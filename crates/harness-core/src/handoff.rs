@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-/// The four AI roles in the pipeline.
+/// Who wrote a handoff: one of the four AI roles, or Lisa's own decision.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Role {
@@ -10,6 +10,7 @@ pub enum Role {
     Developer,
     Tester,
     Security,
+    Human,
 }
 
 /// A role's decision about the work it received.
