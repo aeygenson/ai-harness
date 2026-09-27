@@ -14,25 +14,34 @@ pub fn allowed_next(role: Role, verdict: Verdict) -> &'static [NextStep] {
         (
             Role::Architect | Role::Developer | Role::Tester | Role::Security,
             Verdict::NeedsHuman,
-        ) => &[N::Human],
+        ) => &[N::To(Role::Human)],
 
-        (Role::Architect, Verdict::Approved) => &[N::Human],
+        (Role::Architect, Verdict::Approved) => &[N::To(Role::Human)],
         (Role::Architect, Verdict::Rejected) => &[],
 
-        (Role::Developer, Verdict::Approved) => &[N::Tester],
-        (Role::Developer, Verdict::Rejected) => &[N::Architect],
+        (Role::Developer, Verdict::Approved) => &[N::To(Role::Tester)],
+        (Role::Developer, Verdict::Rejected) => &[N::To(Role::Architect)],
 
-        (Role::Tester, Verdict::Approved) => &[N::Security],
-        (Role::Tester, Verdict::Rejected) => &[N::Developer, N::Architect],
+        (Role::Tester, Verdict::Approved) => &[N::To(Role::Security)],
+        (Role::Tester, Verdict::Rejected) => &[N::To(Role::Developer), N::To(Role::Architect)],
 
         (Role::Security, Verdict::Approved) => &[N::Done],
-        (Role::Security, Verdict::Rejected) => &[N::Developer, N::Architect],
+        (Role::Security, Verdict::Rejected) => &[N::To(Role::Developer), N::To(Role::Architect)],
 
         // Lisa is the boss: she can send the work to any role, or finish it.
-        (Role::Human, Verdict::Approved) => {
-            &[N::Architect, N::Developer, N::Tester, N::Security, N::Done]
-        }
-        (Role::Human, Verdict::Rejected) => &[N::Architect, N::Developer, N::Tester, N::Security],
+        (Role::Human, Verdict::Approved) => &[
+            N::To(Role::Architect),
+            N::To(Role::Developer),
+            N::To(Role::Tester),
+            N::To(Role::Security),
+            N::Done,
+        ],
+        (Role::Human, Verdict::Rejected) => &[
+            N::To(Role::Architect),
+            N::To(Role::Developer),
+            N::To(Role::Tester),
+            N::To(Role::Security),
+        ],
         (Role::Human, Verdict::NeedsHuman) => &[],
     }
 }
@@ -51,7 +60,7 @@ mod tests {
         assert!(is_allowed(
             Role::Tester,
             Verdict::Rejected,
-            NextStep::Developer
+            NextStep::To(Role::Developer)
         ));
     }
 
@@ -60,7 +69,7 @@ mod tests {
         assert!(!is_allowed(
             Role::Developer,
             Verdict::Approved,
-            NextStep::Security
+            NextStep::To(Role::Security)
         ));
     }
 
@@ -68,7 +77,7 @@ mod tests {
     fn architect_always_goes_to_lisa() {
         assert_eq!(
             allowed_next(Role::Architect, Verdict::Approved),
-            &[NextStep::Human]
+            &[NextStep::To(Role::Human)]
         );
     }
 

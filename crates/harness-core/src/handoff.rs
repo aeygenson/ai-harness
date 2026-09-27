@@ -1,6 +1,7 @@
 //! The handoff file (`handoff.json`) that every role writes when it finishes.
 
-use serde::{Deserialize, Serialize};
+use serde::de::IntoDeserializer;
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 /// Who wrote a handoff: one of the four AI roles, or Lisa's own decision.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -22,16 +23,36 @@ pub enum Verdict {
     NeedsHuman,
 }
 
-/// Where the work should go next: another role, the human, or finished.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
+/// Where the work should go next: to a role (including Lisa), or finished.
+///
+/// In JSON it is a plain string: `"developer"`, `"human"`, ... or `"done"`.
+/// Because `Done` is not a `Role`, a handoff can never claim to be written by "done".
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NextStep {
-    Architect,
-    Developer,
-    Tester,
-    Security,
-    Human,
+    To(Role),
     Done,
+}
+
+impl Serialize for NextStep {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        match self {
+            // A role is written exactly as `Role` writes itself, e.g. "developer".
+            NextStep::To(role) => role.serialize(serializer),
+            NextStep::Done => serializer.serialize_str("done"),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for NextStep {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let text = String::deserialize(deserializer)?;
+        if text == "done" {
+            return Ok(NextStep::Done);
+        }
+        // Anything else must be a role name; `Role` decides what is valid.
+        let as_role = IntoDeserializer::<D::Error>::into_deserializer(text);
+        Role::deserialize(as_role).map(NextStep::To)
+    }
 }
 
 /// What a role did with a file.
@@ -124,7 +145,7 @@ mod tests {
         let handoff = Handoff::from_json(TESTER_EXAMPLE).unwrap();
         assert_eq!(handoff.role, Role::Tester);
         assert_eq!(handoff.verdict, Verdict::Rejected);
-        assert_eq!(handoff.next_role, NextStep::Developer);
+        assert_eq!(handoff.next_role, NextStep::To(Role::Developer));
         assert_eq!(handoff.issues[0].severity, Severity::High);
     }
 
@@ -141,6 +162,23 @@ mod tests {
         for example in examples {
             Handoff::from_json(example).unwrap();
         }
+    }
+
+    #[test]
+    fn next_role_is_a_role_or_done() {
+        let done =
+            TESTER_EXAMPLE.replace("\"next_role\": \"developer\"", "\"next_role\": \"done\"");
+        assert_eq!(Handoff::from_json(&done).unwrap().next_role, NextStep::Done);
+
+        let banana =
+            TESTER_EXAMPLE.replace("\"next_role\": \"developer\"", "\"next_role\": \"banana\"");
+        assert!(Handoff::from_json(&banana).is_err());
+    }
+
+    #[test]
+    fn done_is_not_a_role() {
+        let bad = TESTER_EXAMPLE.replace("\"role\": \"tester\"", "\"role\": \"done\"");
+        assert!(Handoff::from_json(&bad).is_err());
     }
 
     #[test]

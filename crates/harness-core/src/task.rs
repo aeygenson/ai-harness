@@ -162,18 +162,15 @@ impl TaskState {
 
         self.stage = match handoff.next_role {
             NextStep::Done => Stage::Done,
-            NextStep::Human => Stage::WaitingForHuman(match handoff.verdict {
+            NextStep::To(Role::Human) => Stage::WaitingForHuman(match handoff.verdict {
                 Verdict::NeedsHuman => WaitReason::RoleAskedForHelp(handoff.role),
                 _ => WaitReason::ApproveDesign,
             }),
             // Lisa may always continue past the limit; AI roles may not.
-            _ if self.round > self.max_rounds && handoff.role != Role::Human => {
+            NextStep::To(_) if self.round > self.max_rounds && handoff.role != Role::Human => {
                 Stage::WaitingForHuman(WaitReason::RoundLimitReached)
             }
-            NextStep::Architect => Stage::Working(Role::Architect),
-            NextStep::Developer => Stage::Working(Role::Developer),
-            NextStep::Tester => Stage::Working(Role::Tester),
-            NextStep::Security => Stage::Working(Role::Security),
+            NextStep::To(role) => Stage::Working(role),
         };
         Ok(())
     }
@@ -217,10 +214,10 @@ mod tests {
     fn happy_path_goes_through_every_role_to_done() {
         let mut task = new_task();
         let steps = [
-            (Role::Architect, NextStep::Human),
-            (Role::Human, NextStep::Developer),
-            (Role::Developer, NextStep::Tester),
-            (Role::Tester, NextStep::Security),
+            (Role::Architect, NextStep::To(Role::Human)),
+            (Role::Human, NextStep::To(Role::Developer)),
+            (Role::Developer, NextStep::To(Role::Tester)),
+            (Role::Tester, NextStep::To(Role::Security)),
             (Role::Security, NextStep::Done),
         ];
         for (role, next) in steps {
@@ -238,7 +235,7 @@ mod tests {
             Role::Architect,
             1,
             Verdict::Approved,
-            NextStep::Human,
+            NextStep::To(Role::Human),
         ))
         .unwrap();
         assert_eq!(
@@ -256,7 +253,7 @@ mod tests {
             Role::Tester,
             1,
             Verdict::Rejected,
-            NextStep::Developer,
+            NextStep::To(Role::Developer),
         ))
         .unwrap();
         assert_eq!(task.stage, Stage::Working(Role::Developer));
@@ -271,7 +268,7 @@ mod tests {
                 Role::Developer,
                 1,
                 Verdict::Approved,
-                NextStep::Tester,
+                NextStep::To(Role::Tester),
             ))
             .unwrap_err();
         assert_eq!(
@@ -293,7 +290,7 @@ mod tests {
                 Role::Developer,
                 1,
                 Verdict::Approved,
-                NextStep::Security,
+                NextStep::To(Role::Security),
             ))
             .unwrap_err();
         assert!(matches!(err, TransitionError::RouteNotAllowed { .. }));
@@ -303,7 +300,12 @@ mod tests {
     fn refuses_a_rejection_without_issues() {
         let mut task = new_task();
         task.stage = Stage::Working(Role::Tester);
-        let mut h = handoff(Role::Tester, 1, Verdict::Rejected, NextStep::Developer);
+        let mut h = handoff(
+            Role::Tester,
+            1,
+            Verdict::Rejected,
+            NextStep::To(Role::Developer),
+        );
         h.issues.clear();
         assert_eq!(task.apply(&h), Err(TransitionError::RejectedWithoutIssues));
     }
@@ -317,7 +319,7 @@ mod tests {
                 Role::Architect,
                 2,
                 Verdict::Approved,
-                NextStep::Human,
+                NextStep::To(Role::Human),
             ))
             .unwrap_err();
         assert_eq!(
@@ -337,7 +339,7 @@ mod tests {
             Role::Security,
             1,
             Verdict::NeedsHuman,
-            NextStep::Human,
+            NextStep::To(Role::Human),
         ))
         .unwrap();
         assert_eq!(
@@ -355,7 +357,7 @@ mod tests {
             Role::Tester,
             DEFAULT_MAX_ROUNDS,
             Verdict::Rejected,
-            NextStep::Developer,
+            NextStep::To(Role::Developer),
         ))
         .unwrap();
         assert_eq!(
@@ -369,7 +371,7 @@ mod tests {
             Role::Human,
             round,
             Verdict::Approved,
-            NextStep::Developer,
+            NextStep::To(Role::Developer),
         ))
         .unwrap();
         assert_eq!(task.stage, Stage::Working(Role::Developer));
