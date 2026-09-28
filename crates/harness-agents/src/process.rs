@@ -107,6 +107,9 @@ pub fn looks_like_usage_limit(text: &str) -> bool {
         "hit your limit",
         "limit reached",
         "rate limit",
+        // Google: "You have exhausted your daily quota", RESOURCE_EXHAUSTED.
+        "exhausted your",
+        "resource_exhausted",
     ]
     .iter()
     .any(|phrase| text.contains(phrase))
@@ -122,6 +125,9 @@ mod tests {
             "Claude AI usage limit reached|1759000000"
         ));
         assert!(looks_like_usage_limit("You've hit your limit · resets 5pm"));
+        assert!(looks_like_usage_limit(
+            "AGY_ERROR: {\"status\":\"RESOURCE_EXHAUSTED\"}"
+        ));
         assert!(!looks_like_usage_limit("All tests pass."));
     }
 }

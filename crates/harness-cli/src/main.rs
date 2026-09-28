@@ -5,6 +5,7 @@
 //! harness init                         prepare .harness/ in the project
 //! harness login claude                 save the token from `claude setup-token`
 //! harness login codex                  log in to Codex (ChatGPT subscription)
+//! harness login antigravity            log in to Antigravity CLI (Google account)
 //! harness task new task-001 "Build a CSV parser"
 //! harness run task-001                 run roles until someone must look
 //! harness approve task-001 --notes "Looks good"
@@ -20,7 +21,7 @@ use std::time::Duration;
 use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand};
 use harness_agents::credentials::{self, Secret};
-use harness_agents::{AnyAgent, ClaudeCode, Codex, Team};
+use harness_agents::{Antigravity, AnyAgent, ClaudeCode, Codex, Team};
 use harness_core::config::{Config, CONFIG_FILE, DEFAULT_CONFIG};
 use harness_core::git::{Repo, HARNESS_DIR};
 use harness_core::handoff::{NextStep, Role, Verdict};
@@ -44,7 +45,7 @@ enum Command {
     Init,
     /// Save an agent's login token (outside the project, never in git).
     Login {
-        /// `claude` or `codex`.
+        /// `claude`, `codex` or `antigravity`.
         agent: String,
     },
     /// Work with tasks.
@@ -156,7 +157,8 @@ fn login(agent: &str) -> Result<()> {
     match agent {
         "claude" => login_claude(&dir),
         "codex" => login_codex(&dir),
-        other => bail!("unknown agent {other:?}; use `claude` or `codex`"),
+        "antigravity" => login_antigravity(&dir),
+        other => bail!("unknown agent {other:?}; use `claude`, `codex` or `antigravity`"),
     }
 }
 
@@ -206,6 +208,49 @@ fn login_codex(dir: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Starts `agy` with `HOME` set to our credentials folder, so the login is
+/// saved there and not in `~/.gemini`. `agy` has no separate login command:
+/// Lisa signs in with Google, then quits with `/quit`. The environment is
+/// empty like for the agents, so the login goes to files, not the keyring.
+fn login_antigravity(dir: &Path) -> Result<()> {
+    let home = dir.join("antigravity");
+    fs::create_dir_all(&home)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&home, fs::Permissions::from_mode(0o700))?;
+    }
+    println!("Starting `agy`. Sign in with Google, then type /quit to come back here.");
+    let mut command = std::process::Command::new("agy");
+    command.env_clear().env("HOME", &home);
+    for name in [
+        "PATH",
+        "TERM",
+        "LANG",
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "NO_PROXY",
+    ] {
+        if let Some(value) = std::env::var_os(name) {
+            command.env(name, value);
+        }
+    }
+    let status = command
+        .status()
+        .context("cannot start `agy`; is Antigravity CLI installed?")?;
+    if !status.success() {
+        bail!("`agy` failed ({status})");
+    }
+    if !home.join(".gemini/antigravity-cli").is_dir() {
+        bail!(
+            "`agy` finished but did not save a login in {}",
+            home.display()
+        );
+    }
+    println!("Saved in {} (only you can read it).", home.display());
+    Ok(())
+}
+
 fn new_task(project: &Path, task_id: &str, description: &str) -> Result<()> {
     let repo = open_repo(project)?;
     let config = Config::load(&repo.root().join(HARNESS_DIR))?;
@@ -250,7 +295,20 @@ fn build_team(config: &Config) -> Result<Team> {
                 }
                 AnyAgent::Codex(agent)
             }
-            other => bail!("{role:?} uses agent {other:?}; use \"claude\" or \"codex\""),
+            "antigravity" => {
+                let auth_dir = dir.join("antigravity");
+                if !auth_dir.join(".gemini/antigravity-cli").is_dir() {
+                    bail!("no Antigravity login saved; run `harness login antigravity` first");
+                }
+                let mut agent = Antigravity::new(auth_dir).with_timeout(timeout);
+                if let Some(model) = &settings.model {
+                    agent = agent.with_model(role, model);
+                }
+                AnyAgent::Antigravity(agent)
+            }
+            other => {
+                bail!("{role:?} uses agent {other:?}; use \"claude\", \"codex\" or \"antigravity\"")
+            }
         };
         team = team.with(role, agent);
     }

@@ -1,6 +1,7 @@
 //! Agent adapters: how to run each console agent for one role.
-//! The mock, Claude Code and Codex CLI for now; Gemini CLI comes next.
+//! The mock, Claude Code, Codex CLI and Antigravity CLI.
 
+pub mod antigravity;
 pub mod claude;
 pub mod codex;
 pub mod credentials;
@@ -8,6 +9,7 @@ pub mod mock;
 pub mod process;
 pub mod team;
 
+pub use antigravity::Antigravity;
 pub use claude::ClaudeCode;
 pub use codex::Codex;
 pub use mock::{MockAgent, MockStep};

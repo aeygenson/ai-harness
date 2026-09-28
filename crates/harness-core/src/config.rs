@@ -26,7 +26,8 @@ pub const DEFAULT_CONFIG: &str = r#"# Settings of the AI harness for this projec
 max_rounds = 5
 agent_timeout_minutes = 30
 
-# Which agent works as each role: "claude" (Claude Code) or "codex" (Codex CLI).
+# Which agent works as each role: "claude" (Claude Code), "codex" (Codex CLI)
+# or "antigravity" (Antigravity CLI).
 # Add `model = "..."` to pick a model, for example "opus" for claude.
 
 [roles.architect]
