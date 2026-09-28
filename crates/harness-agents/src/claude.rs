@@ -19,15 +19,20 @@ use crate::credentials::Secret;
 use crate::process::{self, failed};
 use harness_core::agent::{AgentOutcome, AgentRunner, RoleJob};
 use harness_core::handoff::Role;
+use harness_core::mcp::McpServer;
 
 /// Where the agent's own settings live inside the project (ignored by git).
 pub const CONFIG_DIR: &str = ".harness/agents/claude";
+
+/// `--mcp-config` for a role without MCP servers.
+const NO_MCP_SERVERS: &str = r#"{"mcpServers":{}}"#;
 
 #[derive(Debug, Clone)]
 pub struct ClaudeCode {
     program: PathBuf,
     token: Secret,
     models: HashMap<Role, String>,
+    mcp: HashMap<Role, Vec<McpServer>>,
     timeout: Duration,
 }
 
@@ -37,6 +42,7 @@ impl ClaudeCode {
             program: PathBuf::from("claude"),
             token,
             models: HashMap::new(),
+            mcp: HashMap::new(),
             timeout: Duration::from_secs(30 * 60),
         }
     }
@@ -57,11 +63,22 @@ impl ClaudeCode {
         self
     }
 
+    /// The MCP servers this role gets (from harness.toml).
+    pub fn with_mcp_servers(mut self, role: Role, servers: Vec<McpServer>) -> Self {
+        self.mcp.insert(role, servers);
+        self
+    }
+
     /// Builds the full command for one job, without running it.
     /// A separate function, so tests can check every flag and variable.
     pub fn command(&self, job: &RoleJob) -> Command {
+        self.command_with_mcp(job, NO_MCP_SERVERS.as_ref())
+    }
+
+    /// `mcp_config` is the JSON itself or a file with it: `--mcp-config` takes both.
+    fn command_with_mcp(&self, job: &RoleJob, mcp_config: &std::ffi::OsStr) -> Command {
         let config_dir = job.project_dir.join(CONFIG_DIR);
-        let rules = RoleRules::for_job(job);
+        let rules = RoleRules::for_job(job, self.servers(job.role));
 
         let mut command = process::base_command(&self.program, &job.project_dir);
         command
@@ -75,12 +92,10 @@ impl ClaudeCode {
             .args(["--tools", &rules.tools.join(",")])
             .args(["--allowedTools", &rules.allowed.join(",")])
             .args(["--disallowedTools", &rules.denied.join(",")])
-            // No MCP servers at all, and settings only from our own config dir.
-            .args([
-                "--strict-mcp-config",
-                "--mcp-config",
-                r#"{"mcpServers":{}}"#,
-            ])
+            // Only the role's own MCP servers, and settings only from our own config dir.
+            .arg("--strict-mcp-config")
+            .arg("--mcp-config")
+            .arg(mcp_config)
             .args(["--setting-sources", "user"])
             .arg("--disable-slash-commands")
             .arg("--no-session-persistence");
@@ -88,6 +103,41 @@ impl ClaudeCode {
             command.args(["--model", model]);
         }
         command
+    }
+
+    fn servers(&self, role: Role) -> &[McpServer] {
+        self.mcp.get(&role).map_or(&[], Vec::as_slice)
+    }
+
+    /// The role's servers as a temporary file outside the project, readable
+    /// only by Lisa. Secrets are in it, so it is not passed as an argument;
+    /// the file is deleted when the returned value is dropped.
+    fn write_mcp_config(&self, role: Role) -> std::io::Result<tempfile::NamedTempFile> {
+        let servers: serde_json::Map<String, serde_json::Value> = self
+            .servers(role)
+            .iter()
+            .map(|server| {
+                let env: serde_json::Map<String, serde_json::Value> = server
+                    .env
+                    .iter()
+                    .map(|(name, value)| (name.clone(), value.expose().into()))
+                    .collect();
+                let spec = serde_json::json!({
+                    "type": "stdio",
+                    "command": server.command,
+                    "args": server.args,
+                    "env": env,
+                });
+                (server.name.clone(), spec)
+            })
+            .collect();
+        let mut file = tempfile::Builder::new()
+            .prefix("harness-mcp-")
+            .suffix(".json")
+            .tempfile()?;
+        let json = serde_json::json!({ "mcpServers": servers });
+        std::io::Write::write_all(&mut file, json.to_string().as_bytes())?;
+        Ok(file)
     }
 
     /// Writes the agent's settings file from scratch, so manual changes there
@@ -114,7 +164,19 @@ impl AgentRunner for ClaudeCode {
             return failed(log, format!("cannot prepare {CONFIG_DIR}: {e}"));
         }
 
-        let finished = match process::run(self.command(job), &job.prompt, self.timeout).await {
+        let mcp_file = if self.servers(job.role).is_empty() {
+            None
+        } else {
+            match self.write_mcp_config(job.role) {
+                Ok(file) => Some(file),
+                Err(e) => return failed(log, format!("cannot write the MCP settings: {e}")),
+            }
+        };
+        let command = match &mcp_file {
+            Some(file) => self.command_with_mcp(job, file.path().as_os_str()),
+            None => self.command(job),
+        };
+        let finished = match process::run(command, &job.prompt, self.timeout).await {
             Ok(finished) => finished,
             Err(message) => return failed(log, message),
         };
@@ -157,7 +219,7 @@ struct RoleRules {
 impl RoleRules {
     /// Mirrors `harness_core::permissions`. The harness checks the result with
     /// git anyway; these rules stop a wrong edit before it happens.
-    fn for_job(job: &RoleJob) -> Self {
+    fn for_job(job: &RoleJob, servers: &[McpServer]) -> Self {
         let inbox = format!("Edit({}/**)", rule_path(&job.project_dir, &job.output_dir));
         let read = ["Read(./**)", "Glob", "Grep"].map(String::from);
         let (tools, allowed): (Vec<&str>, Vec<String>) = match job.role {
@@ -189,9 +251,11 @@ impl RoleRules {
             // Lisa is never run as an agent.
             Role::Human => (vec![], vec![]),
         };
+        // Every tool of the role's own MCP servers; there are no others.
+        let mcp = servers.iter().map(|server| format!("mcp__{}", server.name));
         RoleRules {
             tools,
-            allowed: read.into_iter().chain(allowed).collect(),
+            allowed: read.into_iter().chain(allowed).chain(mcp).collect(),
             denied: [
                 "Bash(git commit:*)",
                 "Bash(git push:*)",
@@ -290,6 +354,47 @@ mod tests {
         assert_eq!(arg_after(&command, "--mcp-config"), r#"{"mcpServers":{}}"#);
         assert_eq!(arg_after(&command, "--setting-sources"), "user");
         assert!(args.contains(&"--disable-slash-commands".to_string()));
+    }
+
+    #[test]
+    fn a_role_gets_only_its_mcp_servers_from_a_private_file() {
+        use std::collections::BTreeMap;
+
+        let server = McpServer {
+            name: "context7".into(),
+            command: "npx".into(),
+            args: vec!["-y".into(), "@upstash/context7-mcp".into()],
+            env: BTreeMap::from([("CONTEXT7_API_KEY".into(), Secret::new("ctx-secret"))]),
+        };
+        let agent =
+            ClaudeCode::new(Secret::new("t")).with_mcp_servers(Role::Developer, vec![server]);
+
+        let rules = RoleRules::for_job(&job(Role::Developer), agent.servers(Role::Developer));
+        assert!(rules.allowed.contains(&"mcp__context7".to_string()));
+        let tester = RoleRules::for_job(&job(Role::Tester), agent.servers(Role::Tester));
+        assert!(!tester.allowed.iter().any(|rule| rule.starts_with("mcp__")));
+
+        let file = agent.write_mcp_config(Role::Developer).unwrap();
+        let json: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(file.path()).unwrap()).unwrap();
+        let spec = &json["mcpServers"]["context7"];
+        assert_eq!(spec["command"], "npx");
+        assert_eq!(spec["args"][1], "@upstash/context7-mcp");
+        assert_eq!(spec["env"]["CONTEXT7_API_KEY"], "ctx-secret");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = fs::metadata(file.path()).unwrap().permissions().mode();
+            assert_eq!(mode & 0o777, 0o600);
+        }
+
+        // The file, not the secret, is what the command line carries.
+        let command = agent.command_with_mcp(&job(Role::Developer), file.path().as_os_str());
+        assert_eq!(
+            arg_after(&command, "--mcp-config"),
+            file.path().to_string_lossy()
+        );
+        assert!(!args(&command).iter().any(|a| a.contains("ctx-secret")));
     }
 
     #[test]

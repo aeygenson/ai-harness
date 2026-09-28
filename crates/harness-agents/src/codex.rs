@@ -27,6 +27,7 @@ use std::time::Duration;
 
 use harness_core::agent::{AgentOutcome, AgentRunner, RoleJob};
 use harness_core::handoff::Role;
+use harness_core::mcp::McpServer;
 
 use crate::credentials::Secret;
 use crate::process::{self, failed};
@@ -77,6 +78,7 @@ pub struct Codex {
     /// `~/.harness/credentials/codex`: holds the saved `auth.json`.
     auth_dir: PathBuf,
     models: HashMap<Role, String>,
+    mcp: HashMap<Role, Vec<McpServer>>,
     timeout: Duration,
 }
 
@@ -87,6 +89,7 @@ impl Codex {
             provider: Provider::ChatGpt,
             auth_dir: auth_dir.into(),
             models: HashMap::new(),
+            mcp: HashMap::new(),
             timeout: Duration::from_secs(30 * 60),
         }
     }
@@ -111,6 +114,12 @@ impl Codex {
 
     pub fn with_timeout(mut self, timeout: Duration) -> Self {
         self.timeout = timeout;
+        self
+    }
+
+    /// The MCP servers this role gets (from harness.toml).
+    pub fn with_mcp_servers(mut self, role: Role, servers: Vec<McpServer>) -> Self {
+        self.mcp.insert(role, servers);
         self
     }
 
@@ -156,11 +165,45 @@ impl Codex {
                 command.args(["-c", &setting]);
             }
         }
+        self.add_mcp_servers(&mut command, job.role);
         if let Some(model) = self.model(job.role) {
             command.args(["--model", model]);
         }
         command.arg("-");
         command
+    }
+
+    /// Each server as `-c mcp_servers.<name>.*` settings. Values of variables
+    /// never go into the arguments: Codex gets them in its own environment,
+    /// passes them on only to the server (`env_vars`), and keeps them away
+    /// from the commands the agent runs (`shell_environment_policy.exclude`).
+    fn add_mcp_servers(&self, command: &mut Command, role: Role) {
+        let servers = self.mcp.get(&role).map_or(&[][..], Vec::as_slice);
+        let mut all_variables = Vec::new();
+        for server in servers {
+            let key = format!("mcp_servers.{}", server.name);
+            let variables: Vec<String> = server.env.keys().cloned().collect();
+            for setting in [
+                format!("{key}.command={}", toml_value(server.command.as_str())),
+                format!("{key}.args={}", toml_value(server.args.clone())),
+                format!("{key}.env_vars={}", toml_value(variables)),
+            ] {
+                command.args(["-c", &setting]);
+            }
+            for (name, value) in &server.env {
+                command.env(name, value.expose());
+                all_variables.push(name.clone());
+            }
+        }
+        if !all_variables.is_empty() {
+            command.args([
+                "-c",
+                &format!(
+                    "shell_environment_policy.exclude={}",
+                    toml_value(all_variables)
+                ),
+            ]);
+        }
     }
 
     /// The role's model from harness.toml; DeepSeek needs one, so it has a default.
@@ -250,6 +293,11 @@ impl AgentRunner for Codex {
             message,
         }
     }
+}
+
+/// A string or a list of strings in TOML syntax. JSON writes them the same way.
+fn toml_value(value: impl Into<serde_json::Value>) -> String {
+    value.into().to_string()
 }
 
 /// Roles that run commands such as `cargo test` or `cargo audit` may need to
@@ -350,6 +398,47 @@ mod tests {
             .and_then(|(_, v)| v)
             .unwrap();
         assert_eq!(home, "/work/app/.harness/agents/codex");
+    }
+
+    #[test]
+    fn mcp_servers_go_to_their_role_and_secrets_stay_out_of_the_arguments() {
+        use harness_core::mcp::McpServer;
+        use std::collections::BTreeMap;
+
+        let server = McpServer {
+            name: "context7".into(),
+            command: "npx".into(),
+            args: vec!["-y".into(), "@upstash/context7-mcp".into()],
+            env: BTreeMap::from([("CONTEXT7_API_KEY".into(), Secret::new("ctx-secret"))]),
+        };
+        let codex = Codex::new("/creds").with_mcp_servers(Role::Developer, vec![server]);
+        let command = codex.command(&job(Role::Developer));
+        let args = args(&command);
+        for setting in [
+            r#"mcp_servers.context7.command="npx""#,
+            r#"mcp_servers.context7.args=["-y","@upstash/context7-mcp"]"#,
+            r#"mcp_servers.context7.env_vars=["CONTEXT7_API_KEY"]"#,
+            r#"shell_environment_policy.exclude=["CONTEXT7_API_KEY"]"#,
+        ] {
+            assert!(
+                args.contains(&setting.to_string()),
+                "missing {setting}: {args:?}"
+            );
+        }
+        assert!(!args.iter().any(|a| a.contains("ctx-secret")));
+        let value = command
+            .get_envs()
+            .find(|(k, _)| *k == "CONTEXT7_API_KEY")
+            .and_then(|(_, v)| v)
+            .unwrap();
+        assert_eq!(value, "ctx-secret");
+
+        let tester = args_of(&codex, Role::Tester);
+        assert!(!tester.iter().any(|a| a.contains("mcp_servers")));
+    }
+
+    fn args_of(codex: &Codex, role: Role) -> Vec<String> {
+        args(&codex.command(&job(role)))
     }
 
     #[test]

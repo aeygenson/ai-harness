@@ -33,6 +33,14 @@ agent_timeout_minutes = 30
 # Add `model = "..."` to pick a model, for example "opus" for claude or
 # "deepseek-v4-pro" for codex+deepseek (default "deepseek-flash").
 #
+# MCP servers: describe each once, then list it in the roles that need it.
+#   [mcp.context7]
+#   command = "npx"
+#   args = ["-y", "@upstash/context7-mcp"]
+#   env = { CONTEXT7_API_KEY = "secret:context7" }  # `harness secret set context7`
+#   [roles.developer]
+#   mcp = ["context7"]
+#
 # Skills are files in .harness/skills/<name>.md that start with
 #   ---
 #   description: one line about the skill
@@ -64,6 +72,9 @@ pub struct Config {
     /// `BTreeMap` keeps the roles sorted, so saved files are stable.
     #[serde(default)]
     pub roles: BTreeMap<Role, RoleConfig>,
+    /// MCP servers the roles may use, by name; see `crate::mcp`.
+    #[serde(default)]
+    pub mcp: BTreeMap<String, McpConfig>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -78,6 +89,22 @@ pub struct RoleConfig {
     /// Skills put into the prompt in full every time.
     #[serde(default)]
     pub always_skills: Vec<String>,
+    /// Names of the `[mcp.<name>]` servers this role gets.
+    #[serde(default)]
+    pub mcp: Vec<String>,
+}
+
+/// One MCP server, started by the agent as a program (`stdio`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct McpConfig {
+    pub command: String,
+    #[serde(default)]
+    pub args: Vec<String>,
+    /// Variables for the server. A value `"secret:<name>"` is read from the
+    /// secret `harness secret set <name>` saved; the file keeps only the name.
+    #[serde(default)]
+    pub env: BTreeMap<String, String>,
 }
 
 #[derive(Debug, thiserror::Error)]

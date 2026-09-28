@@ -6,8 +6,9 @@
 //! - `agy` has no setting for its config folder, so it gets a fresh `HOME`: a
 //!   temporary folder outside the project, deleted after the role. It holds a
 //!   copy of the login saved by `harness login antigravity` and our
-//!   `settings.json`, and nothing else: no MCP servers, plugins or skills of
-//!   Lisa's, and no history of earlier runs;
+//!   `settings.json` and `mcp_config.json`, and nothing else: no MCP servers,
+//!   plugins or skills of Lisa's (only the role's own MCP servers from
+//!   harness.toml), and no history of earlier runs;
 //! - the login is not one file but a few of `agy`'s own files, so the whole
 //!   saved folder is copied, without logs and old conversations. A run does
 //!   not change the login files (checked with agy 1.2.12), so nothing is
@@ -29,11 +30,15 @@ use std::time::Duration;
 
 use harness_core::agent::{AgentOutcome, AgentRunner, RoleJob};
 use harness_core::handoff::Role;
+use harness_core::mcp::McpServer;
 
 use crate::process::{self, failed};
 
 /// Where `agy` keeps its settings, inside `HOME`.
 const SETTINGS_DIR: &str = ".gemini/antigravity-cli";
+/// Where `agy` reads the user's MCP servers, inside `HOME` (agy 1.2.12:
+/// `agy mcp add` writes this file).
+const MCP_CONFIG: &str = ".gemini/config/mcp_config.json";
 /// Folders of the saved login that are history or logs, not the login itself.
 const NOT_COPIED: &[&str] = &[
     "log",
@@ -51,6 +56,7 @@ pub struct Antigravity {
     /// `~/.harness/credentials/antigravity`: the `HOME` Lisa logged in with.
     auth_dir: PathBuf,
     models: HashMap<Role, String>,
+    mcp: HashMap<Role, Vec<McpServer>>,
     timeout: Duration,
 }
 
@@ -60,6 +66,7 @@ impl Antigravity {
             program: PathBuf::from("agy"),
             auth_dir: auth_dir.into(),
             models: HashMap::new(),
+            mcp: HashMap::new(),
             timeout: Duration::from_secs(30 * 60),
         }
     }
@@ -76,6 +83,12 @@ impl Antigravity {
 
     pub fn with_timeout(mut self, timeout: Duration) -> Self {
         self.timeout = timeout;
+        self
+    }
+
+    /// The MCP servers this role gets (from harness.toml).
+    pub fn with_mcp_servers(mut self, role: Role, servers: Vec<McpServer>) -> Self {
+        self.mcp.insert(role, servers);
         self
     }
 
@@ -118,7 +131,39 @@ impl Antigravity {
             home.path().join(SETTINGS_DIR).join("settings.json"),
             settings(role),
         )?;
+        // Always written, so a server from the saved login never gets through.
+        // The temporary HOME is readable only by Lisa, so secrets may be here.
+        let mcp_config = home.path().join(MCP_CONFIG);
+        if let Some(dir) = mcp_config.parent() {
+            fs::create_dir_all(dir)?;
+        }
+        fs::write(mcp_config, self.mcp_config(role))?;
         Ok(home)
+    }
+
+    /// `{"mcpServers": {"<name>": {"command", "args", "env"}}}`, agy's own format.
+    fn mcp_config(&self, role: Role) -> String {
+        let servers: serde_json::Map<String, serde_json::Value> = self
+            .mcp
+            .get(&role)
+            .map_or(&[][..], Vec::as_slice)
+            .iter()
+            .map(|server| {
+                let env: serde_json::Map<String, serde_json::Value> = server
+                    .env
+                    .iter()
+                    .map(|(name, value)| (name.clone(), value.expose().into()))
+                    .collect();
+                let spec = serde_json::json!({
+                    "command": server.command,
+                    "args": server.args,
+                    "env": env,
+                    "disabled": false,
+                });
+                (server.name.clone(), spec)
+            })
+            .collect();
+        serde_json::json!({ "mcpServers": servers }).to_string()
     }
 
     fn header(&self, job: &RoleJob) -> String {
@@ -452,5 +497,42 @@ mod tests {
         let path = home.path().to_path_buf();
         drop(home);
         assert!(!path.exists());
+    }
+
+    #[test]
+    fn the_home_has_only_the_roles_own_mcp_servers() {
+        use crate::credentials::Secret;
+        use std::collections::BTreeMap;
+
+        let saved = tempfile::tempdir().unwrap();
+        fs::create_dir_all(saved.path().join(SETTINGS_DIR)).unwrap();
+        // A server Lisa added to her own login must not reach any role.
+        fs::create_dir_all(saved.path().join(".gemini/config")).unwrap();
+        fs::write(
+            saved.path().join(MCP_CONFIG),
+            r#"{"mcpServers":{"personal":{"command":"x"}}}"#,
+        )
+        .unwrap();
+        let server = McpServer {
+            name: "context7".into(),
+            command: "npx".into(),
+            args: vec!["-y".into(), "@upstash/context7-mcp".into()],
+            env: BTreeMap::from([("CONTEXT7_API_KEY".into(), Secret::new("ctx-secret"))]),
+        };
+        let agent = Antigravity::new(saved.path()).with_mcp_servers(Role::Security, vec![server]);
+
+        let read = |role| {
+            let home = agent.prepare_home(role).unwrap();
+            let text = fs::read_to_string(home.path().join(MCP_CONFIG)).unwrap();
+            serde_json::from_str::<serde_json::Value>(&text).unwrap()
+        };
+        let security = read(Role::Security);
+        assert_eq!(security["mcpServers"]["context7"]["command"], "npx");
+        assert_eq!(
+            security["mcpServers"]["context7"]["env"]["CONTEXT7_API_KEY"],
+            "ctx-secret"
+        );
+        assert!(security["mcpServers"].get("personal").is_none());
+        assert_eq!(read(Role::Tester), serde_json::json!({"mcpServers": {}}));
     }
 }
