@@ -4,6 +4,7 @@
 //! ```text
 //! harness init                         prepare .harness/ in the project
 //! harness login claude                 save the token from `claude setup-token`
+//! harness login codex                  log in to Codex (ChatGPT subscription)
 //! harness task new task-001 "Build a CSV parser"
 //! harness run task-001                 run roles until someone must look
 //! harness approve task-001 --notes "Looks good"
@@ -19,7 +20,7 @@ use std::time::Duration;
 use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand};
 use harness_agents::credentials::{self, Secret};
-use harness_agents::ClaudeCode;
+use harness_agents::{AnyAgent, ClaudeCode, Codex, Team};
 use harness_core::config::{Config, CONFIG_FILE, DEFAULT_CONFIG};
 use harness_core::git::{Repo, HARNESS_DIR};
 use harness_core::handoff::{NextStep, Role, Verdict};
@@ -43,7 +44,7 @@ enum Command {
     Init,
     /// Save an agent's login token (outside the project, never in git).
     Login {
-        /// For now only `claude`.
+        /// `claude` or `codex`.
         agent: String,
     },
     /// Work with tasks.
@@ -151,9 +152,15 @@ fn init(project: &Path) -> Result<()> {
 }
 
 fn login(agent: &str) -> Result<()> {
-    if agent != "claude" {
-        bail!("only `claude` is supported for now");
+    let dir = credentials::default_dir().context("HOME is not set")?;
+    match agent {
+        "claude" => login_claude(&dir),
+        "codex" => login_codex(&dir),
+        other => bail!("unknown agent {other:?}; use `claude` or `codex`"),
     }
+}
+
+fn login_claude(dir: &Path) -> Result<()> {
     println!("1. In another terminal run:  claude setup-token");
     println!("2. Paste the token it prints here and press Enter.");
     print!("Token: ");
@@ -164,9 +171,38 @@ fn login(agent: &str) -> Result<()> {
     if token.expose().is_empty() {
         bail!("no token given");
     }
-    let dir = credentials::default_dir().context("HOME is not set")?;
-    let path = credentials::save_token(&dir, agent, &token)?;
+    let path = credentials::save_token(dir, "claude", &token)?;
     println!("Saved to {} (only you can read it).", path.display());
+    Ok(())
+}
+
+/// Runs `codex login` with its home in our credentials folder, so the login is
+/// saved there and not in `~/.codex`.
+fn login_codex(dir: &Path) -> Result<()> {
+    let home = dir.join("codex");
+    fs::create_dir_all(&home)?;
+    println!("Starting `codex login`; finish the login in your browser.");
+    let status = std::process::Command::new("codex")
+        .arg("login")
+        .env("CODEX_HOME", &home)
+        .status()
+        .context("cannot start `codex`; is Codex CLI installed?")?;
+    if !status.success() {
+        bail!("`codex login` failed ({status})");
+    }
+    let auth = home.join("auth.json");
+    if !auth.exists() {
+        bail!(
+            "`codex login` finished but {} was not created",
+            auth.display()
+        );
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&auth, fs::Permissions::from_mode(0o600))?;
+    }
+    println!("Saved to {} (only you can read it).", auth.display());
     Ok(())
 }
 
@@ -181,13 +217,11 @@ fn new_task(project: &Path, task_id: &str, description: &str) -> Result<()> {
     Ok(())
 }
 
-/// Builds the agent from harness.toml. Every role uses Claude Code for now.
-fn claude_agent(config: &Config) -> Result<ClaudeCode> {
+/// Builds the team from harness.toml: each role gets the agent and model set there.
+fn build_team(config: &Config) -> Result<Team> {
     let dir = credentials::default_dir().context("HOME is not set")?;
-    let token = credentials::load_token(&dir, "claude")
-        .context("no Claude token saved; run `harness login claude` first")?;
-    let mut agent =
-        ClaudeCode::new(token).with_timeout(Duration::from_secs(config.agent_timeout_minutes * 60));
+    let timeout = Duration::from_secs(config.agent_timeout_minutes * 60);
+    let mut team = Team::new();
     for role in [
         Role::Architect,
         Role::Developer,
@@ -195,23 +229,38 @@ fn claude_agent(config: &Config) -> Result<ClaudeCode> {
         Role::Security,
     ] {
         let settings = config.role(role)?;
-        if settings.agent != "claude" {
-            bail!(
-                "{role:?} uses agent {:?}; only \"claude\" works for now",
-                settings.agent
-            );
-        }
-        if let Some(model) = &settings.model {
-            agent = agent.with_model(role, model);
-        }
+        let agent = match settings.agent.as_str() {
+            "claude" => {
+                let token = credentials::load_token(&dir, "claude")
+                    .context("no Claude token saved; run `harness login claude` first")?;
+                let mut agent = ClaudeCode::new(token).with_timeout(timeout);
+                if let Some(model) = &settings.model {
+                    agent = agent.with_model(role, model);
+                }
+                AnyAgent::Claude(agent)
+            }
+            "codex" => {
+                let auth_dir = dir.join("codex");
+                if !auth_dir.join("auth.json").exists() {
+                    bail!("no Codex login saved; run `harness login codex` first");
+                }
+                let mut agent = Codex::new(auth_dir).with_timeout(timeout);
+                if let Some(model) = &settings.model {
+                    agent = agent.with_model(role, model);
+                }
+                AnyAgent::Codex(agent)
+            }
+            other => bail!("{role:?} uses agent {other:?}; use \"claude\" or \"codex\""),
+        };
+        team = team.with(role, agent);
     }
-    Ok(agent)
+    Ok(team)
 }
 
 async fn run(project: &Path, task_id: &str) -> Result<()> {
     let repo = open_repo(project)?;
     let config = Config::load(&repo.root().join(HARNESS_DIR))?;
-    let agent = claude_agent(&config)?;
+    let agent = build_team(&config)?;
     let (store, mut state) = open_task(&repo, task_id)?;
     println!("Running {task_id} (round {})...", state.round);
     let stop = orchestrator::run(&repo, &store, &mut state, &agent).await?;
