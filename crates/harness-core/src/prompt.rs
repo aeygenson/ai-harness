@@ -5,6 +5,7 @@
 use std::path::Path;
 
 use crate::handoff::{Handoff, Role};
+use crate::permissions::{self, WriteRule};
 use crate::task::TaskState;
 
 pub fn build(
@@ -27,6 +28,16 @@ pub fn build(
             previous.role
         ));
     }
+    prompt.push_str(&match permissions::rule_for(role) {
+        WriteRule::Anything => {
+            "You may change any project file except .harness/ and agent settings.\n".to_string()
+        }
+        WriteRule::FoldersNamed(names) => format!(
+            "You may change only files inside folders named {}.\n",
+            names.join(" or ")
+        ),
+        WriteRule::Nothing => "Do not change any project files; only read them.\n".to_string(),
+    });
     prompt.push_str(&format!(
         "When you finish, write two files into {dir}:\n\
          - notes.md: short notes for Lisa.\n\

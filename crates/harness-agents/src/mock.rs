@@ -3,6 +3,8 @@
 
 use std::collections::{HashMap, VecDeque};
 use std::fs;
+use std::path::Path;
+use std::process::Command;
 use std::sync::Mutex;
 
 use harness_core::agent::{AgentOutcome, AgentRunner, RoleJob};
@@ -11,14 +13,20 @@ use harness_core::handoff::{Handoff, Issue, NextStep, Role, Severity, Verdict};
 /// What the mock does the next time a given role runs.
 #[derive(Debug, Clone)]
 pub enum MockStep {
-    /// Write a correct `notes.md` and `handoff.json`.
+    /// Change project files, then write a correct `notes.md` and `handoff.json`.
     Finish {
         verdict: Verdict,
         next: NextStep,
         summary: String,
+        /// `(path in the project, contents)` pairs.
+        files: Vec<(String, String)>,
     },
     /// Exit without writing anything, like an agent that crashed quietly.
     WriteNothing,
+    /// Change project files but write no handoff: the work is half done.
+    WriteFilesOnly(Vec<(String, String)>),
+    /// Make a git commit itself, which agents must never do.
+    GitCommit,
     /// Write a `handoff.json` that is not valid.
     WriteGarbage,
     /// Pretend the subscription limit was hit.
@@ -31,8 +39,27 @@ impl MockStep {
             verdict,
             next,
             summary: format!("{verdict:?}"),
+            files: vec![],
         }
     }
+
+    /// Like `finish`, but first writes `files` into the project.
+    pub fn finish_writing(verdict: Verdict, next: NextStep, files: &[(&str, &str)]) -> Self {
+        MockStep::Finish {
+            verdict,
+            next,
+            summary: format!("{verdict:?}"),
+            files: owned(files),
+        }
+    }
+}
+
+/// Turns `&[("a.rs", "text")]` into owned strings.
+fn owned(files: &[(&str, &str)]) -> Vec<(String, String)> {
+    files
+        .iter()
+        .map(|(path, text)| (path.to_string(), text.to_string()))
+        .collect()
 }
 
 /// A scripted agent. Each role has its own queue of steps.
@@ -100,12 +127,31 @@ impl AgentRunner for MockAgent {
                     log,
                 }
             }
+            MockStep::WriteFilesOnly(files) => AgentOutcome {
+                success: write_files(&job.project_dir, &files).is_ok(),
+                usage_limit_reached: false,
+                log,
+            },
+            MockStep::GitCommit => {
+                let committed = Command::new("git")
+                    .current_dir(&job.project_dir)
+                    .args(["-c", "user.name=agent", "-c", "user.email=agent@localhost"])
+                    .args(["commit", "-q", "--allow-empty", "-m", "sneaky"])
+                    .status();
+                AgentOutcome {
+                    success: committed.is_ok_and(|status| status.success()),
+                    usage_limit_reached: false,
+                    log,
+                }
+            }
             MockStep::Finish {
                 verdict,
                 next,
                 summary,
+                files,
             } => {
-                let written = write_result(job, verdict, next, &summary);
+                let written = write_files(&job.project_dir, &files)
+                    .and_then(|()| write_result(job, verdict, next, &summary));
                 AgentOutcome {
                     success: written.is_ok(),
                     usage_limit_reached: false,
@@ -114,6 +160,17 @@ impl AgentRunner for MockAgent {
             }
         }
     }
+}
+
+fn write_files(project_dir: &Path, files: &[(String, String)]) -> std::io::Result<()> {
+    for (path, text) in files {
+        let path = project_dir.join(path);
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        fs::write(path, text)?;
+    }
+    Ok(())
 }
 
 fn write_result(

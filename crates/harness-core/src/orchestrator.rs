@@ -1,9 +1,19 @@
 //! The loop that runs roles one after another until the task has to stop.
+//!
+//! Around every role the harness uses git:
+//!
+//! 1. Before: the project must have no uncommitted changes, so everything that
+//!    changes afterwards was done by this role.
+//! 2. After: the changed files are checked against the role's permissions.
+//! 3. If the role's work is accepted, everything is committed:
+//!    `task-001 round 2: tester (rejected) - ...`. A failed attempt is thrown away.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use crate::agent::{AgentRunner, RoleJob};
+use crate::git::{GitError, Repo};
 use crate::handoff::{Handoff, NextStep, Role, Verdict};
+use crate::permissions;
 use crate::prompt;
 use crate::store::{StoreError, TaskStore};
 use crate::task::{Stage, TaskState, WaitReason};
@@ -26,6 +36,44 @@ pub enum StopReason {
         problem: String,
     },
     StepLimitReached,
+    /// The project had uncommitted changes before a role started. Lisa commits
+    /// or removes them, then runs again.
+    DirtyWorkingTree(Vec<String>),
+    /// The role changed files it may not touch. The changes are left in place,
+    /// uncommitted, so Lisa can look at them.
+    ForbiddenChanges {
+        role: Role,
+        files: Vec<String>,
+    },
+    /// The agent made a git commit itself, which agents must never do.
+    AgentCommitted(Role),
+}
+
+/// A real problem of the harness itself, not a mistake of an agent.
+#[derive(Debug, thiserror::Error)]
+pub enum RunError {
+    #[error(transparent)]
+    Store(#[from] StoreError),
+    #[error(transparent)]
+    Git(#[from] GitError),
+}
+
+/// Creates a new task in `<project>/.harness/runs/` and commits it.
+pub fn create_task(
+    repo: &Repo,
+    task_id: &str,
+    description: &str,
+    max_rounds: u32,
+) -> Result<(TaskStore, TaskState), RunError> {
+    repo.ensure_harness_ignores()?;
+    let runs = repo.runs_dir();
+    std::fs::create_dir_all(&runs).map_err(|source| StoreError::Io {
+        path: runs.clone(),
+        source,
+    })?;
+    let (store, state) = TaskStore::create(&runs, task_id, description, max_rounds)?;
+    repo.commit_paths(&[store.dir()], &format!("{task_id}: new task"))?;
+    Ok((store, state))
 }
 
 /// Runs roles until the task is done or someone has to look at it.
@@ -33,10 +81,12 @@ pub enum StopReason {
 /// Returns `Err` only for real problems of the harness itself (for example the
 /// disk is full). Mistakes of an agent are a `StopReason`, not an error.
 pub async fn run<A: AgentRunner>(
+    repo: &Repo,
     store: &TaskStore,
     state: &mut TaskState,
     agent: &A,
-) -> Result<StopReason, StoreError> {
+) -> Result<StopReason, RunError> {
+    repo.ensure_harness_ignores()?;
     for _ in 0..MAX_STEPS_PER_RUN {
         let role = match state.stage {
             Stage::Done => return Ok(StopReason::Done),
@@ -44,24 +94,47 @@ pub async fn run<A: AgentRunner>(
             Stage::Working(role) => role,
         };
 
+        let dirty = repo.changed_files()?;
+        if !dirty.is_empty() {
+            return Ok(StopReason::DirtyWorkingTree(dirty));
+        }
+
         let mut problem = String::new();
         let mut accepted = false;
         for _ in 0..ATTEMPTS_PER_ROLE {
-            let job = prepare_job(store, state, role)?;
+            let head = repo.head()?;
+            let job = prepare_job(repo.root(), store, state, role)?;
             let outcome = agent.run(&job).await;
+
+            if repo.head()? != head {
+                return Ok(StopReason::AgentCommitted(role));
+            }
             if outcome.usage_limit_reached {
+                repo.discard_changes()?;
                 return Ok(StopReason::UsageLimitReached(role));
             }
             if !outcome.success {
+                repo.discard_changes()?;
                 problem = format!("the agent exited with an error: {}", outcome.log);
                 continue;
             }
+            let forbidden = permissions::forbidden_changes(role, &repo.changed_files()?);
+            if !forbidden.is_empty() {
+                return Ok(StopReason::ForbiddenChanges {
+                    role,
+                    files: forbidden,
+                });
+            }
             match accept_inbox(store, state)? {
-                Ok(()) => {
+                Ok(handoff) => {
+                    repo.commit_all(&commit_message(&handoff))?;
                     accepted = true;
                     break;
                 }
-                Err(why) => problem = why,
+                Err(why) => {
+                    repo.discard_changes()?;
+                    problem = why;
+                }
             }
         }
         if !accepted {
@@ -74,12 +147,13 @@ pub async fn run<A: AgentRunner>(
 /// Lisa's decision (approve the design, send work back, answer a question),
 /// saved like any other handoff with role `human`.
 pub fn record_human_decision(
+    repo: &Repo,
     store: &TaskStore,
     state: &mut TaskState,
     verdict: Verdict,
     next: NextStep,
     notes: &str,
-) -> Result<PathBuf, StoreError> {
+) -> Result<PathBuf, RunError> {
     let summary = notes
         .lines()
         .next()
@@ -107,10 +181,18 @@ pub fn record_human_decision(
         files: vec![],
         issues,
     };
-    store.record(state, &handoff, notes)
+    let step_dir = store.record(state, &handoff, notes)?;
+    // Commit only the task folder: code Lisa changed herself is hers to commit.
+    repo.commit_paths(&[store.dir()], &commit_message(&handoff))?;
+    Ok(step_dir)
 }
 
-fn prepare_job(store: &TaskStore, state: &TaskState, role: Role) -> Result<RoleJob, StoreError> {
+fn prepare_job(
+    project_dir: &Path,
+    store: &TaskStore,
+    state: &TaskState,
+    role: Role,
+) -> Result<RoleJob, StoreError> {
     let output_dir = store.prepare_inbox()?;
     let history = store.history()?;
     let prompt = prompt::build(
@@ -124,23 +206,46 @@ fn prepare_job(store: &TaskStore, state: &TaskState, role: Role) -> Result<RoleJ
         task_id: state.task_id.clone(),
         round: state.round,
         role,
+        project_dir: project_dir.to_path_buf(),
         prompt,
         output_dir,
     })
 }
 
-/// Outer `Result`: a real harness error. Inner `Result`: was the agent's work accepted?
+/// Outer `Result`: a real harness error. Inner `Result`: was the agent's work
+/// accepted? If yes, it holds the saved handoff.
 fn accept_inbox(
     store: &TaskStore,
     state: &mut TaskState,
-) -> Result<Result<(), String>, StoreError> {
+) -> Result<Result<Handoff, String>, StoreError> {
     let (handoff, notes) = match store.read_inbox() {
         Ok(found) => found,
         Err(e) => return Ok(Err(format!("no valid handoff: {e}"))),
     };
     match store.record(state, &handoff, &notes) {
-        Ok(_) => Ok(Ok(())),
+        Ok(_) => Ok(Ok(handoff)),
         Err(StoreError::Refused(e)) => Ok(Err(format!("handoff refused: {e}"))),
         Err(e) => Err(e),
     }
+}
+
+/// `task-001 round 2: tester (rejected) - Parser fails on empty input`
+fn commit_message(handoff: &Handoff) -> String {
+    const MAX_SUMMARY: usize = 60;
+    let verdict = match handoff.verdict {
+        Verdict::Approved => "approved",
+        Verdict::Rejected => "rejected",
+        Verdict::NeedsHuman => "needs human",
+    };
+    let first_line = handoff.summary.lines().next().unwrap_or("").trim();
+    let mut summary: String = first_line.chars().take(MAX_SUMMARY).collect();
+    if first_line.chars().count() > MAX_SUMMARY {
+        summary.push('…');
+    }
+    format!(
+        "{} round {}: {} ({verdict}) - {summary}",
+        handoff.task_id,
+        handoff.round,
+        format!("{:?}", handoff.role).to_lowercase(),
+    )
 }
