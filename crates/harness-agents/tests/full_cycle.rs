@@ -180,6 +180,11 @@ async fn a_role_that_keeps_failing_stops_the_task() {
     assert_eq!(agent.calls().len(), ATTEMPTS_PER_ROLE as usize);
     assert_eq!(state, before);
     assert!(store.history().unwrap().is_empty());
+    // Both failed attempts keep their logs, committed, so the next run can start.
+    let failures = store.dir().join("failures");
+    assert!(failures.join("round-01-architect-1.log").exists());
+    assert!(failures.join("round-01-architect-2.log").exists());
+    assert!(repo.changed_files().unwrap().is_empty());
 }
 
 #[tokio::test]

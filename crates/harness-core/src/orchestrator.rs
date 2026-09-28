@@ -101,6 +101,9 @@ pub async fn run<A: AgentRunner>(
 
         let mut problem = String::new();
         let mut accepted = false;
+        // Failure logs the harness itself wrote during this role: they are not
+        // the agent's changes.
+        let mut failure_logs: Vec<PathBuf> = Vec::new();
         for _ in 0..ATTEMPTS_PER_ROLE {
             let head = repo.head()?;
             let job = prepare_job(repo.root(), store, state, role)?;
@@ -111,14 +114,27 @@ pub async fn run<A: AgentRunner>(
             }
             if outcome.usage_limit_reached {
                 repo.discard_changes()?;
+                failure_logs.push(store.save_failure_log(state.round, role, &outcome.log)?);
+                commit_failure_logs(repo, &failure_logs, state, role, "paused by usage limit")?;
                 return Ok(StopReason::UsageLimitReached(role));
             }
             if !outcome.success {
                 repo.discard_changes()?;
-                problem = format!("the agent exited with an error: {}", outcome.log);
+                let log = store.save_failure_log(state.round, role, &outcome.log)?;
+                problem = format!(
+                    "the agent failed: {} (full log: {})",
+                    outcome.message,
+                    log.display()
+                );
+                failure_logs.push(log);
                 continue;
             }
-            let forbidden = permissions::forbidden_changes(role, &repo.changed_files()?);
+            let agent_changes: Vec<String> = repo
+                .changed_files()?
+                .into_iter()
+                .filter(|path| !failure_logs.contains(&repo.root().join(path)))
+                .collect();
+            let forbidden = permissions::forbidden_changes(role, &agent_changes);
             if !forbidden.is_empty() {
                 return Ok(StopReason::ForbiddenChanges {
                     role,
@@ -126,18 +142,22 @@ pub async fn run<A: AgentRunner>(
                 });
             }
             match accept_inbox(store, state)? {
-                Ok(handoff) => {
+                Ok((handoff, step_dir)) => {
+                    store.save_log(&step_dir, &outcome.log)?;
                     repo.commit_all(&commit_message(&handoff))?;
                     accepted = true;
                     break;
                 }
                 Err(why) => {
                     repo.discard_changes()?;
-                    problem = why;
+                    let log = store.save_failure_log(state.round, role, &outcome.log)?;
+                    problem = format!("{why} (full log: {})", log.display());
+                    failure_logs.push(log);
                 }
             }
         }
         if !accepted {
+            commit_failure_logs(repo, &failure_logs, state, role, "failed")?;
             return Ok(StopReason::RoleFailed { role, problem });
         }
     }
@@ -187,6 +207,26 @@ pub fn record_human_decision(
     Ok(step_dir)
 }
 
+/// Commits only the failure logs (nothing an agent wrote), so the next run
+/// starts with a clean project.
+fn commit_failure_logs(
+    repo: &Repo,
+    logs: &[PathBuf],
+    state: &TaskState,
+    role: Role,
+    what: &str,
+) -> Result<(), GitError> {
+    let message = format!(
+        "{} round {}: {} {what}",
+        state.task_id,
+        state.round,
+        format!("{role:?}").to_lowercase()
+    );
+    let paths: Vec<&Path> = logs.iter().map(PathBuf::as_path).collect();
+    repo.commit_paths(&paths, &message)?;
+    Ok(())
+}
+
 fn prepare_job(
     project_dir: &Path,
     store: &TaskStore,
@@ -213,17 +253,17 @@ fn prepare_job(
 }
 
 /// Outer `Result`: a real harness error. Inner `Result`: was the agent's work
-/// accepted? If yes, it holds the saved handoff.
+/// accepted? If yes, it holds the saved handoff and its step folder.
 fn accept_inbox(
     store: &TaskStore,
     state: &mut TaskState,
-) -> Result<Result<Handoff, String>, StoreError> {
+) -> Result<Result<(Handoff, PathBuf), String>, StoreError> {
     let (handoff, notes) = match store.read_inbox() {
         Ok(found) => found,
         Err(e) => return Ok(Err(format!("no valid handoff: {e}"))),
     };
     match store.record(state, &handoff, &notes) {
-        Ok(_) => Ok(Ok(handoff)),
+        Ok(step_dir) => Ok(Ok((handoff, step_dir))),
         Err(StoreError::Refused(e)) => Ok(Err(format!("handoff refused: {e}"))),
         Err(e) => Err(e),
     }
