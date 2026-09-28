@@ -2,4 +2,5 @@
 
 pub mod handoff;
 pub mod routes;
+pub mod store;
 pub mod task;

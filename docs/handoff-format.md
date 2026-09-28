@@ -74,18 +74,20 @@
 
 ## Где лежат файлы
 
-Предложение (пока не реализовано):
+Реализовано в `crates/harness-core/src/store.rs` (подробнее — раздел 8 в [design.md](design.md)):
 
 ```
 runs/
   task-001/
+    task.md
+    state.json
     round-01/
-      architect/  notes.md  handoff.json  design.md
-      human/      notes.md  handoff.json
-      developer/  notes.md  handoff.json
-      tester/     notes.md  handoff.json
+      01-architect/  notes.md  handoff.json
+      02-human/      notes.md  handoff.json
+      03-developer/  notes.md  handoff.json
+      04-tester/     notes.md  handoff.json
     round-02/
-      developer/  ...
+      01-developer/  ...
 ```
 
 ## Примеры
