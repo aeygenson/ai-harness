@@ -107,6 +107,9 @@ pub fn looks_like_usage_limit(text: &str) -> bool {
         "hit your limit",
         "limit reached",
         "rate limit",
+        // Gemini: "You have exhausted your daily quota on this model."
+        "exhausted your",
+        "quota exceeded",
     ]
     .iter()
     .any(|phrase| text.contains(phrase))
@@ -122,6 +125,9 @@ mod tests {
             "Claude AI usage limit reached|1759000000"
         ));
         assert!(looks_like_usage_limit("You've hit your limit · resets 5pm"));
+        assert!(looks_like_usage_limit(
+            "You have exhausted your daily quota on this model."
+        ));
         assert!(!looks_like_usage_limit("All tests pass."));
     }
 }

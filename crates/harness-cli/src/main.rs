@@ -5,6 +5,7 @@
 //! harness init                         prepare .harness/ in the project
 //! harness login claude                 save the token from `claude setup-token`
 //! harness login codex                  log in to Codex (ChatGPT subscription)
+//! harness login gemini                 log in to Gemini CLI (Google account)
 //! harness task new task-001 "Build a CSV parser"
 //! harness run task-001                 run roles until someone must look
 //! harness approve task-001 --notes "Looks good"
@@ -20,7 +21,7 @@ use std::time::Duration;
 use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand};
 use harness_agents::credentials::{self, Secret};
-use harness_agents::{AnyAgent, ClaudeCode, Codex, Team};
+use harness_agents::{AnyAgent, ClaudeCode, Codex, Gemini, Team};
 use harness_core::config::{Config, CONFIG_FILE, DEFAULT_CONFIG};
 use harness_core::git::{Repo, HARNESS_DIR};
 use harness_core::handoff::{NextStep, Role, Verdict};
@@ -44,7 +45,7 @@ enum Command {
     Init,
     /// Save an agent's login token (outside the project, never in git).
     Login {
-        /// `claude` or `codex`.
+        /// `claude`, `codex` or `gemini`.
         agent: String,
     },
     /// Work with tasks.
@@ -156,7 +157,8 @@ fn login(agent: &str) -> Result<()> {
     match agent {
         "claude" => login_claude(&dir),
         "codex" => login_codex(&dir),
-        other => bail!("unknown agent {other:?}; use `claude` or `codex`"),
+        "gemini" => login_gemini(&dir),
+        other => bail!("unknown agent {other:?}; use `claude`, `codex` or `gemini`"),
     }
 }
 
@@ -194,6 +196,41 @@ fn login_codex(dir: &Path) -> Result<()> {
     if !auth.exists() {
         bail!(
             "`codex login` finished but {} was not created",
+            auth.display()
+        );
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&auth, fs::Permissions::from_mode(0o600))?;
+    }
+    println!("Saved to {} (only you can read it).", auth.display());
+    Ok(())
+}
+
+/// Starts `gemini` with its home in our credentials folder. Gemini has no
+/// separate login command: Lisa picks "Login with Google", then quits with
+/// `/quit`, and the login stays in that folder, not in `~/.gemini`.
+fn login_gemini(dir: &Path) -> Result<()> {
+    let home = dir.join("gemini");
+    fs::create_dir_all(&home)?;
+    println!("Starting `gemini`. Choose \"Login with Google\", finish in the browser,");
+    println!("then type /quit to come back here.");
+    let status = std::process::Command::new("gemini")
+        .env("GEMINI_CLI_HOME", &home)
+        .env("GOOGLE_GENAI_USE_GCA", "true")
+        .env("GEMINI_FORCE_FILE_STORAGE", "true")
+        .env_remove("GEMINI_API_KEY")
+        .env_remove("GOOGLE_API_KEY")
+        .status()
+        .context("cannot start `gemini`; is Gemini CLI installed?")?;
+    if !status.success() {
+        bail!("`gemini` failed ({status})");
+    }
+    let auth = home.join(".gemini").join("oauth_creds.json");
+    if !auth.exists() {
+        bail!(
+            "`gemini` finished but {} was not created; did the login finish?",
             auth.display()
         );
     }
@@ -250,7 +287,20 @@ fn build_team(config: &Config) -> Result<Team> {
                 }
                 AnyAgent::Codex(agent)
             }
-            other => bail!("{role:?} uses agent {other:?}; use \"claude\" or \"codex\""),
+            "gemini" => {
+                let auth_dir = dir.join("gemini");
+                if !auth_dir.join(".gemini/oauth_creds.json").exists() {
+                    bail!("no Gemini login saved; run `harness login gemini` first");
+                }
+                let mut agent = Gemini::new(auth_dir).with_timeout(timeout);
+                if let Some(model) = &settings.model {
+                    agent = agent.with_model(role, model);
+                }
+                AnyAgent::Gemini(agent)
+            }
+            other => {
+                bail!("{role:?} uses agent {other:?}; use \"claude\", \"codex\" or \"gemini\"")
+            }
         };
         team = team.with(role, agent);
     }

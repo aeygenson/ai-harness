@@ -204,8 +204,8 @@ always_skills = ["write-idiomatic-rust"]
 1. **Своя домашняя папка настроек для каждого агента в каждом проекте.**
    `.harness/agents/claude/`, `.harness/agents/codex/`, `.harness/agents/gemini/`.
    Агенту она подставляется вместо домашней: у Claude Code это переменная
-   `CLAUDE_CONFIG_DIR`, у Codex — `CODEX_HOME`, для Gemini CLI — его папка настроек
-   (точный способ уточним при написании адаптера). Файлы из `~/.claude`, `~/.codex`,
+   `CLAUDE_CONFIG_DIR`, у Codex — `CODEX_HOME`, у Gemini CLI — `GEMINI_CLI_HOME`
+   (проверено на всех трёх). Файлы из `~/.claude`, `~/.codex`,
    `~/.gemini` агент не видит.
 2. **Чистое окружение.** Процесс агента запускается с пустым набором переменных
    окружения (в Rust — `Command::env_clear()`), и харнесс добавляет только нужные:
@@ -235,7 +235,7 @@ api_key_env = "DEEPSEEK_API_KEY"   # единственный ключ, кото
 |-------|-------------------|------------------------------------|
 | Codex CLI | `auth.json` в папке настроек (`~/.codex/auth.json`) | скопировать `auth.json` в `CODEX_HOME` проекта |
 | Claude Code | на Linux `~/.claude/.credentials.json`, на macOS — в Keychain | долгоживущий токен из `claude setup-token` → переменная `CLAUDE_CODE_OAUTH_TOKEN` (или файл `.credentials.json` в `CLAUDE_CONFIG_DIR`) |
-| Gemini CLI | файл токена Google-входа в `~/.gemini/` (по отзывам — `oauth_creds.json`) | скопировать файл в изолированную папку; агенту подставляем `HOME` = эта папка |
+| Gemini CLI | `.gemini/oauth_creds.json` (проверено) | скопировать файл в `.harness/agents/gemini/.gemini/`; агенту `GEMINI_CLI_HOME` = `.harness/agents/gemini` |
 | DeepSeek (через Codex) | просто ключ API | переменная окружения из `api_key_env` |
 
 Точные имена файлов и флаги проверим на практике при написании каждого адаптера.
@@ -322,6 +322,33 @@ agent = "claude"
 [roles.tester]
 agent = "codex"
 ```
+
+### 5.4. Адаптер Gemini CLI ✅ (этап 5)
+
+Харнесс запускает `gemini -p "…" --output-format stream-json` в папке проекта;
+полный промпт идёт через стандартный ввод, `-p` добавляется после него.
+Проверено на Gemini CLI 0.61.0 (без живого запуска: в облаке нет входа Google).
+
+| Что | Как |
+|-----|-----|
+| Окружение | то же, что у Claude: `env_clear()` и короткий список переменных, поэтому `GEMINI_API_KEY` не доходит до агента |
+| Папка настроек | `GEMINI_CLI_HOME=.harness/agents/gemini`: Gemini читает `<она>/.gemini/`, а не `~/.gemini` |
+| Вход | `harness login gemini` запускает `gemini` с `GEMINI_CLI_HOME=~/.harness/credentials/gemini`; Лиза выбирает «Login with Google» и выходит `/quit`. Перед ролью `.gemini/oauth_creds.json` копируется в проект, после роли обновлённый вход сохраняется обратно, а копия удаляется. `GOOGLE_GENAI_USE_GCA=true` — только подписка, `GEMINI_FORCE_FILE_STORAGE=true` — без системного хранилища паролей |
+| Лишние возможности | `-e none` выключает все расширения, `--allowed-mcp-server-names` с несуществующим именем — все MCP-серверы |
+| Права роли | `--policy .harness/agents/gemini/policy.toml`, файл пишется перед каждой ролью. Он в уровне «user» (4), а разрешение «всё» режима yolo — в уровне «default» (1), поэтому наши запреты сильнее |
+| Вопросы | `--approval-mode yolo` и `--skip-trust`: агент никогда не ждёт ответа человека |
+| Вывод | события JSON по строкам; последнее `{"type":"result","status":"success"}` — успех, `"status":"error"` — ошибка с текстом. Если такого события нет (например, вход не обновился), в сообщение идёт последняя строка stderr |
+
+Правила политики:
+
+| Роль | Запрещено |
+|------|-----------|
+| Все | `git commit`, `git push`, поиск и загрузка из интернета |
+| Architect | любые команды оболочки |
+| Security | запись файлов; из команд разрешены только `cargo audit` и `cargo deny` |
+
+Песочницы без Docker у Gemini нет, поэтому, как и у Codex, какие папки роль
+изменила, проверяет `git status` из раздела 6.
 
 ---
 

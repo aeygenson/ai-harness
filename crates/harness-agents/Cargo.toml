@@ -10,4 +10,5 @@ tokio = { version = "1", features = ["process", "time", "io-util"] }
 
 [dev-dependencies]
 tempfile = "3"
+toml = "0.9"
 tokio = { version = "1", features = ["macros", "rt", "process", "time", "io-util"] }
