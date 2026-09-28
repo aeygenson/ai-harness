@@ -27,6 +27,7 @@ use harness_core::config::{Config, CONFIG_FILE, DEFAULT_CONFIG};
 use harness_core::git::{Repo, HARNESS_DIR};
 use harness_core::handoff::{NextStep, Role, Verdict};
 use harness_core::orchestrator::{self, StopReason};
+use harness_core::skills::Skills;
 use harness_core::store::TaskStore;
 use harness_core::task::{Stage, TaskState, WaitReason};
 
@@ -401,11 +402,13 @@ fn build_team(config: &Config) -> Result<Team> {
 
 async fn run(project: &Path, task_id: &str) -> Result<()> {
     let repo = open_repo(project)?;
-    let config = Config::load(&repo.root().join(HARNESS_DIR))?;
+    let harness_dir = repo.root().join(HARNESS_DIR);
+    let config = Config::load(&harness_dir)?;
+    let skills = Skills::load(&harness_dir, &config)?;
     let agent = build_team(&config)?;
     let (store, mut state) = open_task(&repo, task_id)?;
     println!("Running {task_id} (round {})...", state.round);
-    let stop = orchestrator::run(&repo, &store, &mut state, &agent).await?;
+    let stop = orchestrator::run_with_skills(&repo, &store, &mut state, &agent, &skills).await?;
     println!("{}", explain(&stop, task_id));
     Ok(())
 }

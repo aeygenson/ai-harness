@@ -15,6 +15,7 @@ use crate::git::{GitError, Repo};
 use crate::handoff::{Handoff, NextStep, Role, Verdict};
 use crate::permissions;
 use crate::prompt;
+use crate::skills::Skills;
 use crate::store::{StoreError, TaskStore};
 use crate::task::{Stage, TaskState, WaitReason};
 
@@ -86,6 +87,17 @@ pub async fn run<A: AgentRunner>(
     state: &mut TaskState,
     agent: &A,
 ) -> Result<StopReason, RunError> {
+    run_with_skills(repo, store, state, agent, &Skills::none()).await
+}
+
+/// Like [`run`], but every role also gets its skills from `harness.toml`.
+pub async fn run_with_skills<A: AgentRunner>(
+    repo: &Repo,
+    store: &TaskStore,
+    state: &mut TaskState,
+    agent: &A,
+    skills: &Skills,
+) -> Result<StopReason, RunError> {
     repo.ensure_harness_ignores()?;
     for _ in 0..MAX_STEPS_PER_RUN {
         let role = match state.stage {
@@ -106,7 +118,7 @@ pub async fn run<A: AgentRunner>(
         let mut failure_logs: Vec<PathBuf> = Vec::new();
         for _ in 0..ATTEMPTS_PER_ROLE {
             let head = repo.head()?;
-            let job = prepare_job(repo.root(), store, state, role)?;
+            let job = prepare_job(repo.root(), store, state, role, skills)?;
             let outcome = agent.run(&job).await;
 
             if repo.head()? != head {
@@ -232,6 +244,7 @@ fn prepare_job(
     store: &TaskStore,
     state: &TaskState,
     role: Role,
+    skills: &Skills,
 ) -> Result<RoleJob, StoreError> {
     let output_dir = store.prepare_inbox()?;
     let history = store.history()?;
@@ -241,6 +254,7 @@ fn prepare_job(
         state,
         history.last(),
         &output_dir,
+        &skills.for_role(role),
     );
     Ok(RoleJob {
         task_id: state.task_id.clone(),

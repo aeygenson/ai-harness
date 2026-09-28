@@ -8,5 +8,6 @@ pub mod orchestrator;
 pub mod permissions;
 pub mod prompt;
 pub mod routes;
+pub mod skills;
 pub mod store;
 pub mod task;

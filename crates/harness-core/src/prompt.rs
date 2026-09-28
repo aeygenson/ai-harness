@@ -1,6 +1,6 @@
 //! Builds the prompt an agent receives for one role.
 //!
-//! The role's own `prompt.md` and skills come in a later stage.
+//! The role's own `prompt.md` comes in a later stage.
 //!
 //! The agent works in *another* project, so the prompt must contain everything it
 //! needs, including the exact `handoff.json` format: a first live run showed that
@@ -11,6 +11,7 @@ use std::path::Path;
 use crate::handoff::{FileAction, FileChange, Handoff, NextStep, Role, Verdict};
 use crate::permissions::{self, WriteRule};
 use crate::routes;
+use crate::skills::RoleSkills;
 use crate::task::TaskState;
 
 pub fn build(
@@ -19,6 +20,7 @@ pub fn build(
     state: &TaskState,
     previous: Option<&Handoff>,
     output_dir: &Path,
+    skills: &RoleSkills,
 ) -> String {
     let mut prompt = format!(
         "You are the {role:?} in a team of AI roles.\n\
@@ -50,6 +52,7 @@ pub fn build(
         ),
         WriteRule::Nothing => "Do not change any project files; only read them.\n".to_string(),
     });
+    prompt.push_str(&skills_text(skills));
     prompt.push_str(&format!(
         "\nWhen you finish, write two files into {dir}:\n\
          - notes.md: short notes for Lisa.\n\
@@ -59,6 +62,32 @@ pub fn build(
     ));
     prompt.push_str(&handoff_format(role, state));
     prompt
+}
+
+/// The role's skills: the always-on ones in full, the others as a list of files.
+fn skills_text(skills: &RoleSkills) -> String {
+    let mut text = String::new();
+    for skill in &skills.always {
+        text.push_str(&format!(
+            "\nAlways follow the skill \"{}\":\n{}\n",
+            skill.name, skill.body
+        ));
+    }
+    if !skills.on_demand.is_empty() {
+        text.push_str("\nSkills you can use: read a skill's file when it fits your work.\n");
+        for skill in &skills.on_demand {
+            text.push_str(&format!(
+                "- {}: {} (file {})\n",
+                skill.name,
+                skill.description,
+                skill.path.display()
+            ));
+        }
+    }
+    if !skills.is_empty() {
+        text.push_str("List the names of the skills you used in skills_used.\n");
+    }
+    text
 }
 
 /// The `handoff.json` rules for this role, with a ready example.
@@ -143,6 +172,7 @@ mod tests {
             &state,
             None,
             Path::new("/p/.harness/runs/task-007/inbox"),
+            &RoleSkills::default(),
         )
     }
 
@@ -181,6 +211,45 @@ mod tests {
     fn the_prompt_says_where_earlier_notes_are() {
         assert!(prompt_for(Role::Security)
             .contains("earlier steps are in /p/.harness/runs/task-007/round-XX/NN-role/"));
+    }
+
+    #[test]
+    fn the_prompt_lists_skills_and_includes_always_skills_in_full() {
+        use crate::skills::Skill;
+        use std::path::PathBuf;
+
+        let skill = |name: &str, body: &str| Skill {
+            name: name.to_string(),
+            description: format!("About {name}."),
+            path: PathBuf::from(format!("/p/.harness/skills/{name}.md")),
+            body: body.to_string(),
+        };
+        let skills = RoleSkills {
+            on_demand: vec![skill("rust-errors", "Use thiserror.")],
+            always: vec![skill("style", "Run clippy.")],
+        };
+        let state = TaskState::new("task-007", DEFAULT_MAX_ROUNDS);
+        let prompt = build(
+            Role::Developer,
+            "Build a parser",
+            &state,
+            None,
+            Path::new("/p/.harness/runs/task-007/inbox"),
+            &skills,
+        );
+        assert!(prompt.contains(
+            "- rust-errors: About rust-errors. (file /p/.harness/skills/rust-errors.md)"
+        ));
+        // Only the list: the agent reads the file itself.
+        assert!(!prompt.contains("Use thiserror."));
+        assert!(prompt.contains("Always follow the skill \"style\":\nRun clippy."));
+        assert!(prompt.contains("in skills_used"));
+    }
+
+    #[test]
+    fn a_role_without_skills_gets_no_skill_text() {
+        assert!(!prompt_for(Role::Tester).contains("skill \""));
+        assert!(!prompt_for(Role::Tester).contains("Skills you can use"));
     }
 
     #[test]
