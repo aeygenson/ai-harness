@@ -33,6 +33,13 @@ pub fn build(
             previous.role
         ));
     }
+    if let Some(task_dir) = output_dir.parent() {
+        prompt.push_str(&format!(
+            "Notes and handoffs of earlier steps are in {}/round-XX/NN-role/ \
+             (notes.md, handoff.json); read them if you need more context.\n\n",
+            task_dir.display()
+        ));
+    }
     prompt.push_str(&match permissions::rule_for(role) {
         WriteRule::Anything => {
             "You may change any project file except .harness/ and agent settings.\n".to_string()
@@ -168,6 +175,12 @@ mod tests {
     #[test]
     fn the_prompt_does_not_point_to_files_the_project_may_not_have() {
         assert!(!prompt_for(Role::Architect).contains("handoff-format.md"));
+    }
+
+    #[test]
+    fn the_prompt_says_where_earlier_notes_are() {
+        assert!(prompt_for(Role::Security)
+            .contains("earlier steps are in /p/.harness/runs/task-007/round-XX/NN-role/"));
     }
 
     #[test]

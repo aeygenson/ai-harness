@@ -6,8 +6,8 @@ edition = "2021"
 [dependencies]
 harness-core = { path = "../harness-core" }
 serde_json = "1"
+tempfile = "3"
 tokio = { version = "1", features = ["process", "time", "io-util"] }
 
 [dev-dependencies]
-tempfile = "3"
 tokio = { version = "1", features = ["macros", "rt", "process", "time", "io-util"] }

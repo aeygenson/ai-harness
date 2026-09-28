@@ -14,7 +14,7 @@ Architect → (утверждение Лизы) → Developer → Tester → Sec
 работу назад. Каждая роль оставляет короткие заметки (`notes.md`) и `handoff.json`.
 
 **Главная идея: харнесс — дирижёр, а не музыкант.** ✅
-Роли выполняют **готовые консольные агенты**: Claude Code, OpenAI Codex CLI, Gemini CLI.
+Роли выполняют **готовые консольные агенты**: Claude Code, OpenAI Codex CLI, Antigravity CLI.
 Они сами читают и меняют файлы, запускают `cargo test` и так далее. Мы не пишем своего
 агента. Наша программа:
 
@@ -53,7 +53,7 @@ Architect → (утверждение Лизы) → Developer → Tester → Sec
                      │                 │  передать промпт, собрать результат
                      └──┬──────┬────┬──┘
                         ▼      ▼    ▼
-                  Claude   Codex   Gemini        + mock (для тестов)
+                  Claude   Codex   Antigravity   + mock (для тестов)
                    Code     CLI     CLI
 ```
 
@@ -168,7 +168,7 @@ always_skills = ["write-idiomatic-rust"]
 |--------|-------|-----------|---------|
 | `claude` | Claude Code | подписка Claude Pro/Max | |
 | `codex` | OpenAI Codex CLI | подписка ChatGPT | |
-| `gemini` | Gemini CLI | аккаунт Google / подписка Gemini | |
+| `antigravity` | Antigravity CLI (`agy`) | аккаунт Google / подписка Google AI Pro | Gemini CLI больше не работает с подпиской Pro/Ultra (Google закрыл это 18.06.2026), поэтому вместо него Antigravity |
 | `codex+deepseek` | Codex CLI с моделью DeepSeek | ключ API DeepSeek (дёшево) | Codex позволяет подключить сторонний OpenAI-совместимый провайдер в своём `config.toml`; проверим на практике |
 | `mock` | заранее записанный «агент» | бесплатно | для тестов всего цикла без интернета |
 
@@ -181,7 +181,7 @@ always_skills = ["write-idiomatic-rust"]
 | Architect | Claude Code |
 | Developer | Codex CLI |
 | Tester | Claude Code |
-| Security | Gemini CLI |
+| Security | Antigravity CLI |
 
 **Первый адаптер — Claude Code**: у него самый развитый неинтерактивный режим
 (`claude -p`, машиночитаемый вывод, режимы разрешений), на нём проще всего отладить схему.
@@ -202,10 +202,10 @@ always_skills = ["write-idiomatic-rust"]
 Как харнесс этого добивается при запуске агента:
 
 1. **Своя домашняя папка настроек для каждого агента в каждом проекте.**
-   `.harness/agents/claude/`, `.harness/agents/codex/`, `.harness/agents/gemini/`.
+   `.harness/agents/claude/`, `.harness/agents/codex/`; у Antigravity — временная папка вне проекта.
    Агенту она подставляется вместо домашней: у Claude Code это переменная
-   `CLAUDE_CONFIG_DIR`, у Codex — `CODEX_HOME`, для Gemini CLI — его папка настроек
-   (точный способ уточним при написании адаптера). Файлы из `~/.claude`, `~/.codex`,
+   `CLAUDE_CONFIG_DIR`, у Codex — `CODEX_HOME`, у Antigravity CLI — сама переменная
+   `HOME` (своей переменной у него нет). Файлы из `~/.claude`, `~/.codex`,
    `~/.gemini` агент не видит.
 2. **Чистое окружение.** Процесс агента запускается с пустым набором переменных
    окружения (в Rust — `Command::env_clear()`), и харнесс добавляет только нужные:
@@ -235,14 +235,14 @@ api_key_env = "DEEPSEEK_API_KEY"   # единственный ключ, кото
 |-------|-------------------|------------------------------------|
 | Codex CLI | `auth.json` в папке настроек (`~/.codex/auth.json`) | скопировать `auth.json` в `CODEX_HOME` проекта |
 | Claude Code | на Linux `~/.claude/.credentials.json`, на macOS — в Keychain | долгоживущий токен из `claude setup-token` → переменная `CLAUDE_CODE_OAUTH_TOKEN` (или файл `.credentials.json` в `CLAUDE_CONFIG_DIR`) |
-| Gemini CLI | файл токена Google-входа в `~/.gemini/` (по отзывам — `oauth_creds.json`) | скопировать файл в изолированную папку; агенту подставляем `HOME` = эта папка |
+| Antigravity CLI | несколько служебных файлов в `~/.gemini/antigravity-cli/` и `~/.gemini/config/` (одного файла с токеном нет; проверено на agy 1.2.12) | скопировать всю сохранённую папку входа (без логов и истории) во временный `HOME` |
 | DeepSeek (через Codex) | просто ключ API | переменная окружения из `api_key_env` |
 
 Точные имена файлов и флаги проверим на практике при написании каждого адаптера.
 
 **Схема: войти один раз, изолировать всё остальное.**
 
-- `harness login claude` (и `codex`, `gemini`) один раз выполняет вход и кладёт **только
+- `harness login claude` (и `codex`, `antigravity`) один раз выполняет вход и кладёт **только
   токен** в хранилище харнесса `~/.harness/credentials/<агент>/` — вне любого проекта и вне git.
 - При каждом запуске роли харнесс создаёт изолированную папку настроек проекта и
   передаёт туда **только токен** (копия файла или переменная окружения). Плагины,
@@ -323,6 +323,27 @@ agent = "claude"
 agent = "codex"
 ```
 
+### 5.4. Адаптер Antigravity CLI ✅ (этап 5)
+
+Сначала был написан адаптер Gemini CLI, но живой запуск не вошёл: Google с 18.06.2026
+не пускает подписки Google AI Pro/Ultra в Gemini CLI и предлагает Antigravity CLI.
+Поэтому третий агент — `agy` (Antigravity CLI). Проверено на agy 1.2.12 на ноутбуке Лизы.
+
+| Что | Как |
+|-----|-----|
+| Запуск | `agy -p "<промпт>" --output-format stream-json --disable-slash-commands`, стандартный ввод пустой |
+| Окружение | то же, что у Claude: `env_clear()` и короткий список переменных, плюс `AGY_CLI_DISABLE_AUTO_UPDATE=true`. Раз `HOME` подменён, харнесс передаёт `CARGO_HOME` и `RUSTUP_HOME` на настоящие `~/.cargo` и `~/.rustup` (если Лиза не задала их сама), иначе `cargo` внутри агента не находит Rust |
+| Папка настроек | своей переменной у `agy` нет, поэтому для каждой роли создаётся временный `HOME` вне проекта и удаляется после роли. Там только копия входа и наш `settings.json`: ни MCP-серверов, ни плагинов Лизы, ни истории прошлых запусков |
+| Вход | `harness login antigravity` запускает `agy` с `HOME=~/.harness/credentials/antigravity` и пустым окружением, поэтому вход ложится в файлы, а не в системное хранилище паролей. Одного файла с токеном нет, поэтому перед ролью копируется вся папка без `log`, `brain`, `conversations` и другой истории. Во время работы файлы входа не меняются, поэтому обратно ничего не копируется |
+| Права роли | `settings.json` → `permissions`. Запреты (`deny`) действуют всегда, даже с `--dangerously-skip-permissions`, и запрещённая команда просто не выполняется, работа идёт дальше. Разрешения (`allow`) без окна не работают как белый список, поэтому папки проверяет `git status` из раздела 6 |
+| Команды | Все роли запускаются с `--dangerously-skip-permissions`: без окна любая неразрешённая команда сразу заканчивает всю работу, и `handoff.json` не пишется (так остановилась Security в первом живом прогоне на `ls`). Поэтому роли ограничены только запретами: всем — `git commit`, `git push`; Architect и Security ещё `rm`, `mv`, `cp`, `git add/checkout/reset/restore/stash`, `cargo build/install/run/publish`, `curl`, `wget`. Список неполный; изменённые файлы всё равно ловит проверка git |
+| Остановка без разрешения | если `agy` всё же остановился из-за действия, которое без окна нельзя разрешить, в `result` есть `denied_actions`; роль считается неуспешной, и в сообщении сказано, какое действие было нужно |
+| Настройки проекта | `agy` читает навыки, правила и MCP-серверы проекта из `.agents/`, поэтому эта папка добавлена в «никому нельзя» |
+| Вывод | события JSON по строкам; последнее `{"event":"result","result":{"status":"SUCCESS"}}` — успех. Ошибка модели — код выхода 3 и строка `AGY_ERROR: {...}` в stderr; её текст идёт в сообщение, `RESOURCE_EXHAUSTED` ставит задачу на паузу |
+
+Что ещё не закрыто: запрет чтения интернета (по умолчанию `agy` спрашивает, а без окна
+отказывает, но с `--dangerously-skip-permissions` у Developer и Tester, вероятно, разрешено).
+
 ---
 
 ## 6. Проверка результата роли
@@ -340,7 +361,7 @@ agent = "codex"
    - Architect — только файлы в папках `docs`, Tester — только в папках `tests`
      (на любой глубине, например `crates/core/tests/`), Developer — любые,
      Security — ничего.
-   - Никому нельзя: `.harness/`, `.git/`, `.claude/`, `.codex/`, `.gemini/`,
+   - Никому нельзя: `.harness/`, `.git/`, `.claude/`, `.codex/`, `.gemini/`, `.agents/`,
      `CLAUDE.md`, `AGENTS.md`, `GEMINI.md` — это файлы, которые управляют агентами.
    - Нарушение — стоп. Изменения остаются в папке незакоммиченными, чтобы Лиза посмотрела.
 3. Читает `handoff.json` нашими Rust-типами и проверяет автора и маршрут по таблице.
@@ -445,7 +466,7 @@ agent = "codex"
 agent = "codex+deepseek"
 
 [roles.security]
-agent = "gemini"
+agent = "antigravity"
 ```
 
 - Изменение действует со **следующего запуска роли**; какой агент работал, записывается в `agent.log`.
@@ -548,7 +569,7 @@ harness retro [task|--all]    # ретроспектива: статистика
 | 2 | Хранение: папки runs, `state.json`, продолжение после остановки | нет |
 | 3 | Mock-агент и полный цикл четырёх ролей «понарошку», проверки из раздела 6, git | нет |
 | 4 | Первый настоящий адаптер: **Claude Code** | да |
-| 5 | Остальные адаптеры: Codex, Gemini CLI, Codex+DeepSeek | да |
+| 5 | Остальные адаптеры: Codex, Antigravity CLI, Codex+DeepSeek | да |
 | 6 | Команды CLI полностью | да |
 | 7 | Ретроспектива: статистика, роль Retrospective, предложения к навыкам | да (для выводов) |
 | 8 | TUI на Ratatui | да |

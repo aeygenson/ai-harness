@@ -15,6 +15,8 @@ const ALWAYS_FORBIDDEN: &[&str] = &[
     ".claude",
     ".codex",
     ".gemini",
+    // Antigravity CLI reads project skills, rules and MCP servers from here.
+    ".agents",
     "CLAUDE.md",
     "AGENTS.md",
     "GEMINI.md",
@@ -98,6 +100,7 @@ mod tests {
         ));
         assert!(!may_write(Role::Developer, "CLAUDE.md"));
         assert!(!may_write(Role::Developer, ".claude/settings.json"));
+        assert!(!may_write(Role::Developer, ".agents/mcp_config.json"));
     }
 
     #[test]
