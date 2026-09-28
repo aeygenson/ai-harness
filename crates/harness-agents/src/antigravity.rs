@@ -83,6 +83,13 @@ impl Antigravity {
     /// temporary `HOME` prepared by `prepare_home`.
     pub fn command(&self, job: &RoleJob, home: &Path) -> Command {
         let mut command = process::base_command(&self.program, &job.project_dir);
+        // `rustup` and `cargo` look for Rust under `$HOME`, which is replaced
+        // below, so point them at the real folders first.
+        if let Some(real_home) = std::env::var_os("HOME") {
+            for (name, path) in rust_env(Path::new(&real_home)) {
+                command.env(name, path);
+            }
+        }
         command
             .env("HOME", home)
             .env("AGY_CLI_DISABLE_AUTO_UPDATE", "true")
@@ -177,6 +184,17 @@ fn outcome(mut log: String, result: Result<process::Finished, String>) -> AgentO
         log,
         message,
     }
+}
+
+/// `CARGO_HOME` and `RUSTUP_HOME` pointing at `real_home/.cargo` and
+/// `real_home/.rustup`, for those Lisa has not set herself and that exist.
+fn rust_env(real_home: &Path) -> Vec<(&'static str, PathBuf)> {
+    [("CARGO_HOME", ".cargo"), ("RUSTUP_HOME", ".rustup")]
+        .into_iter()
+        .filter(|(name, _)| std::env::var_os(name).is_none())
+        .map(|(name, folder)| (name, real_home.join(folder)))
+        .filter(|(_, path)| path.is_dir())
+        .collect()
 }
 
 /// Commands no role may run: the harness makes the commits.
@@ -390,6 +408,18 @@ mod tests {
             agy_error(stderr).as_deref(),
             Some("{\"status\":\"RESOURCE_EXHAUSTED\"}")
         );
+    }
+
+    #[test]
+    fn rust_is_found_in_the_real_home() {
+        let real_home = tempfile::tempdir().unwrap();
+        fs::create_dir(real_home.path().join(".rustup")).unwrap();
+        let env = rust_env(real_home.path());
+        if std::env::var_os("RUSTUP_HOME").is_none() {
+            assert!(env.contains(&("RUSTUP_HOME", real_home.path().join(".rustup"))));
+        }
+        // No `.cargo` folder there, so nothing is invented.
+        assert!(!env.iter().any(|(name, _)| *name == "CARGO_HOME"));
     }
 
     #[test]
