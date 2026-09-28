@@ -147,3 +147,45 @@ async fn without_a_saved_login_the_role_fails_with_a_hint() {
         other => panic!("expected RoleFailed, got {other:?}"),
     }
 }
+
+#[tokio::test]
+async fn deepseek_roles_get_the_key_and_no_chatgpt_login() {
+    let s = setup();
+    let seen = s.scratch.path().join("seen");
+    let script = fake_codex(
+        s.scratch.path(),
+        &format!(
+            "env > {seen}.env\n\
+             echo \"$@\" > {seen}.args\n\
+             ls -A \"$CODEX_HOME\" > {seen}.home\n\
+             cat > /dev/null\n\
+             cat > .harness/runs/task-001/inbox/handoff.json <<'JSON'\n{HANDOFF}\nJSON\n\
+             echo '{{\"type\":\"turn.completed\",\"usage\":{{}}}}'\n",
+            seen = seen.display()
+        ),
+    );
+    let agent = Codex::deepseek(harness_agents::credentials::Secret::new("sk-deepseek-test"))
+        .with_program(script);
+    let (store, mut state) = new_task(&s.repo);
+
+    let stop = orchestrator::run(&s.repo, &store, &mut state, &agent)
+        .await
+        .unwrap();
+
+    assert_eq!(stop, StopReason::WaitingForHuman(WaitReason::ApproveDesign));
+    let env = fs::read_to_string(seen.with_extension("env")).unwrap();
+    assert!(env.contains("DEEPSEEK_API_KEY=sk-deepseek-test"), "{env}");
+    let args = fs::read_to_string(seen.with_extension("args")).unwrap();
+    assert!(args.contains("model_provider=\"deepseek\""), "{args}");
+    assert!(!args.contains("sk-deepseek-test"), "{args}");
+    // The ChatGPT login was not copied in.
+    let home = fs::read_to_string(seen.with_extension("home")).unwrap();
+    assert!(!home.contains("auth.json"), "{home}");
+    // The key is not in the log that goes into git.
+    let log = fs::read_to_string(store.dir().join("round-01/01-architect/agent.log")).unwrap();
+    assert!(
+        log.starts_with("agent: codex+deepseek, model: deepseek-flash"),
+        "{log}"
+    );
+    assert!(!log.contains("sk-deepseek-test"), "{log}");
+}

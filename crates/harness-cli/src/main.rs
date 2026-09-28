@@ -21,7 +21,7 @@ use std::time::Duration;
 use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand};
 use harness_agents::credentials::{self, Secret};
-use harness_agents::{Antigravity, AnyAgent, ClaudeCode, Codex, Team};
+use harness_agents::{codex, Antigravity, AnyAgent, ClaudeCode, Codex, Team};
 use harness_core::config::{Config, CONFIG_FILE, DEFAULT_CONFIG};
 use harness_core::git::{Repo, HARNESS_DIR};
 use harness_core::handoff::{NextStep, Role, Verdict};
@@ -295,6 +295,22 @@ fn build_team(config: &Config) -> Result<Team> {
                 }
                 AnyAgent::Codex(agent)
             }
+            "codex+deepseek" => {
+                let key = std::env::var(codex::DEEPSEEK_KEY_ENV).unwrap_or_default();
+                if key.trim().is_empty() {
+                    bail!(
+                        "{role:?} uses DeepSeek, but {} is not set; \
+                         add `export {}=...` to your shell (not to a file in the project)",
+                        codex::DEEPSEEK_KEY_ENV,
+                        codex::DEEPSEEK_KEY_ENV
+                    );
+                }
+                let mut agent = Codex::deepseek(Secret::new(key.trim())).with_timeout(timeout);
+                if let Some(model) = &settings.model {
+                    agent = agent.with_model(role, model);
+                }
+                AnyAgent::Codex(agent)
+            }
             "antigravity" => {
                 let auth_dir = dir.join("antigravity");
                 if !auth_dir.join(".gemini/antigravity-cli").is_dir() {
@@ -307,7 +323,7 @@ fn build_team(config: &Config) -> Result<Team> {
                 AnyAgent::Antigravity(agent)
             }
             other => {
-                bail!("{role:?} uses agent {other:?}; use \"claude\", \"codex\" or \"antigravity\"")
+                bail!("{role:?} uses agent {other:?}; use \"claude\", \"codex\", \"codex+deepseek\" or \"antigravity\"")
             }
         };
         team = team.with(role, agent);

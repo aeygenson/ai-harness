@@ -26,9 +26,11 @@ pub const DEFAULT_CONFIG: &str = r#"# Settings of the AI harness for this projec
 max_rounds = 5
 agent_timeout_minutes = 30
 
-# Which agent works as each role: "claude" (Claude Code), "codex" (Codex CLI)
-# or "antigravity" (Antigravity CLI).
-# Add `model = "..."` to pick a model, for example "opus" for claude.
+# Which agent works as each role: "claude" (Claude Code), "codex" (Codex CLI),
+# "codex+deepseek" (Codex CLI with DeepSeek models; needs DEEPSEEK_API_KEY in
+# your shell) or "antigravity" (Antigravity CLI).
+# Add `model = "..."` to pick a model, for example "opus" for claude or
+# "deepseek-v4-pro" for codex+deepseek (default "deepseek-flash").
 
 [roles.architect]
 agent = "claude"

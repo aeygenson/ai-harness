@@ -169,7 +169,7 @@ always_skills = ["write-idiomatic-rust"]
 | `claude` | Claude Code | подписка Claude Pro/Max | |
 | `codex` | OpenAI Codex CLI | подписка ChatGPT | |
 | `antigravity` | Antigravity CLI (`agy`) | аккаунт Google / подписка Google AI Pro | |
-| `codex+deepseek` | Codex CLI с моделью DeepSeek | ключ API DeepSeek (дёшево) | Codex позволяет подключить сторонний OpenAI-совместимый провайдер в своём `config.toml`; проверим на практике |
+| `codex+deepseek` | Codex CLI с моделью DeepSeek | ключ API DeepSeek (дёшево) | сделано в этапе 5c, см. раздел 5.3 |
 | `mock` | заранее записанный «агент» | бесплатно | для тестов всего цикла без интернета |
 
 **Подписки Лизы** (27.09.2026): Claude за $100 (Max), OpenAI за $100, Google AI Pro (Gemini Pro).
@@ -236,7 +236,7 @@ api_key_env = "DEEPSEEK_API_KEY"   # единственный ключ, кото
 | Codex CLI | `auth.json` в папке настроек (`~/.codex/auth.json`) | скопировать `auth.json` в `CODEX_HOME` проекта |
 | Claude Code | на Linux `~/.claude/.credentials.json`, на macOS — в Keychain | долгоживущий токен из `claude setup-token` → переменная `CLAUDE_CODE_OAUTH_TOKEN` (или файл `.credentials.json` в `CLAUDE_CONFIG_DIR`) |
 | Antigravity CLI | несколько служебных файлов в `~/.gemini/antigravity-cli/` и `~/.gemini/config/` (одного файла с токеном нет; проверено на agy 1.2.12) | скопировать всю сохранённую папку входа (без логов и истории) во временный `HOME` |
-| DeepSeek (через Codex) | просто ключ API | переменная окружения из `api_key_env` |
+| DeepSeek (через Codex) | просто ключ API | переменная `DEEPSEEK_API_KEY` в оболочке Лизы, передаётся только ролям на DeepSeek |
 
 Точные имена файлов и флаги проверим на практике при написании каждого адаптера.
 
@@ -322,6 +322,21 @@ agent = "claude"
 [roles.tester]
 agent = "codex"
 ```
+
+**DeepSeek через Codex** (`agent = "codex+deepseek"`, этап 5c). Тот же Codex, но
+с DeepSeek вместо OpenAI. Codex 0.158 умеет только протокол Responses (`wire_api = "chat"`
+он отвергает, проверено), а DeepSeek его поддерживает
+([документация DeepSeek для Codex](https://api-docs.deepseek.com/quick_start/agent_integrations/codex/)).
+
+| Что | Как |
+|-----|-----|
+| Провайдер | флаги `-c model_provider="deepseek"`, `model_providers.deepseek.base_url="https://api.deepseek.com/"`, `wire_api="responses"`, `env_key="DEEPSEEK_API_KEY"`, `forced_login_method="api"`, `web_search="disabled"` |
+| Модель | `model` в `harness.toml`: `deepseek-flash` (по умолчанию) или `deepseek-v4-pro` |
+| Ключ | только переменная `DEEPSEEK_API_KEY` в оболочке Лизы. Харнесс передаёт её лишь ролям на DeepSeek, в аргументы и логи она не попадает, в файлы не пишется. `shell_environment_policy.ignore_default_excludes=false`: команды, которые запускает агент, не видят переменных с KEY/SECRET/TOKEN в имени |
+| Вход ChatGPT | не нужен и не копируется: `auth.json` для этих ролей не трогается |
+
+Codex предупреждает «Model metadata for `deepseek-flash` not found» и берёт общие
+настройки модели; каталог `models.json` из документации DeepSeek пока не подключаем.
 
 ### 5.4. Адаптер Antigravity CLI ✅ (этап 5)
 
