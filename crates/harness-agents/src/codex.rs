@@ -11,6 +11,12 @@
 //! - Codex's own sandbox (`workspace-write`): commands may write only inside
 //!   the project. Codex has no per-folder rules like Claude Code, so the git
 //!   check after the role is what enforces "Architect writes only docs/".
+//!
+//! DeepSeek (`agent = "codex+deepseek"`): the same Codex, with DeepSeek as its
+//! model provider. DeepSeek speaks the Responses API that Codex uses. The API
+//! key comes only from the `DEEPSEEK_API_KEY` variable in Lisa's shell and is
+//! passed to this agent alone; it is never written to a file. No ChatGPT
+//! login is copied in for these roles.
 
 use std::collections::HashMap;
 use std::fs;
@@ -22,6 +28,7 @@ use std::time::Duration;
 use harness_core::agent::{AgentOutcome, AgentRunner, RoleJob};
 use harness_core::handoff::Role;
 
+use crate::credentials::Secret;
 use crate::process::{self, failed};
 
 /// Where the agent's own settings live inside the project (ignored by git).
@@ -47,9 +54,26 @@ const DISABLED_FEATURES: &[&str] = &[
     "unbounded_connection_retries",
 ];
 
+/// The variable in Lisa's shell that holds the DeepSeek API key.
+pub const DEEPSEEK_KEY_ENV: &str = "DEEPSEEK_API_KEY";
+/// DeepSeek's endpoint for Codex; Codex adds `responses` to it.
+const DEEPSEEK_URL: &str = "https://api.deepseek.com/";
+/// Used when harness.toml sets no model for the role.
+pub const DEEPSEEK_DEFAULT_MODEL: &str = "deepseek-flash";
+
+/// Who Codex talks to.
+#[derive(Debug, Clone)]
+enum Provider {
+    /// OpenAI, with the ChatGPT login saved by `harness login codex`.
+    ChatGpt,
+    /// DeepSeek, with an API key.
+    DeepSeek(Secret),
+}
+
 #[derive(Debug, Clone)]
 pub struct Codex {
     program: PathBuf,
+    provider: Provider,
     /// `~/.harness/credentials/codex`: holds the saved `auth.json`.
     auth_dir: PathBuf,
     models: HashMap<Role, String>,
@@ -60,9 +84,18 @@ impl Codex {
     pub fn new(auth_dir: impl Into<PathBuf>) -> Self {
         Self {
             program: PathBuf::from("codex"),
+            provider: Provider::ChatGpt,
             auth_dir: auth_dir.into(),
             models: HashMap::new(),
             timeout: Duration::from_secs(30 * 60),
+        }
+    }
+
+    /// Codex with DeepSeek models, paid by the API key.
+    pub fn deepseek(api_key: Secret) -> Self {
+        Self {
+            provider: Provider::DeepSeek(api_key),
+            ..Self::new(PathBuf::new())
         }
     }
 
@@ -105,11 +138,38 @@ impl Codex {
         for feature in DISABLED_FEATURES {
             command.args(["-c", &format!("features.{feature}=false")]);
         }
-        if let Some(model) = self.models.get(&job.role) {
+        if let Provider::DeepSeek(key) = &self.provider {
+            command.env(DEEPSEEK_KEY_ENV, key.expose());
+            for setting in [
+                "model_provider=\"deepseek\"".to_string(),
+                "model_providers.deepseek.name=\"DeepSeek\"".to_string(),
+                format!("model_providers.deepseek.base_url=\"{DEEPSEEK_URL}\""),
+                "model_providers.deepseek.wire_api=\"responses\"".to_string(),
+                format!("model_providers.deepseek.env_key=\"{DEEPSEEK_KEY_ENV}\""),
+                "forced_login_method=\"api\"".to_string(),
+                // DeepSeek has no web search tool for Codex.
+                "web_search=\"disabled\"".to_string(),
+                // Commands the agent runs do not get variables named like
+                // *KEY*, *SECRET* or *TOKEN*, so the key stays with Codex.
+                "shell_environment_policy.ignore_default_excludes=false".to_string(),
+            ] {
+                command.args(["-c", &setting]);
+            }
+        }
+        if let Some(model) = self.model(job.role) {
             command.args(["--model", model]);
         }
         command.arg("-");
         command
+    }
+
+    /// The role's model from harness.toml; DeepSeek needs one, so it has a default.
+    fn model(&self, role: Role) -> Option<&str> {
+        match (self.models.get(&role), &self.provider) {
+            (Some(model), _) => Some(model),
+            (None, Provider::DeepSeek(_)) => Some(DEEPSEEK_DEFAULT_MODEL),
+            (None, Provider::ChatGpt) => None,
+        }
     }
 
     /// Copies the saved login into the project's config folder for this run.
@@ -140,9 +200,13 @@ impl Codex {
     }
 
     fn header(&self, job: &RoleJob) -> String {
-        let model = self.models.get(&job.role).map_or("default", String::as_str);
+        let model = self.model(job.role).unwrap_or("default");
+        let agent = match self.provider {
+            Provider::ChatGpt => "codex",
+            Provider::DeepSeek(_) => "codex+deepseek",
+        };
         format!(
-            "agent: codex, model: {model}, role: {:?}, round: {}\n",
+            "agent: {agent}, model: {model}, role: {:?}, round: {}\n",
             job.role, job.round
         )
     }
@@ -151,11 +215,19 @@ impl Codex {
 impl AgentRunner for Codex {
     async fn run(&self, job: &RoleJob) -> AgentOutcome {
         let mut log = self.header(job);
-        if let Err(e) = self.put_auth(job) {
+        let chatgpt = matches!(self.provider, Provider::ChatGpt);
+        let prepared = if chatgpt {
+            self.put_auth(job)
+        } else {
+            fs::create_dir_all(job.project_dir.join(CONFIG_DIR))
+        };
+        if let Err(e) = prepared {
             return failed(log, format!("cannot prepare {CONFIG_DIR}: {e}"));
         }
         let result = process::run(self.command(job), &job.prompt, self.timeout).await;
-        self.take_auth_back(job);
+        if chatgpt {
+            self.take_auth_back(job);
+        }
         let finished = match result {
             Ok(finished) => finished,
             Err(message) => return failed(log, message),
@@ -306,6 +378,40 @@ mod tests {
         let codex = Codex::new("/creds").with_model(Role::Tester, "gpt-5-codex");
         assert!(args(&codex.command(&job(Role::Tester))).contains(&"gpt-5-codex".to_string()));
         assert!(!args(&codex.command(&job(Role::Architect))).contains(&"--model".to_string()));
+    }
+
+    #[test]
+    fn deepseek_gets_its_key_and_provider_but_no_chatgpt_login() {
+        let codex = Codex::deepseek(Secret::new("sk-test"));
+        let command = codex.command(&job(Role::Tester));
+        let args = args(&command);
+        for setting in [
+            "model_provider=\"deepseek\"",
+            "model_providers.deepseek.wire_api=\"responses\"",
+            "model_providers.deepseek.env_key=\"DEEPSEEK_API_KEY\"",
+            DEEPSEEK_DEFAULT_MODEL,
+        ] {
+            assert!(
+                args.contains(&setting.to_string()),
+                "missing {setting}: {args:?}"
+            );
+        }
+        // The key is only in the environment, never in the arguments.
+        assert!(!args.iter().any(|a| a.contains("sk-test")));
+        let key = command
+            .get_envs()
+            .find(|(k, _)| *k == DEEPSEEK_KEY_ENV)
+            .and_then(|(_, v)| v)
+            .unwrap();
+        assert_eq!(key, "sk-test");
+        assert!(format!("{codex:?}").contains("Secret(***)"));
+    }
+
+    #[test]
+    fn chatgpt_codex_gets_no_deepseek_key() {
+        let command = Codex::new("/creds").command(&job(Role::Tester));
+        assert!(!command.get_envs().any(|(k, _)| k == DEEPSEEK_KEY_ENV));
+        assert!(!args(&command).contains(&"model_provider=\"deepseek\"".to_string()));
     }
 
     #[test]

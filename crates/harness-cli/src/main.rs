@@ -5,6 +5,7 @@
 //! harness init                         prepare .harness/ in the project
 //! harness login claude                 save the token from `claude setup-token`
 //! harness login codex                  log in to Codex (ChatGPT subscription)
+//! harness login deepseek               save the DeepSeek API key
 //! harness login antigravity            log in to Antigravity CLI (Google account)
 //! harness task new task-001 "Build a CSV parser"
 //! harness run task-001                 run roles until someone must look
@@ -21,7 +22,7 @@ use std::time::Duration;
 use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand};
 use harness_agents::credentials::{self, Secret};
-use harness_agents::{Antigravity, AnyAgent, ClaudeCode, Codex, Team};
+use harness_agents::{codex, Antigravity, AnyAgent, ClaudeCode, Codex, Team};
 use harness_core::config::{Config, CONFIG_FILE, DEFAULT_CONFIG};
 use harness_core::git::{Repo, HARNESS_DIR};
 use harness_core::handoff::{NextStep, Role, Verdict};
@@ -45,7 +46,7 @@ enum Command {
     Init,
     /// Save an agent's login token (outside the project, never in git).
     Login {
-        /// `claude`, `codex` or `antigravity`.
+        /// `claude`, `codex`, `deepseek` or `antigravity`.
         agent: String,
     },
     /// Work with tasks.
@@ -157,8 +158,11 @@ fn login(agent: &str) -> Result<()> {
     match agent {
         "claude" => login_claude(&dir),
         "codex" => login_codex(&dir),
+        "deepseek" => login_deepseek(&dir),
         "antigravity" => login_antigravity(&dir),
-        other => bail!("unknown agent {other:?}; use `claude`, `codex` or `antigravity`"),
+        other => {
+            bail!("unknown agent {other:?}; use `claude`, `codex`, `deepseek` or `antigravity`")
+        }
     }
 }
 
@@ -176,6 +180,73 @@ fn login_claude(dir: &Path) -> Result<()> {
     let path = credentials::save_token(dir, "claude", &token)?;
     println!("Saved to {} (only you can read it).", path.display());
     Ok(())
+}
+
+/// Saves the DeepSeek API key like the Claude token: in
+/// `~/.harness/credentials/deepseek/`, readable only by Lisa. The key is typed
+/// without showing it on the screen.
+fn login_deepseek(dir: &Path) -> Result<()> {
+    println!("Paste your DeepSeek API key (from platform.deepseek.com) and press Enter.");
+    println!("It is not shown while you type: paste it once, then press Enter.");
+    let key = read_hidden("API key: ")?;
+    check_deepseek_key(key.expose())?;
+    let path = credentials::save_token(dir, "deepseek", &key)?;
+    println!(
+        "Saved {} to {} (only you can read it).",
+        masked(key.expose()),
+        path.display()
+    );
+    Ok(())
+}
+
+/// A DeepSeek key is `sk-` and letters or digits, with no spaces. Pasting it
+/// twice into the hidden prompt is easy, because nothing shows up.
+fn check_deepseek_key(key: &str) -> Result<()> {
+    let copies = key.matches("sk-").count();
+    if copies > 1 {
+        bail!("the key seems to be pasted {copies} times; run the command again and paste it once");
+    }
+    let body = key.strip_prefix("sk-").unwrap_or("");
+    if body.len() < 16 || !body.chars().all(|c| c.is_ascii_alphanumeric()) {
+        bail!("this does not look like a DeepSeek API key (it starts with sk-); nothing was saved");
+    }
+    Ok(())
+}
+
+/// `sk-…1a2b (35 characters)`: enough to recognise the key, not to use it.
+fn masked(key: &str) -> String {
+    let tail: String = key
+        .chars()
+        .rev()
+        .take(4)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect();
+    format!("sk-…{tail} ({} characters)", key.chars().count())
+}
+
+/// Reads one line from the terminal without echoing it.
+fn read_hidden(prompt: &str) -> Result<Secret> {
+    print!("{prompt}");
+    io::stdout().flush()?;
+    let stty = |arg: &str| {
+        std::process::Command::new("stty")
+            .arg(arg)
+            .stdin(std::process::Stdio::inherit())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .is_ok_and(|s| s.success())
+    };
+    let hidden = stty("-echo");
+    let mut line = String::new();
+    let read = io::stdin().lock().read_line(&mut line);
+    if hidden {
+        stty("echo");
+        println!();
+    }
+    read?;
+    Ok(Secret::new(line.trim()))
 }
 
 /// Runs `codex login` with its home in our credentials folder, so the login is
@@ -295,6 +366,19 @@ fn build_team(config: &Config) -> Result<Team> {
                 }
                 AnyAgent::Codex(agent)
             }
+            "codex+deepseek" => {
+                // A key in the shell wins; otherwise the one `harness login deepseek` saved.
+                let key = match std::env::var(codex::DEEPSEEK_KEY_ENV) {
+                    Ok(key) if !key.trim().is_empty() => Secret::new(key.trim()),
+                    _ => credentials::load_token(&dir, "deepseek")
+                        .context("no DeepSeek API key saved; run `harness login deepseek` first")?,
+                };
+                let mut agent = Codex::deepseek(key).with_timeout(timeout);
+                if let Some(model) = &settings.model {
+                    agent = agent.with_model(role, model);
+                }
+                AnyAgent::Codex(agent)
+            }
             "antigravity" => {
                 let auth_dir = dir.join("antigravity");
                 if !auth_dir.join(".gemini/antigravity-cli").is_dir() {
@@ -307,7 +391,7 @@ fn build_team(config: &Config) -> Result<Team> {
                 AnyAgent::Antigravity(agent)
             }
             other => {
-                bail!("{role:?} uses agent {other:?}; use \"claude\", \"codex\" or \"antigravity\"")
+                bail!("{role:?} uses agent {other:?}; use \"claude\", \"codex\", \"codex+deepseek\" or \"antigravity\"")
             }
         };
         team = team.with(role, agent);
@@ -403,6 +487,25 @@ fn status(project: &Path, task_id: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_deepseek_key_pasted_twice_is_refused() {
+        let key = "sk-0123456789abcdef0123456789abcdef";
+        assert!(check_deepseek_key(key).is_ok());
+        let twice = format!("{key}{key}");
+        let error = check_deepseek_key(&twice).unwrap_err().to_string();
+        assert!(error.contains("2 times"), "{error}");
+        assert!(check_deepseek_key("hello").is_err());
+        assert!(check_deepseek_key("").is_err());
+    }
+
+    #[test]
+    fn the_saved_key_is_shown_masked() {
+        assert_eq!(
+            masked("sk-0123456789abcdef0123456789abcdef"),
+            "sk-…cdef (35 characters)"
+        );
+    }
 
     #[test]
     fn next_step_words_are_the_handoff_words() {
