@@ -113,11 +113,13 @@ impl AgentRunner for MockAgent {
                 success: false,
                 usage_limit_reached: true,
                 log,
+                message: String::new(),
             },
             MockStep::WriteNothing => AgentOutcome {
                 success: true,
                 usage_limit_reached: false,
                 log,
+                message: String::new(),
             },
             MockStep::WriteGarbage => {
                 let written = fs::write(job.output_dir.join("handoff.json"), "{ not json");
@@ -125,12 +127,14 @@ impl AgentRunner for MockAgent {
                     success: written.is_ok(),
                     usage_limit_reached: false,
                     log,
+                    message: String::new(),
                 }
             }
             MockStep::WriteFilesOnly(files) => AgentOutcome {
                 success: write_files(&job.project_dir, &files).is_ok(),
                 usage_limit_reached: false,
                 log,
+                message: String::new(),
             },
             MockStep::GitCommit => {
                 let committed = Command::new("git")
@@ -142,6 +146,7 @@ impl AgentRunner for MockAgent {
                     success: committed.is_ok_and(|status| status.success()),
                     usage_limit_reached: false,
                     log,
+                    message: String::new(),
                 }
             }
             MockStep::Finish {
@@ -156,6 +161,7 @@ impl AgentRunner for MockAgent {
                     success: written.is_ok(),
                     usage_limit_reached: false,
                     log,
+                    message: String::new(),
                 }
             }
         }

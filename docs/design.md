@@ -258,6 +258,43 @@ api_key_env = "DEEPSEEK_API_KEY"   # единственный ключ, кото
 `harness doctor` покажет, что именно увидит каждый агент: переменные окружения (только
 имена, без значений), файлы настроек, MCP-серверы и плагины.
 
+### 5.2. Адаптер Claude Code ✅ (этап 4)
+
+Харнесс запускает `claude -p` в папке проекта и передаёт промпт через стандартный ввод.
+Проверено на Claude Code 2.1.283: все флаги ниже он принимает.
+
+| Что | Как |
+|-----|-----|
+| Окружение | `env_clear()`, потом только `PATH`, `HOME`, `USER`, `LANG`, `LC_ALL`, `TERM`, `TMPDIR`, `CARGO_HOME`, `RUSTUP_HOME`, прокси |
+| Папка настроек | `CLAUDE_CONFIG_DIR=.harness/agents/claude`, `settings.json` пишется заново перед каждым запуском |
+| Вход | `CLAUDE_CODE_OAUTH_TOKEN` из `~/.harness/credentials/claude/oauth-token` (права 600) |
+| MCP, навыки, личные настройки | `--strict-mcp-config --mcp-config '{"mcpServers":{}}'`, `--disable-slash-commands`, `--setting-sources user` |
+| Права | `--permission-mode dontAsk`: всё, что не разрешено явно, запрещено без вопросов |
+| Инструменты роли | `--tools`: Architect без `Bash`; Security только `Bash(cargo audit/deny)` |
+| Файлы роли | `--allowedTools "Edit(./docs/**)"` и т.п., плюс папка `inbox` |
+| Всегда запрещено | `Bash(git commit:*)`, `Bash(git push:*)`, правка `.git/` и `.claude/` |
+| Вывод | `--output-format stream-json --verbose`, сохраняется как `agent.log` |
+
+Правила Claude Code — первая линия защиты. Вторая — проверка `git status` из раздела 6,
+она работает для любого агента. Настоящая песочница (Docker) — позже: `Bash` у Developer
+и Tester по-прежнему может читать файлы вне проекта.
+
+Лог неудачной попытки сохраняется в `runs/task-001/failures/round-01-architect-1.log`
+и коммитится, чтобы было видно, что пошло не так.
+
+Команды для Лизы:
+
+```
+harness init                          # .harness/harness.toml и .gitignore
+claude setup-token                    # один раз, выдаёт долгоживущий токен
+harness login claude                  # вставить токен
+harness task new task-001 "Описание задачи"
+harness run task-001
+harness approve task-001 --notes "Хорошо"
+harness reject task-001 --to architect --notes "Переделай ..."
+harness status task-001
+```
+
 ---
 
 ## 6. Проверка результата роли

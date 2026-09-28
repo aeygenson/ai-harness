@@ -26,8 +26,10 @@ pub struct AgentOutcome {
     pub success: bool,
     /// True if the subscription's usage limit stopped the agent.
     pub usage_limit_reached: bool,
-    /// What the agent printed; saved later as `agent.log`.
+    /// What the agent printed; saved as `agent.log`.
     pub log: String,
+    /// If it failed: one short line for Lisa, for example "timed out after 1800 s".
+    pub message: String,
 }
 
 /// Runs one role with some agent.

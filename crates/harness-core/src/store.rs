@@ -33,6 +33,8 @@ const TASK_FILE: &str = "task.md";
 const HANDOFF_FILE: &str = "handoff.json";
 const NOTES_FILE: &str = "notes.md";
 const INBOX_DIR: &str = "inbox";
+const LOG_FILE: &str = "agent.log";
+const FAILURES_DIR: &str = "failures";
 
 #[derive(Debug, thiserror::Error)]
 pub enum StoreError {
@@ -115,6 +117,35 @@ impl TaskStore {
 
         *state = next;
         Ok(step_dir)
+    }
+
+    /// Saves what the agent printed next to its handoff, as `agent.log`.
+    pub fn save_log(&self, step_dir: &Path, log: &str) -> Result<(), StoreError> {
+        write_new(&step_dir.join(LOG_FILE), log)
+    }
+
+    /// Saves the log of a failed attempt as `failures/round-01-architect-1.log`,
+    /// so Lisa can see what went wrong. Returns the file's path.
+    pub fn save_failure_log(
+        &self,
+        round: u32,
+        role: Role,
+        log: &str,
+    ) -> Result<PathBuf, StoreError> {
+        let dir = self.dir.join(FAILURES_DIR);
+        if !dir.exists() {
+            create_dir(&dir)?;
+        }
+        let prefix = format!("round-{round:02}-{}-", role_name(role));
+        let mut attempt = 1;
+        loop {
+            let path = dir.join(format!("{prefix}{attempt}.log"));
+            if !path.exists() {
+                write_new(&path, log)?;
+                return Ok(path);
+            }
+            attempt += 1;
+        }
     }
 
     /// The task description written by Lisa (`task.md`).
