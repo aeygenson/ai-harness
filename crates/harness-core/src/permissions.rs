@@ -14,11 +14,13 @@ const ALWAYS_FORBIDDEN: &[&str] = &[
     ".git",
     ".claude",
     ".codex",
+    // Antigravity CLI keeps its settings here (the folder name is Google's).
     ".gemini",
     // Antigravity CLI reads project skills, rules and MCP servers from here.
     ".agents",
     "CLAUDE.md",
     "AGENTS.md",
+    // Antigravity CLI reads it as project instructions.
     "GEMINI.md",
 ];
 

@@ -1,4 +1,4 @@
-//! The interface every agent adapter implements: Claude Code, Codex, Gemini CLI, mock.
+//! The interface every agent adapter implements: Claude Code, Codex, Antigravity CLI, mock.
 
 use std::future::Future;
 use std::path::PathBuf;
