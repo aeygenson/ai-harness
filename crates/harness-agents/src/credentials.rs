@@ -40,13 +40,19 @@ pub fn save_token(dir: &Path, agent: &str, token: &Secret) -> io::Result<PathBuf
     let agent_dir = dir.join(agent);
     fs::create_dir_all(&agent_dir)?;
     let path = agent_dir.join(TOKEN_FILE);
-    write_private(&path, token.expose().trim())?;
+    write_private(&path, &clean(token.expose()))?;
     Ok(path)
 }
 
 pub fn load_token(dir: &Path, agent: &str) -> io::Result<Secret> {
     let text = fs::read_to_string(dir.join(agent).join(TOKEN_FILE))?;
-    Ok(Secret::new(text.trim()))
+    Ok(Secret::new(clean(&text)))
+}
+
+/// A token never contains spaces, but a copy from the terminal may add a line
+/// break in the middle of a long token. Remove every kind of whitespace.
+fn clean(token: &str) -> String {
+    token.chars().filter(|c| !c.is_whitespace()).collect()
 }
 
 /// Creates the file with permissions 600 (owner reads and writes, nobody else),
@@ -84,7 +90,7 @@ mod tests {
     #[test]
     fn save_and_load() {
         let dir = tempfile::tempdir().unwrap();
-        let path = save_token(dir.path(), "claude", &Secret::new(" token-1\n")).unwrap();
+        let path = save_token(dir.path(), "claude", &Secret::new(" token-\n1\n")).unwrap();
         assert_eq!(
             load_token(dir.path(), "claude").unwrap().expose(),
             "token-1"
