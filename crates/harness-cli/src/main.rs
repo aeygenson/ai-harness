@@ -5,6 +5,7 @@
 //! harness init                         prepare .harness/ in the project
 //! harness login claude                 save the token from `claude setup-token`
 //! harness login codex                  log in to Codex (ChatGPT subscription)
+//! harness login deepseek               save the DeepSeek API key
 //! harness login antigravity            log in to Antigravity CLI (Google account)
 //! harness task new task-001 "Build a CSV parser"
 //! harness run task-001                 run roles until someone must look
@@ -45,7 +46,7 @@ enum Command {
     Init,
     /// Save an agent's login token (outside the project, never in git).
     Login {
-        /// `claude`, `codex` or `antigravity`.
+        /// `claude`, `codex`, `deepseek` or `antigravity`.
         agent: String,
     },
     /// Work with tasks.
@@ -157,8 +158,11 @@ fn login(agent: &str) -> Result<()> {
     match agent {
         "claude" => login_claude(&dir),
         "codex" => login_codex(&dir),
+        "deepseek" => login_deepseek(&dir),
         "antigravity" => login_antigravity(&dir),
-        other => bail!("unknown agent {other:?}; use `claude`, `codex` or `antigravity`"),
+        other => {
+            bail!("unknown agent {other:?}; use `claude`, `codex`, `deepseek` or `antigravity`")
+        }
     }
 }
 
@@ -176,6 +180,44 @@ fn login_claude(dir: &Path) -> Result<()> {
     let path = credentials::save_token(dir, "claude", &token)?;
     println!("Saved to {} (only you can read it).", path.display());
     Ok(())
+}
+
+/// Saves the DeepSeek API key like the Claude token: in
+/// `~/.harness/credentials/deepseek/`, readable only by Lisa. The key is typed
+/// without showing it on the screen.
+fn login_deepseek(dir: &Path) -> Result<()> {
+    println!("Paste your DeepSeek API key (from platform.deepseek.com) and press Enter.");
+    println!("It is not shown while you type.");
+    let key = read_hidden("API key: ")?;
+    if key.expose().is_empty() {
+        bail!("no key given");
+    }
+    let path = credentials::save_token(dir, "deepseek", &key)?;
+    println!("Saved to {} (only you can read it).", path.display());
+    Ok(())
+}
+
+/// Reads one line from the terminal without echoing it.
+fn read_hidden(prompt: &str) -> Result<Secret> {
+    print!("{prompt}");
+    io::stdout().flush()?;
+    let stty = |arg: &str| {
+        std::process::Command::new("stty")
+            .arg(arg)
+            .stdin(std::process::Stdio::inherit())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .is_ok_and(|s| s.success())
+    };
+    let hidden = stty("-echo");
+    let mut line = String::new();
+    let read = io::stdin().lock().read_line(&mut line);
+    if hidden {
+        stty("echo");
+        println!();
+    }
+    read?;
+    Ok(Secret::new(line.trim()))
 }
 
 /// Runs `codex login` with its home in our credentials folder, so the login is
@@ -296,16 +338,13 @@ fn build_team(config: &Config) -> Result<Team> {
                 AnyAgent::Codex(agent)
             }
             "codex+deepseek" => {
-                let key = std::env::var(codex::DEEPSEEK_KEY_ENV).unwrap_or_default();
-                if key.trim().is_empty() {
-                    bail!(
-                        "{role:?} uses DeepSeek, but {} is not set; \
-                         add `export {}=...` to your shell (not to a file in the project)",
-                        codex::DEEPSEEK_KEY_ENV,
-                        codex::DEEPSEEK_KEY_ENV
-                    );
-                }
-                let mut agent = Codex::deepseek(Secret::new(key.trim())).with_timeout(timeout);
+                // A key in the shell wins; otherwise the one `harness login deepseek` saved.
+                let key = match std::env::var(codex::DEEPSEEK_KEY_ENV) {
+                    Ok(key) if !key.trim().is_empty() => Secret::new(key.trim()),
+                    _ => credentials::load_token(&dir, "deepseek")
+                        .context("no DeepSeek API key saved; run `harness login deepseek` first")?,
+                };
+                let mut agent = Codex::deepseek(key).with_timeout(timeout);
                 if let Some(model) = &settings.model {
                     agent = agent.with_model(role, model);
                 }

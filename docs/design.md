@@ -236,7 +236,7 @@ api_key_env = "DEEPSEEK_API_KEY"   # единственный ключ, кото
 | Codex CLI | `auth.json` в папке настроек (`~/.codex/auth.json`) | скопировать `auth.json` в `CODEX_HOME` проекта |
 | Claude Code | на Linux `~/.claude/.credentials.json`, на macOS — в Keychain | долгоживущий токен из `claude setup-token` → переменная `CLAUDE_CODE_OAUTH_TOKEN` (или файл `.credentials.json` в `CLAUDE_CONFIG_DIR`) |
 | Antigravity CLI | несколько служебных файлов в `~/.gemini/antigravity-cli/` и `~/.gemini/config/` (одного файла с токеном нет; проверено на agy 1.2.12) | скопировать всю сохранённую папку входа (без логов и истории) во временный `HOME` |
-| DeepSeek (через Codex) | просто ключ API | переменная `DEEPSEEK_API_KEY` в оболочке Лизы, передаётся только ролям на DeepSeek |
+| DeepSeek (через Codex) | просто ключ API | `harness login deepseek` → `~/.harness/credentials/deepseek/`; агенту — переменная `DEEPSEEK_API_KEY`, только ролям на DeepSeek |
 
 Точные имена файлов и флаги проверим на практике при написании каждого адаптера.
 
@@ -332,7 +332,7 @@ agent = "codex"
 |-----|-----|
 | Провайдер | флаги `-c model_provider="deepseek"`, `model_providers.deepseek.base_url="https://api.deepseek.com/"`, `wire_api="responses"`, `env_key="DEEPSEEK_API_KEY"`, `forced_login_method="api"`, `web_search="disabled"` |
 | Модель | `model` в `harness.toml`: `deepseek-flash` (по умолчанию) или `deepseek-v4-pro` |
-| Ключ | только переменная `DEEPSEEK_API_KEY` в оболочке Лизы. Харнесс передаёт её лишь ролям на DeepSeek, в аргументы и логи она не попадает, в файлы не пишется. `shell_environment_policy.ignore_default_excludes=false`: команды, которые запускает агент, не видят переменных с KEY/SECRET/TOKEN в имени |
+| Ключ | `harness login deepseek` сохраняет его, как токен Claude: `~/.harness/credentials/deepseek/` с правами 600, вне проектов и git; ввод не виден на экране. Переменная `DEEPSEEK_API_KEY` в оболочке, если задана, важнее сохранённого. Харнесс передаёт ключ лишь ролям на DeepSeek, в аргументы и логи он не попадает. `shell_environment_policy.ignore_default_excludes=false`: команды, которые запускает агент, не видят переменных с KEY/SECRET/TOKEN в имени |
 | Вход ChatGPT | не нужен и не копируется: `auth.json` для этих ролей не трогается |
 
 Codex предупреждает «Model metadata for `deepseek-flash` not found» и берёт общие

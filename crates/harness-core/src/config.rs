@@ -27,8 +27,8 @@ max_rounds = 5
 agent_timeout_minutes = 30
 
 # Which agent works as each role: "claude" (Claude Code), "codex" (Codex CLI),
-# "codex+deepseek" (Codex CLI with DeepSeek models; needs DEEPSEEK_API_KEY in
-# your shell) or "antigravity" (Antigravity CLI).
+# "codex+deepseek" (Codex CLI with DeepSeek models; `harness login deepseek`
+# saves the API key) or "antigravity" (Antigravity CLI).
 # Add `model = "..."` to pick a model, for example "opus" for claude or
 # "deepseek-v4-pro" for codex+deepseek (default "deepseek-flash").
 
