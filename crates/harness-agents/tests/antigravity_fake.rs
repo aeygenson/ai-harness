@@ -135,6 +135,33 @@ async fn a_used_up_quota_pauses_the_task() {
 }
 
 #[tokio::test]
+async fn a_run_cut_short_by_a_permission_says_so() {
+    let s = setup();
+    // What agy 1.2.12 printed when a command needed a permission it could not ask for.
+    let script = fake_agy(
+        s.scratch.path(),
+        "echo '{\"event\":\"result\",\"result\":{\"status\":\"SUCCESS\",\"response\":\"\",\
+         \"denied_actions\":[{\"action\":\"command\",\"display_name\":\"RunCommand\"}]}}'\n",
+    );
+    let agent = Antigravity::new(&s.auth_dir).with_program(script);
+    let (store, mut state) = new_task(&s.repo);
+
+    let stop = orchestrator::run(&s.repo, &store, &mut state, &agent)
+        .await
+        .unwrap();
+
+    match stop {
+        StopReason::RoleFailed { problem, .. } => {
+            assert!(
+                problem.contains("needed permission for RunCommand"),
+                "{problem}"
+            )
+        }
+        other => panic!("expected RoleFailed, got {other:?}"),
+    }
+}
+
+#[tokio::test]
 async fn a_missing_login_is_shown_from_stderr() {
     let s = setup();
     let script = fake_agy(

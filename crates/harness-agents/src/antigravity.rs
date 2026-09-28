@@ -12,9 +12,12 @@
 //!   saved folder is copied, without logs and old conversations. A run does
 //!   not change the login files (checked with agy 1.2.12), so nothing is
 //!   copied back;
-//! - rules in `settings.json`: `deny` rules always hold, even with
-//!   `--dangerously-skip-permissions`. `allow` rules are not a whitelist in
-//!   headless mode, so the git check after the role is what enforces which
+//! - every role runs with `--dangerously-skip-permissions`: in headless mode
+//!   any command that is not allowed ends the whole run, so the agent never
+//!   gets to write its handoff. What a role may not do is said with `deny`
+//!   rules in `settings.json`; they hold even with that flag, and a denied
+//!   command only fails, the run goes on. `allow` rules are not a whitelist
+//!   in headless mode, so the git check after the role is what enforces which
 //!   folders a role may change.
 
 use std::collections::HashMap;
@@ -85,10 +88,8 @@ impl Antigravity {
             .env("AGY_CLI_DISABLE_AUTO_UPDATE", "true")
             .args(["-p", &job.prompt])
             .args(["--output-format", "stream-json"])
-            .arg("--disable-slash-commands");
-        if runs_commands_freely(job.role) {
-            command.arg("--dangerously-skip-permissions");
-        }
+            .arg("--disable-slash-commands")
+            .arg("--dangerously-skip-permissions");
         if let Some(model) = self.models.get(&job.role) {
             command.args(["--model", model]);
         }
@@ -144,13 +145,21 @@ fn outcome(mut log: String, result: Result<process::Finished, String>) -> AgentO
     };
     process::append_output(&mut log, &finished);
 
-    let status = final_status(&finished.stdout);
+    let result = RunResult::find(&finished.stdout);
+    let status = result.as_ref().map(|r| r.status.clone());
+    let denied = result.map(|r| r.denied).unwrap_or_default();
     let success = finished.status.success() && status.as_deref() == Some("SUCCESS");
-    let message = if success {
+    let message = if success && denied.is_empty() {
         String::new()
     } else {
         match (&status, agy_error(&finished.stderr)) {
             (_, Some(error)) => error,
+            // agy reports SUCCESS but stopped at the first action it could not
+            // ask about, before the work was done.
+            (Some(_), None) if !denied.is_empty() => format!(
+                "agy stopped: it needed permission for {} and headless mode cannot ask",
+                denied.join(", ")
+            ),
             (Some(status), None) => format!("agy finished with status {status}"),
             (None, None) => format!(
                 "agy exited ({}) without finishing: {}",
@@ -161,6 +170,7 @@ fn outcome(mut log: String, result: Result<process::Finished, String>) -> AgentO
     };
     let usage_limit_reached =
         !success && process::looks_like_usage_limit(&format!("{message}\n{}", finished.stderr));
+    let success = success && denied.is_empty();
     AgentOutcome {
         success: success && !usage_limit_reached,
         usage_limit_reached,
@@ -169,36 +179,80 @@ fn outcome(mut log: String, result: Result<process::Finished, String>) -> AgentO
     }
 }
 
-/// Developer and Tester run builds and tests, so they may run any command
-/// except the denied ones. The Architect runs none; Security only the allowed
-/// `cargo audit` and `cargo deny`: without the flag `agy` refuses every other
-/// command in headless mode.
-fn runs_commands_freely(role: Role) -> bool {
-    matches!(role, Role::Developer | Role::Tester)
-}
+/// Commands no role may run: the harness makes the commits.
+const DENIED_FOR_ALL: &[&str] = &["git commit", "git push"];
+
+/// Commands the roles that only look (Architect, Security) may not run: they
+/// change files, the git state or reach the network. Reading and `cargo test`
+/// stay allowed. The list cannot be complete; the git check after the role
+/// still catches any changed file.
+const DENIED_FOR_READERS: &[&str] = &[
+    "rm",
+    "mv",
+    "cp",
+    "git add",
+    "git checkout",
+    "git reset",
+    "git restore",
+    "git stash",
+    "cargo build",
+    "cargo install",
+    "cargo run",
+    "cargo publish",
+    "curl",
+    "wget",
+];
 
 /// The role's `settings.json`. `deny` beats everything else.
 fn settings(role: Role) -> String {
-    let allow: &[&str] = match role {
-        Role::Security => &["command(cargo audit)", "command(cargo deny)"],
-        _ => &[],
-    };
-    let deny = ["command(git commit)", "command(git push)"];
+    let mut deny: Vec<&str> = DENIED_FOR_ALL.to_vec();
+    if matches!(role, Role::Architect | Role::Security) {
+        deny.extend(DENIED_FOR_READERS);
+    }
+    let deny: Vec<String> = deny.iter().map(|c| format!("command({c})")).collect();
     let settings = serde_json::json!({
-        "permissions": { "allow": allow, "deny": deny },
+        "permissions": { "allow": [], "deny": deny },
         "allowNonWorkspaceAccess": false,
     });
     serde_json::to_string_pretty(&settings).expect("settings are plain JSON")
 }
 
-/// The `status` of the last `{"event":"result","result":{...}}` line.
-fn final_status(stdout: &str) -> Option<String> {
-    stdout
-        .lines()
-        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
-        .filter(|event| event["event"] == "result")
-        .filter_map(|event| event["result"]["status"].as_str().map(str::to_string))
-        .next_back()
+/// The last `{"event":"result","result":{"status":...,"denied_actions":[...]}}`.
+#[derive(Debug, PartialEq, Eq)]
+struct RunResult {
+    status: String,
+    /// Actions agy refused because headless mode cannot ask, e.g. "RunCommand".
+    denied: Vec<String>,
+}
+
+impl RunResult {
+    fn find(stdout: &str) -> Option<Self> {
+        stdout
+            .lines()
+            .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+            .filter(|event| event["event"] == "result")
+            .filter_map(|event| {
+                let result = &event["result"];
+                let status = result["status"].as_str()?.to_string();
+                let denied = result["denied_actions"]
+                    .as_array()
+                    .map(|actions| {
+                        actions
+                            .iter()
+                            .map(|a| {
+                                a["display_name"]
+                                    .as_str()
+                                    .or(a["action"].as_str())
+                                    .unwrap_or("an action")
+                                    .to_string()
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                Some(RunResult { status, denied })
+            })
+            .next_back()
+    }
 }
 
 /// A failed call to the model is reported on stderr as `AGY_ERROR: {...}`.
@@ -275,14 +329,20 @@ mod tests {
     }
 
     #[test]
-    fn only_developer_and_tester_run_any_command() {
+    fn every_role_runs_commands_and_is_limited_by_deny_rules() {
         let agy = Antigravity::new("/creds");
         let home = Path::new("/tmp/home");
         let flag = "--dangerously-skip-permissions".to_string();
-        assert!(args(&agy.command(&job(Role::Developer), home)).contains(&flag));
-        assert!(args(&agy.command(&job(Role::Tester), home)).contains(&flag));
-        assert!(!args(&agy.command(&job(Role::Architect), home)).contains(&flag));
-        assert!(!args(&agy.command(&job(Role::Security), home)).contains(&flag));
+        for role in [Role::Architect, Role::Developer, Role::Security] {
+            assert!(
+                args(&agy.command(&job(role), home)).contains(&flag),
+                "{role:?}"
+            );
+        }
+        assert!(settings(Role::Security).contains("command(rm)"));
+        assert!(settings(Role::Architect).contains("command(curl)"));
+        assert!(!settings(Role::Developer).contains("command(rm)"));
+        assert!(!settings(Role::Tester).contains("cargo build"));
     }
 
     #[test]
@@ -311,16 +371,20 @@ mod tests {
             assert!(deny.contains(&"command(git commit)".into()), "{role:?}");
             assert!(deny.contains(&"command(git push)".into()), "{role:?}");
         }
-        assert!(settings(Role::Security).contains("command(cargo audit)"));
-        assert!(!settings(Role::Developer).contains("cargo audit"));
     }
 
     #[test]
     fn the_last_result_event_decides() {
         let ok = "{\"event\":\"init\"}\n\
                   {\"event\":\"result\",\"result\":{\"status\":\"SUCCESS\",\"response\":\"OK\"}}";
-        assert_eq!(final_status(ok).as_deref(), Some("SUCCESS"));
-        assert_eq!(final_status("not json\n"), None);
+        assert_eq!(
+            RunResult::find(ok),
+            Some(RunResult {
+                status: "SUCCESS".into(),
+                denied: vec![]
+            })
+        );
+        assert_eq!(RunResult::find("not json\n"), None);
         let stderr = "something\nAGY_ERROR: {\"status\":\"RESOURCE_EXHAUSTED\"}\n";
         assert_eq!(
             agy_error(stderr).as_deref(),
