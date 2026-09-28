@@ -7,6 +7,7 @@
 //! [roles.architect]
 //! agent = "claude"
 //! model = "opus"        # optional: otherwise the agent's default model
+//! skills = ["write-docs"]  # optional: see `crate::skills`
 //! ```
 
 use std::collections::BTreeMap;
@@ -31,6 +32,14 @@ agent_timeout_minutes = 30
 # saves the API key) or "antigravity" (Antigravity CLI).
 # Add `model = "..."` to pick a model, for example "opus" for claude or
 # "deepseek-v4-pro" for codex+deepseek (default "deepseek-flash").
+#
+# Skills are files in .harness/skills/<name>.md that start with
+#   ---
+#   description: one line about the skill
+#   ---
+# Each role picks its own: `skills = ["rust-errors"]` are listed in the prompt and
+# the agent reads them when needed; `always_skills = ["style"]` go into the prompt
+# in full.
 
 [roles.architect]
 agent = "claude"
@@ -63,6 +72,12 @@ pub struct RoleConfig {
     pub agent: String,
     #[serde(default)]
     pub model: Option<String>,
+    /// Skills from `.harness/skills/` the agent reads when it needs them.
+    #[serde(default)]
+    pub skills: Vec<String>,
+    /// Skills put into the prompt in full every time.
+    #[serde(default)]
+    pub always_skills: Vec<String>,
 }
 
 #[derive(Debug, thiserror::Error)]
