@@ -295,6 +295,34 @@ harness reject task-001 --to architect --notes "Переделай ..."
 harness status task-001
 ```
 
+### 5.3. Адаптер Codex CLI ✅ (этап 5)
+
+Харнесс запускает `codex exec --json … -` в папке проекта и передаёт промпт через
+стандартный ввод. Проверено на Codex CLI 0.158.0.
+
+| Что | Как |
+|-----|-----|
+| Окружение | то же, что у Claude: `env_clear()` и короткий список переменных |
+| Папка настроек | `CODEX_HOME=.harness/agents/codex`; `--ignore-user-config` и `--ignore-rules` не читают никакие `config.toml` и `.rules` |
+| Вход | `harness login codex` запускает `codex login` с `CODEX_HOME=~/.harness/credentials/codex`. Перед ролью `auth.json` копируется в проект, после роли обновлённый вход сохраняется обратно, а копия удаляется |
+| Лишние возможности | `-c features.<имя>=false` для apps, plugins, hooks, browser_use, computer_use и др. Незнакомое имя — только предупреждение, поэтому работает на разных версиях |
+| Песочница | `--sandbox workspace-write`: команды пишут только в проект. Сеть только у Developer, Tester и Security |
+| Вопросы | `approval_policy="never"`: агент никогда не ждёт ответа человека |
+| Вывод | события JSON по строкам; последнее `turn.completed` — успех, `turn.failed` — ошибка с текстом |
+
+У Codex нет правил «только папка docs», как у Claude Code, поэтому права роли
+обеспечивает проверка `git status` из раздела 6.
+
+Агент для роли выбирается в `harness.toml`:
+
+```toml
+[roles.developer]
+agent = "claude"
+
+[roles.tester]
+agent = "codex"
+```
+
 ---
 
 ## 6. Проверка результата роли

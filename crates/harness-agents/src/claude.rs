@@ -12,31 +12,13 @@
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::Command;
 use std::time::Duration;
 
+use crate::credentials::Secret;
+use crate::process::{self, failed};
 use harness_core::agent::{AgentOutcome, AgentRunner, RoleJob};
 use harness_core::handoff::Role;
-use tokio::io::AsyncWriteExt;
-
-use crate::credentials::Secret;
-
-/// Environment variables the agent may inherit from Lisa's terminal. Everything
-/// else, including every `*_API_KEY`, is removed.
-const INHERITED_ENV: &[&str] = &[
-    "PATH",
-    "HOME",
-    "USER",
-    "LANG",
-    "LC_ALL",
-    "TERM",
-    "TMPDIR",
-    "CARGO_HOME",
-    "RUSTUP_HOME",
-    "HTTP_PROXY",
-    "HTTPS_PROXY",
-    "NO_PROXY",
-];
 
 /// Where the agent's own settings live inside the project (ignored by git).
 pub const CONFIG_DIR: &str = ".harness/agents/claude";
@@ -81,15 +63,8 @@ impl ClaudeCode {
         let config_dir = job.project_dir.join(CONFIG_DIR);
         let rules = RoleRules::for_job(job);
 
-        let mut command = Command::new(&self.program);
+        let mut command = process::base_command(&self.program, &job.project_dir);
         command
-            .current_dir(&job.project_dir)
-            .env_clear()
-            .envs(
-                INHERITED_ENV
-                    .iter()
-                    .filter_map(|name| std::env::var_os(name).map(|value| (*name, value))),
-            )
             .env("CLAUDE_CONFIG_DIR", &config_dir)
             .env("CLAUDE_CODE_OAUTH_TOKEN", self.token.expose())
             .env("DISABLE_AUTOUPDATER", "1")
@@ -139,56 +114,25 @@ impl AgentRunner for ClaudeCode {
             return failed(log, format!("cannot prepare {CONFIG_DIR}: {e}"));
         }
 
-        let mut command = tokio::process::Command::from(self.command(job));
-        command
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            // If we stop waiting (time-out), the agent is killed too.
-            .kill_on_drop(true);
-        let mut child = match command.spawn() {
-            Ok(child) => child,
-            Err(e) => {
-                return failed(log, format!("cannot start {}: {e}", self.program.display()));
-            }
+        let finished = match process::run(self.command(job), &job.prompt, self.timeout).await {
+            Ok(finished) => finished,
+            Err(message) => return failed(log, message),
         };
-        if let Some(mut stdin) = child.stdin.take() {
-            // An agent may exit without reading everything; that is not our problem.
-            let _ = stdin.write_all(job.prompt.as_bytes()).await;
-        }
+        process::append_output(&mut log, &finished);
+        let (stdout, stderr, status) = (&finished.stdout, &finished.stderr, finished.status);
 
-        let output = match tokio::time::timeout(self.timeout, child.wait_with_output()).await {
-            Ok(Ok(output)) => output,
-            Ok(Err(e)) => {
-                return failed(log, format!("error while waiting for the agent: {e}"));
-            }
-            Err(_) => {
-                let message = format!(
-                    "timed out after {} s; the agent was stopped",
-                    self.timeout.as_secs()
-                );
-                return failed(log, message);
-            }
-        };
-
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        log.push_str(&stdout);
-        if !stderr.trim().is_empty() {
-            log.push_str("\n--- stderr ---\n");
-            log.push_str(&stderr);
-        }
-
-        let result = FinalResult::find(&stdout);
-        let usage_limit_reached =
-            looks_like_usage_limit(result.as_ref().map_or("", |r| &r.text), &stderr);
-        let success = output.status.success()
+        let result = FinalResult::find(stdout);
+        let usage_limit_reached = process::looks_like_usage_limit(&format!(
+            "{}\n{stderr}",
+            result.as_ref().map_or("", |r| &r.text)
+        ));
+        let success = status.success()
             && !usage_limit_reached
             && result.as_ref().is_some_and(|r| !r.is_error);
         let message = match &result {
             _ if success => String::new(),
             Some(result) => result.text.clone(),
-            None => format!("claude exited ({}) without a result", output.status),
+            None => format!("claude exited ({status}) without a result"),
         };
         AgentOutcome {
             success,
@@ -196,18 +140,6 @@ impl AgentRunner for ClaudeCode {
             log,
             message,
         }
-    }
-}
-
-/// Adds `message` to the log too, and returns a failed outcome.
-fn failed(mut log: String, message: String) -> AgentOutcome {
-    log.push_str(&message);
-    log.push('\n');
-    AgentOutcome {
-        success: false,
-        usage_limit_reached: false,
-        log,
-        message,
     }
 }
 
@@ -300,20 +232,6 @@ impl FinalResult {
     }
 }
 
-/// Claude Code reports a used-up subscription only as text, so we look for the
-/// usual phrases. Pausing by mistake is harmless: Lisa just runs again.
-fn looks_like_usage_limit(result: &str, stderr: &str) -> bool {
-    let text = format!("{result}\n{stderr}").to_lowercase();
-    [
-        "usage limit",
-        "hit your limit",
-        "limit reached",
-        "rate limit",
-    ]
-    .iter()
-    .any(|phrase| text.contains(phrase))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -399,7 +317,7 @@ mod tests {
                 "DISABLE_AUTOUPDATER",
             ];
             assert!(
-                INHERITED_ENV.contains(&name.as_str()) || ours.contains(&name.as_str()),
+                process::INHERITED_ENV.contains(&name.as_str()) || ours.contains(&name.as_str()),
                 "{name} should not be passed"
             );
         }
@@ -434,18 +352,5 @@ mod tests {
             })
         );
         assert_eq!(FinalResult::find("not json"), None);
-    }
-
-    #[test]
-    fn usage_limit_phrases_are_recognised() {
-        assert!(looks_like_usage_limit(
-            "Claude AI usage limit reached|1759000000",
-            ""
-        ));
-        assert!(looks_like_usage_limit(
-            "",
-            "You've hit your limit · resets 5pm"
-        ));
-        assert!(!looks_like_usage_limit("All tests pass.", ""));
     }
 }
