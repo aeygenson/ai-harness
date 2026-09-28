@@ -4,7 +4,7 @@ use serde::de::IntoDeserializer;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 /// Who wrote a handoff: one of the four AI roles, or Lisa's own decision.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Role {
     Architect,

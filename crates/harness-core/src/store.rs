@@ -12,6 +12,7 @@
 //!     03-developer/
 //!   round-02/
 //!     01-developer/
+//!   inbox/               scratch folder where an agent writes its result
 //! ```
 //!
 //! Step folders are numbered because the same role can work twice in one round
@@ -31,6 +32,7 @@ const STATE_FILE: &str = "state.json";
 const TASK_FILE: &str = "task.md";
 const HANDOFF_FILE: &str = "handoff.json";
 const NOTES_FILE: &str = "notes.md";
+const INBOX_DIR: &str = "inbox";
 
 #[derive(Debug, thiserror::Error)]
 pub enum StoreError {
@@ -115,10 +117,40 @@ impl TaskStore {
         Ok(step_dir)
     }
 
+    /// The task description written by Lisa (`task.md`).
+    pub fn description(&self) -> Result<String, StoreError> {
+        let path = self.dir.join(TASK_FILE);
+        fs::read_to_string(&path).map_err(|e| io_error(&path, e))
+    }
+
+    /// Empties the inbox and returns its path. An agent writes its
+    /// `handoff.json` and `notes.md` there; nothing in it is kept as history.
+    pub fn prepare_inbox(&self) -> Result<PathBuf, StoreError> {
+        let inbox = self.dir.join(INBOX_DIR);
+        if inbox.exists() {
+            fs::remove_dir_all(&inbox).map_err(|e| io_error(&inbox, e))?;
+        }
+        create_dir(&inbox)?;
+        Ok(inbox)
+    }
+
+    /// Reads what the agent left in the inbox. Missing notes are allowed, a missing
+    /// or invalid handoff is not.
+    pub fn read_inbox(&self) -> Result<(Handoff, String), StoreError> {
+        let inbox = self.dir.join(INBOX_DIR);
+        let handoff = read_json(&inbox.join(HANDOFF_FILE))?;
+        let notes = fs::read_to_string(inbox.join(NOTES_FILE)).unwrap_or_default();
+        Ok((handoff, notes))
+    }
+
     /// All saved handoffs, in the order they happened.
     pub fn history(&self) -> Result<Vec<Handoff>, StoreError> {
         let mut handoffs = Vec::new();
-        for round_dir in sorted_subdirs(&self.dir)? {
+        let rounds = sorted_subdirs(&self.dir)?.into_iter().filter(|dir| {
+            dir.file_name()
+                .is_some_and(|name| name.to_string_lossy().starts_with("round-"))
+        });
+        for round_dir in rounds {
             for step_dir in sorted_subdirs(&round_dir)? {
                 handoffs.push(read_json(&step_dir.join(HANDOFF_FILE))?);
             }
