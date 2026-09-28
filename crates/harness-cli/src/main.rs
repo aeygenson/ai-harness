@@ -187,14 +187,43 @@ fn login_claude(dir: &Path) -> Result<()> {
 /// without showing it on the screen.
 fn login_deepseek(dir: &Path) -> Result<()> {
     println!("Paste your DeepSeek API key (from platform.deepseek.com) and press Enter.");
-    println!("It is not shown while you type.");
+    println!("It is not shown while you type: paste it once, then press Enter.");
     let key = read_hidden("API key: ")?;
-    if key.expose().is_empty() {
-        bail!("no key given");
-    }
+    check_deepseek_key(key.expose())?;
     let path = credentials::save_token(dir, "deepseek", &key)?;
-    println!("Saved to {} (only you can read it).", path.display());
+    println!(
+        "Saved {} to {} (only you can read it).",
+        masked(key.expose()),
+        path.display()
+    );
     Ok(())
+}
+
+/// A DeepSeek key is `sk-` and letters or digits, with no spaces. Pasting it
+/// twice into the hidden prompt is easy, because nothing shows up.
+fn check_deepseek_key(key: &str) -> Result<()> {
+    let copies = key.matches("sk-").count();
+    if copies > 1 {
+        bail!("the key seems to be pasted {copies} times; run the command again and paste it once");
+    }
+    let body = key.strip_prefix("sk-").unwrap_or("");
+    if body.len() < 16 || !body.chars().all(|c| c.is_ascii_alphanumeric()) {
+        bail!("this does not look like a DeepSeek API key (it starts with sk-); nothing was saved");
+    }
+    Ok(())
+}
+
+/// `sk-…1a2b (35 characters)`: enough to recognise the key, not to use it.
+fn masked(key: &str) -> String {
+    let tail: String = key
+        .chars()
+        .rev()
+        .take(4)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect();
+    format!("sk-…{tail} ({} characters)", key.chars().count())
 }
 
 /// Reads one line from the terminal without echoing it.
@@ -458,6 +487,25 @@ fn status(project: &Path, task_id: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_deepseek_key_pasted_twice_is_refused() {
+        let key = "sk-0123456789abcdef0123456789abcdef";
+        assert!(check_deepseek_key(key).is_ok());
+        let twice = format!("{key}{key}");
+        let error = check_deepseek_key(&twice).unwrap_err().to_string();
+        assert!(error.contains("2 times"), "{error}");
+        assert!(check_deepseek_key("hello").is_err());
+        assert!(check_deepseek_key("").is_err());
+    }
+
+    #[test]
+    fn the_saved_key_is_shown_masked() {
+        assert_eq!(
+            masked("sk-0123456789abcdef0123456789abcdef"),
+            "sk-…cdef (35 characters)"
+        );
+    }
 
     #[test]
     fn next_step_words_are_the_handoff_words() {
