@@ -11,6 +11,8 @@ pub struct RoleJob {
     pub task_id: String,
     pub round: u32,
     pub role: Role,
+    /// The project folder: the agent works here.
+    pub project_dir: PathBuf,
     /// The full prompt: role instructions, task, previous handoff.
     pub prompt: String,
     /// Where the agent must write `handoff.json` and `notes.md`.
