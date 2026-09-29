@@ -30,6 +30,7 @@ use harness_core::git::{Repo, HARNESS_DIR};
 use harness_core::handoff::{NextStep, Role, Verdict};
 use harness_core::mcp::{self, McpServers};
 use harness_core::orchestrator::{self, StopReason};
+use harness_core::plugins::Plugins;
 use harness_core::skills::Skills;
 use harness_core::store::TaskStore;
 use harness_core::task::{Stage, TaskState, WaitReason};
@@ -410,9 +411,10 @@ fn new_task(project: &Path, task_id: &str, description: &str) -> Result<()> {
 
 /// Builds the team from harness.toml: each role gets the agent, model and MCP
 /// servers set there.
-fn build_team(config: &Config) -> Result<Team> {
+fn build_team(config: &Config, project_dir: &Path) -> Result<Team> {
     let dir = credentials::default_dir().context("HOME is not set")?;
     let servers = McpServers::load(config, |name| credentials::load_secret(&dir, name).ok())?;
+    let plugins = Plugins::load(project_dir, config)?;
     // Codex starts MCP servers and reads keys through this same program.
     let harness = std::env::current_exe().context("cannot find the harness program")?;
     let timeout = Duration::from_secs(config.agent_timeout_minutes * 60);
@@ -432,7 +434,11 @@ fn build_team(config: &Config) -> Result<Team> {
                 if let Some(model) = &settings.model {
                     agent = agent.with_model(role, model);
                 }
-                AnyAgent::Claude(agent.with_mcp_servers(role, servers.for_role(role)))
+                AnyAgent::Claude(
+                    agent
+                        .with_mcp_servers(role, servers.for_role(role))
+                        .with_plugins(role, plugins.for_role(role)),
+                )
             }
             "codex" => {
                 let auth_dir = dir.join("codex");
@@ -491,7 +497,7 @@ async fn run(project: &Path, task_id: &str) -> Result<()> {
     let harness_dir = repo.root().join(HARNESS_DIR);
     let config = Config::load(&harness_dir)?;
     let skills = Skills::load(&harness_dir, &config)?;
-    let agent = build_team(&config)?;
+    let agent = build_team(&config, repo.root())?;
     let (store, mut state) = open_task(&repo, task_id)?;
     println!("Running {task_id} (round {})...", state.round);
     let stop = orchestrator::run_with_skills(&repo, &store, &mut state, &agent, &skills).await?;

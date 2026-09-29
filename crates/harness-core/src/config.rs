@@ -41,6 +41,15 @@ agent_timeout_minutes = 30
 #   [roles.developer]
 #   mcp = ["context7"]
 #
+# Plugins (Claude Code only for now): a plugin folder is kept in the project,
+# by default in .harness/plugins/<name>/, and listed in the roles that need it.
+#   [plugins.rust-review]
+#   agent = "claude"
+#   [roles.security]
+#   plugins = ["rust-review"]
+# A plugin with hooks or its own MCP servers is refused unless its settings
+# say `allow_hooks = true` or `allow_mcp = true`.
+#
 # Skills are files in .harness/skills/<name>.md that start with
 #   ---
 #   description: one line about the skill
@@ -75,6 +84,9 @@ pub struct Config {
     /// MCP servers the roles may use, by name; see `crate::mcp`.
     #[serde(default)]
     pub mcp: BTreeMap<String, McpConfig>,
+    /// Agent plugins kept in the project, by name; see `crate::plugins`.
+    #[serde(default)]
+    pub plugins: BTreeMap<String, PluginConfig>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -92,6 +104,26 @@ pub struct RoleConfig {
     /// Names of the `[mcp.<name>]` servers this role gets.
     #[serde(default)]
     pub mcp: Vec<String>,
+    /// Names of the `[plugins.<name>]` this role gets.
+    #[serde(default)]
+    pub plugins: Vec<String>,
+}
+
+/// One plugin: a folder inside the project, for one kind of agent.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PluginConfig {
+    /// Which agent can load it; only "claude" for now.
+    pub agent: String,
+    /// The folder, relative to the project; `.harness/plugins/<name>` if not set.
+    #[serde(default)]
+    pub path: Option<String>,
+    /// A plugin's hooks run commands on their own; refused unless allowed here.
+    #[serde(default)]
+    pub allow_hooks: bool,
+    /// A plugin's own MCP or LSP servers; refused unless allowed here.
+    #[serde(default)]
+    pub allow_mcp: bool,
 }
 
 /// One MCP server, started by the agent as a program (`stdio`).

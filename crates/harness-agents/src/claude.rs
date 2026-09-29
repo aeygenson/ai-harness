@@ -20,6 +20,7 @@ use crate::process::{self, failed};
 use harness_core::agent::{AgentOutcome, AgentRunner, RoleJob};
 use harness_core::handoff::Role;
 use harness_core::mcp::McpServer;
+use harness_core::plugins::Plugin;
 
 /// Where the agent's own settings live inside the project (ignored by git).
 pub const CONFIG_DIR: &str = ".harness/agents/claude";
@@ -33,6 +34,7 @@ pub struct ClaudeCode {
     token: Secret,
     models: HashMap<Role, String>,
     mcp: HashMap<Role, Vec<McpServer>>,
+    plugins: HashMap<Role, Vec<Plugin>>,
     timeout: Duration,
 }
 
@@ -43,6 +45,7 @@ impl ClaudeCode {
             token,
             models: HashMap::new(),
             mcp: HashMap::new(),
+            plugins: HashMap::new(),
             timeout: Duration::from_secs(30 * 60),
         }
     }
@@ -69,6 +72,12 @@ impl ClaudeCode {
         self
     }
 
+    /// The plugins this role gets (from harness.toml).
+    pub fn with_plugins(mut self, role: Role, plugins: Vec<Plugin>) -> Self {
+        self.plugins.insert(role, plugins);
+        self
+    }
+
     /// Builds the full command for one job, without running it.
     /// A separate function, so tests can check every flag and variable.
     pub fn command(&self, job: &RoleJob) -> Command {
@@ -78,7 +87,8 @@ impl ClaudeCode {
     /// `mcp_config` is the JSON itself or a file with it: `--mcp-config` takes both.
     fn command_with_mcp(&self, job: &RoleJob, mcp_config: &std::ffi::OsStr) -> Command {
         let config_dir = job.project_dir.join(CONFIG_DIR);
-        let rules = RoleRules::for_job(job, self.servers(job.role));
+        let plugins = self.role_plugins(job.role);
+        let rules = RoleRules::for_job(job, self.servers(job.role), plugins);
 
         let mut command = process::base_command(&self.program, &job.project_dir);
         command
@@ -97,8 +107,15 @@ impl ClaudeCode {
             .arg("--mcp-config")
             .arg(mcp_config)
             .args(["--setting-sources", "user"])
-            .arg("--disable-slash-commands")
             .arg("--no-session-persistence");
+        // Only the role's own plugins. A role without plugins gets no skills
+        // of Claude Code's at all; the harness's own skills are in the prompt.
+        for plugin in plugins {
+            command.arg("--plugin-dir").arg(&plugin.path);
+        }
+        if plugins.is_empty() {
+            command.arg("--disable-slash-commands");
+        }
         if let Some(model) = self.models.get(&job.role) {
             command.args(["--model", model]);
         }
@@ -107,6 +124,10 @@ impl ClaudeCode {
 
     fn servers(&self, role: Role) -> &[McpServer] {
         self.mcp.get(&role).map_or(&[], Vec::as_slice)
+    }
+
+    fn role_plugins(&self, role: Role) -> &[Plugin] {
+        self.plugins.get(&role).map_or(&[], Vec::as_slice)
     }
 
     /// The role's servers as a temporary file outside the project, readable
@@ -145,7 +166,13 @@ impl ClaudeCode {
     fn prepare_config_dir(&self, job: &RoleJob) -> std::io::Result<()> {
         let dir = job.project_dir.join(CONFIG_DIR);
         fs::create_dir_all(&dir)?;
-        fs::write(dir.join("settings.json"), "{}\n")
+        fs::write(dir.join("settings.json"), self.settings(job.role))
+    }
+
+    /// Hooks run only if a plugin of the role is allowed to have them.
+    fn settings(&self, role: Role) -> String {
+        let hooks = self.role_plugins(role).iter().any(|p| p.allow_hooks);
+        format!("{}\n", serde_json::json!({ "disableAllHooks": !hooks }))
     }
 
     fn header(&self, job: &RoleJob) -> String {
@@ -228,10 +255,10 @@ struct RoleRules {
 impl RoleRules {
     /// Mirrors `harness_core::permissions`. The harness checks the result with
     /// git anyway; these rules stop a wrong edit before it happens.
-    fn for_job(job: &RoleJob, servers: &[McpServer]) -> Self {
+    fn for_job(job: &RoleJob, servers: &[McpServer], plugins: &[Plugin]) -> Self {
         let inbox = format!("Edit({}/**)", rule_path(&job.project_dir, &job.output_dir));
         let read = ["Read(./**)", "Glob", "Grep"].map(String::from);
-        let (tools, allowed): (Vec<&str>, Vec<String>) = match job.role {
+        let (mut tools, allowed): (Vec<&str>, Vec<String>) = match job.role {
             Role::Architect => (
                 vec!["Read", "Glob", "Grep", "Edit", "Write"],
                 vec!["Edit(./docs/**)".into(), "Edit(./**/docs/**)".into(), inbox],
@@ -262,9 +289,24 @@ impl RoleRules {
         };
         // Every tool of the role's own MCP servers; there are no others.
         let mcp = servers.iter().map(|server| format!("mcp__{}", server.name));
+        // Plugins bring skills, which the agent opens with the Skill tool,
+        // and possibly MCP servers named `plugin_<plugin>_<server>`.
+        let mut from_plugins = Vec::new();
+        if !plugins.is_empty() {
+            tools.push("Skill");
+            from_plugins.push("Skill".to_string());
+        }
+        for plugin in plugins {
+            from_plugins.push(format!("mcp__plugin_{}_*", plugin.name));
+        }
         RoleRules {
             tools,
-            allowed: read.into_iter().chain(allowed).chain(mcp).collect(),
+            allowed: read
+                .into_iter()
+                .chain(allowed)
+                .chain(mcp)
+                .chain(from_plugins)
+                .collect(),
             denied: [
                 "Bash(git commit:*)",
                 "Bash(git push:*)",
@@ -366,6 +408,44 @@ mod tests {
     }
 
     #[test]
+    fn a_role_gets_only_its_plugins_and_hooks_stay_off_unless_allowed() {
+        let plugin = |name: &str, allow_hooks| Plugin {
+            name: name.into(),
+            path: PathBuf::from(format!("/work/app/.harness/plugins/{name}")),
+            allow_hooks,
+        };
+        let agent = ClaudeCode::new(Secret::new("t"))
+            .with_plugins(Role::Security, vec![plugin("review", false)])
+            .with_plugins(Role::Developer, vec![plugin("fmt", true)]);
+
+        let security = agent.command(&job(Role::Security));
+        assert_eq!(
+            arg_after(&security, "--plugin-dir"),
+            "/work/app/.harness/plugins/review"
+        );
+        let security_args = args(&security);
+        // Plugin skills need skills switched on and the Skill tool.
+        assert!(!security_args.contains(&"--disable-slash-commands".to_string()));
+        assert!(arg_after(&security, "--tools")
+            .split(',')
+            .any(|t| t == "Skill"));
+        assert!(arg_after(&security, "--allowedTools").contains("mcp__plugin_review_*"));
+        assert_eq!(
+            agent.settings(Role::Security),
+            "{\"disableAllHooks\":true}\n"
+        );
+        assert_eq!(
+            agent.settings(Role::Developer),
+            "{\"disableAllHooks\":false}\n"
+        );
+
+        let tester = args(&agent.command(&job(Role::Tester)));
+        assert!(!tester.contains(&"--plugin-dir".to_string()));
+        assert!(tester.contains(&"--disable-slash-commands".to_string()));
+        assert_eq!(agent.settings(Role::Tester), "{\"disableAllHooks\":true}\n");
+    }
+
+    #[test]
     fn a_role_gets_only_its_mcp_servers_from_a_private_file() {
         use std::collections::BTreeMap;
 
@@ -378,9 +458,9 @@ mod tests {
         let agent =
             ClaudeCode::new(Secret::new("t")).with_mcp_servers(Role::Developer, vec![server]);
 
-        let rules = RoleRules::for_job(&job(Role::Developer), agent.servers(Role::Developer));
+        let rules = RoleRules::for_job(&job(Role::Developer), agent.servers(Role::Developer), &[]);
         assert!(rules.allowed.contains(&"mcp__context7".to_string()));
-        let tester = RoleRules::for_job(&job(Role::Tester), agent.servers(Role::Tester));
+        let tester = RoleRules::for_job(&job(Role::Tester), agent.servers(Role::Tester), &[]);
         assert!(!tester.allowed.iter().any(|rule| rule.starts_with("mcp__")));
 
         let file = agent.write_mcp_config(Role::Developer).unwrap();
