@@ -42,7 +42,7 @@ pub const CODEX: &str = "codex";
 const AGENTS: &[&str] = &[CLAUDE, CODEX];
 
 /// The plugin manifest each agent looks for inside the plugin folder.
-fn manifest(agent: &str) -> &'static str {
+pub fn manifest(agent: &str) -> &'static str {
     if agent == CODEX {
         ".codex-plugin/plugin.json"
     } else {
@@ -180,6 +180,69 @@ pub fn relative_path(name: &str, plugin: &PluginConfig) -> String {
         .unwrap_or_else(|| format!("{PLUGINS_DIR}/{name}"))
 }
 
+/// What a plugin folder contains that runs or reaches out by itself.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Contents {
+    /// Hooks: commands run on events.
+    pub hooks: bool,
+    /// Its own MCP or LSP servers.
+    pub servers: bool,
+    /// Codex apps (ChatGPT connectors).
+    pub apps: bool,
+}
+
+/// Reads the manifest of `agent`'s plugin in `path` and looks at what the
+/// plugin brings. `name` is only for messages.
+pub fn inspect(path: &Path, name: &str, agent: &str) -> Result<Contents, PluginError> {
+    let manifest_path = path.join(manifest(agent));
+    let shown = manifest_path.display().to_string();
+    let text = fs::read_to_string(&manifest_path).map_err(|_| PluginError::NoManifest {
+        name: name.to_string(),
+        path: path.display().to_string(),
+        manifest: manifest(agent),
+        agent: agent.to_string(),
+    })?;
+    let manifest: serde_json::Value = serde_json::from_str(&text)
+        .ok()
+        .filter(serde_json::Value::is_object)
+        .ok_or_else(|| PluginError::BadManifest {
+            name: name.to_string(),
+            path: shown,
+        })?;
+    Ok(Contents {
+        hooks: path.join("hooks/hooks.json").exists() || manifest.get("hooks").is_some(),
+        servers: path.join(".mcp.json").exists()
+            || path.join(".lsp.json").exists()
+            || manifest.get("mcpServers").is_some()
+            || manifest.get("lspServers").is_some(),
+        apps: path.join(".app.json").exists() || manifest.get("apps").is_some(),
+    })
+}
+
+/// Copies a plugin folder, without its `.git`. Symbolic links and other
+/// special files are refused: a link could point outside the project.
+pub fn copy_dir(from: &Path, to: &Path) -> std::io::Result<()> {
+    fs::create_dir_all(to)?;
+    for entry in fs::read_dir(from)? {
+        let entry = entry?;
+        let kind = entry.file_type()?;
+        let target = to.join(entry.file_name());
+        if kind.is_dir() {
+            if entry.file_name() != ".git" {
+                copy_dir(&entry.path(), &target)?;
+            }
+        } else if kind.is_file() {
+            fs::copy(entry.path(), target)?;
+        } else {
+            return Err(std::io::Error::other(format!(
+                "{} is a link or a special file; plugins may hold only files and folders",
+                entry.path().display()
+            )));
+        }
+    }
+    Ok(())
+}
+
 /// Finds the plugin folder and looks at what the plugin contains.
 fn check(project_dir: &Path, name: &str, plugin: &PluginConfig) -> Result<Plugin, PluginError> {
     let relative = relative_path(name, plugin);
@@ -193,39 +256,18 @@ fn check(project_dir: &Path, name: &str, plugin: &PluginConfig) -> Result<Plugin
         });
     }
     let path = project_dir.join(&relative);
-    let manifest_path = path.join(manifest(&plugin.agent));
-    let shown = manifest_path.display().to_string();
-    let text = fs::read_to_string(&manifest_path).map_err(|_| PluginError::NoManifest {
-        name: name.to_string(),
-        path: path.display().to_string(),
-        manifest: manifest(&plugin.agent),
-        agent: plugin.agent.clone(),
-    })?;
-    let manifest: serde_json::Value = serde_json::from_str(&text)
-        .ok()
-        .filter(serde_json::Value::is_object)
-        .ok_or_else(|| PluginError::BadManifest {
-            name: name.to_string(),
-            path: shown,
-        })?;
-
-    let has_hooks = path.join("hooks/hooks.json").exists() || manifest.get("hooks").is_some();
-    if has_hooks && !plugin.allow_hooks {
+    let contents = inspect(&path, name, &plugin.agent)?;
+    if contents.hooks && !plugin.allow_hooks {
         return Err(PluginError::HooksNotAllowed {
             name: name.to_string(),
         });
     }
-    let has_servers = path.join(".mcp.json").exists()
-        || path.join(".lsp.json").exists()
-        || manifest.get("mcpServers").is_some()
-        || manifest.get("lspServers").is_some();
-    if has_servers && !plugin.allow_mcp {
+    if contents.servers && !plugin.allow_mcp {
         return Err(PluginError::ServersNotAllowed {
             name: name.to_string(),
         });
     }
-    let has_apps = path.join(".app.json").exists() || manifest.get("apps").is_some();
-    if plugin.agent == CODEX && has_apps {
+    if plugin.agent == CODEX && contents.apps {
         return Err(PluginError::AppsNotAllowed {
             name: name.to_string(),
         });

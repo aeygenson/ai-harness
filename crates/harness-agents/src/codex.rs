@@ -42,7 +42,7 @@ use std::time::Duration;
 use harness_core::agent::{AgentOutcome, AgentRunner, RoleJob};
 use harness_core::handoff::Role;
 use harness_core::mcp::McpServer;
-use harness_core::plugins::Plugin;
+use harness_core::plugins::{copy_dir, Plugin};
 
 use crate::credentials::Secret;
 use crate::launcher;
@@ -425,28 +425,6 @@ fn remove_extras(job: &RoleJob) {
     for dir in [PLUGINS_DIR, SKILLS_DIR] {
         let _ = fs::remove_dir_all(home.join(dir));
     }
-}
-
-/// Copies a plugin folder. Symbolic links are refused: one could point
-/// outside the project.
-fn copy_dir(from: &Path, to: &Path) -> io::Result<()> {
-    fs::create_dir_all(to)?;
-    for entry in fs::read_dir(from)? {
-        let entry = entry?;
-        let kind = entry.file_type()?;
-        let target = to.join(entry.file_name());
-        if kind.is_dir() {
-            copy_dir(&entry.path(), &target)?;
-        } else if kind.is_file() {
-            fs::copy(entry.path(), target)?;
-        } else {
-            return Err(io::Error::other(format!(
-                "{} is a link or a special file; plugins may hold only files and folders",
-                entry.path().display()
-            )));
-        }
-    }
-    Ok(())
 }
 
 /// A string or a list of strings in TOML syntax. JSON writes them the same way.

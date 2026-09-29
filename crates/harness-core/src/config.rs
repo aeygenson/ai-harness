@@ -49,6 +49,8 @@ agent_timeout_minutes = 30
 #   agent = "claude"
 #   [roles.security]
 #   plugins = ["rust-review"]
+# `harness plugin add <name>` copies one from a catalog (`harness marketplace
+# add owner/repo`) and writes `source` and `commit` here for later updates.
 # A plugin with hooks or its own MCP servers is refused unless its settings
 # say `allow_hooks = true` or `allow_mcp = true`. Codex plugins with apps
 # (ChatGPT connectors) are refused.
@@ -127,6 +129,12 @@ pub struct PluginConfig {
     /// A plugin's own MCP or LSP servers; refused unless allowed here.
     #[serde(default)]
     pub allow_mcp: bool,
+    /// Where `harness plugin add` took it from: `<catalog>/<plugin>`.
+    #[serde(default)]
+    pub source: Option<String>,
+    /// The git commit it was copied at, so updates can show what changed.
+    #[serde(default)]
+    pub commit: Option<String>,
 }
 
 /// One MCP server, started by the agent as a program (`stdio`).
