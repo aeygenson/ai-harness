@@ -160,3 +160,43 @@ async fn a_missing_claude_program_is_a_role_failure() {
         other => panic!("expected RoleFailed, got {other:?}"),
     }
 }
+
+#[tokio::test]
+async fn an_mcp_secret_the_agent_prints_is_hidden_in_the_log() {
+    use harness_core::mcp::McpServer;
+    use std::collections::BTreeMap;
+
+    let s = setup();
+    // The fake reads its --mcp-config file and prints it, as a tool that shows
+    // its environment would.
+    let script = fake_claude(
+        s.scratch.path(),
+        &format!(
+            "while [ \"$1\" != --mcp-config ]; do shift; done\n\
+             cat \"$2\"; echo\n\
+             cat > /dev/null\n\
+             cat > .harness/runs/task-001/inbox/handoff.json <<'JSON'\n{HANDOFF}\nJSON\n\
+             mkdir -p docs && echo '# Design' > docs/design.md\n\
+             echo 'notes' > .harness/runs/task-001/inbox/notes.md\n\
+             echo '{{\"type\":\"result\",\"is_error\":false,\"result\":\"Done.\"}}'\n"
+        ),
+    );
+    let server = McpServer {
+        name: "everything".into(),
+        command: "npx".into(),
+        args: vec![],
+        env: BTreeMap::from([("MCP_TEST_TOKEN".into(), Secret::new("mcp-secret-42"))]),
+    };
+    let agent = ClaudeCode::new(Secret::new("t"))
+        .with_program(script)
+        .with_mcp_servers(Role::Architect, vec![server]);
+    let (store, mut state) = new_task(&s.repo);
+
+    orchestrator::run(&s.repo, &store, &mut state, &agent)
+        .await
+        .unwrap();
+
+    let log = fs::read_to_string(store.dir().join("round-01/01-architect/agent.log")).unwrap();
+    assert!(log.contains("\"MCP_TEST_TOKEN\":\"***\""), "{log}");
+    assert!(!log.contains("mcp-secret-42"), "{log}");
+}

@@ -271,6 +271,17 @@ impl AgentRunner for Codex {
         if chatgpt {
             self.take_auth_back(job);
         }
+        let deepseek_key = match &self.provider {
+            Provider::DeepSeek(key) => Some(key.expose()),
+            Provider::ChatGpt => None,
+        };
+        let servers = self.mcp.get(&job.role).into_iter().flatten();
+        let result = process::hide_secrets(
+            result,
+            servers
+                .flat_map(|server| server.env.values().map(|v| v.expose()))
+                .chain(deepseek_key),
+        );
         let finished = match result {
             Ok(finished) => finished,
             Err(message) => return failed(log, message),

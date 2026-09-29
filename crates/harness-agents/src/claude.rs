@@ -176,7 +176,16 @@ impl AgentRunner for ClaudeCode {
             Some(file) => self.command_with_mcp(job, file.path().as_os_str()),
             None => self.command(job),
         };
-        let finished = match process::run(command, &job.prompt, self.timeout).await {
+        let result = process::run(command, &job.prompt, self.timeout).await;
+        let secrets = self
+            .servers(job.role)
+            .iter()
+            .flat_map(|server| server.env.values());
+        let result = process::hide_secrets(
+            result,
+            secrets.map(|v| v.expose()).chain([self.token.expose()]),
+        );
+        let finished = match result {
             Ok(finished) => finished,
             Err(message) => return failed(log, message),
         };

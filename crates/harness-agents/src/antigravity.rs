@@ -185,6 +185,11 @@ impl AgentRunner for Antigravity {
         // The prompt is given with `-p`; standard input stays empty.
         let result = process::run(self.command(job, home.path()), "", self.timeout).await;
         drop(home);
+        let secrets = self.mcp.get(&job.role).into_iter().flatten();
+        let result = process::hide_secrets(
+            result,
+            secrets.flat_map(|server| server.env.values().map(|v| v.expose())),
+        );
         outcome(log, result)
     }
 }
