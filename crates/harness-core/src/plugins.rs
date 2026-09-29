@@ -13,12 +13,16 @@
 //! plugins = ["rust-review"]
 //! ```
 //!
-//! Plugins differ between agents, so each one says which agent loads it; for
-//! now only Claude Code plugins are supported (`.claude-plugin/plugin.json`).
+//! Plugins differ between agents, so each one says which agent loads it:
+//! `"claude"` for Claude Code plugins (`.claude-plugin/plugin.json`) or
+//! `"codex"` for Codex plugins (`.codex-plugin/plugin.json`), which also work
+//! in `"codex+deepseek"` roles.
 //!
 //! Two parts of a plugin run programs by themselves: hooks (commands on
 //! events) and MCP or LSP servers. They could get around the harness's own
 //! rules, so a plugin that has them is refused unless its settings allow them.
+//! A Codex plugin with apps (`.app.json`, ChatGPT connectors) is always
+//! refused: apps reach services outside the project.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -30,10 +34,26 @@ use crate::mcp::is_simple_name;
 
 /// Where plugins live by default, inside the project.
 pub const PLUGINS_DIR: &str = ".harness/plugins";
-/// The only agent with plugin support for now.
+/// Claude Code plugins.
 pub const CLAUDE: &str = "claude";
-/// Claude Code's plugin manifest, inside the plugin folder.
-const MANIFEST: &str = ".claude-plugin/plugin.json";
+/// Codex plugins, for roles on `"codex"` and `"codex+deepseek"`.
+pub const CODEX: &str = "codex";
+/// The agents with plugin support.
+const AGENTS: &[&str] = &[CLAUDE, CODEX];
+
+/// The plugin manifest each agent looks for inside the plugin folder.
+fn manifest(agent: &str) -> &'static str {
+    if agent == CODEX {
+        ".codex-plugin/plugin.json"
+    } else {
+        ".claude-plugin/plugin.json"
+    }
+}
+
+/// The agent family a role runs on: `"codex+deepseek"` is still Codex.
+fn family(role_agent: &str) -> &str {
+    role_agent.split('+').next().unwrap_or(role_agent)
+}
 
 /// One plugin as the agent loads it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -60,7 +80,10 @@ pub enum PluginError {
     BadName(String),
     #[error("the {role:?} role uses plugin {name:?}, but harness.toml has no [plugins.{name}]")]
     Unknown { role: Role, name: String },
-    #[error("plugin {name:?} is for agent {agent:?}; only \"claude\" plugins are supported")]
+    #[error(
+        "plugin {name:?} is for agent {agent:?}; only \"claude\" and \"codex\" plugins \
+         are supported"
+    )]
     UnsupportedAgent { name: String, agent: String },
     #[error(
         "the {role:?} role runs on {role_agent:?}, but plugin {name:?} is for {plugin_agent:?}"
@@ -73,8 +96,13 @@ pub enum PluginError {
     },
     #[error("plugin {name:?}: the path {path:?} must be a folder inside the project")]
     BadPath { name: String, path: String },
-    #[error("plugin {name:?}: {path} has no {MANIFEST}; is it a Claude Code plugin?")]
-    NoManifest { name: String, path: String },
+    #[error("plugin {name:?}: {path} has no {manifest}; is it a plugin for {agent:?}?")]
+    NoManifest {
+        name: String,
+        path: String,
+        manifest: &'static str,
+        agent: String,
+    },
     #[error("plugin {name:?}: {path} is not valid JSON")]
     BadManifest { name: String, path: String },
     #[error(
@@ -87,6 +115,11 @@ pub enum PluginError {
          add `allow_mcp = true` to [plugins.{name}] if you trust them"
     )]
     ServersNotAllowed { name: String },
+    #[error(
+        "plugin {name:?} has apps (ChatGPT connectors), which reach services outside \
+         the project; they are not supported"
+    )]
+    AppsNotAllowed { name: String },
 }
 
 impl Plugins {
@@ -112,13 +145,13 @@ impl Plugins {
                         role,
                         name: name.clone(),
                     })?;
-                if plugin.agent != CLAUDE {
+                if !AGENTS.contains(&plugin.agent.as_str()) {
                     return Err(PluginError::UnsupportedAgent {
                         name: name.clone(),
                         agent: plugin.agent.clone(),
                     });
                 }
-                if settings.agent != plugin.agent {
+                if family(&settings.agent) != plugin.agent {
                     return Err(PluginError::WrongAgent {
                         role,
                         name: name.clone(),
@@ -160,11 +193,13 @@ fn check(project_dir: &Path, name: &str, plugin: &PluginConfig) -> Result<Plugin
         });
     }
     let path = project_dir.join(&relative);
-    let manifest_path = path.join(MANIFEST);
+    let manifest_path = path.join(manifest(&plugin.agent));
     let shown = manifest_path.display().to_string();
     let text = fs::read_to_string(&manifest_path).map_err(|_| PluginError::NoManifest {
         name: name.to_string(),
         path: path.display().to_string(),
+        manifest: manifest(&plugin.agent),
+        agent: plugin.agent.clone(),
     })?;
     let manifest: serde_json::Value = serde_json::from_str(&text)
         .ok()
@@ -189,6 +224,12 @@ fn check(project_dir: &Path, name: &str, plugin: &PluginConfig) -> Result<Plugin
             name: name.to_string(),
         });
     }
+    let has_apps = path.join(".app.json").exists() || manifest.get("apps").is_some();
+    if plugin.agent == CODEX && has_apps {
+        return Err(PluginError::AppsNotAllowed {
+            name: name.to_string(),
+        });
+    }
     Ok(Plugin {
         name: name.to_string(),
         path,
@@ -200,12 +241,18 @@ fn check(project_dir: &Path, name: &str, plugin: &PluginConfig) -> Result<Plugin
 mod tests {
     use super::*;
 
-    /// A project with one plugin folder `.harness/plugins/review/`.
-    fn project(manifest: &str, extra: &[(&str, &str)]) -> tempfile::TempDir {
+    /// A project with one Claude Code plugin folder `.harness/plugins/review/`.
+    fn project(manifest_text: &str, extra: &[(&str, &str)]) -> tempfile::TempDir {
+        project_for(CLAUDE, manifest_text, extra)
+    }
+
+    /// The same for any agent's plugin.
+    fn project_for(agent: &str, manifest_text: &str, extra: &[(&str, &str)]) -> tempfile::TempDir {
         let dir = tempfile::tempdir().unwrap();
         let plugin = dir.path().join(PLUGINS_DIR).join("review");
-        fs::create_dir_all(plugin.join(".claude-plugin")).unwrap();
-        fs::write(plugin.join(MANIFEST), manifest).unwrap();
+        let manifest_path = plugin.join(manifest(agent));
+        fs::create_dir_all(manifest_path.parent().unwrap()).unwrap();
+        fs::write(manifest_path, manifest_text).unwrap();
         for (file, text) in extra {
             let path = plugin.join(file);
             fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -239,25 +286,74 @@ mod tests {
     }
 
     #[test]
-    fn plugins_are_only_for_claude_roles() {
+    fn a_plugin_is_only_for_roles_on_its_agent() {
         let dir = project(MANIFEST_OK, &[]);
+        for (role_agent, plugin_agent) in [("codex", "claude"), ("claude", "codex")] {
+            let error = load(
+                dir.path(),
+                &format!(
+                    "[roles.tester]\nagent = {role_agent:?}\nplugins = [\"review\"]\n\
+                     [plugins.review]\nagent = {plugin_agent:?}\n"
+                ),
+            )
+            .unwrap_err();
+            assert!(matches!(error, PluginError::WrongAgent { .. }), "{error}");
+        }
         let error = load(
             dir.path(),
-            "[roles.tester]\nagent = \"codex\"\nplugins = [\"review\"]\n\
-             [plugins.review]\nagent = \"claude\"\n",
-        )
-        .unwrap_err();
-        assert!(matches!(error, PluginError::WrongAgent { .. }), "{error}");
-        let error = load(
-            dir.path(),
-            "[roles.tester]\nagent = \"codex\"\nplugins = [\"review\"]\n\
-             [plugins.review]\nagent = \"codex\"\n",
+            "[roles.tester]\nagent = \"antigravity\"\nplugins = [\"review\"]\n\
+             [plugins.review]\nagent = \"antigravity\"\n",
         )
         .unwrap_err();
         assert!(
             matches!(error, PluginError::UnsupportedAgent { .. }),
             "{error}"
         );
+    }
+
+    #[test]
+    fn codex_plugins_work_for_codex_and_deepseek_roles() {
+        let dir = project_for(
+            CODEX,
+            MANIFEST_OK,
+            &[("skills/audit/SKILL.md", "---\n---\n")],
+        );
+        let plugins = load(
+            dir.path(),
+            "[roles.developer]\nagent = \"codex\"\nplugins = [\"review\"]\n\
+             [roles.tester]\nagent = \"codex+deepseek\"\nplugins = [\"review\"]\n\
+             [plugins.review]\nagent = \"codex\"\n",
+        )
+        .unwrap();
+        assert_eq!(plugins.for_role(Role::Developer).len(), 1);
+        assert_eq!(plugins.for_role(Role::Tester).len(), 1);
+
+        // A Claude Code manifest is not enough for Codex.
+        let claude_only = project(MANIFEST_OK, &[]);
+        let error = load(
+            claude_only.path(),
+            "[roles.developer]\nagent = \"codex\"\nplugins = [\"review\"]\n\
+             [plugins.review]\nagent = \"codex\"\n",
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(error.contains(".codex-plugin/plugin.json"), "{error}");
+    }
+
+    #[test]
+    fn codex_plugins_with_apps_are_refused() {
+        let toml = "[roles.developer]\nagent = \"codex\"\nplugins = [\"review\"]\n\
+                    [plugins.review]\nagent = \"codex\"\nallow_hooks = true\nallow_mcp = true\n";
+        for (manifest_text, extra) in [
+            (MANIFEST_OK, &[(".app.json", "{}")][..]),
+            (r#"{"name": "review", "apps": "./apps"}"#, &[][..]),
+        ] {
+            let dir = project_for(CODEX, manifest_text, extra);
+            assert!(matches!(
+                load(dir.path(), toml),
+                Err(PluginError::AppsNotAllowed { .. })
+            ));
+        }
     }
 
     #[test]

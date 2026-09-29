@@ -409,8 +409,8 @@ fn new_task(project: &Path, task_id: &str, description: &str) -> Result<()> {
     Ok(())
 }
 
-/// Builds the team from harness.toml: each role gets the agent, model and MCP
-/// servers set there.
+/// Builds the team from harness.toml: each role gets the agent, model, MCP
+/// servers and plugins set there.
 fn build_team(config: &Config, project_dir: &Path) -> Result<Team> {
     let dir = credentials::default_dir().context("HOME is not set")?;
     let servers = McpServers::load(config, |name| credentials::load_secret(&dir, name).ok())?;
@@ -452,7 +452,8 @@ fn build_team(config: &Config, project_dir: &Path) -> Result<Team> {
                 AnyAgent::Codex(
                     agent
                         .with_launcher(&harness)
-                        .with_mcp_servers(role, servers.for_role(role)),
+                        .with_mcp_servers(role, servers.for_role(role))
+                        .with_plugins(role, plugins.for_role(role)),
                 )
             }
             "codex+deepseek" => {
@@ -469,7 +470,8 @@ fn build_team(config: &Config, project_dir: &Path) -> Result<Team> {
                 AnyAgent::Codex(
                     agent
                         .with_launcher(&harness)
-                        .with_mcp_servers(role, servers.for_role(role)),
+                        .with_mcp_servers(role, servers.for_role(role))
+                        .with_plugins(role, plugins.for_role(role)),
                 )
             }
             "antigravity" => {
