@@ -5,6 +5,7 @@ pub mod antigravity;
 pub mod claude;
 pub mod codex;
 pub mod credentials;
+pub mod launcher;
 pub mod mock;
 pub mod process;
 pub mod team;

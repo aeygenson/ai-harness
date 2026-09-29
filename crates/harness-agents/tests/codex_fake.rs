@@ -158,6 +158,7 @@ async fn deepseek_roles_get_the_key_and_no_chatgpt_login() {
             "env > {seen}.env\n\
              echo \"$@\" > {seen}.args\n\
              ls -A \"$CODEX_HOME\" > {seen}.home\n\
+             cat \"$(echo \"$@\" | grep -o '/[^\"]*deepseek-key' | head -n 1)\" > {seen}.key\n\
              cat > /dev/null\n\
              cat > .harness/runs/task-001/inbox/handoff.json <<'JSON'\n{HANDOFF}\nJSON\n\
              echo '{{\"type\":\"turn.completed\",\"usage\":{{}}}}'\n",
@@ -173,10 +174,15 @@ async fn deepseek_roles_get_the_key_and_no_chatgpt_login() {
         .unwrap();
 
     assert_eq!(stop, StopReason::WaitingForHuman(WaitReason::ApproveDesign));
+    // Codex reads the key from a private file through `harness print-secret`;
+    // its own environment (which the agent's commands inherit) has no key.
     let env = fs::read_to_string(seen.with_extension("env")).unwrap();
-    assert!(env.contains("DEEPSEEK_API_KEY=sk-deepseek-test"), "{env}");
+    assert!(!env.contains("sk-deepseek-test"), "{env}");
     let args = fs::read_to_string(seen.with_extension("args")).unwrap();
     assert!(args.contains("model_provider=\"deepseek\""), "{args}");
+    assert!(args.contains("print-secret"), "{args}");
+    let key = fs::read_to_string(seen.with_extension("key")).unwrap();
+    assert_eq!(key, "sk-deepseek-test");
     assert!(!args.contains("sk-deepseek-test"), "{args}");
     // The ChatGPT login was not copied in.
     let home = fs::read_to_string(seen.with_extension("home")).unwrap();

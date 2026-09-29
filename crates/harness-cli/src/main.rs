@@ -24,7 +24,7 @@ use std::time::Duration;
 use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand};
 use harness_agents::credentials::{self, Secret};
-use harness_agents::{codex, Antigravity, AnyAgent, ClaudeCode, Codex, Team};
+use harness_agents::{codex, launcher, Antigravity, AnyAgent, ClaudeCode, Codex, Team};
 use harness_core::config::{Config, CONFIG_FILE, DEFAULT_CONFIG};
 use harness_core::git::{Repo, HARNESS_DIR};
 use harness_core::handoff::{NextStep, Role, Verdict};
@@ -84,6 +84,12 @@ enum Command {
     },
     /// Show where a task is and its history.
     Status { task_id: String },
+    /// Used by Codex: start an MCP server from its private settings file.
+    #[command(name = "mcp-exec", hide = true)]
+    McpExec { file: PathBuf },
+    /// Used by Codex: print a key from its private file.
+    #[command(name = "print-secret", hide = true)]
+    PrintSecret { file: PathBuf },
 }
 
 #[derive(Subcommand)]
@@ -148,6 +154,17 @@ async fn main() -> Result<()> {
             decide(project, &task_id, Verdict::Rejected, Some(to), &notes)
         }
         Command::Status { task_id } => status(project, &task_id),
+        Command::McpExec { file } => {
+            let error = launcher::exec_server(&file);
+            bail!(
+                "cannot start the MCP server from {}: {error}",
+                file.display()
+            )
+        }
+        Command::PrintSecret { file } => {
+            println!("{}", launcher::read_secret(&file)?);
+            Ok(())
+        }
     }
 }
 
@@ -396,6 +413,8 @@ fn new_task(project: &Path, task_id: &str, description: &str) -> Result<()> {
 fn build_team(config: &Config) -> Result<Team> {
     let dir = credentials::default_dir().context("HOME is not set")?;
     let servers = McpServers::load(config, |name| credentials::load_secret(&dir, name).ok())?;
+    // Codex starts MCP servers and reads keys through this same program.
+    let harness = std::env::current_exe().context("cannot find the harness program")?;
     let timeout = Duration::from_secs(config.agent_timeout_minutes * 60);
     let mut team = Team::new();
     for role in [
@@ -424,7 +443,11 @@ fn build_team(config: &Config) -> Result<Team> {
                 if let Some(model) = &settings.model {
                     agent = agent.with_model(role, model);
                 }
-                AnyAgent::Codex(agent.with_mcp_servers(role, servers.for_role(role)))
+                AnyAgent::Codex(
+                    agent
+                        .with_launcher(&harness)
+                        .with_mcp_servers(role, servers.for_role(role)),
+                )
             }
             "codex+deepseek" => {
                 // A key in the shell wins; otherwise the one `harness login deepseek` saved.
@@ -437,7 +460,11 @@ fn build_team(config: &Config) -> Result<Team> {
                 if let Some(model) = &settings.model {
                     agent = agent.with_model(role, model);
                 }
-                AnyAgent::Codex(agent.with_mcp_servers(role, servers.for_role(role)))
+                AnyAgent::Codex(
+                    agent
+                        .with_launcher(&harness)
+                        .with_mcp_servers(role, servers.for_role(role)),
+                )
             }
             "antigravity" => {
                 let auth_dir = dir.join("antigravity");

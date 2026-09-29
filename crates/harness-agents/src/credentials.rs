@@ -72,7 +72,7 @@ fn clean(token: &str) -> String {
 /// Creates the file with permissions 600 (owner reads and writes, nobody else),
 /// before any secret is written into it.
 #[cfg(unix)]
-fn write_private(path: &Path, text: &str) -> io::Result<()> {
+pub(crate) fn write_private(path: &Path, text: &str) -> io::Result<()> {
     use std::io::Write;
     use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
     let mut file = fs::OpenOptions::new()
@@ -87,7 +87,7 @@ fn write_private(path: &Path, text: &str) -> io::Result<()> {
 }
 
 #[cfg(not(unix))]
-fn write_private(path: &Path, text: &str) -> io::Result<()> {
+pub(crate) fn write_private(path: &Path, text: &str) -> io::Result<()> {
     fs::write(path, text)
 }
 
