@@ -18,6 +18,7 @@
 //! harness approve task-001 --notes "Looks good"
 //! harness reject task-001 --to architect --notes "Use serde"
 //! harness status task-001
+//! harness retro task-001               statistics of one task (or --all)
 //! ```
 
 use std::fs;
@@ -37,6 +38,7 @@ use harness_core::handoff::{NextStep, Role, Verdict};
 use harness_core::mcp::{self, McpServers};
 use harness_core::orchestrator::{self, StopReason};
 use harness_core::plugins::Plugins;
+use harness_core::retro::{Stats, TaskHistory};
 use harness_core::skills::Skills;
 use harness_core::store::TaskStore;
 use harness_core::task::{Stage, TaskState, WaitReason};
@@ -101,6 +103,15 @@ enum Command {
     },
     /// Show where a task is and its history.
     Status { task_id: String },
+    /// Count what happened in a task (or in all tasks) and save it in
+    /// .harness/retros/<NNN>/.
+    Retro {
+        #[arg(required_unless_present = "all", conflicts_with = "all")]
+        task_id: Option<String>,
+        /// All tasks of the project.
+        #[arg(long)]
+        all: bool,
+    },
     /// Used by Codex: start an MCP server from its private settings file.
     #[command(name = "mcp-exec", hide = true)]
     McpExec { file: PathBuf },
@@ -255,6 +266,7 @@ async fn main() -> Result<()> {
             decide(project, &task_id, Verdict::Rejected, Some(to), &notes)
         }
         Command::Status { task_id } => status(project, &task_id),
+        Command::Retro { task_id, .. } => retro(project, task_id.as_deref()),
         Command::McpExec { file } => {
             let error = launcher::exec_server(&file);
             bail!(
@@ -681,6 +693,38 @@ fn status(project: &Path, task_id: &str) -> Result<()> {
     Ok(())
 }
 
+/// Statistics of one task, or of all tasks when `task_id` is `None`.
+/// Printed, saved in `.harness/retros/<NNN>/` and committed.
+fn retro(project: &Path, task_id: Option<&str>) -> Result<()> {
+    let repo = open_repo(project)?;
+    let runs = repo.runs_dir();
+    let (scope, tasks) = match task_id {
+        Some(id) => (
+            id,
+            vec![TaskHistory::load(&runs, id).with_context(|| format!("cannot open task {id}"))?],
+        ),
+        None => ("all", TaskHistory::load_all(&runs)?),
+    };
+    if tasks.is_empty() {
+        bail!("there are no tasks yet; create one with `harness task new`");
+    }
+    let harness_dir = repo.root().join(HARNESS_DIR);
+    let config = match Config::load(&harness_dir) {
+        Ok(config) => Some(config),
+        Err(error) => {
+            eprintln!("Skills are not compared with harness.toml: {error}");
+            None
+        }
+    };
+    let stats = Stats::collect(scope, &tasks, config.as_ref());
+    print!("{}", stats.to_markdown());
+    let dir = stats.save(&harness_dir)?;
+    let number = dir.file_name().unwrap_or_default().to_string_lossy();
+    repo.commit_paths(&[&dir], &format!("harness: retro {number} ({scope})"))?;
+    println!("\nSaved to {}.", dir.display());
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -728,5 +772,24 @@ mod tests {
         assert!(repo.changed_files().unwrap().is_empty());
         let (_, state) = open_task(&repo, "task-001").unwrap();
         assert_eq!(state.stage, Stage::Working(Role::Architect));
+    }
+
+    #[test]
+    fn retro_is_saved_and_committed() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = Repo::init(dir.path()).unwrap();
+        assert!(retro(dir.path(), None).is_err()); // no tasks yet
+        init(dir.path()).unwrap();
+        new_task(dir.path(), "task-001", "Build a parser").unwrap();
+
+        retro(dir.path(), Some("task-001")).unwrap();
+        retro(dir.path(), None).unwrap();
+        assert!(retro(dir.path(), Some("task-404")).is_err());
+
+        let retros = dir.path().join(".harness/retros");
+        assert!(retros.join("001/stats.md").exists());
+        let json = fs::read_to_string(retros.join("002/stats.json")).unwrap();
+        assert!(json.contains("\"scope\": \"all\""), "{json}");
+        assert!(repo.changed_files().unwrap().is_empty());
     }
 }

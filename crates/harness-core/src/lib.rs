@@ -12,6 +12,7 @@ pub mod permissions;
 pub mod plugin_install;
 pub mod plugins;
 pub mod prompt;
+pub mod retro;
 pub mod routes;
 pub mod secret;
 pub mod skills;
