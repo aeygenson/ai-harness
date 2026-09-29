@@ -193,6 +193,25 @@ impl TaskStore {
         &self.dir
     }
 
+    /// The failed attempts saved by `save_failure_log`, as (round, role), in order.
+    /// Files with other names are skipped.
+    pub fn failures(&self) -> Result<Vec<(u32, Role)>, StoreError> {
+        let dir = self.dir.join(FAILURES_DIR);
+        if !dir.exists() {
+            return Ok(Vec::new());
+        }
+        let mut names = Vec::new();
+        for entry in fs::read_dir(&dir).map_err(|e| io_error(&dir, e))? {
+            let entry = entry.map_err(|e| io_error(&dir, e))?;
+            names.push(entry.file_name().to_string_lossy().into_owned());
+        }
+        names.sort();
+        Ok(names
+            .iter()
+            .filter_map(|name| parse_failure(name))
+            .collect())
+    }
+
     /// Creates the next numbered step folder, e.g. `round-02/03-tester`.
     fn new_step_dir(&self, round: u32, role: Role) -> Result<PathBuf, StoreError> {
         let round_dir = self.dir.join(format!("round-{round:02}"));
@@ -213,6 +232,29 @@ impl TaskStore {
         fs::write(&tmp, to_json(&tmp, state)?).map_err(|e| io_error(&tmp, e))?;
         fs::rename(&tmp, &path).map_err(|e| io_error(&path, e))
     }
+}
+
+/// The ids of all tasks in `runs_dir` (folders with a `state.json`), sorted.
+pub fn task_ids(runs_dir: &Path) -> Result<Vec<String>, StoreError> {
+    if !runs_dir.exists() {
+        return Ok(Vec::new());
+    }
+    Ok(sorted_subdirs(runs_dir)?
+        .into_iter()
+        .filter(|dir| dir.join(STATE_FILE).exists())
+        .filter_map(|dir| Some(dir.file_name()?.to_string_lossy().into_owned()))
+        .filter(|id| check_task_id(id).is_ok())
+        .collect())
+}
+
+/// `round-02-tester-1.log` -> (2, Tester).
+fn parse_failure(name: &str) -> Option<(u32, Role)> {
+    let rest = name.strip_prefix("round-")?.strip_suffix(".log")?;
+    let (round, rest) = rest.split_once('-')?;
+    let (role, attempt) = rest.rsplit_once('-')?;
+    attempt.parse::<u32>().ok()?;
+    let role = serde_json::from_value(serde_json::Value::String(role.to_string())).ok()?;
+    Some((round.parse().ok()?, role))
 }
 
 /// Task ids become folder names, so we allow only safe characters.
@@ -373,6 +415,30 @@ mod tests {
         assert_eq!(
             fs::read_to_string(step_dir.join("notes.md")).unwrap(),
             "Design is ready."
+        );
+    }
+
+    #[test]
+    fn failures_and_task_ids_are_listed() {
+        let runs = tempfile::tempdir().unwrap();
+        assert!(task_ids(&runs.path().join("missing")).unwrap().is_empty());
+        let (store, _) = new_task(runs.path());
+        TaskStore::create(runs.path(), "task-002", "x", 5).unwrap();
+        fs::create_dir(runs.path().join("not-a-task")).unwrap();
+        assert_eq!(task_ids(runs.path()).unwrap(), ["task-001", "task-002"]);
+
+        assert!(store.failures().unwrap().is_empty());
+        store.save_failure_log(1, Role::Architect, "boom").unwrap();
+        store.save_failure_log(2, Role::Tester, "boom").unwrap();
+        store.save_failure_log(1, Role::Architect, "again").unwrap();
+        fs::write(store.dir().join("failures/notes.txt"), "").unwrap();
+        assert_eq!(
+            store.failures().unwrap(),
+            [
+                (1, Role::Architect),
+                (1, Role::Architect),
+                (2, Role::Tester)
+            ]
         );
     }
 
