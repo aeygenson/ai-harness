@@ -22,6 +22,15 @@
 //! private temporary folder outside the project, deleted after the role, and
 //! Codex reads them through `harness mcp-exec` / `harness print-secret` (see
 //! `launcher`).
+//!
+//! Plugins (`[plugins.<name>] agent = "codex"`): before a role, only that
+//! role's plugin folders are copied into Codex's plugin cache
+//! (`plugins/cache/harness/<name>/local/` in `CODEX_HOME`) and switched on with
+//! `-c plugins={"<name>@harness"={enabled=true}}`. The `plugins` feature is on
+//! only for roles with plugins, `hooks` only if a plugin may have them; remote
+//! plugins and apps stay off. Codex's own bundled skills (one of them installs
+//! skills from GitHub) are always off, and the `skills` folder older runs left
+//! in `CODEX_HOME` is removed.
 
 use std::collections::HashMap;
 use std::fs;
@@ -33,6 +42,7 @@ use std::time::Duration;
 use harness_core::agent::{AgentOutcome, AgentRunner, RoleJob};
 use harness_core::handoff::Role;
 use harness_core::mcp::McpServer;
+use harness_core::plugins::Plugin;
 
 use crate::credentials::Secret;
 use crate::launcher;
@@ -41,6 +51,15 @@ use crate::process::{self, failed};
 /// Where the agent's own settings live inside the project (ignored by git).
 pub const CONFIG_DIR: &str = ".harness/agents/codex";
 const AUTH_FILE: &str = "auth.json";
+/// Codex's plugin folder inside `CODEX_HOME`; cleared before and after each role.
+const PLUGINS_DIR: &str = "plugins";
+/// Codex's own skills folder inside `CODEX_HOME`. Older runs left the bundled
+/// skills there; the harness gives skills through the prompt, so it is cleared too.
+const SKILLS_DIR: &str = "skills";
+/// The marketplace name the harness's plugins are filed under.
+const MARKETPLACE: &str = "harness";
+/// The version folder Codex prefers over any other.
+const PLUGIN_VERSION: &str = "local";
 
 /// Codex features that reach outside the project or add tools we did not
 /// choose. Written as `-c features.<name>=false`: an unknown name is only a
@@ -87,6 +106,7 @@ pub struct Codex {
     auth_dir: PathBuf,
     models: HashMap<Role, String>,
     mcp: HashMap<Role, Vec<McpServer>>,
+    plugins: HashMap<Role, Vec<Plugin>>,
     /// The `harness` program, which starts MCP servers and hands over keys.
     launcher: PathBuf,
     timeout: Duration,
@@ -100,6 +120,7 @@ impl Codex {
             auth_dir: auth_dir.into(),
             models: HashMap::new(),
             mcp: HashMap::new(),
+            plugins: HashMap::new(),
             launcher: PathBuf::from("harness"),
             timeout: Duration::from_secs(30 * 60),
         }
@@ -134,6 +155,12 @@ impl Codex {
         self
     }
 
+    /// The plugins this role gets (from harness.toml).
+    pub fn with_plugins(mut self, role: Role, plugins: Vec<Plugin>) -> Self {
+        self.plugins.insert(role, plugins);
+        self
+    }
+
     /// The `harness` program to use for `mcp-exec` and `print-secret`; the
     /// command line passes its own path.
     pub fn with_launcher(mut self, launcher: impl Into<PathBuf>) -> Self {
@@ -163,8 +190,24 @@ impl Codex {
                     needs_network(job.role)
                 ),
             ]);
+        let plugins = self.role_plugins(job.role);
+        let hooks = plugins.iter().any(|p| p.allow_hooks);
         for feature in DISABLED_FEATURES {
-            command.args(["-c", &format!("features.{feature}=false")]);
+            let on = match *feature {
+                "plugins" => !plugins.is_empty(),
+                "hooks" => hooks,
+                _ => false,
+            };
+            command.args(["-c", &format!("features.{feature}={on}")]);
+        }
+        // Bundled skills such as `skill-installer` are not the project's choice.
+        command.args(["-c", "skills.bundled.enabled=false"]);
+        if !plugins.is_empty() {
+            let enabled: Vec<String> = plugins
+                .iter()
+                .map(|p| format!("\"{}@{MARKETPLACE}\"={{enabled=true}}", p.name))
+                .collect();
+            command.args(["-c", &format!("plugins={{{}}}", enabled.join(","))]);
         }
         if let Provider::DeepSeek(_) = &self.provider {
             let key_file = secrets_dir.join(DEEPSEEK_KEY_FILE);
@@ -221,6 +264,25 @@ impl Codex {
 
     fn servers(&self, role: Role) -> &[McpServer] {
         self.mcp.get(&role).map_or(&[], Vec::as_slice)
+    }
+
+    fn role_plugins(&self, role: Role) -> &[Plugin] {
+        self.plugins.get(&role).map_or(&[], Vec::as_slice)
+    }
+
+    /// Leaves in Codex's plugin cache exactly this role's plugins.
+    fn put_plugins(&self, job: &RoleJob) -> io::Result<()> {
+        remove_extras(job);
+        let cache = job
+            .project_dir
+            .join(CONFIG_DIR)
+            .join(PLUGINS_DIR)
+            .join("cache")
+            .join(MARKETPLACE);
+        for plugin in self.role_plugins(job.role) {
+            copy_dir(&plugin.path, &cache.join(&plugin.name).join(PLUGIN_VERSION))?;
+        }
+        Ok(())
     }
 
     /// A private temporary folder outside the project with the role's secrets:
@@ -296,7 +358,12 @@ impl AgentRunner for Codex {
         } else {
             fs::create_dir_all(job.project_dir.join(CONFIG_DIR))
         };
+        let prepared = prepared.and_then(|()| self.put_plugins(job));
         if let Err(e) = prepared {
+            if chatgpt {
+                self.take_auth_back(job);
+            }
+            remove_extras(job);
             return failed(log, format!("cannot prepare {CONFIG_DIR}: {e}"));
         }
         let secrets = match self.write_secrets(job.role) {
@@ -305,6 +372,7 @@ impl AgentRunner for Codex {
                 if chatgpt {
                     self.take_auth_back(job);
                 }
+                remove_extras(job);
                 return failed(log, format!("cannot write the role's secrets: {e}"));
             }
         };
@@ -314,6 +382,7 @@ impl AgentRunner for Codex {
         if chatgpt {
             self.take_auth_back(job);
         }
+        remove_extras(job);
         let deepseek_key = match &self.provider {
             Provider::DeepSeek(key) => Some(key.expose()),
             Provider::ChatGpt => None,
@@ -347,6 +416,37 @@ impl AgentRunner for Codex {
             message,
         }
     }
+}
+
+/// Removes Codex's plugin and skills folders, so the next role starts
+/// without plugins or skills left by an earlier run.
+fn remove_extras(job: &RoleJob) {
+    let home = job.project_dir.join(CONFIG_DIR);
+    for dir in [PLUGINS_DIR, SKILLS_DIR] {
+        let _ = fs::remove_dir_all(home.join(dir));
+    }
+}
+
+/// Copies a plugin folder. Symbolic links are refused: one could point
+/// outside the project.
+fn copy_dir(from: &Path, to: &Path) -> io::Result<()> {
+    fs::create_dir_all(to)?;
+    for entry in fs::read_dir(from)? {
+        let entry = entry?;
+        let kind = entry.file_type()?;
+        let target = to.join(entry.file_name());
+        if kind.is_dir() {
+            copy_dir(&entry.path(), &target)?;
+        } else if kind.is_file() {
+            fs::copy(entry.path(), target)?;
+        } else {
+            return Err(io::Error::other(format!(
+                "{} is a link or a special file; plugins may hold only files and folders",
+                entry.path().display()
+            )));
+        }
+    }
+    Ok(())
 }
 
 /// A string or a list of strings in TOML syntax. JSON writes them the same way.
@@ -443,6 +543,7 @@ mod tests {
             "approval_policy=\"never\"",
             "features.plugins=false",
             "features.hooks=false",
+            "skills.bundled.enabled=false",
         ] {
             assert!(args.contains(&flag.to_string()), "missing {flag}: {args:?}");
         }
@@ -499,6 +600,90 @@ mod tests {
 
     fn args_of(codex: &Codex, role: Role) -> Vec<String> {
         args(&codex.command(&job(role), Path::new("/secrets")))
+    }
+
+    #[test]
+    fn a_role_gets_only_its_plugins_and_hooks_stay_off_unless_allowed() {
+        let plugin = |name: &str, allow_hooks| Plugin {
+            name: name.into(),
+            path: PathBuf::from(format!("/work/app/.harness/plugins/{name}")),
+            allow_hooks,
+        };
+        let codex = Codex::new("/creds/codex")
+            .with_plugins(Role::Security, vec![plugin("review", false)])
+            .with_plugins(
+                Role::Developer,
+                vec![plugin("fmt", true), plugin("lint", false)],
+            );
+
+        let security = args_of(&codex, Role::Security);
+        assert!(security.contains(&"features.plugins=true".to_string()));
+        assert!(security.contains(&"features.hooks=false".to_string()));
+        assert!(security.contains(&r#"plugins={"review@harness"={enabled=true}}"#.to_string()));
+        // Plugins never bring remote plugins or ChatGPT apps.
+        assert!(security.contains(&"features.remote_plugin=false".to_string()));
+        assert!(security.contains(&"features.apps=false".to_string()));
+
+        let developer = args_of(&codex, Role::Developer);
+        assert!(developer.contains(&"features.hooks=true".to_string()));
+        assert!(developer.contains(
+            &r#"plugins={"fmt@harness"={enabled=true},"lint@harness"={enabled=true}}"#.to_string()
+        ));
+
+        let tester = args_of(&codex, Role::Tester);
+        assert!(tester.contains(&"features.plugins=false".to_string()));
+        assert!(!tester.iter().any(|a| a.starts_with("plugins=")));
+    }
+
+    #[test]
+    fn plugin_folders_are_copied_for_the_role_and_removed_after() {
+        let project = tempfile::tempdir().unwrap();
+        let source = project.path().join(".harness/plugins/review");
+        fs::create_dir_all(source.join(".codex-plugin")).unwrap();
+        fs::write(source.join(".codex-plugin/plugin.json"), "{}").unwrap();
+        fs::create_dir_all(source.join("skills/audit")).unwrap();
+        fs::write(source.join("skills/audit/SKILL.md"), "audit").unwrap();
+        let codex = Codex::new("/creds/codex").with_plugins(
+            Role::Security,
+            vec![Plugin {
+                name: "review".into(),
+                path: source.clone(),
+                allow_hooks: false,
+            }],
+        );
+        let job = RoleJob {
+            project_dir: project.path().to_path_buf(),
+            ..job(Role::Security)
+        };
+        let plugins = project.path().join(CONFIG_DIR).join(PLUGINS_DIR);
+        // Something left from an earlier role or run is cleared.
+        fs::create_dir_all(plugins.join("cache/harness/old/local")).unwrap();
+        let skills = project.path().join(CONFIG_DIR).join(SKILLS_DIR);
+        fs::create_dir_all(skills.join(".system/skill-installer")).unwrap();
+
+        codex.put_plugins(&job).unwrap();
+        let copied = plugins.join("cache/harness/review/local");
+        assert_eq!(
+            fs::read_to_string(copied.join("skills/audit/SKILL.md")).unwrap(),
+            "audit"
+        );
+        assert!(!plugins.join("cache/harness/old").exists());
+        assert!(!skills.exists());
+
+        remove_extras(&job);
+        assert!(!plugins.exists());
+        assert!(source.join("skills/audit/SKILL.md").exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_plugin_with_a_link_is_not_copied() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = dir.path().join("plugin");
+        fs::create_dir_all(&source).unwrap();
+        std::os::unix::fs::symlink("/etc/passwd", source.join("passwd")).unwrap();
+        let error = copy_dir(&source, &dir.path().join("copy")).unwrap_err();
+        assert!(error.to_string().contains("link"), "{error}");
     }
 
     #[test]

@@ -41,14 +41,17 @@ agent_timeout_minutes = 30
 #   [roles.developer]
 #   mcp = ["context7"]
 #
-# Plugins (Claude Code only for now): a plugin folder is kept in the project,
+# Plugins (Claude Code and Codex): a plugin folder is kept in the project,
 # by default in .harness/plugins/<name>/, and listed in the roles that need it.
+# `agent` says whose plugin it is: "claude" (.claude-plugin/plugin.json) or
+# "codex" (.codex-plugin/plugin.json, also for "codex+deepseek" roles).
 #   [plugins.rust-review]
 #   agent = "claude"
 #   [roles.security]
 #   plugins = ["rust-review"]
 # A plugin with hooks or its own MCP servers is refused unless its settings
-# say `allow_hooks = true` or `allow_mcp = true`.
+# say `allow_hooks = true` or `allow_mcp = true`. Codex plugins with apps
+# (ChatGPT connectors) are refused.
 #
 # Skills are files in .harness/skills/<name>.md that start with
 #   ---
@@ -113,7 +116,7 @@ pub struct RoleConfig {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PluginConfig {
-    /// Which agent can load it; only "claude" for now.
+    /// Which agent can load it: "claude" or "codex".
     pub agent: String,
     /// The folder, relative to the project; `.harness/plugins/<name>` if not set.
     #[serde(default)]
