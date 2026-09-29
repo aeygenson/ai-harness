@@ -160,6 +160,8 @@ pub enum SkillSetting {
     OnDemand,
     /// In `always_skills`: always in the prompt.
     Always,
+    /// `<plugin>:<skill>`, from a plugin in the role's `plugins`.
+    Plugin,
     /// Reported in `skills_used`, but not given to this role (now).
     NotConfigured,
 }
@@ -170,6 +172,7 @@ pub struct SkillUse {
     pub skill: String,
     pub setting: SkillSetting,
     /// In how many handoffs of this role the skill was listed in `skills_used`.
+    /// The role reports this itself, so it is what the role says it used.
     pub used: usize,
 }
 
@@ -367,12 +370,13 @@ impl Stats {
         if self.skills.is_empty() {
             md.push_str("No skills configured or used.\n");
         } else {
-            md.push_str("| Role | Skill | Setting | Used in handoffs |\n");
+            md.push_str("| Role | Skill | Setting | Listed in skills_used |\n");
             md.push_str("|---|---|---|---|\n");
             for s in &self.skills {
                 let setting = match s.setting {
                     SkillSetting::OnDemand => "skills",
                     SkillSetting::Always => "always_skills",
+                    SkillSetting::Plugin => "plugin",
                     SkillSetting::NotConfigured => "not configured",
                 };
                 let _ = writeln!(
@@ -422,9 +426,19 @@ fn skill_uses(config: &Config, used: &BTreeMap<(Role, String), usize>) -> Vec<Sk
             rows.insert((role, skill.clone()), SkillSetting::Always);
         }
     }
-    for key in used.keys() {
-        rows.entry(key.clone())
-            .or_insert(SkillSetting::NotConfigured);
+    for (role, skill) in used.keys() {
+        let from_plugin = skill.split_once(':').is_some_and(|(plugin, _)| {
+            config
+                .roles
+                .get(role)
+                .is_some_and(|r| r.plugins.iter().any(|p| p == plugin))
+        });
+        rows.entry((*role, skill.clone()))
+            .or_insert(if from_plugin {
+                SkillSetting::Plugin
+            } else {
+                SkillSetting::NotConfigured
+            });
     }
     rows.into_iter()
         .map(|((role, skill), setting)| {
@@ -583,7 +597,7 @@ mod tests {
             Verdict::Approved,
             NextStep::To(Role::Tester),
         );
-        developer.skills_used = vec!["surprise".into()];
+        developer.skills_used = vec!["surprise".into(), "review:check".into()];
         let mut tester = handoff(
             Role::Tester,
             Verdict::Rejected,
@@ -595,7 +609,9 @@ mod tests {
             issue(Severity::High, "panics  on EMPTY input"),
             issue(Severity::Low, "typo in README"),
         ];
-        let tester_ok = handoff(Role::Tester, Verdict::Approved, NextStep::Done);
+        let mut tester_ok = handoff(Role::Tester, Verdict::Approved, NextStep::Done);
+        // The tester has no `review` plugin, but says it used its skill.
+        tester_ok.skills_used = vec!["review:check".into()];
 
         let mut first = task(
             "task-001",
@@ -621,7 +637,8 @@ mod tests {
     fn config() -> Config {
         Config::parse(
             "[roles.architect]\nagent = \"claude\"\nskills = [\"rust-design\", \"never\"]\n\
-             [roles.developer]\nagent = \"codex\"\nalways_skills = [\"errors\"]\n",
+             [roles.developer]\nagent = \"codex\"\nalways_skills = [\"errors\"]\n\
+             plugins = [\"review\"]\n[plugins.review]\nagent = \"codex\"\n",
         )
         .unwrap()
     }
@@ -711,6 +728,14 @@ mod tests {
             row(Role::Developer, "surprise"),
             Some((SkillSetting::NotConfigured, 1))
         );
+        assert_eq!(
+            row(Role::Developer, "review:check"),
+            Some((SkillSetting::Plugin, 1))
+        );
+        assert_eq!(
+            row(Role::Tester, "review:check"),
+            Some((SkillSetting::NotConfigured, 1))
+        );
         let unused: Vec<&str> = stats.unused_skills().map(|s| s.skill.as_str()).collect();
         assert_eq!(unused, ["never", "errors"]);
     }
@@ -725,6 +750,8 @@ mod tests {
             "- tester -> developer: 2 times",
             "4 in total: critical 1, high 1, medium 1, low 1.",
             "- 3 times, critical: Panics on empty input. (by tester, security; in task-001, task-002)",
+            "| Role | Skill | Setting | Listed in skills_used |",
+            "| developer | review:check | plugin | 1 |",
             "| developer | surprise | not configured | 1 |",
             "Configured but never used: never (architect), errors (developer).",
         ] {
