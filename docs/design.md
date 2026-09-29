@@ -174,7 +174,7 @@ always_skills = ["idiomatic-rust"]        # файл целиком вставл
   странное (разрешены только `a-z`, `0-9` и `-`), задача не начинается и Лиза сразу
   видит, какая роль и какой файл виноваты.
 
-Дальше в этапе 6: MCP-серверы и их ключи для каждой роли (6b), плагины (6c).
+MCP-серверы для каждой роли — раздел 5.5 (этап 6b). Дальше в этапе 6: плагины (6c).
 Права ролей и свой `prompt.md` роли пока остаются в коде (раздел 3).
 
 ---
@@ -232,18 +232,8 @@ always_skills = ["idiomatic-rust"]        # файл целиком вставл
    (разрешённые инструменты, MCP-серверы, плагины) харнесс каждый раз пишет заново
    из `harness.toml`. Ручные изменения там не живут. По умолчанию списки пустые.
 
-Пример в `harness.toml`:
-
-```toml
-[agents.claude]
-auth = "shared"                # общий вход из ~/.harness/credentials, см. ниже
-mcp_servers = []               # по умолчанию никаких
-plugins = []
-
-[agents."codex+deepseek"]
-auth = "api_key"
-api_key_env = "DEEPSEEK_API_KEY"   # единственный ключ, который передаётся агенту
-```
+Что роль может использовать сверх своих прав (навыки, MCP-серверы), задаётся у
+самой роли в `harness.toml`: навыки — раздел 4, MCP-серверы — раздел 5.5.
 
 **Тонкость: вход по подписке — это тоже сохранённый ключ.** После входа по подписке
 агент хранит токен в файле или передаёт его через переменную окружения:
@@ -253,7 +243,7 @@ api_key_env = "DEEPSEEK_API_KEY"   # единственный ключ, кото
 | Codex CLI | `auth.json` в папке настроек (`~/.codex/auth.json`) | скопировать `auth.json` в `CODEX_HOME` проекта |
 | Claude Code | на Linux `~/.claude/.credentials.json`, на macOS — в Keychain | долгоживущий токен из `claude setup-token` → переменная `CLAUDE_CODE_OAUTH_TOKEN` (или файл `.credentials.json` в `CLAUDE_CONFIG_DIR`) |
 | Antigravity CLI | несколько служебных файлов в `~/.gemini/antigravity-cli/` и `~/.gemini/config/` (одного файла с токеном нет; проверено на agy 1.2.12) | скопировать всю сохранённую папку входа (без логов и истории) во временный `HOME` |
-| DeepSeek (через Codex) | просто ключ API | `harness login deepseek` → `~/.harness/credentials/deepseek/`; агенту — переменная `DEEPSEEK_API_KEY`, только ролям на DeepSeek |
+| DeepSeek (через Codex) | просто ключ API | `harness login deepseek` → `~/.harness/credentials/deepseek/`; Codex читает его командой `harness print-secret <файл>` из закрытой временной папки, только у ролей на DeepSeek |
 
 Точные имена файлов и флаги проверим на практике при написании каждого адаптера.
 
@@ -347,9 +337,9 @@ agent = "codex"
 
 | Что | Как |
 |-----|-----|
-| Провайдер | флаги `-c model_provider="deepseek"`, `model_providers.deepseek.base_url="https://api.deepseek.com/"`, `wire_api="responses"`, `env_key="DEEPSEEK_API_KEY"`, `forced_login_method="api"`, `web_search="disabled"` |
+| Провайдер | флаги `-c model_provider="deepseek"`, `model_providers.deepseek.base_url="https://api.deepseek.com/"`, `wire_api="responses"`, `auth={command=<harness>, args=["print-secret", <файл>]}`, `forced_login_method="api"`, `web_search="disabled"` |
 | Модель | `model` в `harness.toml`: `deepseek-flash` (по умолчанию) или `deepseek-v4-pro` |
-| Ключ | `harness login deepseek` сохраняет его, как токен Claude: `~/.harness/credentials/deepseek/` с правами 600, вне проектов и git; ввод не виден на экране. Переменная `DEEPSEEK_API_KEY` в оболочке, если задана, важнее сохранённого. Харнесс передаёт ключ лишь ролям на DeepSeek, в аргументы и логи он не попадает. `shell_environment_policy.ignore_default_excludes=false`: команды, которые запускает агент, не видят переменных с KEY/SECRET/TOKEN в имени |
+| Ключ | `harness login deepseek` сохраняет его, как токен Claude: `~/.harness/credentials/deepseek/` с правами 600, вне проектов и git; ввод не виден на экране. Переменная `DEEPSEEK_API_KEY` в оболочке, если задана, важнее сохранённого. Харнесс передаёт ключ лишь ролям на DeepSeek: в закрытом временном файле вне проекта (права 600, удаляется после роли), Codex берёт его командой `harness print-secret`. В окружение Codex ключ не кладётся: живой тест показал, что `shell_environment_policy` не прячет переменные от команд агента. В аргументы и логи ключ не попадает |
 | Вход ChatGPT | не нужен и не копируется: `auth.json` для этих ролей не трогается |
 
 Codex предупреждает «Model metadata for `deepseek-flash` not found» и берёт общие
@@ -376,6 +366,49 @@ Codex предупреждает «Model metadata for `deepseek-flash` not found
 
 Что ещё не закрыто: запрет чтения интернета (по умолчанию `agy` спрашивает, а без окна
 отказывает, но с `--dangerously-skip-permissions` у Developer и Tester, вероятно, разрешено).
+
+### 5.5. MCP-серверы для ролей ✅ (этап 6b)
+
+MCP-сервер даёт агенту новые инструменты, например поиск по документации. Каждый
+сервер описывается в `harness.toml` один раз, а роль перечисляет нужные ей. Агент
+получает **только серверы своей роли**; серверы из личных настроек Лизы не видит никто.
+
+```toml
+[mcp.context7]
+command = "npx"
+args = ["-y", "@upstash/context7-mcp"]
+env = { CONTEXT7_API_KEY = "secret:context7" }
+
+[roles.developer]
+agent = "codex"
+mcp = ["context7"]
+```
+
+**Ключи серверов.** `"secret:context7"` значит: значение — это секрет, который
+сохранила команда `harness secret set context7` (скрытый ввод, файл
+`~/.harness/credentials/secrets/context7`, права 600). В проекте и в git только имя.
+`harness secret list` показывает имена сохранённых секретов, но не значения.
+
+**Проверка до запуска.** Неизвестный сервер, несохранённый секрет, странное имя или
+переменная, которую используют сами агенты (`PATH`, `HOME`, `OPENAI_*`, `CLAUDE_*` и т.п.),
+останавливают `harness run` сразу, с понятным сообщением.
+
+Как каждый агент получает серверы:
+
+| Агент | Как передаются серверы | Где ключи |
+|-------|------------------------|-----------|
+| Claude Code | `--strict-mcp-config --mcp-config <файл>`; разрешения `mcp__<имя>` добавляются роли | во временном файле вне проекта (права 600), удаляется после роли |
+| Codex (и codex+deepseek) | `-c mcp_servers.<имя>.command=<harness>`, `args=["mcp-exec", <файл>]`: сервер запускает сама программа `harness` | в закрытом временном файле вне проекта (права 600), удаляется после роли. В окружении Codex ключей нет: его наследуют команды агента, а `shell_environment_policy` их не прячет (проверено живым тестом) |
+| Antigravity | `~/.gemini/config/mcp_config.json` во временном `HOME` (этот файл пишет `agy mcp add`, проверено на agy 1.2.12) | в том же файле, во временной папке, доступной только Лизе; удаляется после роли |
+
+**Ограничение.** Роль, которая сама запускает команды (Developer, Tester), при желании
+может найти ключ своего сервера: он в памяти процесса агента на той же машине. Ключи не
+попадают в git и handoff; если инструмент или агент напечатает ключ, харнесс заменит его
+на `***` в `agent.log` (как и ключ DeepSeek и токен Claude). Полную защиту даст песочница
+Docker (позже).
+
+Пока поддерживаются серверы-программы (`stdio`). HTTP-серверы (`url`) и плагины — дальше
+в этапе 6.
 
 ---
 

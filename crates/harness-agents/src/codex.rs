@@ -13,10 +13,15 @@
 //!   check after the role is what enforces "Architect writes only docs/".
 //!
 //! DeepSeek (`agent = "codex+deepseek"`): the same Codex, with DeepSeek as its
-//! model provider. DeepSeek speaks the Responses API that Codex uses. The API
-//! key comes only from the `DEEPSEEK_API_KEY` variable in Lisa's shell and is
-//! passed to this agent alone; it is never written to a file. No ChatGPT
-//! login is copied in for these roles.
+//! model provider. DeepSeek speaks the Responses API that Codex uses. No
+//! ChatGPT login is copied in for these roles.
+//!
+//! Secrets (the DeepSeek key, MCP server keys) are never in Codex's own
+//! environment: commands the agent runs inherit it, and a live run showed that
+//! `shell_environment_policy` does not keep them out. They go into files in a
+//! private temporary folder outside the project, deleted after the role, and
+//! Codex reads them through `harness mcp-exec` / `harness print-secret` (see
+//! `launcher`).
 
 use std::collections::HashMap;
 use std::fs;
@@ -27,8 +32,10 @@ use std::time::Duration;
 
 use harness_core::agent::{AgentOutcome, AgentRunner, RoleJob};
 use harness_core::handoff::Role;
+use harness_core::mcp::McpServer;
 
 use crate::credentials::Secret;
+use crate::launcher;
 use crate::process::{self, failed};
 
 /// Where the agent's own settings live inside the project (ignored by git).
@@ -56,6 +63,8 @@ const DISABLED_FEATURES: &[&str] = &[
 
 /// The variable in Lisa's shell that holds the DeepSeek API key.
 pub const DEEPSEEK_KEY_ENV: &str = "DEEPSEEK_API_KEY";
+/// The file with the DeepSeek key in the role's secrets folder.
+const DEEPSEEK_KEY_FILE: &str = "deepseek-key";
 /// DeepSeek's endpoint for Codex; Codex adds `responses` to it.
 const DEEPSEEK_URL: &str = "https://api.deepseek.com/";
 /// Used when harness.toml sets no model for the role.
@@ -77,6 +86,9 @@ pub struct Codex {
     /// `~/.harness/credentials/codex`: holds the saved `auth.json`.
     auth_dir: PathBuf,
     models: HashMap<Role, String>,
+    mcp: HashMap<Role, Vec<McpServer>>,
+    /// The `harness` program, which starts MCP servers and hands over keys.
+    launcher: PathBuf,
     timeout: Duration,
 }
 
@@ -87,6 +99,8 @@ impl Codex {
             provider: Provider::ChatGpt,
             auth_dir: auth_dir.into(),
             models: HashMap::new(),
+            mcp: HashMap::new(),
+            launcher: PathBuf::from("harness"),
             timeout: Duration::from_secs(30 * 60),
         }
     }
@@ -114,8 +128,22 @@ impl Codex {
         self
     }
 
-    /// Builds the full command for one job, without running it.
-    pub fn command(&self, job: &RoleJob) -> Command {
+    /// The MCP servers this role gets (from harness.toml).
+    pub fn with_mcp_servers(mut self, role: Role, servers: Vec<McpServer>) -> Self {
+        self.mcp.insert(role, servers);
+        self
+    }
+
+    /// The `harness` program to use for `mcp-exec` and `print-secret`; the
+    /// command line passes its own path.
+    pub fn with_launcher(mut self, launcher: impl Into<PathBuf>) -> Self {
+        self.launcher = launcher.into();
+        self
+    }
+
+    /// Builds the full command for one job, without running it. `secrets_dir`
+    /// is the private folder `write_secrets` filled.
+    pub fn command(&self, job: &RoleJob, secrets_dir: &Path) -> Command {
         let mut command = process::base_command(&self.program, &job.project_dir);
         command
             .env("CODEX_HOME", job.project_dir.join(CONFIG_DIR))
@@ -138,29 +166,76 @@ impl Codex {
         for feature in DISABLED_FEATURES {
             command.args(["-c", &format!("features.{feature}=false")]);
         }
-        if let Provider::DeepSeek(key) = &self.provider {
-            command.env(DEEPSEEK_KEY_ENV, key.expose());
+        if let Provider::DeepSeek(_) = &self.provider {
+            let key_file = secrets_dir.join(DEEPSEEK_KEY_FILE);
             for setting in [
                 "model_provider=\"deepseek\"".to_string(),
                 "model_providers.deepseek.name=\"DeepSeek\"".to_string(),
                 format!("model_providers.deepseek.base_url=\"{DEEPSEEK_URL}\""),
                 "model_providers.deepseek.wire_api=\"responses\"".to_string(),
-                format!("model_providers.deepseek.env_key=\"{DEEPSEEK_KEY_ENV}\""),
+                // Codex runs this command to get the key.
+                format!(
+                    "model_providers.deepseek.auth={{command={},args={}}}",
+                    toml_value(self.launcher.to_string_lossy().as_ref()),
+                    toml_value(vec![
+                        launcher::PRINT_SECRET.to_string(),
+                        key_file.to_string_lossy().into_owned(),
+                    ])
+                ),
                 "forced_login_method=\"api\"".to_string(),
                 // DeepSeek has no web search tool for Codex.
                 "web_search=\"disabled\"".to_string(),
-                // Commands the agent runs do not get variables named like
-                // *KEY*, *SECRET* or *TOKEN*, so the key stays with Codex.
-                "shell_environment_policy.ignore_default_excludes=false".to_string(),
             ] {
                 command.args(["-c", &setting]);
             }
         }
+        self.add_mcp_servers(&mut command, job.role, secrets_dir);
         if let Some(model) = self.model(job.role) {
             command.args(["--model", model]);
         }
         command.arg("-");
         command
+    }
+
+    /// Each server as `-c mcp_servers.<name>.*` settings that start it through
+    /// `harness mcp-exec <file>`; only the file knows the server's secrets.
+    fn add_mcp_servers(&self, command: &mut Command, role: Role, secrets_dir: &Path) {
+        for server in self.servers(role) {
+            let key = format!("mcp_servers.{}", server.name);
+            let spec = secrets_dir.join(format!("{}.json", server.name));
+            let args = vec![
+                launcher::MCP_EXEC.to_string(),
+                spec.to_string_lossy().into_owned(),
+            ];
+            for setting in [
+                format!(
+                    "{key}.command={}",
+                    toml_value(self.launcher.to_string_lossy().as_ref())
+                ),
+                format!("{key}.args={}", toml_value(args)),
+            ] {
+                command.args(["-c", &setting]);
+            }
+        }
+    }
+
+    fn servers(&self, role: Role) -> &[McpServer] {
+        self.mcp.get(&role).map_or(&[], Vec::as_slice)
+    }
+
+    /// A private temporary folder outside the project with the role's secrets:
+    /// one file per MCP server and the DeepSeek key. Deleted when dropped.
+    fn write_secrets(&self, role: Role) -> io::Result<tempfile::TempDir> {
+        let dir = tempfile::Builder::new()
+            .prefix("harness-codex-")
+            .tempdir()?;
+        for server in self.servers(role) {
+            launcher::write_server(dir.path(), server)?;
+        }
+        if let Provider::DeepSeek(key) = &self.provider {
+            launcher::write_secret(dir.path(), DEEPSEEK_KEY_FILE, key)?;
+        }
+        Ok(dir)
     }
 
     /// The role's model from harness.toml; DeepSeek needs one, so it has a default.
@@ -224,10 +299,32 @@ impl AgentRunner for Codex {
         if let Err(e) = prepared {
             return failed(log, format!("cannot prepare {CONFIG_DIR}: {e}"));
         }
-        let result = process::run(self.command(job), &job.prompt, self.timeout).await;
+        let secrets = match self.write_secrets(job.role) {
+            Ok(dir) => dir,
+            Err(e) => {
+                if chatgpt {
+                    self.take_auth_back(job);
+                }
+                return failed(log, format!("cannot write the role's secrets: {e}"));
+            }
+        };
+        let command = self.command(job, secrets.path());
+        let result = process::run(command, &job.prompt, self.timeout).await;
+        drop(secrets);
         if chatgpt {
             self.take_auth_back(job);
         }
+        let deepseek_key = match &self.provider {
+            Provider::DeepSeek(key) => Some(key.expose()),
+            Provider::ChatGpt => None,
+        };
+        let result = process::hide_secrets(
+            result,
+            self.servers(job.role)
+                .iter()
+                .flat_map(|server| server.env.values().map(|v| v.expose()))
+                .chain(deepseek_key),
+        );
         let finished = match result {
             Ok(finished) => finished,
             Err(message) => return failed(log, message),
@@ -250,6 +347,11 @@ impl AgentRunner for Codex {
             message,
         }
     }
+}
+
+/// A string or a list of strings in TOML syntax. JSON writes them the same way.
+fn toml_value(value: impl Into<serde_json::Value>) -> String {
+    value.into().to_string()
 }
 
 /// Roles that run commands such as `cargo test` or `cargo audit` may need to
@@ -329,7 +431,8 @@ mod tests {
 
     #[test]
     fn codex_runs_isolated_in_the_project_sandbox() {
-        let command = Codex::new("/creds/codex").command(&job(Role::Developer));
+        let command =
+            Codex::new("/creds/codex").command(&job(Role::Developer), Path::new("/secrets"));
         let args = args(&command);
         for flag in [
             "exec",
@@ -353,17 +456,63 @@ mod tests {
     }
 
     #[test]
+    fn mcp_servers_go_to_their_role_and_secrets_stay_out_of_the_arguments() {
+        use harness_core::mcp::McpServer;
+        use std::collections::BTreeMap;
+
+        let server = McpServer {
+            name: "context7".into(),
+            command: "npx".into(),
+            args: vec!["-y".into(), "@upstash/context7-mcp".into()],
+            env: BTreeMap::from([("CONTEXT7_API_KEY".into(), Secret::new("ctx-secret"))]),
+        };
+        let codex = Codex::new("/creds")
+            .with_launcher("/bin/harness")
+            .with_mcp_servers(Role::Developer, vec![server]);
+        let command = codex.command(&job(Role::Developer), Path::new("/secrets"));
+        let args = args(&command);
+        for setting in [
+            r#"mcp_servers.context7.command="/bin/harness""#,
+            r#"mcp_servers.context7.args=["mcp-exec","/secrets/context7.json"]"#,
+        ] {
+            assert!(
+                args.contains(&setting.to_string()),
+                "missing {setting}: {args:?}"
+            );
+        }
+        // Neither the arguments nor Codex's own environment hold the secret:
+        // the agent's commands inherit that environment.
+        assert!(!args.iter().any(|a| a.contains("ctx-secret")));
+        assert!(!command.get_envs().any(|(k, _)| k == "CONTEXT7_API_KEY"));
+
+        // The file mcp-exec reads is written into the role's secrets folder.
+        let dir = codex.write_secrets(Role::Developer).unwrap();
+        let spec = fs::read_to_string(dir.path().join("context7.json")).unwrap();
+        assert!(spec.contains("ctx-secret"), "{spec}");
+        let path = dir.path().to_path_buf();
+        drop(dir);
+        assert!(!path.exists());
+
+        let tester = args_of(&codex, Role::Tester);
+        assert!(!tester.iter().any(|a| a.contains("mcp_servers")));
+    }
+
+    fn args_of(codex: &Codex, role: Role) -> Vec<String> {
+        args(&codex.command(&job(role), Path::new("/secrets")))
+    }
+
+    #[test]
     fn only_command_running_roles_get_the_network() {
         let codex = Codex::new("/creds/codex");
-        let architect = args(&codex.command(&job(Role::Architect)));
+        let architect = args(&codex.command(&job(Role::Architect), Path::new("/secrets")));
         assert!(architect.contains(&"sandbox_workspace_write.network_access=false".to_string()));
-        let developer = args(&codex.command(&job(Role::Developer)));
+        let developer = args(&codex.command(&job(Role::Developer), Path::new("/secrets")));
         assert!(developer.contains(&"sandbox_workspace_write.network_access=true".to_string()));
     }
 
     #[test]
     fn no_api_keys_in_the_environment() {
-        let command = Codex::new("/creds/codex").command(&job(Role::Tester));
+        let command = Codex::new("/creds/codex").command(&job(Role::Tester), Path::new("/secrets"));
         for (name, _) in command.get_envs() {
             let name = name.to_string_lossy();
             assert!(
@@ -376,19 +525,26 @@ mod tests {
     #[test]
     fn the_model_is_set_per_role() {
         let codex = Codex::new("/creds").with_model(Role::Tester, "gpt-5-codex");
-        assert!(args(&codex.command(&job(Role::Tester))).contains(&"gpt-5-codex".to_string()));
-        assert!(!args(&codex.command(&job(Role::Architect))).contains(&"--model".to_string()));
+        assert!(
+            args(&codex.command(&job(Role::Tester), Path::new("/secrets")))
+                .contains(&"gpt-5-codex".to_string())
+        );
+        assert!(
+            !args(&codex.command(&job(Role::Architect), Path::new("/secrets")))
+                .contains(&"--model".to_string())
+        );
     }
 
     #[test]
     fn deepseek_gets_its_key_and_provider_but_no_chatgpt_login() {
-        let codex = Codex::deepseek(Secret::new("sk-test"));
-        let command = codex.command(&job(Role::Tester));
+        let codex =
+            Codex::deepseek(Secret::new("sk-test-0123456789")).with_launcher("/bin/harness");
+        let command = codex.command(&job(Role::Tester), Path::new("/secrets"));
         let args = args(&command);
         for setting in [
             "model_provider=\"deepseek\"",
             "model_providers.deepseek.wire_api=\"responses\"",
-            "model_providers.deepseek.env_key=\"DEEPSEEK_API_KEY\"",
+            r#"model_providers.deepseek.auth={command="/bin/harness",args=["print-secret","/secrets/deepseek-key"]}"#,
             DEEPSEEK_DEFAULT_MODEL,
         ] {
             assert!(
@@ -396,20 +552,20 @@ mod tests {
                 "missing {setting}: {args:?}"
             );
         }
-        // The key is only in the environment, never in the arguments.
+        // The key is neither in the arguments nor in Codex's environment.
         assert!(!args.iter().any(|a| a.contains("sk-test")));
-        let key = command
-            .get_envs()
-            .find(|(k, _)| *k == DEEPSEEK_KEY_ENV)
-            .and_then(|(_, v)| v)
-            .unwrap();
-        assert_eq!(key, "sk-test");
+        assert!(!command.get_envs().any(|(k, _)| k == DEEPSEEK_KEY_ENV));
         assert!(format!("{codex:?}").contains("Secret(***)"));
+        let dir = codex.write_secrets(Role::Tester).unwrap();
+        assert_eq!(
+            fs::read_to_string(dir.path().join("deepseek-key")).unwrap(),
+            "sk-test-0123456789"
+        );
     }
 
     #[test]
     fn chatgpt_codex_gets_no_deepseek_key() {
-        let command = Codex::new("/creds").command(&job(Role::Tester));
+        let command = Codex::new("/creds").command(&job(Role::Tester), Path::new("/secrets"));
         assert!(!command.get_envs().any(|(k, _)| k == DEEPSEEK_KEY_ENV));
         assert!(!args(&command).contains(&"model_provider=\"deepseek\"".to_string()));
     }

@@ -7,6 +7,8 @@
 //! harness login codex                  log in to Codex (ChatGPT subscription)
 //! harness login deepseek               save the DeepSeek API key
 //! harness login antigravity            log in to Antigravity CLI (Google account)
+//! harness secret set context7          save a secret an MCP server needs
+//! harness secret list                  show the names of the saved secrets
 //! harness task new task-001 "Build a CSV parser"
 //! harness run task-001                 run roles until someone must look
 //! harness approve task-001 --notes "Looks good"
@@ -22,10 +24,11 @@ use std::time::Duration;
 use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand};
 use harness_agents::credentials::{self, Secret};
-use harness_agents::{codex, Antigravity, AnyAgent, ClaudeCode, Codex, Team};
+use harness_agents::{codex, launcher, Antigravity, AnyAgent, ClaudeCode, Codex, Team};
 use harness_core::config::{Config, CONFIG_FILE, DEFAULT_CONFIG};
 use harness_core::git::{Repo, HARNESS_DIR};
 use harness_core::handoff::{NextStep, Role, Verdict};
+use harness_core::mcp::{self, McpServers};
 use harness_core::orchestrator::{self, StopReason};
 use harness_core::skills::Skills;
 use harness_core::store::TaskStore;
@@ -49,6 +52,11 @@ enum Command {
     Login {
         /// `claude`, `codex`, `deepseek` or `antigravity`.
         agent: String,
+    },
+    /// Secrets for MCP servers, such as API keys (outside the project, never in git).
+    Secret {
+        #[command(subcommand)]
+        command: SecretCommand,
     },
     /// Work with tasks.
     Task {
@@ -76,6 +84,20 @@ enum Command {
     },
     /// Show where a task is and its history.
     Status { task_id: String },
+    /// Used by Codex: start an MCP server from its private settings file.
+    #[command(name = "mcp-exec", hide = true)]
+    McpExec { file: PathBuf },
+    /// Used by Codex: print a key from its private file.
+    #[command(name = "print-secret", hide = true)]
+    PrintSecret { file: PathBuf },
+}
+
+#[derive(Subcommand)]
+enum SecretCommand {
+    /// Save a secret; harness.toml uses it as "secret:<name>".
+    Set { name: String },
+    /// Show the names of the saved secrets (never their values).
+    List,
 }
 
 #[derive(Subcommand)]
@@ -102,6 +124,12 @@ async fn main() -> Result<()> {
     match cli.command {
         Command::Init => init(project),
         Command::Login { agent } => login(&agent),
+        Command::Secret {
+            command: SecretCommand::Set { name },
+        } => set_secret(&name),
+        Command::Secret {
+            command: SecretCommand::List,
+        } => list_secrets(),
         Command::Task {
             command:
                 TaskCommand::New {
@@ -126,6 +154,17 @@ async fn main() -> Result<()> {
             decide(project, &task_id, Verdict::Rejected, Some(to), &notes)
         }
         Command::Status { task_id } => status(project, &task_id),
+        Command::McpExec { file } => {
+            let error = launcher::exec_server(&file);
+            bail!(
+                "cannot start the MCP server from {}: {error}",
+                file.display()
+            )
+        }
+        Command::PrintSecret { file } => {
+            println!("{}", launcher::read_secret(&file)?);
+            Ok(())
+        }
     }
 }
 
@@ -250,6 +289,41 @@ fn read_hidden(prompt: &str) -> Result<Secret> {
     Ok(Secret::new(line.trim()))
 }
 
+/// Saves a secret for MCP servers in `~/.harness/credentials/secrets/<name>`,
+/// readable only by Lisa, typed without showing it on the screen.
+fn set_secret(name: &str) -> Result<()> {
+    if !mcp::is_simple_name(name) {
+        bail!("use lowercase letters, digits, '-' and '_' for the name, for example `context7`");
+    }
+    let dir = credentials::default_dir().context("HOME is not set")?;
+    println!("Paste the secret for {name:?} and press Enter.");
+    println!("It is not shown while you type: paste it once, then press Enter.");
+    let value = read_hidden("Secret: ")?;
+    if value.expose().is_empty() {
+        bail!("no secret given; nothing was saved");
+    }
+    let path = credentials::save_secret(&dir, name, &value)?;
+    println!(
+        "Saved {} characters to {} (only you can read it).",
+        value.expose().chars().count(),
+        path.display()
+    );
+    println!("Use it in harness.toml as \"secret:{name}\".");
+    Ok(())
+}
+
+fn list_secrets() -> Result<()> {
+    let dir = credentials::default_dir().context("HOME is not set")?;
+    let names = credentials::secret_names(&dir)?;
+    if names.is_empty() {
+        println!("No secrets saved. Add one with `harness secret set <name>`.");
+    }
+    for name in names {
+        println!("{name}");
+    }
+    Ok(())
+}
+
 /// Runs `codex login` with its home in our credentials folder, so the login is
 /// saved there and not in `~/.codex`.
 fn login_codex(dir: &Path) -> Result<()> {
@@ -334,9 +408,13 @@ fn new_task(project: &Path, task_id: &str, description: &str) -> Result<()> {
     Ok(())
 }
 
-/// Builds the team from harness.toml: each role gets the agent and model set there.
+/// Builds the team from harness.toml: each role gets the agent, model and MCP
+/// servers set there.
 fn build_team(config: &Config) -> Result<Team> {
     let dir = credentials::default_dir().context("HOME is not set")?;
+    let servers = McpServers::load(config, |name| credentials::load_secret(&dir, name).ok())?;
+    // Codex starts MCP servers and reads keys through this same program.
+    let harness = std::env::current_exe().context("cannot find the harness program")?;
     let timeout = Duration::from_secs(config.agent_timeout_minutes * 60);
     let mut team = Team::new();
     for role in [
@@ -354,7 +432,7 @@ fn build_team(config: &Config) -> Result<Team> {
                 if let Some(model) = &settings.model {
                     agent = agent.with_model(role, model);
                 }
-                AnyAgent::Claude(agent)
+                AnyAgent::Claude(agent.with_mcp_servers(role, servers.for_role(role)))
             }
             "codex" => {
                 let auth_dir = dir.join("codex");
@@ -365,7 +443,11 @@ fn build_team(config: &Config) -> Result<Team> {
                 if let Some(model) = &settings.model {
                     agent = agent.with_model(role, model);
                 }
-                AnyAgent::Codex(agent)
+                AnyAgent::Codex(
+                    agent
+                        .with_launcher(&harness)
+                        .with_mcp_servers(role, servers.for_role(role)),
+                )
             }
             "codex+deepseek" => {
                 // A key in the shell wins; otherwise the one `harness login deepseek` saved.
@@ -378,7 +460,11 @@ fn build_team(config: &Config) -> Result<Team> {
                 if let Some(model) = &settings.model {
                     agent = agent.with_model(role, model);
                 }
-                AnyAgent::Codex(agent)
+                AnyAgent::Codex(
+                    agent
+                        .with_launcher(&harness)
+                        .with_mcp_servers(role, servers.for_role(role)),
+                )
             }
             "antigravity" => {
                 let auth_dir = dir.join("antigravity");
@@ -389,7 +475,7 @@ fn build_team(config: &Config) -> Result<Team> {
                 if let Some(model) = &settings.model {
                     agent = agent.with_model(role, model);
                 }
-                AnyAgent::Antigravity(agent)
+                AnyAgent::Antigravity(agent.with_mcp_servers(role, servers.for_role(role)))
             }
             other => {
                 bail!("{role:?} uses agent {other:?}; use \"claude\", \"codex\", \"codex+deepseek\" or \"antigravity\"")

@@ -86,6 +86,26 @@ pub fn append_output(log: &mut String, finished: &Finished) {
     }
 }
 
+/// Replaces every secret the agent was given with `***` in what it printed.
+/// Its output becomes `agent.log`, which is committed to git, and an MCP tool
+/// may echo a key back (a tool that prints its environment does exactly that).
+pub fn hide_secrets<'a>(
+    mut result: Result<Finished, String>,
+    secrets: impl IntoIterator<Item = &'a str>,
+) -> Result<Finished, String> {
+    // A very short value would hide ordinary words too; real keys are long.
+    for secret in secrets.into_iter().filter(|s| s.len() >= 8) {
+        match &mut result {
+            Ok(finished) => {
+                finished.stdout = finished.stdout.replace(secret, "***");
+                finished.stderr = finished.stderr.replace(secret, "***");
+            }
+            Err(message) => *message = message.replace(secret, "***"),
+        }
+    }
+    result
+}
+
 /// Adds `message` to the log too, and returns a failed outcome.
 pub fn failed(mut log: String, message: String) -> AgentOutcome {
     log.push_str(&message);
