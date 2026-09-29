@@ -9,6 +9,10 @@
 //! harness login antigravity            log in to Antigravity CLI (Google account)
 //! harness secret set context7          save a secret an MCP server needs
 //! harness secret list                  show the names of the saved secrets
+//! harness marketplace add anthropics/claude-plugins-official
+//! harness plugin list                  plugins in all added catalogs
+//! harness plugin add code-review --role security
+//! harness plugin update code-review    take the catalog's newer version
 //! harness task new task-001 "Build a CSV parser"
 //! harness run task-001                 run roles until someone must look
 //! harness approve task-001 --notes "Looks good"
@@ -20,6 +24,8 @@ use std::fs;
 use std::io::{self, BufRead, Write};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
+
+mod catalogs;
 
 use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand};
@@ -58,6 +64,16 @@ enum Command {
     Secret {
         #[command(subcommand)]
         command: SecretCommand,
+    },
+    /// Plugin catalogs, for all projects (kept in ~/.harness/).
+    Marketplace {
+        #[command(subcommand)]
+        command: MarketplaceCommand,
+    },
+    /// Plugins of this project, copied from the catalogs.
+    Plugin {
+        #[command(subcommand)]
+        command: PluginCommand,
     },
     /// Work with tasks.
     Task {
@@ -102,6 +118,53 @@ enum SecretCommand {
 }
 
 #[derive(Subcommand)]
+enum MarketplaceCommand {
+    /// Add a catalog: `owner/repo` on GitHub, a git address or a local folder.
+    Add {
+        source: String,
+        /// Use this name instead of the one in the catalog.
+        #[arg(long)]
+        name: Option<String>,
+    },
+    /// Show the added catalogs.
+    List,
+    /// Download the newest version of one or all catalogs.
+    Update { name: Option<String> },
+    /// Forget a catalog (plugins already in projects stay).
+    Remove { name: String },
+}
+
+#[derive(Subcommand)]
+enum PluginCommand {
+    /// Show the plugins of all added catalogs.
+    List {
+        /// Only plugins for `claude` or `codex`.
+        #[arg(long)]
+        agent: Option<String>,
+    },
+    /// Copy a plugin into the project: `name` or `name@catalog`.
+    Add {
+        name: String,
+        /// `claude` or `codex`, when the catalog has the plugin for both.
+        #[arg(long)]
+        agent: Option<String>,
+        /// Also give it to this role.
+        #[arg(long, value_parser = parse_role)]
+        role: Option<Role>,
+        /// Allow the plugin's hooks (commands that run by themselves).
+        #[arg(long)]
+        allow_hooks: bool,
+        /// Allow the plugin's own MCP or LSP servers.
+        #[arg(long)]
+        allow_mcp: bool,
+    },
+    /// Take the newer version from its catalog and show what changed.
+    Update { name: String },
+    /// Remove a plugin from the project and from every role.
+    Remove { name: String },
+}
+
+#[derive(Subcommand)]
 enum TaskCommand {
     /// Create a task. The description comes as text or from a file.
     New {
@@ -118,6 +181,14 @@ fn parse_next(text: &str) -> Result<NextStep, String> {
         .map_err(|_| format!("{text:?} is not a role or `done`"))
 }
 
+/// `architect`, `developer`, `tester` or `security`.
+fn parse_role(text: &str) -> Result<Role, String> {
+    match parse_next(text) {
+        Ok(NextStep::To(role)) if role != Role::Human => Ok(role),
+        _ => Err(format!("{text:?} is not a role")),
+    }
+}
+
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
@@ -131,6 +202,35 @@ async fn main() -> Result<()> {
         Command::Secret {
             command: SecretCommand::List,
         } => list_secrets(),
+        Command::Marketplace { command } => match command {
+            MarketplaceCommand::Add { source, name } => {
+                catalogs::marketplace_add(&source, name.as_deref())
+            }
+            MarketplaceCommand::List => catalogs::marketplace_list(),
+            MarketplaceCommand::Update { name } => catalogs::marketplace_update(name.as_deref()),
+            MarketplaceCommand::Remove { name } => catalogs::marketplace_remove(&name),
+        },
+        Command::Plugin { command } => match command {
+            PluginCommand::List { agent } => catalogs::plugin_list(project, agent.as_deref()),
+            PluginCommand::Add {
+                name,
+                agent,
+                role,
+                allow_hooks,
+                allow_mcp,
+            } => catalogs::plugin_add(
+                project,
+                &name,
+                &catalogs::AddOptions {
+                    agent: agent.as_deref(),
+                    role,
+                    allow_hooks,
+                    allow_mcp,
+                },
+            ),
+            PluginCommand::Update { name } => catalogs::plugin_update(project, &name),
+            PluginCommand::Remove { name } => catalogs::plugin_remove(project, &name),
+        },
         Command::Task {
             command:
                 TaskCommand::New {

@@ -174,7 +174,7 @@ always_skills = ["idiomatic-rust"]        # файл целиком вставл
   странное (разрешены только `a-z`, `0-9` и `-`), задача не начинается и Лиза сразу
   видит, какая роль и какой файл виноваты.
 
-MCP-серверы для каждой роли — раздел 5.5 (этап 6b), плагины — раздел 5.6 (этапы 6c, 6d).
+MCP-серверы для каждой роли — раздел 5.5 (этап 6b), плагины — разделы 5.6 и 5.7 (этапы 6c, 6d, 6e).
 Права ролей и свой `prompt.md` роли пока остаются в коде (раздел 3).
 
 ---
@@ -457,8 +457,53 @@ plugins = ["rust-review"]
 `-c skills.bundled.enabled=false`. Папку `skills/` в `.harness/agents/codex/`, которую
 оставили прежние запуски, харнесс удаляет до и после роли.
 
-Дальше: каталоги плагинов (маркетплейсы) и `harness plugin add`, который сам копирует
-плагин в проект (для будущего интерфейса с выбором из списка).
+Плагины можно положить в проект руками или взять из каталога (раздел 5.7).
+
+### 5.7. Каталоги плагинов ✅ (этап 6e)
+
+Каталог (маркетплейс) — git-репозиторий со списком плагинов: `.claude-plugin/marketplace.json`
+для Claude Code и/или `.agents/plugins/marketplace.json` для Codex. Формат у них общий:
+`name` каталога и список `plugins`, у каждого `name`, `description` и `source`.
+
+Каталоги — общие для всех проектов Лизы: список в `~/.harness/marketplaces.toml`, копии в
+`~/.harness/marketplaces/<имя>/`. Агенты их не видят: в проект плагин попадает только
+копией, которая коммитится.
+
+```text
+harness marketplace add anthropics/claude-plugins-official   # или git-адрес, или папка
+harness marketplace list | update [имя] | remove <имя>
+harness plugin list [--agent claude|codex]
+harness plugin add code-review[@каталог] [--agent ...] [--role security] [--allow-hooks] [--allow-mcp]
+harness plugin update code-review
+harness plugin remove code-review
+```
+
+**`plugin add`** находит плагин, копирует его в `.harness/plugins/<имя>/` (без `.git`,
+символические ссылки — ошибка) и дописывает в harness.toml:
+
+```toml
+[plugins.code-review]
+agent = "claude"
+source = "claude-plugins-official/code-review"   # каталог/плагин
+commit = "fbe07fb..."                              # из какого коммита скопирован
+```
+
+harness.toml правится библиотекой `toml_edit`: комментарии и порядок строк Лизы
+сохраняются. Потом те же проверки, что перед запуском роли (раздел 5.6); если они не
+прошли (например, у плагина хуки, а `--allow-hooks` не дан, или роль на другом агенте),
+всё откатывается. Удачное добавление — отдельный git-коммит `harness: add plugin ...`.
+Без `--role` плагин ни одной роли не выдаётся.
+
+**Откуда берутся файлы плагина** (`source` в каталоге): папка внутри каталога
+(`"./plugins/x"` или `{"source": "local", "path": ...}`), другой git-репозиторий
+(`url`, `git-subdir`, `github`; с `ref` или точным `sha`). Такие плагины скачиваются в
+`~/.harness/marketplaces/.downloads/`. npm пока не поддерживается. Если у плагина нет
+своего `plugin.json`, а в каталоге стоит `"strict": false`, харнесс пишет `plugin.json`
+из записи каталога (так делает и Claude Code).
+
+**`plugin update`** берёт версию из (обновлённого через `marketplace update`) каталога,
+показывает изменённые файлы (`+`, `~`, `-`), меняет `commit` и коммитит. Если новая
+версия не проходит проверки, остаётся старая.
 
 ---
 
