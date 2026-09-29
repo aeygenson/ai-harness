@@ -29,7 +29,8 @@
 //! `-c plugins={"<name>@harness"={enabled=true}}`. The `plugins` feature is on
 //! only for roles with plugins, `hooks` only if a plugin may have them; remote
 //! plugins and apps stay off. Codex's own bundled skills (one of them installs
-//! skills from GitHub) are always off.
+//! skills from GitHub) are always off, and the `skills` folder older runs left
+//! in `CODEX_HOME` is removed.
 
 use std::collections::HashMap;
 use std::fs;
@@ -52,6 +53,9 @@ pub const CONFIG_DIR: &str = ".harness/agents/codex";
 const AUTH_FILE: &str = "auth.json";
 /// Codex's plugin folder inside `CODEX_HOME`; cleared before and after each role.
 const PLUGINS_DIR: &str = "plugins";
+/// Codex's own skills folder inside `CODEX_HOME`. Older runs left the bundled
+/// skills there; the harness gives skills through the prompt, so it is cleared too.
+const SKILLS_DIR: &str = "skills";
 /// The marketplace name the harness's plugins are filed under.
 const MARKETPLACE: &str = "harness";
 /// The version folder Codex prefers over any other.
@@ -268,7 +272,7 @@ impl Codex {
 
     /// Leaves in Codex's plugin cache exactly this role's plugins.
     fn put_plugins(&self, job: &RoleJob) -> io::Result<()> {
-        remove_plugins(job);
+        remove_extras(job);
         let cache = job
             .project_dir
             .join(CONFIG_DIR)
@@ -359,7 +363,7 @@ impl AgentRunner for Codex {
             if chatgpt {
                 self.take_auth_back(job);
             }
-            remove_plugins(job);
+            remove_extras(job);
             return failed(log, format!("cannot prepare {CONFIG_DIR}: {e}"));
         }
         let secrets = match self.write_secrets(job.role) {
@@ -368,7 +372,7 @@ impl AgentRunner for Codex {
                 if chatgpt {
                     self.take_auth_back(job);
                 }
-                remove_plugins(job);
+                remove_extras(job);
                 return failed(log, format!("cannot write the role's secrets: {e}"));
             }
         };
@@ -378,7 +382,7 @@ impl AgentRunner for Codex {
         if chatgpt {
             self.take_auth_back(job);
         }
-        remove_plugins(job);
+        remove_extras(job);
         let deepseek_key = match &self.provider {
             Provider::DeepSeek(key) => Some(key.expose()),
             Provider::ChatGpt => None,
@@ -414,9 +418,13 @@ impl AgentRunner for Codex {
     }
 }
 
-/// Removes Codex's plugin folder, so the next role starts without plugins.
-fn remove_plugins(job: &RoleJob) {
-    let _ = fs::remove_dir_all(job.project_dir.join(CONFIG_DIR).join(PLUGINS_DIR));
+/// Removes Codex's plugin and skills folders, so the next role starts
+/// without plugins or skills left by an earlier run.
+fn remove_extras(job: &RoleJob) {
+    let home = job.project_dir.join(CONFIG_DIR);
+    for dir in [PLUGINS_DIR, SKILLS_DIR] {
+        let _ = fs::remove_dir_all(home.join(dir));
+    }
 }
 
 /// Copies a plugin folder. Symbolic links are refused: one could point
@@ -648,8 +656,10 @@ mod tests {
             ..job(Role::Security)
         };
         let plugins = project.path().join(CONFIG_DIR).join(PLUGINS_DIR);
-        // Something left from an earlier role is cleared.
+        // Something left from an earlier role or run is cleared.
         fs::create_dir_all(plugins.join("cache/harness/old/local")).unwrap();
+        let skills = project.path().join(CONFIG_DIR).join(SKILLS_DIR);
+        fs::create_dir_all(skills.join(".system/skill-installer")).unwrap();
 
         codex.put_plugins(&job).unwrap();
         let copied = plugins.join("cache/harness/review/local");
@@ -658,8 +668,9 @@ mod tests {
             "audit"
         );
         assert!(!plugins.join("cache/harness/old").exists());
+        assert!(!skills.exists());
 
-        remove_plugins(&job);
+        remove_extras(&job);
         assert!(!plugins.exists());
         assert!(source.join("skills/audit/SKILL.md").exists());
     }

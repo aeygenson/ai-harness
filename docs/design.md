@@ -454,7 +454,8 @@ plugins = ["rust-review"]
 
 Встроенные навыки Codex (`skill-installer`, который ставит навыки с GitHub,
 `plugin-creator`, `imagegen`, `openai-docs`) выключены у всех ролей Codex:
-`-c skills.bundled.enabled=false`.
+`-c skills.bundled.enabled=false`. Папку `skills/` в `.harness/agents/codex/`, которую
+оставили прежние запуски, харнесс удаляет до и после роли.
 
 Дальше: каталоги плагинов (маркетплейсы) и `harness plugin add`, который сам копирует
 плагин в проект (для будущего интерфейса с выбором из списка).
