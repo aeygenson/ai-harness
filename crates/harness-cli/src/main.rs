@@ -22,6 +22,7 @@
 //! harness retro task-001 --suggest     ... and skill proposals from the [retro] agent
 //! harness retro show 004               the notes and proposals, with diffs
 //! harness retro apply 004 1 3          apply proposals 1 and 3
+//! harness tui                          full-screen view of the tasks
 //! ```
 
 use std::fs;
@@ -30,6 +31,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 mod catalogs;
+mod tui;
 
 use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand};
@@ -113,6 +115,8 @@ enum Command {
     /// Count what happened in a task (or in all tasks) and save it in
     /// .harness/retros/<NNN>/; with --suggest also ask for skill proposals.
     Retro(RetroArgs),
+    /// A full-screen view of the tasks, their steps and notes.
+    Tui,
     /// Used by Codex: start an MCP server from its private settings file.
     #[command(name = "mcp-exec", hide = true)]
     McpExec { file: PathBuf },
@@ -299,6 +303,7 @@ async fn main() -> Result<()> {
             Some(RetroCommand::Apply { number, ids }) => retro_apply(project, &number, &ids),
             None => retro(project, args.task_id.as_deref(), args.suggest).await,
         },
+        Command::Tui => tui::run(open_repo(project)?.root()),
         Command::McpExec { file } => {
             let error = launcher::exec_server(&file);
             bail!(

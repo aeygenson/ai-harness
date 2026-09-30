@@ -517,7 +517,8 @@ fn times(count: usize) -> &'static str {
     }
 }
 
-fn stage_text(stage: Stage) -> String {
+/// Where a task is, in words: `done`, `working: tester`, `waiting: approve design`.
+pub fn stage_text(stage: Stage) -> String {
     match stage {
         Stage::Working(role) => format!("working: {}", role_name(role)),
         Stage::WaitingForHuman(WaitReason::ApproveDesign) => "waiting: approve design".into(),
