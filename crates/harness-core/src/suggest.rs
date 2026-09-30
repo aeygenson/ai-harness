@@ -19,7 +19,7 @@ use serde::{Deserialize, Serialize};
 use crate::agent::{AgentRunner, RoleJob};
 use crate::config::{Config, ConfigError, CONFIG_FILE};
 use crate::config_edit::{self, EditError};
-use crate::git::{GitError, Repo};
+use crate::git::{GitError, Repo, HARNESS_DIR};
 use crate::handoff::Role;
 use crate::proposals::{FileChange, ProposalError, ProposalsFile, SkillList};
 use crate::retro::Stats;
@@ -92,12 +92,44 @@ pub struct Applied {
     pub applied: Vec<u32>,
 }
 
+/// harness.toml as it was when some tasks ran, if it differs from now.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PastSettings {
+    pub tasks: Vec<String>,
+    pub text: String,
+}
+
+/// For each task, harness.toml at the task's last commit; tasks with the same
+/// settings are grouped, and settings equal to `current` are left out.
+pub fn past_settings(repo: &Repo, stats: &Stats, current: &str) -> Vec<PastSettings> {
+    let mut past: Vec<PastSettings> = Vec::new();
+    for task in &stats.tasks {
+        let folder = format!("{HARNESS_DIR}/runs/{}", task.task_id);
+        let file = format!("{HARNESS_DIR}/{CONFIG_FILE}");
+        let Some(text) = repo.file_at_last_change(&folder, &file) else {
+            continue;
+        };
+        if text.trim_end() == current.trim_end() {
+            continue;
+        }
+        match past.iter_mut().find(|p| p.text == text) {
+            Some(same) => same.tasks.push(task.task_id.clone()),
+            None => past.push(PastSettings {
+                tasks: vec![task.task_id.clone()],
+                text,
+            }),
+        }
+    }
+    past
+}
+
 /// The prompt for the Retrospective.
 pub fn prompt(
     stats: &Stats,
     runs_dir: &Path,
     harness_dir: &Path,
     config: &Config,
+    past: &[PastSettings],
     output_dir: &Path,
 ) -> String {
     let tasks: Vec<&str> = stats.tasks.iter().map(|t| t.task_id.as_str()).collect();
@@ -133,6 +165,21 @@ pub fn prompt(
             settings.skills,
             settings.always_skills
         ));
+    }
+    if past.is_empty() {
+        text.push_str("The tasks ran with these same settings.\n");
+    } else {
+        text.push_str(
+            "These are the current settings. They changed after some tasks ran, so \
+             judge each task by the settings it ran with, not by the current ones:\n",
+        );
+        for settings in past {
+            text.push_str(&format!(
+                "harness.toml when {} finished:\n```toml\n{}\n```\n",
+                settings.tasks.join(", "),
+                settings.text.trim_end()
+            ));
+        }
     }
     let files = skill_files(&skills_dir);
     if files.is_empty() {
@@ -215,7 +262,11 @@ pub async fn suggest<A: AgentRunner>(
         round: 1,
         role: RULES_OF,
         project_dir: repo.root().to_path_buf(),
-        prompt: prompt(stats, &repo.runs_dir(), &harness_dir, config, &inbox),
+        prompt: {
+            let current = fs::read_to_string(harness_dir.join(CONFIG_FILE)).unwrap_or_default();
+            let past = past_settings(repo, stats, &current);
+            prompt(stats, &repo.runs_dir(), &harness_dir, config, &past, &inbox)
+        },
         output_dir: inbox.clone(),
     };
     let head = repo.head()?;
@@ -455,6 +506,7 @@ mod tests {
         fs::create_dir_all(harness.join(SKILLS_DIR)).unwrap();
         fs::write(harness.join(CONFIG_FILE), TOML).unwrap();
         fs::write(harness.join("skills/style.md"), STYLE).unwrap();
+        repo.commit_all("settings").unwrap();
         crate::orchestrator::create_task(&repo, "task-001", "Build a parser", 5).unwrap();
         let config = Config::load(&harness).unwrap();
         let tasks = TaskHistory::load_all(&repo.runs_dir()).unwrap();
@@ -545,7 +597,13 @@ mod tests {
     fn the_prompt_has_the_stats_the_history_and_the_skills() {
         let (_dir, repo, retro_dir, stats, config) = project();
         let harness = repo.root().join(".harness");
-        let text = prompt(&stats, &repo.runs_dir(), &harness, &config, &retro_dir);
+        let current = fs::read_to_string(harness.join(CONFIG_FILE)).unwrap();
+        assert!(past_settings(&repo, &stats, &current).is_empty());
+        let text = prompt(&stats, &repo.runs_dir(), &harness, &config, &[], &retro_dir);
+        assert!(
+            text.contains("The tasks ran with these same settings."),
+            "{text}"
+        );
         for part in [
             "# Retrospective: all",
             "for task-001",
@@ -556,6 +614,44 @@ mod tests {
         ] {
             assert!(text.contains(part), "missing {part:?} in:\n{text}");
         }
+    }
+
+    #[test]
+    fn settings_changed_after_a_task_are_shown_as_they_were() {
+        let (_dir, repo, retro_dir, stats, config) = project();
+        let harness = repo.root().join(".harness");
+        let old = fs::read_to_string(harness.join(CONFIG_FILE)).unwrap();
+        let new = old.replace("skills = [\"style\"]\n", "");
+        fs::write(harness.join(CONFIG_FILE), &new).unwrap();
+        repo.commit_all("the developer loses style").unwrap();
+
+        let past = past_settings(&repo, &stats, &new);
+        assert_eq!(
+            past,
+            [PastSettings {
+                tasks: vec!["task-001".into()],
+                text: old.clone()
+            }]
+        );
+        let text = prompt(
+            &stats,
+            &repo.runs_dir(),
+            &harness,
+            &config,
+            &past,
+            &retro_dir,
+        );
+        assert!(
+            text.contains("judge each task by the settings it ran with"),
+            "{text}"
+        );
+        assert!(
+            text.contains(&format!(
+                "harness.toml when task-001 finished:\n```toml\n{}",
+                old.trim_end()
+            )),
+            "{text}"
+        );
     }
 
     #[test]

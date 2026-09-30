@@ -68,6 +68,20 @@ impl Repo {
         &self.root
     }
 
+    /// The text of `file` in the last commit that changed `changed` (both
+    /// relative to the project, with `/`). `None` if there is no such commit
+    /// or the file did not exist in it.
+    pub fn file_at_last_change(&self, changed: &str, file: &str) -> Option<String> {
+        let commit = self
+            .git_literal(&["log", "-1", "--format=%H", "--", changed])
+            .ok()?;
+        let commit = commit.trim();
+        if commit.is_empty() {
+            return None;
+        }
+        self.git(&["show", &format!("{commit}:{file}")]).ok()
+    }
+
     /// Where task folders live: `<project>/.harness/runs`.
     pub fn runs_dir(&self) -> PathBuf {
         self.root.join(HARNESS_DIR).join("runs")
@@ -273,6 +287,24 @@ fn outside_git(dir: &Path, args: &[&str]) -> Result<String, GitError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_file_is_read_as_it_was_at_another_files_last_change() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = Repo::init(dir.path()).unwrap();
+        assert_eq!(repo.file_at_last_change("a.txt", "b.txt"), None);
+        fs::write(dir.path().join("a.txt"), "a").unwrap();
+        fs::write(dir.path().join("b.txt"), "old").unwrap();
+        repo.commit_all("first").unwrap();
+        fs::write(dir.path().join("b.txt"), "new").unwrap();
+        repo.commit_all("second").unwrap();
+        assert_eq!(
+            repo.file_at_last_change("a.txt", "b.txt").as_deref(),
+            Some("old")
+        );
+        assert_eq!(repo.file_at_last_change("a.txt", "missing.txt"), None);
+        assert_eq!(repo.file_at_last_change("nothing", "b.txt"), None);
+    }
 
     #[test]
     fn fetch_copies_and_updates_another_repository() {
