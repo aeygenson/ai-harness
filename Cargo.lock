@@ -342,7 +342,7 @@ dependencies = [
  "clap",
  "harness-agents",
  "harness-core",
- "ratatui",
+ "harness-tui",
  "serde_json",
  "tempfile",
  "tokio",
@@ -359,6 +359,17 @@ dependencies = [
  "tokio",
  "toml",
  "toml_edit",
+]
+
+[[package]]
+name = "harness-tui"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "harness-core",
+ "ratatui",
+ "serde_json",
+ "tempfile",
 ]
 
 [[package]]

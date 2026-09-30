@@ -2,21 +2,30 @@
 # Puts an "AI Harness" icon on the desktop and in the applications menu.
 # The icon opens a terminal and runs scripts/harness-tui.sh.
 #
-#   scripts/install-desktop-launcher.sh [project folder]   (default: ~/code/harness-test)
+#   scripts/install-desktop-launcher.sh [project folder]
+#
+# Without a folder the icon opens the project opened last; the TUI switches
+# projects on its «Проекты» tab.
 set -eu
 
 REPO="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
-PROJECT="${1:-$HOME/code/harness-test}"
+PROJECT="${1:-}"
 DESKTOP_DIR="$(xdg-user-dir DESKTOP 2>/dev/null || echo "$HOME/Desktop")"
 MENU_DIR="$HOME/.local/share/applications"
+
+if [ -n "$PROJECT" ]; then
+    EXEC="\"$REPO/scripts/harness-tui.sh\" \"$PROJECT\""
+else
+    EXEC="\"$REPO/scripts/harness-tui.sh\""
+fi
 
 entry() {
     cat <<ENTRY
 [Desktop Entry]
 Type=Application
 Name=AI Harness
-Comment=Show the harness tasks of $PROJECT
-Exec="$REPO/scripts/harness-tui.sh" "$PROJECT"
+Comment=Tasks, roles and projects of the AI harness
+Exec=$EXEC
 Terminal=true
 Icon=utilities-terminal
 Categories=Development;

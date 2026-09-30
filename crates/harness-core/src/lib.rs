@@ -11,6 +11,7 @@ pub mod orchestrator;
 pub mod permissions;
 pub mod plugin_install;
 pub mod plugins;
+pub mod projects;
 pub mod prompt;
 pub mod proposals;
 pub mod retro;
