@@ -128,7 +128,7 @@ impl Skills {
 }
 
 /// Only simple names, so a name can never point outside the skills folder.
-fn check_name(name: &str) -> Result<(), SkillError> {
+pub fn check_name(name: &str) -> Result<(), SkillError> {
     let ok = !name.is_empty()
         && name.len() <= 64
         && !name.starts_with('-')
@@ -167,7 +167,7 @@ fn read_skill(dir: &Path, role: Role, name: &str) -> Result<Skill, SkillError> {
 }
 
 /// Splits `---\ndescription: ...\n---\nbody` into the description and the body.
-fn split_header(text: &str) -> Option<(String, String)> {
+pub fn split_header(text: &str) -> Option<(String, String)> {
     let mut lines = text.lines();
     if lines.next()?.trim() != "---" {
         return None;

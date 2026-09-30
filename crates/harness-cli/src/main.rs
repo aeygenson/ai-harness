@@ -19,6 +19,9 @@
 //! harness reject task-001 --to architect --notes "Use serde"
 //! harness status task-001
 //! harness retro task-001               statistics of one task (or --all)
+//! harness retro task-001 --suggest     ... and skill proposals from the [retro] agent
+//! harness retro show 004               the notes and proposals, with diffs
+//! harness retro apply 004 1 3          apply proposals 1 and 3
 //! ```
 
 use std::fs;
@@ -35,12 +38,16 @@ use harness_agents::{codex, launcher, Antigravity, AnyAgent, ClaudeCode, Codex, 
 use harness_core::config::{Config, CONFIG_FILE, DEFAULT_CONFIG};
 use harness_core::git::{Repo, HARNESS_DIR};
 use harness_core::handoff::{NextStep, Role, Verdict};
+use harness_core::mcp::McpServer;
 use harness_core::mcp::{self, McpServers};
 use harness_core::orchestrator::{self, StopReason};
+use harness_core::plugins::Plugin;
 use harness_core::plugins::Plugins;
-use harness_core::retro::{Stats, TaskHistory};
+use harness_core::proposals::FileChange;
+use harness_core::retro::{Stats, TaskHistory, RETROS_DIR};
 use harness_core::skills::Skills;
 use harness_core::store::TaskStore;
+use harness_core::suggest::{self, Applied};
 use harness_core::task::{Stage, TaskState, WaitReason};
 
 #[derive(Parser)]
@@ -104,20 +111,41 @@ enum Command {
     /// Show where a task is and its history.
     Status { task_id: String },
     /// Count what happened in a task (or in all tasks) and save it in
-    /// .harness/retros/<NNN>/.
-    Retro {
-        #[arg(required_unless_present = "all", conflicts_with = "all")]
-        task_id: Option<String>,
-        /// All tasks of the project.
-        #[arg(long)]
-        all: bool,
-    },
+    /// .harness/retros/<NNN>/; with --suggest also ask for skill proposals.
+    Retro(RetroArgs),
     /// Used by Codex: start an MCP server from its private settings file.
     #[command(name = "mcp-exec", hide = true)]
     McpExec { file: PathBuf },
     /// Used by Codex: print a key from its private file.
     #[command(name = "print-secret", hide = true)]
     PrintSecret { file: PathBuf },
+}
+
+#[derive(clap::Args)]
+#[command(args_conflicts_with_subcommands = true, subcommand_negates_reqs = true)]
+struct RetroArgs {
+    #[arg(required_unless_present = "all", conflicts_with = "all")]
+    task_id: Option<String>,
+    /// All tasks of the project.
+    #[arg(long)]
+    all: bool,
+    /// Also let the [retro] agent read the history and propose skill changes.
+    #[arg(long)]
+    suggest: bool,
+    #[command(subcommand)]
+    command: Option<RetroCommand>,
+}
+
+#[derive(Subcommand)]
+enum RetroCommand {
+    /// Show a retrospective's notes and proposals, with the changes they make.
+    Show { number: String },
+    /// Apply the chosen proposals, for example `harness retro apply 004 1 3`.
+    Apply {
+        number: String,
+        #[arg(required = true)]
+        ids: Vec<u32>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -266,7 +294,11 @@ async fn main() -> Result<()> {
             decide(project, &task_id, Verdict::Rejected, Some(to), &notes)
         }
         Command::Status { task_id } => status(project, &task_id),
-        Command::Retro { task_id, .. } => retro(project, task_id.as_deref()),
+        Command::Retro(args) => match args.command {
+            Some(RetroCommand::Show { number }) => retro_show(project, &number),
+            Some(RetroCommand::Apply { number, ids }) => retro_apply(project, &number, &ids),
+            None => retro(project, args.task_id.as_deref(), args.suggest).await,
+        },
         Command::McpExec { file } => {
             let error = launcher::exec_server(&file);
             bail!(
@@ -527,9 +559,6 @@ fn build_team(config: &Config, project_dir: &Path) -> Result<Team> {
     let dir = credentials::default_dir().context("HOME is not set")?;
     let servers = McpServers::load(config, |name| credentials::load_secret(&dir, name).ok())?;
     let plugins = Plugins::load(project_dir, config)?;
-    // Codex starts MCP servers and reads keys through this same program.
-    let harness = std::env::current_exe().context("cannot find the harness program")?;
-    let timeout = Duration::from_secs(config.agent_timeout_minutes * 60);
     let mut team = Team::new();
     for role in [
         Role::Architect,
@@ -538,72 +567,110 @@ fn build_team(config: &Config, project_dir: &Path) -> Result<Team> {
         Role::Security,
     ] {
         let settings = config.role(role)?;
-        let agent = match settings.agent.as_str() {
-            "claude" => {
-                let token = credentials::load_token(&dir, "claude")
-                    .context("no Claude token saved; run `harness login claude` first")?;
-                let mut agent = ClaudeCode::new(token).with_timeout(timeout);
-                if let Some(model) = &settings.model {
-                    agent = agent.with_model(role, model);
-                }
-                AnyAgent::Claude(
-                    agent
-                        .with_mcp_servers(role, servers.for_role(role))
-                        .with_plugins(role, plugins.for_role(role)),
-                )
-            }
-            "codex" => {
-                let auth_dir = dir.join("codex");
-                if !auth_dir.join("auth.json").exists() {
-                    bail!("no Codex login saved; run `harness login codex` first");
-                }
-                let mut agent = Codex::new(auth_dir).with_timeout(timeout);
-                if let Some(model) = &settings.model {
-                    agent = agent.with_model(role, model);
-                }
-                AnyAgent::Codex(
-                    agent
-                        .with_launcher(&harness)
-                        .with_mcp_servers(role, servers.for_role(role))
-                        .with_plugins(role, plugins.for_role(role)),
-                )
-            }
-            "codex+deepseek" => {
-                // A key in the shell wins; otherwise the one `harness login deepseek` saved.
-                let key = match std::env::var(codex::DEEPSEEK_KEY_ENV) {
-                    Ok(key) if !key.trim().is_empty() => Secret::new(key.trim()),
-                    _ => credentials::load_token(&dir, "deepseek")
-                        .context("no DeepSeek API key saved; run `harness login deepseek` first")?,
-                };
-                let mut agent = Codex::deepseek(key).with_timeout(timeout);
-                if let Some(model) = &settings.model {
-                    agent = agent.with_model(role, model);
-                }
-                AnyAgent::Codex(
-                    agent
-                        .with_launcher(&harness)
-                        .with_mcp_servers(role, servers.for_role(role))
-                        .with_plugins(role, plugins.for_role(role)),
-                )
-            }
-            "antigravity" => {
-                let auth_dir = dir.join("antigravity");
-                if !auth_dir.join(".gemini/antigravity-cli").is_dir() {
-                    bail!("no Antigravity login saved; run `harness login antigravity` first");
-                }
-                let mut agent = Antigravity::new(auth_dir).with_timeout(timeout);
-                if let Some(model) = &settings.model {
-                    agent = agent.with_model(role, model);
-                }
-                AnyAgent::Antigravity(agent.with_mcp_servers(role, servers.for_role(role)))
-            }
-            other => {
-                bail!("{role:?} uses agent {other:?}; use \"claude\", \"codex\", \"codex+deepseek\" or \"antigravity\"")
-            }
-        };
+        let agent = build_agent(
+            config,
+            &AgentChoice {
+                who: &format!("{role:?}"),
+                agent: &settings.agent,
+                model: settings.model.as_deref(),
+                role,
+            },
+            servers.for_role(role),
+            plugins.for_role(role),
+        )?;
         team = team.with(role, agent);
     }
     Ok(team)
+}
+
+/// Which agent to build, and for whom.
+struct AgentChoice<'a> {
+    /// For error messages: `Tester` or `[retro]`.
+    who: &'a str,
+    agent: &'a str,
+    model: Option<&'a str>,
+    /// The role whose rules the agent gets.
+    role: Role,
+}
+
+fn build_agent(
+    config: &Config,
+    choice: &AgentChoice,
+    servers: Vec<McpServer>,
+    plugins: Vec<Plugin>,
+) -> Result<AnyAgent> {
+    let dir = credentials::default_dir().context("HOME is not set")?;
+    // Codex starts MCP servers and reads keys through this same program.
+    let harness = std::env::current_exe().context("cannot find the harness program")?;
+    let timeout = Duration::from_secs(config.agent_timeout_minutes * 60);
+    let role = choice.role;
+    let agent = match choice.agent {
+        "claude" => {
+            let token = credentials::load_token(&dir, "claude")
+                .context("no Claude token saved; run `harness login claude` first")?;
+            let mut agent = ClaudeCode::new(token).with_timeout(timeout);
+            if let Some(model) = choice.model {
+                agent = agent.with_model(role, model);
+            }
+            AnyAgent::Claude(
+                agent
+                    .with_mcp_servers(role, servers)
+                    .with_plugins(role, plugins),
+            )
+        }
+        "codex" => {
+            let auth_dir = dir.join("codex");
+            if !auth_dir.join("auth.json").exists() {
+                bail!("no Codex login saved; run `harness login codex` first");
+            }
+            let mut agent = Codex::new(auth_dir).with_timeout(timeout);
+            if let Some(model) = choice.model {
+                agent = agent.with_model(role, model);
+            }
+            AnyAgent::Codex(
+                agent
+                    .with_launcher(&harness)
+                    .with_mcp_servers(role, servers)
+                    .with_plugins(role, plugins),
+            )
+        }
+        "codex+deepseek" => {
+            // A key in the shell wins; otherwise the one `harness login deepseek` saved.
+            let key = match std::env::var(codex::DEEPSEEK_KEY_ENV) {
+                Ok(key) if !key.trim().is_empty() => Secret::new(key.trim()),
+                _ => credentials::load_token(&dir, "deepseek")
+                    .context("no DeepSeek API key saved; run `harness login deepseek` first")?,
+            };
+            let mut agent = Codex::deepseek(key).with_timeout(timeout);
+            if let Some(model) = choice.model {
+                agent = agent.with_model(role, model);
+            }
+            AnyAgent::Codex(
+                agent
+                    .with_launcher(&harness)
+                    .with_mcp_servers(role, servers)
+                    .with_plugins(role, plugins),
+            )
+        }
+        "antigravity" => {
+            let auth_dir = dir.join("antigravity");
+            if !auth_dir.join(".gemini/antigravity-cli").is_dir() {
+                bail!("no Antigravity login saved; run `harness login antigravity` first");
+            }
+            let mut agent = Antigravity::new(auth_dir).with_timeout(timeout);
+            if let Some(model) = choice.model {
+                agent = agent.with_model(role, model);
+            }
+            AnyAgent::Antigravity(agent.with_mcp_servers(role, servers))
+        }
+        other => {
+            bail!(
+                "{} uses agent {other:?}; use \"claude\", \"codex\", \"codex+deepseek\" or \"antigravity\"",
+                choice.who
+            )
+        }
+    };
+    Ok(agent)
 }
 
 async fn run(project: &Path, task_id: &str) -> Result<()> {
@@ -694,8 +761,9 @@ fn status(project: &Path, task_id: &str) -> Result<()> {
 }
 
 /// Statistics of one task, or of all tasks when `task_id` is `None`.
-/// Printed, saved in `.harness/retros/<NNN>/` and committed.
-fn retro(project: &Path, task_id: Option<&str>) -> Result<()> {
+/// Printed, saved in `.harness/retros/<NNN>/` and committed. With `suggest`,
+/// the `[retro]` agent then reads the history and proposes skill changes.
+async fn retro(project: &Path, task_id: Option<&str>, suggest: bool) -> Result<()> {
     let repo = open_repo(project)?;
     let runs = repo.runs_dir();
     let (scope, tasks) = match task_id {
@@ -711,17 +779,186 @@ fn retro(project: &Path, task_id: Option<&str>) -> Result<()> {
     let harness_dir = repo.root().join(HARNESS_DIR);
     let config = match Config::load(&harness_dir) {
         Ok(config) => Some(config),
-        Err(error) => {
+        Err(error) if !suggest => {
             eprintln!("Skills are not compared with harness.toml: {error}");
             None
         }
+        Err(error) => return Err(error.into()),
     };
+    // Check everything the agent needs before saving anything.
+    let agent = match (&config, suggest) {
+        (Some(config), true) => {
+            let dirty = repo.changed_files()?;
+            if !dirty.is_empty() {
+                bail!(
+                    "the project has uncommitted changes; commit or remove them first: {}",
+                    dirty.join(", ")
+                );
+            }
+            Some(retro_agent(config)?)
+        }
+        _ => None,
+    };
+
     let stats = Stats::collect(scope, &tasks, config.as_ref());
     print!("{}", stats.to_markdown());
     let dir = stats.save(&harness_dir)?;
-    let number = dir.file_name().unwrap_or_default().to_string_lossy();
+    let number = dir
+        .file_name()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .into_owned();
     repo.commit_paths(&[&dir], &format!("harness: retro {number} ({scope})"))?;
     println!("\nSaved to {}.", dir.display());
+
+    let (Some(agent), Some(config)) = (agent, config) else {
+        return Ok(());
+    };
+    println!("\nThe retro agent is reading the history...");
+    let found = suggest::suggest(&repo, &dir, &stats, &config, &agent)
+        .await
+        .with_context(|| {
+            format!(
+                "the agent's log is in {}",
+                dir.join(suggest::AGENT_LOG).display()
+            )
+        })?;
+    println!("\n{}", found.retro.trim_end());
+    if found.proposals.proposals.is_empty() {
+        println!("\nNo proposals.");
+    } else {
+        println!("\nProposals:");
+        for proposal in &found.proposals.proposals {
+            println!("  {}. {}", proposal.id, proposal.summary);
+        }
+        println!(
+            "\nSee the changes with `harness retro show {number}`, \
+             apply the ones you want with `harness retro apply {number} <ids>`."
+        );
+    }
+    Ok(())
+}
+
+/// The `[retro]` agent: the read-only rules of the security role, and no MCP
+/// servers or plugins.
+fn retro_agent(config: &Config) -> Result<AnyAgent> {
+    let Some(settings) = &config.retro else {
+        bail!("harness.toml has no [retro] section; add\n[retro]\nagent = \"claude\"");
+    };
+    build_agent(
+        config,
+        &AgentChoice {
+            who: "[retro]",
+            agent: &settings.agent,
+            model: settings.model.as_deref(),
+            role: suggest::RULES_OF,
+        },
+        Vec::new(),
+        Vec::new(),
+    )
+}
+
+/// `.harness/retros/<NNN>` for `4`, `04` or `004`; it must exist.
+fn retro_dir(repo: &Repo, number: &str) -> Result<PathBuf> {
+    let n: u32 = number
+        .parse()
+        .map_err(|_| anyhow::anyhow!("{number:?} is not a retrospective number, such as 004"))?;
+    let dir = repo
+        .root()
+        .join(HARNESS_DIR)
+        .join(RETROS_DIR)
+        .join(format!("{n:03}"));
+    if !dir.is_dir() {
+        bail!("there is no retrospective {n:03}");
+    }
+    Ok(dir)
+}
+
+fn retro_show(project: &Path, number: &str) -> Result<()> {
+    let repo = open_repo(project)?;
+    let dir = retro_dir(&repo, number)?;
+    let harness_dir = repo.root().join(HARNESS_DIR);
+    let found = suggest::load(&dir).with_context(|| {
+        format!(
+            "retrospective {number} has no proposals; they come from `harness retro <task> --suggest`"
+        )
+    })?;
+    let config = Config::load(&harness_dir)?;
+    let applied = Applied::load(&dir);
+    let mut text = format!("{}\n", found.retro.trim_end());
+    if found.proposals.proposals.is_empty() {
+        text.push_str("\nNo proposals.\n");
+    }
+    for proposal in &found.proposals.proposals {
+        let mark = if applied.applied.contains(&proposal.id) {
+            " [applied]"
+        } else {
+            ""
+        };
+        text.push_str(&format!(
+            "\n{}.{mark} {}",
+            proposal.id,
+            proposal.describe(&harness_dir, &config)
+        ));
+    }
+    let _ = io::stdout().write_all(text.as_bytes());
+    Ok(())
+}
+
+fn retro_apply(project: &Path, number: &str, ids: &[u32]) -> Result<()> {
+    let repo = open_repo(project)?;
+    let dir = retro_dir(&repo, number)?;
+    let harness_dir = repo.root().join(HARNESS_DIR);
+    // Only the harness's own changes may go into the commit.
+    let dirty: Vec<String> = repo
+        .changed_files()?
+        .into_iter()
+        .filter(|path| {
+            path == ".harness/harness.toml"
+                || path.starts_with(".harness/skills/")
+                || path.starts_with(&format!(".harness/{RETROS_DIR}/"))
+        })
+        .collect();
+    if !dirty.is_empty() {
+        bail!(
+            "these files have uncommitted changes; commit or remove them first: {}",
+            dirty.join(", ")
+        );
+    }
+    let found = suggest::load(&dir)?;
+    let applied = Applied::load(&dir);
+    let mut chosen: Vec<u32> = Vec::new();
+    for &id in ids {
+        if applied.applied.contains(&id) {
+            println!("Proposal {id} is already applied.");
+        } else if !chosen.contains(&id) {
+            chosen.push(id);
+        }
+    }
+    if chosen.is_empty() {
+        return Ok(());
+    }
+    // Say what will happen before it happens.
+    for id in &chosen {
+        if let Some(proposal) = found.proposals.get(*id) {
+            let file = match proposal.file_change(&harness_dir) {
+                FileChange::New => " (new skill file)",
+                FileChange::Changed { .. } => " (skill file changed)",
+                FileChange::Unchanged => "",
+            };
+            println!("{id}. {}{file}", proposal.summary);
+        }
+    }
+    let mut paths = suggest::apply(&harness_dir, &found.proposals, &chosen)?;
+    paths.push(Applied::add(&dir, &chosen)?);
+    let refs: Vec<&Path> = paths.iter().map(PathBuf::as_path).collect();
+    let list: Vec<String> = chosen.iter().map(u32::to_string).collect();
+    let number = dir.file_name().unwrap_or_default().to_string_lossy();
+    repo.commit_paths(
+        &refs,
+        &format!("harness: retro {number}, apply {}", list.join(", ")),
+    )?;
+    println!("Applied and committed.");
     Ok(())
 }
 
@@ -774,22 +1011,59 @@ mod tests {
         assert_eq!(state.stage, Stage::Working(Role::Architect));
     }
 
-    #[test]
-    fn retro_is_saved_and_committed() {
+    #[tokio::test(flavor = "current_thread")]
+    async fn retro_is_saved_and_committed() {
         let dir = tempfile::tempdir().unwrap();
         let repo = Repo::init(dir.path()).unwrap();
-        assert!(retro(dir.path(), None).is_err()); // no tasks yet
+        assert!(retro(dir.path(), None, false).await.is_err()); // no tasks yet
         init(dir.path()).unwrap();
         new_task(dir.path(), "task-001", "Build a parser").unwrap();
 
-        retro(dir.path(), Some("task-001")).unwrap();
-        retro(dir.path(), None).unwrap();
-        assert!(retro(dir.path(), Some("task-404")).is_err());
+        retro(dir.path(), Some("task-001"), false).await.unwrap();
+        retro(dir.path(), None, false).await.unwrap();
+        assert!(retro(dir.path(), Some("task-404"), false).await.is_err());
 
         let retros = dir.path().join(".harness/retros");
         assert!(retros.join("001/stats.md").exists());
         let json = fs::read_to_string(retros.join("002/stats.json")).unwrap();
         assert!(json.contains("\"scope\": \"all\""), "{json}");
         assert!(repo.changed_files().unwrap().is_empty());
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn retro_proposals_are_shown_and_applied() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = Repo::init(dir.path()).unwrap();
+        init(dir.path()).unwrap();
+        new_task(dir.path(), "task-001", "Build a parser").unwrap();
+        retro(dir.path(), Some("task-001"), false).await.unwrap();
+        assert!(retro_show(dir.path(), "1").is_err(), "no proposals yet");
+
+        // What `retro --suggest` would have saved.
+        let saved = dir.path().join(".harness/retros/001");
+        fs::write(saved.join("retro.md"), "Went well.").unwrap();
+        fs::write(
+            saved.join("proposals.json"),
+            r#"{"proposals": [{"id": 1, "summary": "Check empty input", "reason": "r",
+                "skill": "empty-input",
+                "content": "---\ndescription: Check empty input.\n---\nTest it.\n",
+                "roles": [{"role": "developer", "list": "skills"}]}]}"#,
+        )
+        .unwrap();
+        repo.commit_all("saved proposals").unwrap();
+
+        retro_show(dir.path(), "001").unwrap();
+        assert!(retro_show(dir.path(), "9").is_err());
+        assert!(retro_apply(dir.path(), "1", &[2]).is_err());
+
+        retro_apply(dir.path(), "1", &[1]).unwrap();
+        assert!(repo.changed_files().unwrap().is_empty());
+        let harness = dir.path().join(".harness");
+        let config = Config::load(&harness).unwrap();
+        assert_eq!(config.roles[&Role::Developer].skills, ["empty-input"]);
+        assert!(harness.join("skills/empty-input.md").exists());
+        assert_eq!(Applied::load(&saved).applied, [1]);
+        // A second time it only says so.
+        retro_apply(dir.path(), "1", &[1]).unwrap();
     }
 }
