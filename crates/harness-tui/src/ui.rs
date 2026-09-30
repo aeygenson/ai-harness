@@ -20,6 +20,8 @@ pub enum Target {
     Button(ButtonId),
     /// A field of the open form.
     Field(usize),
+    /// A line of a tab's details that can be chosen, by its index.
+    Row(usize),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -27,6 +29,7 @@ pub enum ListId {
     Tasks,
     Steps,
     Projects,
+    Roles,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -38,6 +41,8 @@ pub enum ButtonId {
     Ok,
     Cancel,
     Language,
+    Save,
+    Undo,
 }
 
 /// Where the clickable things were drawn in the last frame. Drawing fills it,

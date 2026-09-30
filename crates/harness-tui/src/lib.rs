@@ -31,12 +31,15 @@ use ratatui::widgets::{Paragraph, Wrap};
 use ratatui::{DefaultTerminal, Frame};
 
 mod i18n;
+mod keys;
 mod projects_tab;
+mod roles_tab;
 mod tasks;
 mod ui;
 
 use i18n::I18n;
 use projects_tab::{has_config, ProjectsTab};
+use roles_tab::{Action, RolesTab};
 use tasks::TasksTab;
 use ui::{buttons, expand_home, panel, ButtonId, Form, Hits, ListId, Target};
 
@@ -77,6 +80,8 @@ enum Purpose {
     InitFolder(PathBuf),
     /// Take the project off the list (the folder stays).
     Remove(PathBuf),
+    /// The model of the role selected on the Roles tab.
+    Model,
 }
 
 /// Opens the TUI and runs until `q`. It starts with `start` if that folder is
@@ -127,12 +132,15 @@ struct App {
     /// The open project.
     project: Option<PathBuf>,
     tasks: Option<TasksTab>,
+    roles: Option<RolesTab>,
     projects: ProjectsTab,
     form: Option<(Purpose, Form)>,
     /// The last result or problem, shown at the bottom.
     message: Option<(String, bool)>,
     hits: Hits,
     last_click: Option<(Instant, Target, u16)>,
+    /// `q` was pressed once with unsaved changes.
+    quit_warned: bool,
     quit: bool,
 }
 
@@ -144,11 +152,13 @@ impl App {
             home: home.clone(),
             project: None,
             tasks: None,
+            roles: None,
             projects: ProjectsTab::load(home),
             form: None,
             message: None,
             hits: Hits::default(),
             last_click: None,
+            quit_warned: false,
             quit: false,
         };
         let start = start.canonicalize().unwrap_or_else(|_| start.to_path_buf());
@@ -171,6 +181,7 @@ impl App {
             return;
         }
         self.tasks = Some(TasksTab::load(root));
+        self.roles = Some(RolesTab::load(root));
         self.project = Some(root.to_path_buf());
         self.tab = Tab::Tasks;
         let saved = self.projects.update(|list| {
@@ -193,6 +204,7 @@ impl App {
             self.quit = true;
             return;
         }
+        let quit_warned = std::mem::take(&mut self.quit_warned);
         if let Some((_, form)) = &mut self.form {
             match key.code {
                 KeyCode::Esc => self.form = None,
@@ -204,9 +216,24 @@ impl App {
             }
             return;
         }
-        match key.code {
+        // Hot keys work with a Russian keyboard layout too: «й» is q.
+        let code = keys::latin(key.code);
+        let unsaved = self.roles.as_ref().is_some_and(RolesTab::changed);
+        match code {
+            KeyCode::Esc
+                if self.tab == Tab::Roles
+                    && self.roles.as_ref().is_some_and(RolesTab::in_details) =>
+            {
+                if let Some(roles) = &mut self.roles {
+                    roles.on_key(KeyCode::Esc, &self.tr);
+                }
+            }
+            KeyCode::Char('q') | KeyCode::Esc if unsaved && !quit_warned => {
+                self.quit_warned = true;
+                self.message = Some((self.tr.t("roles.unsaved_quit").to_string(), true));
+            }
             KeyCode::Char('q') | KeyCode::Esc => self.quit = true,
-            KeyCode::Char('L') => self.press(ButtonId::Language),
+            KeyCode::Char('L') | KeyCode::F(2) => self.press(ButtonId::Language),
             KeyCode::Char(c @ '1'..='7') => {
                 let index = usize::from(c as u8 - b'1');
                 self.tab = TABS[index].0;
@@ -214,6 +241,10 @@ impl App {
             KeyCode::Char('r') | KeyCode::F(5) => {
                 if let Some(tasks) = &mut self.tasks {
                     tasks.reload();
+                }
+                // Unsaved changes are not thrown away by a reload.
+                if let Some(roles) = self.roles.as_mut().filter(|r| !r.changed()) {
+                    roles.reload();
                 }
                 self.projects.reload();
             }
@@ -223,6 +254,16 @@ impl App {
                         tasks.on_key(code);
                     }
                 }
+                Tab::Roles => match code {
+                    KeyCode::Char('s') => self.press(ButtonId::Save),
+                    KeyCode::Char('u') => self.press(ButtonId::Undo),
+                    code => {
+                        if let Some(roles) = &mut self.roles {
+                            let action = roles.on_key(code, &self.tr);
+                            self.act(action);
+                        }
+                    }
+                },
                 Tab::Projects => match code {
                     KeyCode::Enter => self.press(ButtonId::UseProject),
                     KeyCode::Char('n') => self.press(ButtonId::NewProject),
@@ -269,6 +310,21 @@ impl App {
                         self.projects
                             .on_key(if down { KeyCode::Down } else { KeyCode::Up });
                     }
+                    (Tab::Roles, Some((ListId::Roles, _))) => {
+                        if let Some(roles) = &mut self.roles {
+                            let next = if down {
+                                roles.selected + 1
+                            } else {
+                                roles.selected.saturating_sub(1)
+                            };
+                            roles.select(next);
+                        }
+                    }
+                    (Tab::Roles, _) => {
+                        if let Some(roles) = &mut self.roles {
+                            roles.on_wheel(down);
+                        }
+                    }
                     _ => {}
                 }
             }
@@ -303,6 +359,11 @@ impl App {
                         }
                     }
                 }
+                Some((ListId::Roles, index)) => {
+                    if let Some(roles) = &mut self.roles {
+                        roles.select(index);
+                    }
+                }
                 Some((list, index)) => {
                     if let Some(tasks) = &mut self.tasks {
                         tasks.on_click(list, index);
@@ -310,7 +371,33 @@ impl App {
                 }
                 None => {}
             },
+            Target::Row(index) => {
+                if let Some(roles) = &mut self.roles {
+                    let action = roles.activate(index, &self.tr);
+                    self.act(action);
+                }
+            }
             Target::Field(_) => {}
+        }
+    }
+
+    /// What the Roles tab asks for after a click or a key.
+    fn act(&mut self, action: Action) {
+        match action {
+            Action::None => {}
+            Action::Say(text) => self.message = Some((text, false)),
+            Action::EditModel(model) => {
+                let tr = &self.tr;
+                self.form = Some((
+                    Purpose::Model,
+                    Form::new(
+                        tr.t("roles.model_title"),
+                        tr.t("roles.model_text"),
+                        tr.t("roles.model_ok"),
+                    )
+                    .field(tr.t("roles.model_field"), &model),
+                ));
+            }
         }
     }
 
@@ -374,6 +461,24 @@ impl App {
                     ));
                 }
             }
+            ButtonId::Save => {
+                if let Some(roles) = &mut self.roles {
+                    self.message = Some(match roles.save() {
+                        Ok(()) => (self.tr.t("roles.saved").to_string(), false),
+                        Err(error) => (error, true),
+                    });
+                    // The Tasks tab shows the agents too.
+                    if let Some(tasks) = &mut self.tasks {
+                        tasks.reload();
+                    }
+                }
+            }
+            ButtonId::Undo => {
+                if let Some(roles) = &mut self.roles {
+                    roles.undo();
+                    self.message = None;
+                }
+            }
             ButtonId::Ok | ButtonId::Cancel => {}
         }
     }
@@ -404,12 +509,19 @@ impl App {
             Purpose::InitFolder(path) => projects::init(path)
                 .map(|_| self.open(path))
                 .map_err(|e| e.to_string()),
+            Purpose::Model => {
+                if let Some(roles) = &mut self.roles {
+                    roles.set_model(form.value(0));
+                }
+                Ok(())
+            }
             Purpose::Remove(path) => {
                 let path = path.clone();
                 let result = self.projects.update(|list| list.remove(&path));
                 if self.project.as_deref() == Some(path.as_path()) {
                     self.project = None;
                     self.tasks = None;
+                    self.roles = None;
                 }
                 result.map(|()| {
                     self.message = Some((self.tr.t("projects.removed").to_string(), false));
@@ -440,6 +552,8 @@ impl App {
         };
         self.projects.update(|list| list.add(&name, &path))?;
         self.open(&path);
+        // A new project starts with choosing the agents.
+        self.tab = Tab::Roles;
         let git = if done.created_git { "git, " } else { "" };
         let text = self
             .tr
@@ -465,6 +579,15 @@ impl App {
                     frame,
                     main,
                     self.tr.t("tasks.title"),
+                    self.tr.t("tabs.no_open_project"),
+                ),
+            },
+            Tab::Roles => match &self.roles {
+                Some(roles) => roles.draw(frame, main, &mut self.hits, &self.tr),
+                None => placeholder(
+                    frame,
+                    main,
+                    self.tr.t("roles.title"),
                     self.tr.t("tabs.no_open_project"),
                 ),
             },

@@ -21,6 +21,9 @@ use crate::task::DEFAULT_MAX_ROUNDS;
 
 pub const CONFIG_FILE: &str = "harness.toml";
 
+/// The agents a role can run on.
+pub const AGENTS: [&str; 4] = ["claude", "codex", "codex+deepseek", "antigravity"];
+
 /// What `harness init` writes into a new project.
 pub const DEFAULT_CONFIG: &str = r#"# Settings of the AI harness for this project.
 

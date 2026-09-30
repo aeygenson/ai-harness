@@ -17,6 +17,7 @@ pub mod proposals;
 pub mod retro;
 pub mod routes;
 pub mod secret;
+pub mod settings;
 pub mod skills;
 pub mod store;
 pub mod suggest;

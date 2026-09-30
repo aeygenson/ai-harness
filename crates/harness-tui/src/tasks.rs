@@ -166,7 +166,7 @@ impl TasksTab {
         match list {
             ListId::Tasks => self.focus = Focus::Tasks,
             ListId::Steps => self.focus = Focus::Steps,
-            ListId::Projects => {}
+            ListId::Projects | ListId::Roles => {}
         }
     }
 

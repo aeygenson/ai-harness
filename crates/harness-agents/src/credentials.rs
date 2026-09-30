@@ -30,6 +30,32 @@ pub fn load_token(dir: &Path, agent: &str) -> io::Result<Secret> {
     Ok(Secret::new(clean(&text)))
 }
 
+/// Is a login for `agent` (as `harness.toml` names it) saved? The same
+/// places the agents are started from; nothing is read beyond "is it there".
+pub fn has_login(dir: &Path, agent: &str) -> bool {
+    match agent {
+        "claude" => dir.join("claude").join(TOKEN_FILE).is_file(),
+        "codex" => dir.join("codex").join("auth.json").is_file(),
+        "codex+deepseek" => {
+            dir.join("deepseek").join(TOKEN_FILE).is_file()
+                || std::env::var(crate::codex::DEEPSEEK_KEY_ENV)
+                    .is_ok_and(|key| !key.trim().is_empty())
+        }
+        "antigravity" => dir.join("antigravity/.gemini/antigravity-cli").is_dir(),
+        _ => false,
+    }
+}
+
+/// The command that saves the login `agent` needs.
+pub fn login_command(agent: &str) -> String {
+    let name = if agent == "codex+deepseek" {
+        "deepseek"
+    } else {
+        agent
+    };
+    format!("harness login {name}")
+}
+
 /// Where `harness secret set` keeps secrets for MCP servers, one file each.
 const SECRETS_DIR: &str = "secrets";
 
@@ -94,6 +120,24 @@ pub(crate) fn write_private(path: &Path, text: &str) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_login_is_seen_where_the_agents_look_for_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let dir = dir.path();
+        assert!(!has_login(dir, "claude"));
+        save_token(dir, "claude", &Secret::new("t")).unwrap();
+        assert!(has_login(dir, "claude"));
+        fs::create_dir_all(dir.join("codex")).unwrap();
+        fs::write(dir.join("codex/auth.json"), "{}").unwrap();
+        assert!(has_login(dir, "codex"));
+        fs::create_dir_all(dir.join("antigravity/.gemini/antigravity-cli")).unwrap();
+        assert!(has_login(dir, "antigravity"));
+        save_token(dir, "deepseek", &Secret::new("k")).unwrap();
+        assert!(has_login(dir, "codex+deepseek"));
+        assert!(!has_login(dir, "gemini"));
+        assert_eq!(login_command("codex+deepseek"), "harness login deepseek");
+    }
 
     #[test]
     fn save_and_load() {
