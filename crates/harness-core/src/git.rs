@@ -64,6 +64,13 @@ impl Repo {
         Ok(repo)
     }
 
+    /// Is `root` the top folder of its repository (not a folder inside one)?
+    pub fn is_top_level(&self) -> Result<bool, GitError> {
+        let top = self.git(&["rev-parse", "--show-toplevel"])?;
+        let top = PathBuf::from(top.trim());
+        Ok(top.canonicalize().ok() == self.root.canonicalize().ok())
+    }
+
     pub fn root(&self) -> &Path {
         &self.root
     }

@@ -22,7 +22,7 @@
 //! harness retro task-001 --suggest     ... and skill proposals from the [retro] agent
 //! harness retro show 004               the notes and proposals, with diffs
 //! harness retro apply 004 1 3          apply proposals 1 and 3
-//! harness tui                          full-screen view of the tasks
+//! harness tui                          full-screen window: tasks, settings, projects
 //! ```
 
 use std::fs;
@@ -31,13 +31,12 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 mod catalogs;
-mod tui;
 
 use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand};
 use harness_agents::credentials::{self, Secret};
 use harness_agents::{codex, launcher, Antigravity, AnyAgent, ClaudeCode, Codex, Team};
-use harness_core::config::{Config, CONFIG_FILE, DEFAULT_CONFIG};
+use harness_core::config::{Config, CONFIG_FILE};
 use harness_core::git::{Repo, HARNESS_DIR};
 use harness_core::handoff::{NextStep, Role, Verdict};
 use harness_core::mcp::McpServer;
@@ -45,6 +44,7 @@ use harness_core::mcp::{self, McpServers};
 use harness_core::orchestrator::{self, StopReason};
 use harness_core::plugins::Plugin;
 use harness_core::plugins::Plugins;
+use harness_core::projects;
 use harness_core::proposals::FileChange;
 use harness_core::retro::{Stats, TaskHistory, RETROS_DIR};
 use harness_core::skills::Skills;
@@ -115,7 +115,7 @@ enum Command {
     /// Count what happened in a task (or in all tasks) and save it in
     /// .harness/retros/<NNN>/; with --suggest also ask for skill proposals.
     Retro(RetroArgs),
-    /// A full-screen view of the tasks, their steps and notes.
+    /// A full-screen window with tabs: tasks, role settings, projects.
     Tui,
     /// Used by Codex: start an MCP server from its private settings file.
     #[command(name = "mcp-exec", hide = true)]
@@ -303,7 +303,12 @@ async fn main() -> Result<()> {
             Some(RetroCommand::Apply { number, ids }) => retro_apply(project, &number, &ids),
             None => retro(project, args.task_id.as_deref(), args.suggest).await,
         },
-        Command::Tui => tui::run(open_repo(project)?.root()),
+        Command::Tui => {
+            // Inside a project it opens that project, anywhere else the last one.
+            let start =
+                Repo::open(project).map_or_else(|_| project.clone(), |r| r.root().to_path_buf());
+            harness_tui::run(&start)
+        }
         Command::McpExec { file } => {
             let error = launcher::exec_server(&file);
             bail!(
@@ -328,18 +333,16 @@ fn open_task(repo: &Repo, task_id: &str) -> Result<(TaskStore, TaskState)> {
 }
 
 fn init(project: &Path) -> Result<()> {
-    let repo = open_repo(project)?;
-    let harness_dir = repo.root().join(HARNESS_DIR);
-    let config = harness_dir.join(CONFIG_FILE);
-    if config.exists() {
-        println!("{} already exists, left as it is.", config.display());
-    } else {
-        fs::create_dir_all(&harness_dir)?;
-        fs::write(&config, DEFAULT_CONFIG)?;
-        println!("Created {}.", config.display());
+    let done = projects::init(project)?;
+    let config = project.join(HARNESS_DIR).join(CONFIG_FILE);
+    if done.created_git {
+        println!("Created a git repository in {}.", project.display());
     }
-    repo.ensure_harness_ignores()?;
-    repo.commit_paths(&[&config], "harness: settings")?;
+    if done.created_config {
+        println!("Created {}.", config.display());
+    } else {
+        println!("{} already exists, left as it is.", config.display());
+    }
     Ok(())
 }
 
