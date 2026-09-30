@@ -10,6 +10,7 @@ anyhow = "1"
 ratatui = { version = "0.30.2", default-features = false, features = ["crossterm"] }
 serde_json = "1"
 toml = "0.9"
+tokio = { version = "1", features = ["rt", "time", "process", "io-util"] }
 
 [dev-dependencies]
 tempfile = "3"

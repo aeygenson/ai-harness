@@ -20,8 +20,8 @@ use std::time::{Duration, Instant};
 use anyhow::Result;
 use harness_core::projects::{self, name_of};
 use ratatui::crossterm::event::{
-    self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyEventKind,
-    KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
+    self, DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
+    Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
 };
 use ratatui::crossterm::execute;
 use ratatui::layout::{Constraint, Layout, Rect};
@@ -35,6 +35,7 @@ mod keys;
 mod picker;
 mod projects_tab;
 mod roles_tab;
+mod runner;
 mod tasks;
 mod ui;
 
@@ -42,6 +43,7 @@ use i18n::I18n;
 use picker::{Browser, Native};
 use projects_tab::{has_config, ProjectsTab};
 use roles_tab::{Action, RolesTab};
+use runner::Builder;
 use tasks::TasksTab;
 use ui::{buttons, panel, ButtonId, Form, Hits, ListId, Target};
 
@@ -102,12 +104,13 @@ pub fn run(start: &Path) -> Result<()> {
     // Give the mouse back to the terminal even if the program panics.
     let hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
-        let _ = execute!(io::stdout(), DisableMouseCapture);
+        let _ = execute!(io::stdout(), DisableMouseCapture, DisableBracketedPaste);
         hook(info);
     }));
-    execute!(io::stdout(), EnableMouseCapture)?;
+    // A pasted text arrives as one event, so its line breaks do not send it.
+    execute!(io::stdout(), EnableMouseCapture, EnableBracketedPaste)?;
     let result = event_loop(&mut terminal, &mut app);
-    let _ = execute!(io::stdout(), DisableMouseCapture);
+    let _ = execute!(io::stdout(), DisableMouseCapture, DisableBracketedPaste);
     ratatui::restore();
     result
 }
@@ -120,9 +123,11 @@ fn event_loop(terminal: &mut DefaultTerminal, app: &mut App) -> Result<()> {
             match event::read()? {
                 Event::Key(key) if key.kind == KeyEventKind::Press => app.on_key(key),
                 Event::Mouse(mouse) => app.on_mouse(mouse),
+                Event::Paste(text) => app.on_paste(&text),
                 _ => {}
             }
         }
+        app.tick();
         if loaded.elapsed() >= RELOAD_EVERY {
             if let Some(tasks) = &mut app.tasks {
                 tasks.reload();
@@ -155,6 +160,8 @@ struct App {
     message: Option<(String, bool)>,
     hits: Hits,
     last_click: Option<(Instant, Target, u16)>,
+    /// Builds the agents that run the roles.
+    builder: Builder,
     /// `q` was pressed once with unsaved changes.
     quit_warned: bool,
     quit: bool,
@@ -177,6 +184,7 @@ impl App {
             message: None,
             hits: Hits::default(),
             last_click: None,
+            builder: harness_agents::build::build_team,
             quit_warned: false,
             quit: false,
         };
@@ -192,6 +200,9 @@ impl App {
 
     /// Opens a project: it becomes the current one and the one opened last.
     fn open(&mut self, root: &Path) {
+        if self.busy() {
+            return;
+        }
         if !has_config(root) {
             let text = self
                 .tr
@@ -218,6 +229,38 @@ impl App {
         });
     }
 
+    /// Roles are working: the project stays open until they finish.
+    fn busy(&mut self) -> bool {
+        let running = self.tasks.as_ref().is_some_and(TasksTab::is_running);
+        if running {
+            self.message = Some((self.tr.t("tasks.busy").to_string(), true));
+        }
+        running
+    }
+
+    /// Takes what the background work sent.
+    fn tick(&mut self) {
+        if let Some(tasks) = &mut self.tasks {
+            if let Some(message) = tasks.tick(&self.tr) {
+                self.message = Some(message);
+            }
+        }
+    }
+
+    fn on_paste(&mut self, text: &str) {
+        if let Some((_, form)) = &mut self.form {
+            text.chars()
+                .filter(|c| !c.is_control())
+                .for_each(|c| form.type_char(c));
+        } else if let Some(name) = self.browser.as_mut().and_then(|(_, b)| b.naming.as_mut()) {
+            name.extend(text.chars().filter(|c| !c.is_control()));
+        } else if self.tab == Tab::Tasks && self.browser.is_none() {
+            if let Some(tasks) = &mut self.tasks {
+                tasks.paste(text);
+            }
+        }
+    }
+
     fn on_key(&mut self, key: KeyEvent) {
         if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c') {
             self.quit = true;
@@ -239,10 +282,29 @@ impl App {
             }
             return;
         }
+        // Writing the message: every key is text, except these.
+        if self.tab == Tab::Tasks {
+            if let Some(tasks) = self.tasks.as_mut().filter(|t| t.typing()) {
+                match key.code {
+                    KeyCode::Enter => self.press(ButtonId::Send),
+                    code => tasks.on_key(code),
+                }
+                return;
+            }
+        }
         // Hot keys work with a Russian keyboard layout too: «й» is q.
         let code = keys::latin(key.code);
         let unsaved = self.roles.as_ref().is_some_and(RolesTab::changed);
+        let running = self.tasks.as_ref().is_some_and(TasksTab::is_running);
         match code {
+            KeyCode::Esc if self.tasks.as_ref().is_some_and(|t| t.menu) => {
+                if let Some(tasks) = &mut self.tasks {
+                    tasks.menu = false;
+                }
+            }
+            KeyCode::Char('q') | KeyCode::Esc if running => {
+                self.message = Some((self.tr.t("tasks.quit_running").to_string(), true));
+            }
             KeyCode::Esc
                 if self.tab == Tab::Roles
                     && self.roles.as_ref().is_some_and(RolesTab::in_details) =>
@@ -360,6 +422,28 @@ impl App {
     }
 
     fn click(&mut self, hit: Option<(Target, u16)>, double: bool) {
+        // The open «To» list closes with any click; a click on it chooses.
+        if let Some(tasks) = self.tasks.as_mut().filter(|t| t.menu) {
+            tasks.menu = false;
+            if let Some((
+                target @ Target::List {
+                    list: ListId::Choices,
+                    ..
+                },
+                row,
+            )) = hit
+            {
+                if let Some((_, index)) = Hits::row(target, row) {
+                    tasks.choose(index);
+                }
+            }
+            if !matches!(
+                hit,
+                Some((Target::Button(ButtonId::Input | ButtonId::Send), _))
+            ) {
+                return;
+            }
+        }
         if let Some((_, browser)) = &mut self.browser {
             match hit {
                 Some((Target::Button(id), _)) => self.press(id),
@@ -448,6 +532,24 @@ impl App {
     /// A button, clicked or chosen with its key.
     fn press(&mut self, id: ButtonId) {
         match id {
+            ButtonId::Input => {
+                if let Some(tasks) = &mut self.tasks {
+                    tasks.focus_input();
+                }
+            }
+            ButtonId::To => {
+                if let Some(tasks) = &mut self.tasks {
+                    tasks.menu = !tasks.menu;
+                }
+            }
+            ButtonId::Send => {
+                if let Some(tasks) = &mut self.tasks {
+                    self.message = Some(match tasks.send(self.builder, &self.tr) {
+                        Ok(text) => (text, false),
+                        Err(error) => (error, true),
+                    });
+                }
+            }
             ButtonId::UseProject => {
                 if let Some(project) = self.projects.current() {
                     let path = project.path.clone();
@@ -494,6 +596,11 @@ impl App {
                 }
             }
             ButtonId::RemoveProject => {
+                if self.project.as_deref() == self.projects.current().map(|p| p.path.as_path())
+                    && self.busy()
+                {
+                    return;
+                }
                 if let Some(project) = self.projects.current() {
                     let tr = &self.tr;
                     let text = tr.f(
@@ -738,8 +845,14 @@ impl App {
                 Style::new().fg(Color::Red),
             ));
         }
+        let typing = self.tab == Tab::Tasks && self.tasks.as_ref().is_some_and(TasksTab::typing);
+        let hint = if typing {
+            "tasks.typing_hint"
+        } else {
+            "footer.hint"
+        };
         spans.push(Span::styled(
-            format!(" {}", self.tr.t("footer.hint")),
+            format!(" {}", self.tr.t(hint)),
             Style::new().fg(Color::DarkGray),
         ));
         frame.render_widget(Line::from(spans), footer);

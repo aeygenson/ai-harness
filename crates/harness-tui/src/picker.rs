@@ -317,7 +317,7 @@ impl Browser {
 }
 
 /// A long path cut from the left, so its end (the folder itself) stays visible.
-fn keep_end(text: &str, width: usize) -> String {
+pub(crate) fn keep_end(text: &str, width: usize) -> String {
     let count = text.chars().count();
     if count <= width {
         return text.to_string();

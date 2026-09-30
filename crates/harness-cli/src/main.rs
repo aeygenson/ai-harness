@@ -28,22 +28,19 @@
 use std::fs;
 use std::io::{self, BufRead, Write};
 use std::path::{Path, PathBuf};
-use std::time::Duration;
 
 mod catalogs;
 
 use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand};
+use harness_agents::build::{build_team, retro_agent};
 use harness_agents::credentials::{self, Secret};
-use harness_agents::{codex, launcher, Antigravity, AnyAgent, ClaudeCode, Codex, Team};
+use harness_agents::launcher;
 use harness_core::config::{Config, CONFIG_FILE};
 use harness_core::git::{Repo, HARNESS_DIR};
 use harness_core::handoff::{NextStep, Role, Verdict};
-use harness_core::mcp::McpServer;
-use harness_core::mcp::{self, McpServers};
+use harness_core::mcp;
 use harness_core::orchestrator::{self, StopReason};
-use harness_core::plugins::Plugin;
-use harness_core::plugins::Plugins;
 use harness_core::projects;
 use harness_core::proposals::FileChange;
 use harness_core::retro::{Stats, TaskHistory, RETROS_DIR};
@@ -565,126 +562,6 @@ fn new_task(project: &Path, task_id: &str, description: &str) -> Result<()> {
     Ok(())
 }
 
-/// Builds the team from harness.toml: each role gets the agent, model, MCP
-/// servers and plugins set there.
-fn build_team(config: &Config, project_dir: &Path) -> Result<Team> {
-    let dir = credentials::default_dir().context("HOME is not set")?;
-    let servers = McpServers::load(config, |name| credentials::load_secret(&dir, name).ok())?;
-    let plugins = Plugins::load(project_dir, config)?;
-    let mut team = Team::new();
-    for role in [
-        Role::Architect,
-        Role::Developer,
-        Role::Tester,
-        Role::Security,
-    ] {
-        let settings = config.role(role)?;
-        let agent = build_agent(
-            config,
-            &AgentChoice {
-                who: &format!("{role:?}"),
-                agent: &settings.agent,
-                model: settings.model.as_deref(),
-                role,
-            },
-            servers.for_role(role),
-            plugins.for_role(role),
-        )?;
-        team = team.with(role, agent);
-    }
-    Ok(team)
-}
-
-/// Which agent to build, and for whom.
-struct AgentChoice<'a> {
-    /// For error messages: `Tester` or `[retro]`.
-    who: &'a str,
-    agent: &'a str,
-    model: Option<&'a str>,
-    /// The role whose rules the agent gets.
-    role: Role,
-}
-
-fn build_agent(
-    config: &Config,
-    choice: &AgentChoice,
-    servers: Vec<McpServer>,
-    plugins: Vec<Plugin>,
-) -> Result<AnyAgent> {
-    let dir = credentials::default_dir().context("HOME is not set")?;
-    // Codex starts MCP servers and reads keys through this same program.
-    let harness = std::env::current_exe().context("cannot find the harness program")?;
-    let timeout = Duration::from_secs(config.agent_timeout_minutes * 60);
-    let role = choice.role;
-    let agent = match choice.agent {
-        "claude" => {
-            let token = credentials::load_token(&dir, "claude")
-                .context("no Claude token saved; run `harness login claude` first")?;
-            let mut agent = ClaudeCode::new(token).with_timeout(timeout);
-            if let Some(model) = choice.model {
-                agent = agent.with_model(role, model);
-            }
-            AnyAgent::Claude(
-                agent
-                    .with_mcp_servers(role, servers)
-                    .with_plugins(role, plugins),
-            )
-        }
-        "codex" => {
-            let auth_dir = dir.join("codex");
-            if !auth_dir.join("auth.json").exists() {
-                bail!("no Codex login saved; run `harness login codex` first");
-            }
-            let mut agent = Codex::new(auth_dir).with_timeout(timeout);
-            if let Some(model) = choice.model {
-                agent = agent.with_model(role, model);
-            }
-            AnyAgent::Codex(
-                agent
-                    .with_launcher(&harness)
-                    .with_mcp_servers(role, servers)
-                    .with_plugins(role, plugins),
-            )
-        }
-        "codex+deepseek" => {
-            // A key in the shell wins; otherwise the one `harness login deepseek` saved.
-            let key = match std::env::var(codex::DEEPSEEK_KEY_ENV) {
-                Ok(key) if !key.trim().is_empty() => Secret::new(key.trim()),
-                _ => credentials::load_token(&dir, "deepseek")
-                    .context("no DeepSeek API key saved; run `harness login deepseek` first")?,
-            };
-            let mut agent = Codex::deepseek(key).with_timeout(timeout);
-            if let Some(model) = choice.model {
-                agent = agent.with_model(role, model);
-            }
-            AnyAgent::Codex(
-                agent
-                    .with_launcher(&harness)
-                    .with_mcp_servers(role, servers)
-                    .with_plugins(role, plugins),
-            )
-        }
-        "antigravity" => {
-            let auth_dir = dir.join("antigravity");
-            if !auth_dir.join(".gemini/antigravity-cli").is_dir() {
-                bail!("no Antigravity login saved; run `harness login antigravity` first");
-            }
-            let mut agent = Antigravity::new(auth_dir).with_timeout(timeout);
-            if let Some(model) = choice.model {
-                agent = agent.with_model(role, model);
-            }
-            AnyAgent::Antigravity(agent.with_mcp_servers(role, servers))
-        }
-        other => {
-            bail!(
-                "{} uses agent {other:?}; use \"claude\", \"codex\", \"codex+deepseek\" or \"antigravity\"",
-                choice.who
-            )
-        }
-    };
-    Ok(agent)
-}
-
 async fn run(project: &Path, task_id: &str) -> Result<()> {
     let repo = open_repo(project)?;
     let harness_dir = repo.root().join(HARNESS_DIR);
@@ -849,25 +726,6 @@ async fn retro(project: &Path, task_id: Option<&str>, suggest: bool) -> Result<(
         );
     }
     Ok(())
-}
-
-/// The `[retro]` agent: the read-only rules of the security role, and no MCP
-/// servers or plugins.
-fn retro_agent(config: &Config) -> Result<AnyAgent> {
-    let Some(settings) = &config.retro else {
-        bail!("harness.toml has no [retro] section; add\n[retro]\nagent = \"claude\"");
-    };
-    build_agent(
-        config,
-        &AgentChoice {
-            who: "[retro]",
-            agent: &settings.agent,
-            model: settings.model.as_deref(),
-            role: suggest::RULES_OF,
-        },
-        Vec::new(),
-        Vec::new(),
-    )
 }
 
 /// `.harness/retros/<NNN>` for `4`, `04` or `004`; it must exist.

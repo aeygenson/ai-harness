@@ -183,13 +183,16 @@ impl AgentRunner for Antigravity {
             Err(e) => return failed(log, format!("cannot prepare the agent's HOME: {e}")),
         };
         // The prompt is given with `-p`; standard input stays empty.
-        let result = process::run(self.command(job, home.path()), "", self.timeout).await;
+        let secrets: Vec<&str> = self
+            .mcp
+            .get(&job.role)
+            .into_iter()
+            .flatten()
+            .flat_map(|server| server.env.values().map(|v| v.expose()))
+            .collect();
+        let result = process::run(self.command(job, home.path()), "", self.timeout, &secrets).await;
         drop(home);
-        let secrets = self.mcp.get(&job.role).into_iter().flatten();
-        let result = process::hide_secrets(
-            result,
-            secrets.flat_map(|server| server.env.values().map(|v| v.expose())),
-        );
+        let result = process::hide_secrets(result, secrets);
         outcome(log, result)
     }
 }
