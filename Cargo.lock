@@ -366,6 +366,7 @@ name = "harness-tui"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "harness-agents",
  "harness-core",
  "ratatui",
  "serde_json",

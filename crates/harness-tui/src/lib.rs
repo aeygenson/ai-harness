@@ -31,14 +31,19 @@ use ratatui::widgets::{Paragraph, Wrap};
 use ratatui::{DefaultTerminal, Frame};
 
 mod i18n;
+mod keys;
+mod picker;
 mod projects_tab;
+mod roles_tab;
 mod tasks;
 mod ui;
 
 use i18n::I18n;
+use picker::{Browser, Native};
 use projects_tab::{has_config, ProjectsTab};
+use roles_tab::{Action, RolesTab};
 use tasks::TasksTab;
-use ui::{buttons, expand_home, panel, ButtonId, Form, Hits, ListId, Target};
+use ui::{buttons, panel, ButtonId, Form, Hits, ListId, Target};
 
 /// How often the open project is read again.
 const RELOAD_EVERY: Duration = Duration::from_secs(3);
@@ -71,18 +76,28 @@ const TABS: [(Tab, &str, u8); 7] = [
 /// What the open form is for.
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Purpose {
-    NewProject,
-    OpenFolder,
+    /// Create a project in this folder: the form asks for its name.
+    NewProject(PathBuf),
     /// The folder has no harness settings yet: create them?
     InitFolder(PathBuf),
     /// Take the project off the list (the folder stays).
     Remove(PathBuf),
+    /// The model of the role selected on the Roles tab.
+    Model,
+}
+
+/// What a folder is being chosen for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Pick {
+    NewProject,
+    Open,
 }
 
 /// Opens the TUI and runs until `q`. It starts with `start` if that folder is
 /// a harness project, otherwise with the project opened last.
 pub fn run(start: &Path) -> Result<()> {
     let mut app = App::new(projects::harness_home(), start);
+    app.native = true;
     let mut terminal = ratatui::init();
     // Give the mouse back to the terminal even if the program panics.
     let hook = std::panic::take_hook();
@@ -127,12 +142,21 @@ struct App {
     /// The open project.
     project: Option<PathBuf>,
     tasks: Option<TasksTab>,
+    roles: Option<RolesTab>,
     projects: ProjectsTab,
     form: Option<(Purpose, Form)>,
+    /// The folder browser, when the system has no folder dialog.
+    browser: Option<(Pick, Browser)>,
+    /// Use the system's folder dialog (`kdialog`, `zenity`) when there is one.
+    native: bool,
+    /// Where choosing a folder starts: `~/code` if it exists.
+    start_dir: PathBuf,
     /// The last result or problem, shown at the bottom.
     message: Option<(String, bool)>,
     hits: Hits,
     last_click: Option<(Instant, Target, u16)>,
+    /// `q` was pressed once with unsaved changes.
+    quit_warned: bool,
     quit: bool,
 }
 
@@ -144,11 +168,16 @@ impl App {
             home: home.clone(),
             project: None,
             tasks: None,
+            roles: None,
             projects: ProjectsTab::load(home),
             form: None,
+            browser: None,
+            native: false,
+            start_dir: default_start_dir(),
             message: None,
             hits: Hits::default(),
             last_click: None,
+            quit_warned: false,
             quit: false,
         };
         let start = start.canonicalize().unwrap_or_else(|_| start.to_path_buf());
@@ -171,6 +200,7 @@ impl App {
             return;
         }
         self.tasks = Some(TasksTab::load(root));
+        self.roles = Some(RolesTab::load(root));
         self.project = Some(root.to_path_buf());
         self.tab = Tab::Tasks;
         let saved = self.projects.update(|list| {
@@ -193,6 +223,11 @@ impl App {
             self.quit = true;
             return;
         }
+        let quit_warned = std::mem::take(&mut self.quit_warned);
+        if self.browser.is_some() {
+            self.browser_key(key.code);
+            return;
+        }
         if let Some((_, form)) = &mut self.form {
             match key.code {
                 KeyCode::Esc => self.form = None,
@@ -204,9 +239,24 @@ impl App {
             }
             return;
         }
-        match key.code {
+        // Hot keys work with a Russian keyboard layout too: «й» is q.
+        let code = keys::latin(key.code);
+        let unsaved = self.roles.as_ref().is_some_and(RolesTab::changed);
+        match code {
+            KeyCode::Esc
+                if self.tab == Tab::Roles
+                    && self.roles.as_ref().is_some_and(RolesTab::in_details) =>
+            {
+                if let Some(roles) = &mut self.roles {
+                    roles.on_key(KeyCode::Esc, &self.tr);
+                }
+            }
+            KeyCode::Char('q') | KeyCode::Esc if unsaved && !quit_warned => {
+                self.quit_warned = true;
+                self.message = Some((self.tr.t("roles.unsaved_quit").to_string(), true));
+            }
             KeyCode::Char('q') | KeyCode::Esc => self.quit = true,
-            KeyCode::Char('L') => self.press(ButtonId::Language),
+            KeyCode::Char('L') | KeyCode::F(2) => self.press(ButtonId::Language),
             KeyCode::Char(c @ '1'..='7') => {
                 let index = usize::from(c as u8 - b'1');
                 self.tab = TABS[index].0;
@@ -214,6 +264,10 @@ impl App {
             KeyCode::Char('r') | KeyCode::F(5) => {
                 if let Some(tasks) = &mut self.tasks {
                     tasks.reload();
+                }
+                // Unsaved changes are not thrown away by a reload.
+                if let Some(roles) = self.roles.as_mut().filter(|r| !r.changed()) {
+                    roles.reload();
                 }
                 self.projects.reload();
             }
@@ -223,6 +277,16 @@ impl App {
                         tasks.on_key(code);
                     }
                 }
+                Tab::Roles => match code {
+                    KeyCode::Char('s') => self.press(ButtonId::Save),
+                    KeyCode::Char('u') => self.press(ButtonId::Undo),
+                    code => {
+                        if let Some(roles) = &mut self.roles {
+                            let action = roles.on_key(code, &self.tr);
+                            self.act(action);
+                        }
+                    }
+                },
                 Tab::Projects => match code {
                     KeyCode::Enter => self.press(ButtonId::UseProject),
                     KeyCode::Char('n') => self.press(ButtonId::NewProject),
@@ -250,6 +314,10 @@ impl App {
             }
             MouseEventKind::ScrollDown | MouseEventKind::ScrollUp => {
                 let down = mouse.kind == MouseEventKind::ScrollDown;
+                if let Some((_, browser)) = &mut self.browser {
+                    browser.move_by(if down { 1 } else { -1 });
+                    return;
+                }
                 if self.form.is_some() {
                     return;
                 }
@@ -269,6 +337,21 @@ impl App {
                         self.projects
                             .on_key(if down { KeyCode::Down } else { KeyCode::Up });
                     }
+                    (Tab::Roles, Some((ListId::Roles, _))) => {
+                        if let Some(roles) = &mut self.roles {
+                            let next = if down {
+                                roles.selected + 1
+                            } else {
+                                roles.selected.saturating_sub(1)
+                            };
+                            roles.select(next);
+                        }
+                    }
+                    (Tab::Roles, _) => {
+                        if let Some(roles) = &mut self.roles {
+                            roles.on_wheel(down);
+                        }
+                    }
                     _ => {}
                 }
             }
@@ -277,6 +360,23 @@ impl App {
     }
 
     fn click(&mut self, hit: Option<(Target, u16)>, double: bool) {
+        if let Some((_, browser)) = &mut self.browser {
+            match hit {
+                Some((Target::Button(id), _)) => self.press(id),
+                Some((target @ Target::List { .. }, row)) => {
+                    if let Some((_, index)) = Hits::row(target, row) {
+                        browser.mark(index);
+                        if double {
+                            browser.open_selected();
+                        }
+                    }
+                }
+                Some((Target::Field(_), _)) => {}
+                // A click outside the window closes it.
+                _ => self.browser = None,
+            }
+            return;
+        }
         if let Some((_, form)) = &mut self.form {
             match hit {
                 Some((Target::Button(ButtonId::Ok), _)) => self.submit(),
@@ -303,6 +403,11 @@ impl App {
                         }
                     }
                 }
+                Some((ListId::Roles, index)) => {
+                    if let Some(roles) = &mut self.roles {
+                        roles.select(index);
+                    }
+                }
                 Some((list, index)) => {
                     if let Some(tasks) = &mut self.tasks {
                         tasks.on_click(list, index);
@@ -310,7 +415,33 @@ impl App {
                 }
                 None => {}
             },
+            Target::Row(index) => {
+                if let Some(roles) = &mut self.roles {
+                    let action = roles.activate(index, &self.tr);
+                    self.act(action);
+                }
+            }
             Target::Field(_) => {}
+        }
+    }
+
+    /// What the Roles tab asks for after a click or a key.
+    fn act(&mut self, action: Action) {
+        match action {
+            Action::None => {}
+            Action::Say(text) => self.message = Some((text, false)),
+            Action::EditModel(model) => {
+                let tr = &self.tr;
+                self.form = Some((
+                    Purpose::Model,
+                    Form::new(
+                        tr.t("roles.model_title"),
+                        tr.t("roles.model_text"),
+                        tr.t("roles.model_ok"),
+                    )
+                    .field(tr.t("roles.model_field"), &model),
+                ));
+            }
         }
     }
 
@@ -330,26 +461,27 @@ impl App {
                     }
                 }
             }
-            ButtonId::NewProject => {
-                let tr = &self.tr;
-                self.form = Some((
-                    Purpose::NewProject,
-                    Form::new(
-                        tr.t("form.new_title"),
-                        tr.t("form.new_text"),
-                        tr.t("form.create"),
-                    )
-                    .field(tr.t("form.new_folder"), "~/code/")
-                    .field(tr.t("form.new_name"), ""),
-                ));
+            ButtonId::NewProject => self.pick(Pick::NewProject),
+            ButtonId::OpenFolder => self.pick(Pick::Open),
+            ButtonId::Choose => {
+                if let Some((pick, browser)) = self.browser.take() {
+                    self.picked(pick, browser.chosen());
+                }
             }
-            ButtonId::OpenFolder => {
-                let tr = &self.tr;
-                self.form = Some((
-                    Purpose::OpenFolder,
-                    Form::new(tr.t("form.open_title"), "", tr.t("form.open"))
-                        .field(tr.t("form.folder"), "~/code/"),
-                ));
+            ButtonId::Up => {
+                if let Some((_, browser)) = &mut self.browser {
+                    browser.up();
+                }
+            }
+            ButtonId::NewFolder => {
+                if let Some((_, browser)) = &mut self.browser {
+                    browser.naming = Some(String::new());
+                }
+            }
+            ButtonId::ToggleHidden => {
+                if let Some((_, browser)) = &mut self.browser {
+                    browser.toggle_hidden();
+                }
             }
             ButtonId::Language => {
                 self.tr.next();
@@ -374,7 +506,26 @@ impl App {
                     ));
                 }
             }
-            ButtonId::Ok | ButtonId::Cancel => {}
+            ButtonId::Save => {
+                if let Some(roles) = &mut self.roles {
+                    self.message = Some(match roles.save() {
+                        Ok(()) => (self.tr.t("roles.saved").to_string(), false),
+                        Err(error) => (error, true),
+                    });
+                    // The Tasks tab shows the agents too.
+                    if let Some(tasks) = &mut self.tasks {
+                        tasks.reload();
+                    }
+                }
+            }
+            ButtonId::Undo => {
+                if let Some(roles) = &mut self.roles {
+                    roles.undo();
+                    self.message = None;
+                }
+            }
+            ButtonId::Cancel => self.browser = None,
+            ButtonId::Ok => {}
         }
     }
 
@@ -384,32 +535,23 @@ impl App {
             return;
         };
         let result = match &purpose {
-            Purpose::NewProject => self.create_project(&form),
-            Purpose::OpenFolder => {
-                let path = expand_home(form.value(0));
-                if form.value(0).is_empty() {
-                    Err(self.tr.t("form.type_folder").to_string())
-                } else if !path.is_dir() {
-                    Err(self
-                        .tr
-                        .f("form.no_such_folder", &[("path", &path.display())]))
-                } else if has_config(&path) {
-                    self.open(&path);
-                    Ok(())
-                } else {
-                    self.form = Some(self.init_form(&path));
-                    return;
-                }
-            }
+            Purpose::NewProject(path) => self.create_project(&path.clone(), &form),
             Purpose::InitFolder(path) => projects::init(path)
                 .map(|_| self.open(path))
                 .map_err(|e| e.to_string()),
+            Purpose::Model => {
+                if let Some(roles) = &mut self.roles {
+                    roles.set_model(form.value(0));
+                }
+                Ok(())
+            }
             Purpose::Remove(path) => {
                 let path = path.clone();
                 let result = self.projects.update(|list| list.remove(&path));
                 if self.project.as_deref() == Some(path.as_path()) {
                     self.project = None;
                     self.tasks = None;
+                    self.roles = None;
                 }
                 result.map(|()| {
                     self.message = Some((self.tr.t("projects.removed").to_string(), false));
@@ -424,22 +566,100 @@ impl App {
         }
     }
 
-    fn create_project(&mut self, form: &Form) -> Result<(), String> {
-        if form.value(0).is_empty() || form.value(0) == "~/code/" {
-            return Err(self.tr.t("form.no_folder").to_string());
+    /// Chooses a folder: in the system's dialog if there is one, otherwise
+    /// in the TUI's own browser.
+    fn pick(&mut self, pick: Pick) {
+        let title = match pick {
+            Pick::NewProject => self.tr.t("picker.new_title"),
+            Pick::Open => self.tr.t("picker.open_title"),
         }
-        let path = expand_home(form.value(0));
+        .to_string();
+        let native = if self.native {
+            picker::native_folder(&title, &self.start_dir)
+        } else {
+            Native::Unavailable
+        };
+        match native {
+            Native::Chosen(path) => self.picked(pick, path),
+            Native::Cancelled => {}
+            Native::Unavailable => {
+                self.browser = Some((pick, Browser::new(&title, &self.start_dir)));
+            }
+        }
+    }
+
+    /// A folder was chosen.
+    fn picked(&mut self, pick: Pick, path: PathBuf) {
+        let path = path.canonicalize().unwrap_or(path);
+        // The next choice starts next to this one.
+        if let Some(parent) = path.parent() {
+            self.start_dir = parent.to_path_buf();
+        }
+        match pick {
+            Pick::NewProject if has_config(&path) => {
+                self.message = Some((self.tr.t("form.exists").to_string(), true));
+            }
+            Pick::NewProject => {
+                let tr = &self.tr;
+                let text = tr.f("form.new_text", &[("path", &path.display())]);
+                self.form = Some((
+                    Purpose::NewProject(path.clone()),
+                    Form::new(tr.t("form.new_title"), &text, tr.t("form.create"))
+                        .field(tr.t("form.new_name"), &name_of(&path)),
+                ));
+            }
+            Pick::Open if has_config(&path) => self.open(&path),
+            Pick::Open => self.form = Some(self.init_form(&path)),
+        }
+    }
+
+    /// Keys while the folder browser is open.
+    fn browser_key(&mut self, code: KeyCode) {
+        let Some((_, browser)) = &mut self.browser else {
+            return;
+        };
+        if let Some(name) = &mut browser.naming {
+            match code {
+                KeyCode::Esc => browser.naming = None,
+                KeyCode::Enter => browser.create(&self.tr),
+                KeyCode::Backspace => {
+                    name.pop();
+                }
+                KeyCode::Char(c) => name.push(c),
+                _ => {}
+            }
+            return;
+        }
+        match keys::latin(code) {
+            KeyCode::Esc => self.browser = None,
+            KeyCode::Up | KeyCode::Char('k') => browser.move_by(-1),
+            KeyCode::Down | KeyCode::Char('j') => browser.move_by(1),
+            KeyCode::PageUp => browser.move_by(-10),
+            KeyCode::PageDown => browser.move_by(10),
+            KeyCode::Enter | KeyCode::Right => browser.open_selected(),
+            KeyCode::Backspace | KeyCode::Left => browser.up(),
+            KeyCode::Char('n') => browser.naming = Some(String::new()),
+            KeyCode::Char('.') => browser.toggle_hidden(),
+            KeyCode::Char('c') => self.press(ButtonId::Choose),
+            _ => {}
+        }
+    }
+
+    fn create_project(&mut self, path: &Path, form: &Form) -> Result<(), String> {
+        let path = path.to_path_buf();
         if has_config(&path) {
             return Err(self.tr.t("form.exists").to_string());
         }
         let done = projects::init(&path).map_err(|e| e.to_string())?;
         let path = path.canonicalize().unwrap_or(path);
-        let name = match form.value(1) {
+        let name = match form.value(0) {
             "" => name_of(&path),
             name => name.to_string(),
         };
         self.projects.update(|list| list.add(&name, &path))?;
         self.open(&path);
+        // A new project starts with choosing the agents.
+        self.tab = Tab::Roles;
         let git = if done.created_git { "git, " } else { "" };
         let text = self
             .tr
@@ -465,6 +685,15 @@ impl App {
                     frame,
                     main,
                     self.tr.t("tasks.title"),
+                    self.tr.t("tabs.no_open_project"),
+                ),
+            },
+            Tab::Roles => match &self.roles {
+                Some(roles) => roles.draw(frame, main, &mut self.hits, &self.tr),
+                None => placeholder(
+                    frame,
+                    main,
+                    self.tr.t("roles.title"),
                     self.tr.t("tabs.no_open_project"),
                 ),
             },
@@ -517,6 +746,9 @@ impl App {
 
         if let Some((_, form)) = &self.form {
             form.draw(frame, &mut self.hits, self.tr.t("form.cancel"));
+        }
+        if let Some((_, browser)) = &self.browser {
+            browser.draw(frame, &mut self.hits, &self.tr);
         }
     }
 
@@ -577,6 +809,17 @@ impl App {
             Purpose::InitFolder(path.to_path_buf()),
             Form::new(tr.t("form.init_title"), &text, tr.t("form.create")),
         )
+    }
+}
+
+/// `~/code` if it exists, otherwise the home folder.
+fn default_start_dir() -> PathBuf {
+    let home = std::env::var_os("HOME").map_or_else(|| PathBuf::from("/"), PathBuf::from);
+    let code = home.join("code");
+    if code.is_dir() {
+        code
+    } else {
+        home
     }
 }
 

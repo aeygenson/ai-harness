@@ -53,7 +53,11 @@ use harness_core::suggest::{self, Applied};
 use harness_core::task::{Stage, TaskState, WaitReason};
 
 #[derive(Parser)]
-#[command(name = "harness", about = "Runs a team of AI roles on a project")]
+#[command(
+    name = "harness",
+    version,
+    about = "Runs a team of AI roles on a project"
+)]
 struct Cli {
     /// The project folder (a git repository).
     #[arg(short = 'C', long, default_value = ".", global = true)]

@@ -51,7 +51,7 @@ pub fn manifest(agent: &str) -> &'static str {
 }
 
 /// The agent family a role runs on: `"codex+deepseek"` is still Codex.
-fn family(role_agent: &str) -> &str {
+pub fn family(role_agent: &str) -> &str {
     role_agent.split('+').next().unwrap_or(role_agent)
 }
 

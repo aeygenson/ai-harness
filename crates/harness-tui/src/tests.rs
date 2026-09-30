@@ -88,8 +88,11 @@ impl Env {
         self.code.path().canonicalize().unwrap().join(name)
     }
 
+    /// The TUI with its own folder browser, starting in the code folder.
     fn app(&self, start: &Path) -> App {
-        App::new(Some(self.home.path().to_path_buf()), start)
+        let mut app = App::new(Some(self.home.path().to_path_buf()), start);
+        app.start_dir = self.code.path().canonicalize().unwrap();
+        app
     }
 
     fn saved(&self) -> Projects {
@@ -194,49 +197,61 @@ fn without_a_project_it_starts_on_the_projects_tab() {
 
     key(&mut app, KeyCode::Char('1'));
     assert!(screen(&mut app).contains("No project is open"));
-    key(&mut app, KeyCode::Char('2'));
-    assert!(screen(&mut app).contains("arrives in step 2 of the plan"));
+    key(&mut app, KeyCode::Char('3'));
+    assert!(screen(&mut app).contains("arrives in step 3 of the plan"));
 }
 
 #[test]
-fn a_new_project_is_created_from_the_form() {
+fn a_new_project_is_created_in_a_folder_chosen_in_the_browser() {
     let env = Env::new();
+    fs::create_dir(env.path("work")).unwrap();
     let mut app = env.app(env.code.path());
     click(&mut app, "[ New project ]");
-    assert!(screen(&mut app).contains("A new folder with a git repository"));
+    let text = screen(&mut app);
+    assert!(text.contains("Folder for the new project"), "{text}");
+    assert!(text.contains("work/"), "{text}");
 
-    // OK with the folder left as it is only explains.
+    // Into «work», then a new folder «fresh» made there.
+    click(&mut app, "work/");
+    click(&mut app, "work/");
+    assert!(screen(&mut app).contains("No folders inside"));
+    click(&mut app, "[ New folder ]");
+    type_text(&mut app, "fresh");
     key(&mut app, KeyCode::Enter);
-    assert!(screen(&mut app).contains("Type the folder of the new project"));
+    let root = env.path("work/fresh");
+    assert!(root.is_dir());
+    click(&mut app, "[ Choose this folder ]");
 
-    let root = env.path("fresh");
-    fill(&mut app, root.to_str().unwrap());
-    key(&mut app, KeyCode::Tab);
-    type_text(&mut app, "Fresh one");
+    // The form shows the folder and asks for the name.
+    let text = screen(&mut app);
+    assert!(text.contains("The project will be in"), "{text}");
+    let (_, form) = app.form.as_ref().unwrap();
+    assert_eq!(form.value(0), "fresh");
+    fill(&mut app, "Fresh one");
     click(&mut app, "[ Create ]");
 
     assert!(app.form.is_none());
     assert_eq!(app.project.as_deref(), Some(root.as_path()));
-    assert_eq!(app.tab, Tab::Tasks);
+    // A new project opens where its agents are chosen.
+    assert_eq!(app.tab, Tab::Roles);
     assert!(has_config(&root));
     assert!(root.join(".git").is_dir());
     let text = screen(&mut app);
     assert!(text.contains("Project «Fresh one» created"), "{text}");
     assert_eq!(env.saved().projects[0].name, "Fresh one");
 
-    // The same folder again is refused, the form stays with the problem.
+    // The same folder again is refused. The browser starts next to it now.
     key(&mut app, KeyCode::Char('7'));
     key(&mut app, KeyCode::Char('n'));
-    fill(&mut app, root.to_str().unwrap());
+    assert!(screen(&mut app).contains("fresh/"));
     key(&mut app, KeyCode::Enter);
-    let (_, form) = app.form.as_ref().unwrap();
-    assert!(form
-        .error
-        .as_deref()
-        .unwrap()
-        .contains("already is a harness project"));
-    key(&mut app, KeyCode::Esc);
+    key(&mut app, KeyCode::Char('c'));
     assert!(app.form.is_none());
+    let (text, error) = app.message.clone().unwrap();
+    assert!(
+        error && text.contains("already is a harness project"),
+        "{text}"
+    );
 }
 
 #[test]
@@ -246,21 +261,15 @@ fn a_plain_folder_is_prepared_before_it_opens() {
     fs::create_dir(&folder).unwrap();
     let mut app = env.app(env.code.path());
 
+    // Keys work in the browser too; Esc closes it.
     key(&mut app, KeyCode::Char('o'));
-    fill(&mut app, &env.path("missing").display().to_string());
-    key(&mut app, KeyCode::Enter);
-    assert!(app
-        .form
-        .as_ref()
-        .unwrap()
-        .1
-        .error
-        .as_deref()
-        .unwrap()
-        .contains("There is no folder"));
+    assert!(screen(&mut app).contains("Open a project folder"));
+    key(&mut app, KeyCode::Esc);
+    assert!(app.browser.is_none());
 
-    fill(&mut app, folder.to_str().unwrap());
+    key(&mut app, KeyCode::Char('o'));
     key(&mut app, KeyCode::Enter);
+    key(&mut app, KeyCode::Char('c'));
     assert!(matches!(app.form, Some((Purpose::InitFolder(_), _))));
     // Cancel leaves the folder alone.
     click(&mut app, "[ Cancel ]");
@@ -268,8 +277,8 @@ fn a_plain_folder_is_prepared_before_it_opens() {
     assert!(!has_config(&folder));
 
     key(&mut app, KeyCode::Char('o'));
-    fill(&mut app, folder.to_str().unwrap());
-    key(&mut app, KeyCode::Enter);
+    click(&mut app, "plain/");
+    click(&mut app, "[ Choose this folder ]");
     key(&mut app, KeyCode::Enter);
     assert!(has_config(&folder));
     assert_eq!(app.project.as_deref(), Some(folder.as_path()));
@@ -373,15 +382,126 @@ fn the_language_switches_and_is_remembered() {
     let mut again = env.app(&root);
     assert!(screen(&mut again).contains("1 Задачи"));
 
-    // The button in the top bar opens the new project form from any tab.
+    // The button in the top bar starts a new project from any tab.
     click(&mut again, "+ Новый проект");
-    let (purpose, form) = again.form.as_ref().unwrap();
-    assert_eq!(
-        (purpose, form.title.as_str()),
-        (&Purpose::NewProject, "Новый проект")
-    );
+    let text = screen(&mut again);
+    assert!(text.contains("Папка для нового проекта"), "{text}");
+    assert!(text.contains("[ Выбрать эту папку ]"), "{text}");
     key(&mut again, KeyCode::Esc);
 
     key(&mut again, KeyCode::Char('L'));
     assert!(screen(&mut again).contains("1 Tasks"));
+}
+
+fn config(root: &Path) -> harness_core::config::Config {
+    harness_core::config::Config::load(&root.join(".harness")).unwrap()
+}
+
+#[test]
+fn roles_get_agents_models_and_skills_and_are_saved() {
+    let env = Env::new();
+    let root = env.path("test");
+    project(&root);
+    let skills = root.join(".harness/skills");
+    fs::create_dir_all(&skills).unwrap();
+    fs::write(
+        skills.join("rust-errors.md"),
+        "---\ndescription: Errors with thiserror.\n---\nUse thiserror.\n",
+    )
+    .unwrap();
+    fs::write(skills.join("broken.md"), "no header").unwrap();
+    let mut app = env.app(&root);
+    click(&mut app, "2 Roles");
+    let text = screen(&mut app);
+    for part in [
+        "architect  claude",
+        "retro      claude",
+        "(•) claude",
+        "( ) codex+deepseek",
+        "[ agent's default ]",
+        "[ ] rust-errors",
+        "Errors with thiserror.",
+        "the file has no description",
+        "No MCP servers yet",
+    ] {
+        assert!(text.contains(part), "missing {part:?} in:\n{text}");
+    }
+
+    // The developer moves to codex with a model and a skill always in the prompt.
+    click(&mut app, "developer  claude");
+    click(&mut app, "( ) codex ");
+    click(&mut app, "[ agent's default ]");
+    fill(&mut app, "gpt-5.5");
+    key(&mut app, KeyCode::Enter);
+    click(&mut app, "[ ] rust-errors");
+    click(&mut app, "[x] rust-errors");
+    let text = screen(&mut app);
+    assert!(text.contains("[■] rust-errors"), "{text}");
+    assert!(text.contains("developer *codex"), "{text}");
+    assert!(text.contains("Changes not saved"), "{text}");
+    assert_eq!(
+        config(&root).roles[&Role::Developer].agent,
+        "claude",
+        "not saved yet"
+    );
+
+    // Retro on another agent too.
+    click(&mut app, "retro      claude");
+    click(&mut app, "( ) antigravity");
+
+    click(&mut app, "[ Save ]");
+    let text = screen(&mut app);
+    assert!(text.contains("Settings saved and committed"), "{text}");
+    let saved = config(&root);
+    let developer = &saved.roles[&Role::Developer];
+    assert_eq!(developer.agent, "codex");
+    assert_eq!(developer.model.as_deref(), Some("gpt-5.5"));
+    assert_eq!(developer.always_skills, ["rust-errors"]);
+    assert_eq!(saved.retro.unwrap().agent, "antigravity");
+    let changed = Repo::open(&root).unwrap().changed_files().unwrap();
+    assert!(
+        !changed.iter().any(|f| f.ends_with("harness.toml")),
+        "committed: {changed:?}"
+    );
+    // The Tasks tab shows the new agent.
+    key(&mut app, KeyCode::Char('1'));
+    assert!(screen(&mut app).contains("developer  codex (gpt-5.5)"));
+}
+
+#[test]
+fn settings_that_fail_the_checks_are_not_saved() {
+    let env = Env::new();
+    let root = env.path("test");
+    project(&root);
+    let skills = root.join(".harness/skills");
+    fs::create_dir_all(&skills).unwrap();
+    fs::write(skills.join("broken.md"), "no header").unwrap();
+    let before = fs::read_to_string(root.join(".harness/harness.toml")).unwrap();
+    let mut app = env.app(&root);
+    key(&mut app, KeyCode::Char('2'));
+    click(&mut app, "[ ] broken");
+    click(&mut app, "[ Save ]");
+    let (text, error) = app.message.clone().unwrap();
+    assert!(error, "{text}");
+    assert_eq!(
+        fs::read_to_string(root.join(".harness/harness.toml")).unwrap(),
+        before
+    );
+
+    // Quitting asks once while changes are not saved.
+    key(&mut app, KeyCode::Char('q'));
+    assert!(!app.quit);
+    assert!(screen(&mut app).contains("press q again"));
+    // With the Russian layout «й» is q.
+    key(&mut app, KeyCode::Char('й'));
+    assert!(app.quit);
+
+    // Undo brings back what is saved.
+    let mut app = env.app(&root);
+    key(&mut app, KeyCode::Char('2'));
+    click(&mut app, "[ ] broken");
+    click(&mut app, "[ Undo changes ]");
+    assert!(screen(&mut app).contains("[ ] broken"));
+    key(&mut app, KeyCode::Char('q'));
+    assert!(app.quit);
 }

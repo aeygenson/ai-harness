@@ -7,7 +7,7 @@
 
 use toml_edit::{value, Array, DocumentMut, Item, Table};
 
-use crate::config::Config;
+use crate::config::{Config, RetroConfig, RoleConfig};
 use crate::handoff::Role;
 
 #[derive(Debug, thiserror::Error)]
@@ -113,6 +113,83 @@ pub fn add_role_skill(
     finish(doc)
 }
 
+/// Sets everything of `[roles.<role>]`: agent, model and the four lists.
+/// The role's table is created if missing; values that did not change keep
+/// their lines and comments. An empty list or no model removes the key.
+pub fn set_role(text: &str, role: Role, settings: &RoleConfig) -> Result<String, EditError> {
+    let mut doc: DocumentMut = text.parse()?;
+    let key = role_key(role);
+    let roles = table(&mut doc, "roles")?;
+    let entry = roles
+        .entry(&key)
+        .or_insert_with(|| Item::Table(Table::new()));
+    let role_table = entry
+        .as_table_mut()
+        .ok_or_else(|| EditError::NotATable(format!("roles.{key}")))?;
+    set_text(role_table, "agent", Some(&settings.agent));
+    set_text(role_table, "model", settings.model.as_deref());
+    set_list(role_table, "skills", &settings.skills);
+    set_list(role_table, "always_skills", &settings.always_skills);
+    set_list(role_table, "mcp", &settings.mcp);
+    set_list(role_table, "plugins", &settings.plugins);
+    finish(doc)
+}
+
+/// Sets `[retro]`: the agent and model of `harness retro --suggest`.
+pub fn set_retro(text: &str, retro: &RetroConfig) -> Result<String, EditError> {
+    let mut doc: DocumentMut = text.parse()?;
+    let entry = doc
+        .entry("retro")
+        .or_insert_with(|| Item::Table(Table::new()));
+    let retro_table = entry
+        .as_table_mut()
+        .ok_or_else(|| EditError::NotATable("retro".into()))?;
+    set_text(retro_table, "agent", Some(&retro.agent));
+    set_text(retro_table, "model", retro.model.as_deref());
+    finish(doc)
+}
+
+/// Sets `key` to `text`, or removes it for `None`. An unchanged value is left
+/// alone, with its comment.
+fn set_text(table: &mut Table, key: &str, text: Option<&str>) {
+    match text {
+        Some(text) if table.get(key).and_then(Item::as_str) == Some(text) => {}
+        Some(text) => {
+            // Keep a comment at the end of the line, if there is one.
+            let decor = table
+                .get(key)
+                .and_then(Item::as_value)
+                .map(|v| v.decor().clone());
+            let mut new = toml_edit::Value::from(text);
+            if let Some(decor) = decor {
+                *new.decor_mut() = decor;
+            }
+            table.insert(key, Item::Value(new));
+        }
+        None => {
+            table.remove(key);
+        }
+    }
+}
+
+fn set_list(table: &mut Table, key: &str, items: &[String]) {
+    let current: Option<Vec<&str>> = table
+        .get(key)
+        .and_then(Item::as_array)
+        .map(|a| a.iter().filter_map(|v| v.as_str()).collect());
+    let wanted: Vec<&str> = items.iter().map(String::as_str).collect();
+    match current {
+        Some(current) if current == wanted => {}
+        None if wanted.is_empty() => {}
+        _ if wanted.is_empty() => {
+            table.remove(key);
+        }
+        _ => {
+            table.insert(key, value(Array::from_iter(wanted)));
+        }
+    }
+}
+
 /// Removes `[plugins.<name>]` and the name from every role's `plugins` list.
 pub fn remove_plugin(text: &str, name: &str) -> Result<String, EditError> {
     let mut doc: DocumentMut = text.parse()?;
@@ -180,6 +257,58 @@ mod tests {
             allow_hooks: false,
             allow_mcp: false,
         }
+    }
+
+    #[test]
+    fn a_role_is_set_whole_and_the_rest_of_the_file_stays() {
+        let mut developer = Config::parse(TOML).unwrap().roles[&Role::Developer].clone();
+        // Nothing changed: the text stays exactly the same.
+        assert_eq!(set_role(TOML, Role::Developer, &developer).unwrap(), TOML);
+
+        developer.model = Some("gpt-5.5".into());
+        developer.plugins.clear();
+        developer.skills = vec!["rust-errors".into()];
+        let text = set_role(TOML, Role::Developer, &developer).unwrap();
+        assert!(text.starts_with("# Lisa's settings\n"), "{text}");
+        assert!(text.contains("agent = \"codex\" # fast"), "{text}");
+        assert!(!text.contains("plugins = "), "{text}");
+        let config = Config::parse(&text).unwrap();
+        let saved = &config.roles[&Role::Developer];
+        assert_eq!(saved, &developer);
+
+        developer.agent = "claude".into();
+        developer.model = None;
+        let text = set_role(&text, Role::Developer, &developer).unwrap();
+        assert!(text.contains("agent = \"claude\" # fast"), "{text}");
+        assert!(!text.contains("model"), "{text}");
+
+        // A role that is not in the file yet gets its table.
+        let text = set_role(TOML, Role::Security, &developer).unwrap();
+        assert_eq!(
+            Config::parse(&text).unwrap().roles[&Role::Security],
+            developer
+        );
+    }
+
+    #[test]
+    fn retro_is_created_or_changed() {
+        let retro = RetroConfig {
+            agent: "codex+deepseek".into(),
+            model: Some("deepseek-v4-pro".into()),
+        };
+        let text = set_retro(TOML, &retro).unwrap();
+        assert_eq!(Config::parse(&text).unwrap().retro.as_ref(), Some(&retro));
+        let text = set_retro(
+            &text,
+            &RetroConfig {
+                agent: "claude".into(),
+                model: None,
+            },
+        )
+        .unwrap();
+        let config = Config::parse(&text).unwrap();
+        assert_eq!(config.retro.unwrap().model, None);
+        assert!(text.starts_with("# Lisa's settings\n"));
     }
 
     #[test]
