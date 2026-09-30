@@ -1,7 +1,5 @@
 //! Pieces every tab uses: clickable areas, panels, buttons and a text form.
 
-use std::path::PathBuf;
-
 use ratatui::layout::{Constraint, Flex, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
@@ -30,6 +28,7 @@ pub enum ListId {
     Steps,
     Projects,
     Roles,
+    Folders,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -43,6 +42,10 @@ pub enum ButtonId {
     Language,
     Save,
     Undo,
+    Choose,
+    Up,
+    NewFolder,
+    ToggleHidden,
 }
 
 /// Where the clickable things were drawn in the last frame. Drawing fills it,
@@ -247,15 +250,6 @@ impl Form {
     }
 }
 
-/// `~/code/x` -> `/home/alex/code/x`.
-pub fn expand_home(path: &str) -> PathBuf {
-    match (path.strip_prefix("~/"), std::env::var_os("HOME")) {
-        (Some(rest), Some(home)) => PathBuf::from(home).join(rest),
-        _ if path == "~" => std::env::var_os("HOME").map_or_else(|| path.into(), PathBuf::from),
-        _ => PathBuf::from(path),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -288,12 +282,5 @@ mod tests {
         assert_eq!((form.value(0), form.value(1)), ("xy", "w"));
         form.next_field();
         assert_eq!(form.focus, 0);
-    }
-
-    #[test]
-    fn home_is_expanded() {
-        let home = std::env::var("HOME").unwrap();
-        assert_eq!(expand_home("~/code"), PathBuf::from(&home).join("code"));
-        assert_eq!(expand_home("/tmp/x"), PathBuf::from("/tmp/x"));
     }
 }

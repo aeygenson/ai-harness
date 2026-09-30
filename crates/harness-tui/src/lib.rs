@@ -32,16 +32,18 @@ use ratatui::{DefaultTerminal, Frame};
 
 mod i18n;
 mod keys;
+mod picker;
 mod projects_tab;
 mod roles_tab;
 mod tasks;
 mod ui;
 
 use i18n::I18n;
+use picker::{Browser, Native};
 use projects_tab::{has_config, ProjectsTab};
 use roles_tab::{Action, RolesTab};
 use tasks::TasksTab;
-use ui::{buttons, expand_home, panel, ButtonId, Form, Hits, ListId, Target};
+use ui::{buttons, panel, ButtonId, Form, Hits, ListId, Target};
 
 /// How often the open project is read again.
 const RELOAD_EVERY: Duration = Duration::from_secs(3);
@@ -74,8 +76,8 @@ const TABS: [(Tab, &str, u8); 7] = [
 /// What the open form is for.
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Purpose {
-    NewProject,
-    OpenFolder,
+    /// Create a project in this folder: the form asks for its name.
+    NewProject(PathBuf),
     /// The folder has no harness settings yet: create them?
     InitFolder(PathBuf),
     /// Take the project off the list (the folder stays).
@@ -84,10 +86,18 @@ enum Purpose {
     Model,
 }
 
+/// What a folder is being chosen for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Pick {
+    NewProject,
+    Open,
+}
+
 /// Opens the TUI and runs until `q`. It starts with `start` if that folder is
 /// a harness project, otherwise with the project opened last.
 pub fn run(start: &Path) -> Result<()> {
     let mut app = App::new(projects::harness_home(), start);
+    app.native = true;
     let mut terminal = ratatui::init();
     // Give the mouse back to the terminal even if the program panics.
     let hook = std::panic::take_hook();
@@ -135,6 +145,12 @@ struct App {
     roles: Option<RolesTab>,
     projects: ProjectsTab,
     form: Option<(Purpose, Form)>,
+    /// The folder browser, when the system has no folder dialog.
+    browser: Option<(Pick, Browser)>,
+    /// Use the system's folder dialog (`kdialog`, `zenity`) when there is one.
+    native: bool,
+    /// Where choosing a folder starts: `~/code` if it exists.
+    start_dir: PathBuf,
     /// The last result or problem, shown at the bottom.
     message: Option<(String, bool)>,
     hits: Hits,
@@ -155,6 +171,9 @@ impl App {
             roles: None,
             projects: ProjectsTab::load(home),
             form: None,
+            browser: None,
+            native: false,
+            start_dir: default_start_dir(),
             message: None,
             hits: Hits::default(),
             last_click: None,
@@ -205,6 +224,10 @@ impl App {
             return;
         }
         let quit_warned = std::mem::take(&mut self.quit_warned);
+        if self.browser.is_some() {
+            self.browser_key(key.code);
+            return;
+        }
         if let Some((_, form)) = &mut self.form {
             match key.code {
                 KeyCode::Esc => self.form = None,
@@ -291,6 +314,10 @@ impl App {
             }
             MouseEventKind::ScrollDown | MouseEventKind::ScrollUp => {
                 let down = mouse.kind == MouseEventKind::ScrollDown;
+                if let Some((_, browser)) = &mut self.browser {
+                    browser.move_by(if down { 1 } else { -1 });
+                    return;
+                }
                 if self.form.is_some() {
                     return;
                 }
@@ -333,6 +360,23 @@ impl App {
     }
 
     fn click(&mut self, hit: Option<(Target, u16)>, double: bool) {
+        if let Some((_, browser)) = &mut self.browser {
+            match hit {
+                Some((Target::Button(id), _)) => self.press(id),
+                Some((target @ Target::List { .. }, row)) => {
+                    if let Some((_, index)) = Hits::row(target, row) {
+                        browser.mark(index);
+                        if double {
+                            browser.open_selected();
+                        }
+                    }
+                }
+                Some((Target::Field(_), _)) => {}
+                // A click outside the window closes it.
+                _ => self.browser = None,
+            }
+            return;
+        }
         if let Some((_, form)) = &mut self.form {
             match hit {
                 Some((Target::Button(ButtonId::Ok), _)) => self.submit(),
@@ -417,26 +461,27 @@ impl App {
                     }
                 }
             }
-            ButtonId::NewProject => {
-                let tr = &self.tr;
-                self.form = Some((
-                    Purpose::NewProject,
-                    Form::new(
-                        tr.t("form.new_title"),
-                        tr.t("form.new_text"),
-                        tr.t("form.create"),
-                    )
-                    .field(tr.t("form.new_folder"), "~/code/")
-                    .field(tr.t("form.new_name"), ""),
-                ));
+            ButtonId::NewProject => self.pick(Pick::NewProject),
+            ButtonId::OpenFolder => self.pick(Pick::Open),
+            ButtonId::Choose => {
+                if let Some((pick, browser)) = self.browser.take() {
+                    self.picked(pick, browser.chosen());
+                }
             }
-            ButtonId::OpenFolder => {
-                let tr = &self.tr;
-                self.form = Some((
-                    Purpose::OpenFolder,
-                    Form::new(tr.t("form.open_title"), "", tr.t("form.open"))
-                        .field(tr.t("form.folder"), "~/code/"),
-                ));
+            ButtonId::Up => {
+                if let Some((_, browser)) = &mut self.browser {
+                    browser.up();
+                }
+            }
+            ButtonId::NewFolder => {
+                if let Some((_, browser)) = &mut self.browser {
+                    browser.naming = Some(String::new());
+                }
+            }
+            ButtonId::ToggleHidden => {
+                if let Some((_, browser)) = &mut self.browser {
+                    browser.toggle_hidden();
+                }
             }
             ButtonId::Language => {
                 self.tr.next();
@@ -479,7 +524,8 @@ impl App {
                     self.message = None;
                 }
             }
-            ButtonId::Ok | ButtonId::Cancel => {}
+            ButtonId::Cancel => self.browser = None,
+            ButtonId::Ok => {}
         }
     }
 
@@ -489,23 +535,7 @@ impl App {
             return;
         };
         let result = match &purpose {
-            Purpose::NewProject => self.create_project(&form),
-            Purpose::OpenFolder => {
-                let path = expand_home(form.value(0));
-                if form.value(0).is_empty() {
-                    Err(self.tr.t("form.type_folder").to_string())
-                } else if !path.is_dir() {
-                    Err(self
-                        .tr
-                        .f("form.no_such_folder", &[("path", &path.display())]))
-                } else if has_config(&path) {
-                    self.open(&path);
-                    Ok(())
-                } else {
-                    self.form = Some(self.init_form(&path));
-                    return;
-                }
-            }
+            Purpose::NewProject(path) => self.create_project(&path.clone(), &form),
             Purpose::InitFolder(path) => projects::init(path)
                 .map(|_| self.open(path))
                 .map_err(|e| e.to_string()),
@@ -536,17 +566,93 @@ impl App {
         }
     }
 
-    fn create_project(&mut self, form: &Form) -> Result<(), String> {
-        if form.value(0).is_empty() || form.value(0) == "~/code/" {
-            return Err(self.tr.t("form.no_folder").to_string());
+    /// Chooses a folder: in the system's dialog if there is one, otherwise
+    /// in the TUI's own browser.
+    fn pick(&mut self, pick: Pick) {
+        let title = match pick {
+            Pick::NewProject => self.tr.t("picker.new_title"),
+            Pick::Open => self.tr.t("picker.open_title"),
         }
-        let path = expand_home(form.value(0));
+        .to_string();
+        let native = if self.native {
+            picker::native_folder(&title, &self.start_dir)
+        } else {
+            Native::Unavailable
+        };
+        match native {
+            Native::Chosen(path) => self.picked(pick, path),
+            Native::Cancelled => {}
+            Native::Unavailable => {
+                self.browser = Some((pick, Browser::new(&title, &self.start_dir)));
+            }
+        }
+    }
+
+    /// A folder was chosen.
+    fn picked(&mut self, pick: Pick, path: PathBuf) {
+        let path = path.canonicalize().unwrap_or(path);
+        // The next choice starts next to this one.
+        if let Some(parent) = path.parent() {
+            self.start_dir = parent.to_path_buf();
+        }
+        match pick {
+            Pick::NewProject if has_config(&path) => {
+                self.message = Some((self.tr.t("form.exists").to_string(), true));
+            }
+            Pick::NewProject => {
+                let tr = &self.tr;
+                let text = tr.f("form.new_text", &[("path", &path.display())]);
+                self.form = Some((
+                    Purpose::NewProject(path.clone()),
+                    Form::new(tr.t("form.new_title"), &text, tr.t("form.create"))
+                        .field(tr.t("form.new_name"), &name_of(&path)),
+                ));
+            }
+            Pick::Open if has_config(&path) => self.open(&path),
+            Pick::Open => self.form = Some(self.init_form(&path)),
+        }
+    }
+
+    /// Keys while the folder browser is open.
+    fn browser_key(&mut self, code: KeyCode) {
+        let Some((_, browser)) = &mut self.browser else {
+            return;
+        };
+        if let Some(name) = &mut browser.naming {
+            match code {
+                KeyCode::Esc => browser.naming = None,
+                KeyCode::Enter => browser.create(&self.tr),
+                KeyCode::Backspace => {
+                    name.pop();
+                }
+                KeyCode::Char(c) => name.push(c),
+                _ => {}
+            }
+            return;
+        }
+        match keys::latin(code) {
+            KeyCode::Esc => self.browser = None,
+            KeyCode::Up | KeyCode::Char('k') => browser.move_by(-1),
+            KeyCode::Down | KeyCode::Char('j') => browser.move_by(1),
+            KeyCode::PageUp => browser.move_by(-10),
+            KeyCode::PageDown => browser.move_by(10),
+            KeyCode::Enter | KeyCode::Right => browser.open_selected(),
+            KeyCode::Backspace | KeyCode::Left => browser.up(),
+            KeyCode::Char('n') => browser.naming = Some(String::new()),
+            KeyCode::Char('.') => browser.toggle_hidden(),
+            KeyCode::Char('c') => self.press(ButtonId::Choose),
+            _ => {}
+        }
+    }
+
+    fn create_project(&mut self, path: &Path, form: &Form) -> Result<(), String> {
+        let path = path.to_path_buf();
         if has_config(&path) {
             return Err(self.tr.t("form.exists").to_string());
         }
         let done = projects::init(&path).map_err(|e| e.to_string())?;
         let path = path.canonicalize().unwrap_or(path);
-        let name = match form.value(1) {
+        let name = match form.value(0) {
             "" => name_of(&path),
             name => name.to_string(),
         };
@@ -641,6 +747,9 @@ impl App {
         if let Some((_, form)) = &self.form {
             form.draw(frame, &mut self.hits, self.tr.t("form.cancel"));
         }
+        if let Some((_, browser)) = &self.browser {
+            browser.draw(frame, &mut self.hits, &self.tr);
+        }
     }
 
     fn draw_tabs(&mut self, frame: &mut Frame, area: Rect) {
@@ -700,6 +809,17 @@ impl App {
             Purpose::InitFolder(path.to_path_buf()),
             Form::new(tr.t("form.init_title"), &text, tr.t("form.create")),
         )
+    }
+}
+
+/// `~/code` if it exists, otherwise the home folder.
+fn default_start_dir() -> PathBuf {
+    let home = std::env::var_os("HOME").map_or_else(|| PathBuf::from("/"), PathBuf::from);
+    let code = home.join("code");
+    if code.is_dir() {
+        code
+    } else {
+        home
     }
 }
 

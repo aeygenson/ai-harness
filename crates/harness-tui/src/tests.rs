@@ -88,8 +88,11 @@ impl Env {
         self.code.path().canonicalize().unwrap().join(name)
     }
 
+    /// The TUI with its own folder browser, starting in the code folder.
     fn app(&self, start: &Path) -> App {
-        App::new(Some(self.home.path().to_path_buf()), start)
+        let mut app = App::new(Some(self.home.path().to_path_buf()), start);
+        app.start_dir = self.code.path().canonicalize().unwrap();
+        app
     }
 
     fn saved(&self) -> Projects {
@@ -199,20 +202,32 @@ fn without_a_project_it_starts_on_the_projects_tab() {
 }
 
 #[test]
-fn a_new_project_is_created_from_the_form() {
+fn a_new_project_is_created_in_a_folder_chosen_in_the_browser() {
     let env = Env::new();
+    fs::create_dir(env.path("work")).unwrap();
     let mut app = env.app(env.code.path());
     click(&mut app, "[ New project ]");
-    assert!(screen(&mut app).contains("A new folder with a git repository"));
+    let text = screen(&mut app);
+    assert!(text.contains("Folder for the new project"), "{text}");
+    assert!(text.contains("work/"), "{text}");
 
-    // OK with the folder left as it is only explains.
+    // Into «work», then a new folder «fresh» made there.
+    click(&mut app, "work/");
+    click(&mut app, "work/");
+    assert!(screen(&mut app).contains("No folders inside"));
+    click(&mut app, "[ New folder ]");
+    type_text(&mut app, "fresh");
     key(&mut app, KeyCode::Enter);
-    assert!(screen(&mut app).contains("Type the folder of the new project"));
+    let root = env.path("work/fresh");
+    assert!(root.is_dir());
+    click(&mut app, "[ Choose this folder ]");
 
-    let root = env.path("fresh");
-    fill(&mut app, root.to_str().unwrap());
-    key(&mut app, KeyCode::Tab);
-    type_text(&mut app, "Fresh one");
+    // The form shows the folder and asks for the name.
+    let text = screen(&mut app);
+    assert!(text.contains("The project will be in"), "{text}");
+    let (_, form) = app.form.as_ref().unwrap();
+    assert_eq!(form.value(0), "fresh");
+    fill(&mut app, "Fresh one");
     click(&mut app, "[ Create ]");
 
     assert!(app.form.is_none());
@@ -225,19 +240,18 @@ fn a_new_project_is_created_from_the_form() {
     assert!(text.contains("Project «Fresh one» created"), "{text}");
     assert_eq!(env.saved().projects[0].name, "Fresh one");
 
-    // The same folder again is refused, the form stays with the problem.
+    // The same folder again is refused. The browser starts next to it now.
     key(&mut app, KeyCode::Char('7'));
     key(&mut app, KeyCode::Char('n'));
-    fill(&mut app, root.to_str().unwrap());
+    assert!(screen(&mut app).contains("fresh/"));
     key(&mut app, KeyCode::Enter);
-    let (_, form) = app.form.as_ref().unwrap();
-    assert!(form
-        .error
-        .as_deref()
-        .unwrap()
-        .contains("already is a harness project"));
-    key(&mut app, KeyCode::Esc);
+    key(&mut app, KeyCode::Char('c'));
     assert!(app.form.is_none());
+    let (text, error) = app.message.clone().unwrap();
+    assert!(
+        error && text.contains("already is a harness project"),
+        "{text}"
+    );
 }
 
 #[test]
@@ -247,21 +261,15 @@ fn a_plain_folder_is_prepared_before_it_opens() {
     fs::create_dir(&folder).unwrap();
     let mut app = env.app(env.code.path());
 
+    // Keys work in the browser too; Esc closes it.
     key(&mut app, KeyCode::Char('o'));
-    fill(&mut app, &env.path("missing").display().to_string());
-    key(&mut app, KeyCode::Enter);
-    assert!(app
-        .form
-        .as_ref()
-        .unwrap()
-        .1
-        .error
-        .as_deref()
-        .unwrap()
-        .contains("There is no folder"));
+    assert!(screen(&mut app).contains("Open a project folder"));
+    key(&mut app, KeyCode::Esc);
+    assert!(app.browser.is_none());
 
-    fill(&mut app, folder.to_str().unwrap());
+    key(&mut app, KeyCode::Char('o'));
     key(&mut app, KeyCode::Enter);
+    key(&mut app, KeyCode::Char('c'));
     assert!(matches!(app.form, Some((Purpose::InitFolder(_), _))));
     // Cancel leaves the folder alone.
     click(&mut app, "[ Cancel ]");
@@ -269,8 +277,8 @@ fn a_plain_folder_is_prepared_before_it_opens() {
     assert!(!has_config(&folder));
 
     key(&mut app, KeyCode::Char('o'));
-    fill(&mut app, folder.to_str().unwrap());
-    key(&mut app, KeyCode::Enter);
+    click(&mut app, "plain/");
+    click(&mut app, "[ Choose this folder ]");
     key(&mut app, KeyCode::Enter);
     assert!(has_config(&folder));
     assert_eq!(app.project.as_deref(), Some(folder.as_path()));
@@ -374,13 +382,11 @@ fn the_language_switches_and_is_remembered() {
     let mut again = env.app(&root);
     assert!(screen(&mut again).contains("1 Задачи"));
 
-    // The button in the top bar opens the new project form from any tab.
+    // The button in the top bar starts a new project from any tab.
     click(&mut again, "+ Новый проект");
-    let (purpose, form) = again.form.as_ref().unwrap();
-    assert_eq!(
-        (purpose, form.title.as_str()),
-        (&Purpose::NewProject, "Новый проект")
-    );
+    let text = screen(&mut again);
+    assert!(text.contains("Папка для нового проекта"), "{text}");
+    assert!(text.contains("[ Выбрать эту папку ]"), "{text}");
     key(&mut again, KeyCode::Esc);
 
     key(&mut again, KeyCode::Char('L'));
