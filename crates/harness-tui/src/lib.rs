@@ -1,16 +1,17 @@
 //! `harness tui`: the harness in a full-screen terminal window, with tabs.
 //!
 //! ```text
-//!  harness-test │ 1 Задачи │ 2 Роли │ 3 Навыки │ 4 MCP │ 5 Плагины │ 6 Ретро │ 7 Проекты
-//! ┌ Задачи ────────────┐┌ task-001 · round 2 of 5 · done ──────────────────────────┐
+//!  harness-test │ 1 Tasks │ 2 Roles │ 3 Skills │ … │ 7 Projects   [ + New project ] [ EN ]
+//! ┌ Tasks ─────────────┐┌ task-001 · round 2 of 5 · done ──────────────────────────┐
 //! │> task-001  done    ││  r1 architect  approved → human    Design ready          │
 //! ...
-//!  клик или 1–7 вкладки · ↑↓ выбор · колесо прокрутка · q выход
+//!  click or 1–7 tabs · ↑↓ select · wheel scroll · … · L language · q quit
 //! ```
 //!
 //! Everything works with the mouse (click, double click, wheel) and with the
 //! keyboard. The terminal's own text selection works with Shift held down.
-//! Every change goes through the same core functions as the CLI.
+//! Every change goes through the same core functions as the CLI. The texts
+//! come from translation files (see `i18n`); English is the default.
 
 use std::io;
 use std::path::{Path, PathBuf};
@@ -29,13 +30,15 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Paragraph, Wrap};
 use ratatui::{DefaultTerminal, Frame};
 
+mod i18n;
 mod projects_tab;
 mod tasks;
 mod ui;
 
+use i18n::I18n;
 use projects_tab::{has_config, ProjectsTab};
 use tasks::TasksTab;
-use ui::{expand_home, panel, ButtonId, Form, Hits, ListId, Target};
+use ui::{buttons, expand_home, panel, ButtonId, Form, Hits, ListId, Target};
 
 /// How often the open project is read again.
 const RELOAD_EVERY: Duration = Duration::from_secs(3);
@@ -53,15 +56,16 @@ enum Tab {
     Projects,
 }
 
-/// The tabs in order, with the step of the plan that brings each one.
+/// The tabs in order: the key of the label, and the step of the plan that
+/// brings each one.
 const TABS: [(Tab, &str, u8); 7] = [
-    (Tab::Tasks, "Задачи", 5),
-    (Tab::Roles, "Роли", 2),
-    (Tab::Skills, "Навыки", 3),
-    (Tab::Mcp, "MCP", 3),
-    (Tab::Plugins, "Плагины", 4),
-    (Tab::Retro, "Ретро", 6),
-    (Tab::Projects, "Проекты", 1),
+    (Tab::Tasks, "tabs.tasks", 5),
+    (Tab::Roles, "tabs.roles", 2),
+    (Tab::Skills, "tabs.skills", 3),
+    (Tab::Mcp, "tabs.mcp", 3),
+    (Tab::Plugins, "tabs.plugins", 4),
+    (Tab::Retro, "tabs.retro", 6),
+    (Tab::Projects, "tabs.projects", 1),
 ];
 
 /// What the open form is for.
@@ -117,6 +121,9 @@ fn event_loop(terminal: &mut DefaultTerminal, app: &mut App) -> Result<()> {
 #[derive(Debug)]
 struct App {
     tab: Tab,
+    /// `~/.harness`: the project list, the language, more translations.
+    home: Option<PathBuf>,
+    tr: I18n,
     /// The open project.
     project: Option<PathBuf>,
     tasks: Option<TasksTab>,
@@ -133,6 +140,8 @@ impl App {
     fn new(home: Option<PathBuf>, start: &Path) -> Self {
         let mut app = Self {
             tab: Tab::Projects,
+            tr: I18n::load(home.as_deref()),
+            home: home.clone(),
             project: None,
             tasks: None,
             projects: ProjectsTab::load(home),
@@ -155,7 +164,10 @@ impl App {
     /// Opens a project: it becomes the current one and the one opened last.
     fn open(&mut self, root: &Path) {
         if !has_config(root) {
-            self.message = Some((format!("{} не проект harness", root.display()), true));
+            let text = self
+                .tr
+                .f("projects.not_a_project", &[("path", &root.display())]);
+            self.message = Some((text, true));
             return;
         }
         self.tasks = Some(TasksTab::load(root));
@@ -168,8 +180,11 @@ impl App {
             list.last = Some(root.to_path_buf());
         });
         self.message = Some(match saved {
-            Ok(()) => (format!("Открыт проект {}", name_of(root)), false),
-            Err(error) => (format!("Список проектов не сохранён: {error}"), true),
+            Ok(()) => (
+                self.tr.f("projects.opened", &[("name", &name_of(root))]),
+                false,
+            ),
+            Err(error) => (self.tr.f("projects.not_saved", &[("error", &error)]), true),
         });
     }
 
@@ -191,6 +206,7 @@ impl App {
         }
         match key.code {
             KeyCode::Char('q') | KeyCode::Esc => self.quit = true,
+            KeyCode::Char('L') => self.press(ButtonId::Language),
             KeyCode::Char(c @ '1'..='7') => {
                 let index = usize::from(c as u8 - b'1');
                 self.tab = TABS[index].0;
@@ -307,41 +323,54 @@ impl App {
                     if has_config(&path) {
                         self.open(&path);
                     } else if path.is_dir() {
-                        self.form = Some(init_form(&path));
+                        self.form = Some(self.init_form(&path));
                     } else {
-                        self.message = Some((format!("Папки {} больше нет", path.display()), true));
+                        let text = self.tr.f("projects.gone", &[("path", &path.display())]);
+                        self.message = Some((text, true));
                     }
                 }
             }
             ButtonId::NewProject => {
+                let tr = &self.tr;
                 self.form = Some((
                     Purpose::NewProject,
                     Form::new(
-                        "Новый проект",
-                        "Будут созданы папка, git-репозиторий и .harness/harness.toml.\n\
-                         Все роли сначала работают на claude; поменять можно на вкладке «Роли».",
-                        "Создать",
+                        tr.t("form.new_title"),
+                        tr.t("form.new_text"),
+                        tr.t("form.create"),
                     )
-                    .field("Папка", "~/code/")
-                    .field("Название (если пусто — имя папки)", ""),
+                    .field(tr.t("form.new_folder"), "~/code/")
+                    .field(tr.t("form.new_name"), ""),
                 ));
             }
             ButtonId::OpenFolder => {
+                let tr = &self.tr;
                 self.form = Some((
                     Purpose::OpenFolder,
-                    Form::new("Открыть папку", "", "Открыть").field("Папка", "~/code/"),
+                    Form::new(tr.t("form.open_title"), "", tr.t("form.open"))
+                        .field(tr.t("form.folder"), "~/code/"),
                 ));
+            }
+            ButtonId::Language => {
+                self.tr.next();
+                // The last message was in the old language.
+                self.message = None;
+                if let Some(home) = &self.home {
+                    if let Err(error) = self.tr.save(home) {
+                        self.message = Some((error, true));
+                    }
+                }
             }
             ButtonId::RemoveProject => {
                 if let Some(project) = self.projects.current() {
-                    let text = format!(
-                        "Проект «{}» исчезнет из списка.\nПапка {} останется как есть.",
-                        project.name,
-                        project.path.display()
+                    let tr = &self.tr;
+                    let text = tr.f(
+                        "form.remove_text",
+                        &[("name", &project.name), ("path", &project.path.display())],
                     );
                     self.form = Some((
                         Purpose::Remove(project.path.clone()),
-                        Form::new("Убрать из списка?", &text, "Убрать"),
+                        Form::new(tr.t("form.remove_title"), &text, tr.t("form.remove")),
                     ));
                 }
             }
@@ -359,14 +388,16 @@ impl App {
             Purpose::OpenFolder => {
                 let path = expand_home(form.value(0));
                 if form.value(0).is_empty() {
-                    Err("Укажите папку".to_string())
+                    Err(self.tr.t("form.type_folder").to_string())
                 } else if !path.is_dir() {
-                    Err(format!("Папки {} нет", path.display()))
+                    Err(self
+                        .tr
+                        .f("form.no_such_folder", &[("path", &path.display())]))
                 } else if has_config(&path) {
                     self.open(&path);
                     Ok(())
                 } else {
-                    self.form = Some(init_form(&path));
+                    self.form = Some(self.init_form(&path));
                     return;
                 }
             }
@@ -381,7 +412,7 @@ impl App {
                     self.tasks = None;
                 }
                 result.map(|()| {
-                    self.message = Some(("Проект убран из списка, папка осталась".into(), false));
+                    self.message = Some((self.tr.t("projects.removed").to_string(), false));
                 })
             }
         };
@@ -395,11 +426,11 @@ impl App {
 
     fn create_project(&mut self, form: &Form) -> Result<(), String> {
         if form.value(0).is_empty() || form.value(0) == "~/code/" {
-            return Err("Укажите папку нового проекта".into());
+            return Err(self.tr.t("form.no_folder").to_string());
         }
         let path = expand_home(form.value(0));
         if has_config(&path) {
-            return Err("Там уже есть проект harness: откройте его".into());
+            return Err(self.tr.t("form.exists").to_string());
         }
         let done = projects::init(&path).map_err(|e| e.to_string())?;
         let path = path.canonicalize().unwrap_or(path);
@@ -410,10 +441,10 @@ impl App {
         self.projects.update(|list| list.add(&name, &path))?;
         self.open(&path);
         let git = if done.created_git { "git, " } else { "" };
-        self.message = Some((
-            format!("Проект «{name}» создан: {git}.harness/harness.toml"),
-            false,
-        ));
+        let text = self
+            .tr
+            .f("projects.created", &[("name", &name), ("git", &git)]);
+        self.message = Some((text, false));
         Ok(())
     }
 
@@ -429,17 +460,22 @@ impl App {
 
         match self.tab {
             Tab::Tasks => match &self.tasks {
-                Some(tasks) => tasks.draw(frame, main, &mut self.hits),
+                Some(tasks) => tasks.draw(frame, main, &mut self.hits, &self.tr),
                 None => placeholder(
                     frame,
                     main,
-                    " Задачи ",
-                    "Проект не открыт. Откройте или создайте его на вкладке «Проекты» (7).",
+                    self.tr.t("tasks.title"),
+                    self.tr.t("tabs.no_open_project"),
                 ),
             },
             Tab::Projects => {
-                self.projects
-                    .draw(frame, main, &mut self.hits, self.project.as_deref());
+                self.projects.draw(
+                    frame,
+                    main,
+                    &mut self.hits,
+                    self.project.as_deref(),
+                    &self.tr,
+                );
             }
             tab => {
                 let (_, label, step) = TABS
@@ -450,37 +486,37 @@ impl App {
                 placeholder(
                     frame,
                     main,
-                    &format!(" {label} "),
-                    &format!(
-                        "Эта вкладка появится на шаге {step} плана.\n\n\
-                         Пока эти настройки меняются в .harness/harness.toml или командами harness."
-                    ),
+                    &format!(" {} ", self.tr.t(label)),
+                    &self.tr.f("tabs.coming", &[("step", &step)]),
                 );
             }
         }
 
-        let mut spans = vec![Span::styled(
-            " клик или 1–7 вкладки · ↑↓ выбор · колесо прокрутка · Shift+мышь выделить текст · q выход",
-            Style::new().fg(Color::DarkGray),
-        )];
+        // The latest result or problem first, so a narrow window still shows it.
+        let mut spans = Vec::new();
         let problem = self
             .tasks
             .as_ref()
             .and_then(|t| t.problem.clone())
-            .or_else(|| self.projects.problem.clone());
+            .or_else(|| self.projects.problem.clone())
+            .or_else(|| self.tr.problems.first().cloned());
         if let Some((text, error)) = &self.message {
             let color = if *error { Color::Red } else { Color::Green };
-            spans.push(Span::styled(format!("   {text}"), Style::new().fg(color)));
+            spans.push(Span::styled(format!(" {text}  "), Style::new().fg(color)));
         } else if let Some(problem) = problem {
             spans.push(Span::styled(
-                format!("   {problem}"),
+                format!(" {problem}  "),
                 Style::new().fg(Color::Red),
             ));
         }
+        spans.push(Span::styled(
+            format!(" {}", self.tr.t("footer.hint")),
+            Style::new().fg(Color::DarkGray),
+        ));
         frame.render_widget(Line::from(spans), footer);
 
         if let Some((_, form)) = &self.form {
-            form.draw(frame, &mut self.hits);
+            form.draw(frame, &mut self.hits, self.tr.t("form.cancel"));
         }
     }
 
@@ -488,7 +524,7 @@ impl App {
         let name = self
             .project
             .as_deref()
-            .map_or_else(|| "нет проекта".to_string(), name_of);
+            .map_or_else(|| self.tr.t("tabs.no_project").to_string(), name_of);
         let mut x = area.x;
         let mut put = |frame: &mut Frame, text: String, style: Style| -> Rect {
             let width = u16::try_from(text.chars().count()).unwrap_or(0);
@@ -509,21 +545,39 @@ impl App {
             } else {
                 Style::new()
             };
-            let rect = put(frame, format!(" {} {label} ", index + 1), style);
+            let rect = put(
+                frame,
+                format!(" {} {} ", index + 1, self.tr.t(label)),
+                style,
+            );
             self.hits.add(rect, Target::Tab(index));
         }
+        // On the right: always at hand, whichever tab is open.
+        let right = Rect::new(x, area.y, area.right().saturating_sub(x), 1);
+        let items = [
+            (self.tr.t("tabs.new_project"), ButtonId::NewProject),
+            (self.tr.label(), ButtonId::Language),
+        ];
+        let width: u16 = items
+            .iter()
+            .map(|(label, _)| u16::try_from(label.chars().count()).unwrap_or(0) + 5)
+            .sum();
+        let start = right.right().saturating_sub(width);
+        if start > right.x {
+            let area = Rect::new(start, area.y, width, 1);
+            let items: Vec<_> = items.iter().map(|(l, id)| (*l, *id, true)).collect();
+            buttons(frame, area, &mut self.hits, &items);
+        }
     }
-}
 
-fn init_form(path: &Path) -> (Purpose, Form) {
-    let text = format!(
-        "В {} нет настроек harness.\nСоздать .harness/harness.toml (и git, если его нет)?",
-        path.display()
-    );
-    (
-        Purpose::InitFolder(path.to_path_buf()),
-        Form::new("Подготовить папку?", &text, "Создать"),
-    )
+    fn init_form(&self, path: &Path) -> (Purpose, Form) {
+        let tr = &self.tr;
+        let text = tr.f("form.init_text", &[("path", &path.display())]);
+        (
+            Purpose::InitFolder(path.to_path_buf()),
+            Form::new(tr.t("form.init_title"), &text, tr.t("form.create")),
+        )
+    }
 }
 
 fn placeholder(frame: &mut Frame, area: Rect, title: &str, text: &str) {

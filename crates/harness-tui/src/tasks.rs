@@ -1,4 +1,4 @@
-//! The «Задачи» tab: tasks, the steps of the selected task, and one step in full.
+//! The Tasks tab: tasks, the steps of the selected task, and one step in full.
 //!
 //! It only reads what is saved in `.harness/` (through the same core functions
 //! as `harness status`) and is reloaded every few seconds, so a `harness run`
@@ -20,6 +20,7 @@ use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{List, ListItem, ListState, Paragraph, Wrap};
 use ratatui::Frame;
 
+use crate::i18n::I18n;
 use crate::ui::{panel, selected, Hits, ListId, Target};
 
 /// One task as the tab shows it.
@@ -198,7 +199,7 @@ impl TasksTab {
         self.scroll = 0;
     }
 
-    pub fn draw(&self, frame: &mut Frame, area: Rect, hits: &mut Hits) {
+    pub fn draw(&self, frame: &mut Frame, area: Rect, hits: &mut Hits, tr: &I18n) {
         let [left, right] =
             Layout::horizontal([Constraint::Percentage(30), Constraint::Percentage(70)])
                 .areas(area);
@@ -220,7 +221,7 @@ impl TasksTab {
             hits,
             tasks_area,
             ListId::Tasks,
-            " Задачи ",
+            tr.t("tasks.title"),
             items,
             self.task,
             self.focus == Focus::Tasks,
@@ -228,29 +229,30 @@ impl TasksTab {
 
         let roles: Vec<Line> = self.roles.iter().map(|r| Line::from(r.as_str())).collect();
         frame.render_widget(
-            Paragraph::new(roles).block(panel(" Роли ", false)),
+            Paragraph::new(roles).block(panel(tr.t("tasks.roles"), false)),
             roles_area,
         );
 
         let Some(task) = self.current() else {
-            let empty = Paragraph::new(
-                "Задач пока нет.\n\nСоздать задачу:\n  harness task new task-001 \"что сделать\"",
-            )
-            .block(panel(" Задачи ", false));
+            let empty = Paragraph::new(tr.t("tasks.empty").to_string())
+                .block(panel(tr.t("tasks.title"), false));
             frame.render_widget(empty, right);
             return;
         };
 
-        let title = format!(
-            " {} · round {} of {} · {}{} ",
-            task.id,
-            task.state.round,
-            task.state.max_rounds,
-            stage_text(task.state.stage),
-            match task.failures {
-                0 => String::new(),
-                n => format!(" · {n} failed attempts"),
-            }
+        let failures = match task.failures {
+            0 => String::new(),
+            n => tr.f("tasks.failures", &[("count", &n)]),
+        };
+        let title = tr.f(
+            "tasks.header",
+            &[
+                ("task", &task.id),
+                ("round", &task.state.round),
+                ("max", &task.state.max_rounds),
+                ("stage", &stage_text(task.state.stage)),
+                ("failures", &failures),
+            ],
         );
         let items: Vec<ListItem> = task.steps.iter().map(step_item).collect();
         draw_list(
@@ -266,12 +268,14 @@ impl TasksTab {
 
         let (title, text) = match task.steps.get(self.step) {
             Some(step) => (
-                format!(
-                    " round {} · {} ",
-                    step.handoff.round,
-                    role_name(step.handoff.role)
+                tr.f(
+                    "tasks.step",
+                    &[
+                        ("round", &step.handoff.round),
+                        ("role", &role_name(step.handoff.role)),
+                    ],
                 ),
-                step_text(step),
+                step_text(step, tr),
             ),
             None => (
                 " task.md ".to_string(),
@@ -356,12 +360,12 @@ fn step_item(step: &Step) -> ListItem<'static> {
     ]))
 }
 
-fn step_text(step: &Step) -> Text<'static> {
+fn step_text(step: &Step, tr: &I18n) -> Text<'static> {
     let h = &step.handoff;
     let bold = Style::new().add_modifier(Modifier::BOLD);
     let mut lines = vec![
         Line::from(vec![
-            Span::raw("verdict: "),
+            Span::raw(tr.t("tasks.verdict").to_string()),
             verdict_span(h.verdict),
             Span::raw(format!(" → {}", next_name(h.next_role))),
         ]),
@@ -369,7 +373,7 @@ fn step_text(step: &Step) -> Text<'static> {
     ];
     if !h.issues.is_empty() {
         lines.push(Line::default());
-        lines.push(Line::styled("Issues:", bold));
+        lines.push(Line::styled(tr.t("tasks.issues").to_string(), bold));
         for issue in &h.issues {
             let (name, color) = match issue.severity {
                 Severity::Low => ("low", Color::Gray),
@@ -390,7 +394,7 @@ fn step_text(step: &Step) -> Text<'static> {
     }
     if !h.files.is_empty() {
         lines.push(Line::default());
-        lines.push(Line::styled("Files:", bold));
+        lines.push(Line::styled(tr.t("tasks.files").to_string(), bold));
         for file in &h.files {
             let action = serde_json::to_value(file.action)
                 .ok()
@@ -401,14 +405,14 @@ fn step_text(step: &Step) -> Text<'static> {
     }
     if !h.skills_used.is_empty() {
         lines.push(Line::default());
-        lines.push(Line::from(format!(
-            "Skills used: {}",
-            h.skills_used.join(", ")
+        lines.push(Line::from(tr.f(
+            "tasks.skills_used",
+            &[("skills", &h.skills_used.join(", "))],
         )));
     }
     if !step.notes.trim().is_empty() {
         lines.push(Line::default());
-        lines.push(Line::styled("Notes:", bold));
+        lines.push(Line::styled(tr.t("tasks.notes").to_string(), bold));
         lines.extend(step.notes.lines().map(|l| Line::from(l.to_string())));
     }
     Text::from(lines)

@@ -1,4 +1,4 @@
-//! The «Проекты» tab: the list from `~/.harness/projects.toml`.
+//! The Projects tab: the list from `~/.harness/projects.toml`.
 
 use std::path::{Path, PathBuf};
 
@@ -12,6 +12,7 @@ use ratatui::text::Line;
 use ratatui::widgets::{ListItem, Paragraph, Wrap};
 use ratatui::Frame;
 
+use crate::i18n::I18n;
 use crate::tasks::draw_list;
 use crate::ui::{buttons, panel, ButtonId, Hits, ListId};
 
@@ -81,7 +82,14 @@ impl ProjectsTab {
         }
     }
 
-    pub fn draw(&self, frame: &mut Frame, area: Rect, hits: &mut Hits, open: Option<&Path>) {
+    pub fn draw(
+        &self,
+        frame: &mut Frame,
+        area: Rect,
+        hits: &mut Hits,
+        open: Option<&Path>,
+        tr: &I18n,
+    ) {
         let [bar, main] = Layout::vertical([Constraint::Length(1), Constraint::Min(0)]).areas(area);
         let has_selection = self.current().is_some();
         buttons(
@@ -89,10 +97,14 @@ impl ProjectsTab {
             bar,
             hits,
             &[
-                ("Открыть", ButtonId::UseProject, has_selection),
-                ("Новый проект", ButtonId::NewProject, true),
-                ("Открыть папку…", ButtonId::OpenFolder, true),
-                ("Убрать из списка", ButtonId::RemoveProject, has_selection),
+                (tr.t("projects.open"), ButtonId::UseProject, has_selection),
+                (tr.t("projects.new"), ButtonId::NewProject, true),
+                (tr.t("projects.open_folder"), ButtonId::OpenFolder, true),
+                (
+                    tr.t("projects.remove"),
+                    ButtonId::RemoveProject,
+                    has_selection,
+                ),
             ],
         );
         let [left, right] =
@@ -117,27 +129,32 @@ impl ProjectsTab {
             hits,
             left,
             ListId::Projects,
-            " Проекты ",
+            tr.t("projects.title"),
             items,
             self.selected,
             true,
         );
 
         let text: Vec<Line> = match self.current() {
-            None => vec![
-                Line::from("Проектов в списке пока нет."),
-                Line::default(),
-                Line::from("«Новый проект» создаст папку, git и настройки harness."),
-                Line::from("«Открыть папку…» добавит существующую папку."),
-            ],
+            None => tr
+                .t("projects.empty")
+                .lines()
+                .map(|l| Line::from(l.to_string()))
+                .collect(),
             Some(project) => {
                 let state = if !project.path.is_dir() {
-                    Line::styled("Папки больше нет.", Style::new().fg(Color::Red))
+                    Line::styled(
+                        tr.t("projects.missing").to_string(),
+                        Style::new().fg(Color::Red),
+                    )
                 } else if has_config(&project.path) {
-                    Line::styled("Проект harness.", Style::new().fg(Color::Green))
+                    Line::styled(
+                        tr.t("projects.ready").to_string(),
+                        Style::new().fg(Color::Green),
+                    )
                 } else {
                     Line::styled(
-                        "В папке нет .harness/harness.toml.",
+                        tr.t("projects.no_config").to_string(),
                         Style::new().fg(Color::Yellow),
                     )
                 };
@@ -147,13 +164,13 @@ impl ProjectsTab {
                     Line::default(),
                     state,
                     Line::default(),
-                    Line::from("Двойной клик или Enter открывает проект."),
+                    Line::from(tr.t("projects.open_hint").to_string()),
                 ]
             }
         };
         frame.render_widget(
             Paragraph::new(text)
-                .block(panel(" О проекте ", false))
+                .block(panel(tr.t("projects.about"), false))
                 .wrap(Wrap { trim: false }),
             right,
         );

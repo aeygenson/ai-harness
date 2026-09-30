@@ -159,8 +159,9 @@ fn starts_with_a_project_folder_and_shows_its_tasks() {
     assert_eq!(app.project.as_deref(), Some(root.as_path()));
     let text = screen(&mut app);
     for part in [
-        " test │ 1 Задачи │ 2 Роли",
-        "7 Проекты",
+        " test │ 1 Tasks │ 2 Roles",
+        "7 Projects",
+        "[ + New project ] [ EN ]",
         "> task-001  working",
         "task-002  working",
         "architect  claude",
@@ -168,7 +169,7 @@ fn starts_with_a_project_folder_and_shows_its_tasks() {
         "> r1 tester",
         "high     src/parser.rs:42  Panics on empty input",
         "Tester notes here.",
-        "q выход",
+        "q quit",
     ] {
         assert!(text.contains(part), "missing {part:?} in:\n{text}");
     }
@@ -188,31 +189,31 @@ fn without_a_project_it_starts_on_the_projects_tab() {
     let mut app = env.app(env.code.path());
     assert_eq!((app.tab, app.project.clone()), (Tab::Projects, None));
     let text = screen(&mut app);
-    assert!(text.contains("нет проекта"), "{text}");
-    assert!(text.contains("Проектов в списке пока нет."), "{text}");
+    assert!(text.contains("no project"), "{text}");
+    assert!(text.contains("No projects in the list yet."), "{text}");
 
     key(&mut app, KeyCode::Char('1'));
-    assert!(screen(&mut app).contains("Проект не открыт"));
+    assert!(screen(&mut app).contains("No project is open"));
     key(&mut app, KeyCode::Char('2'));
-    assert!(screen(&mut app).contains("появится на шаге 2 плана"));
+    assert!(screen(&mut app).contains("arrives in step 2 of the plan"));
 }
 
 #[test]
 fn a_new_project_is_created_from_the_form() {
     let env = Env::new();
     let mut app = env.app(env.code.path());
-    click(&mut app, "Новый проект ]");
-    assert!(screen(&mut app).contains("Будут созданы папка"));
+    click(&mut app, "[ New project ]");
+    assert!(screen(&mut app).contains("A new folder with a git repository"));
 
     // OK with the folder left as it is only explains.
     key(&mut app, KeyCode::Enter);
-    assert!(screen(&mut app).contains("Укажите папку нового проекта"));
+    assert!(screen(&mut app).contains("Type the folder of the new project"));
 
     let root = env.path("fresh");
     fill(&mut app, root.to_str().unwrap());
     key(&mut app, KeyCode::Tab);
     type_text(&mut app, "Fresh one");
-    click(&mut app, "[ Создать ]");
+    click(&mut app, "[ Create ]");
 
     assert!(app.form.is_none());
     assert_eq!(app.project.as_deref(), Some(root.as_path()));
@@ -220,7 +221,7 @@ fn a_new_project_is_created_from_the_form() {
     assert!(has_config(&root));
     assert!(root.join(".git").is_dir());
     let text = screen(&mut app);
-    assert!(text.contains("Проект «Fresh one» создан"), "{text}");
+    assert!(text.contains("Project «Fresh one» created"), "{text}");
     assert_eq!(env.saved().projects[0].name, "Fresh one");
 
     // The same folder again is refused, the form stays with the problem.
@@ -229,7 +230,11 @@ fn a_new_project_is_created_from_the_form() {
     fill(&mut app, root.to_str().unwrap());
     key(&mut app, KeyCode::Enter);
     let (_, form) = app.form.as_ref().unwrap();
-    assert!(form.error.as_deref().unwrap().contains("уже есть проект"));
+    assert!(form
+        .error
+        .as_deref()
+        .unwrap()
+        .contains("already is a harness project"));
     key(&mut app, KeyCode::Esc);
     assert!(app.form.is_none());
 }
@@ -252,13 +257,13 @@ fn a_plain_folder_is_prepared_before_it_opens() {
         .error
         .as_deref()
         .unwrap()
-        .contains("нет"));
+        .contains("There is no folder"));
 
     fill(&mut app, folder.to_str().unwrap());
     key(&mut app, KeyCode::Enter);
     assert!(matches!(app.form, Some((Purpose::InitFolder(_), _))));
     // Cancel leaves the folder alone.
-    click(&mut app, "[ Отмена ]");
+    click(&mut app, "[ Cancel ]");
     assert!(app.form.is_none());
     assert!(!has_config(&folder));
 
@@ -293,14 +298,14 @@ fn projects_are_chosen_with_the_mouse_and_removed_from_the_list() {
     assert_eq!(app.tab, Tab::Tasks);
 
     // A click on a tab switches to it; the open project is marked.
-    click(&mut app, "7 Проекты");
+    click(&mut app, "7 Projects");
     assert_eq!(app.tab, Tab::Projects);
     assert!(screen(&mut app).contains("● beta"));
 
     // Removing asks first and never deletes the folder.
-    click(&mut app, "Убрать из списка ]");
-    assert!(screen(&mut app).contains("Папка"));
-    click(&mut app, "[ Убрать ]");
+    click(&mut app, "Remove from list ]");
+    assert!(screen(&mut app).contains("leaves the list"));
+    click(&mut app, "[ Remove ]");
     assert_eq!(env.saved().projects.len(), 1);
     assert_eq!(env.saved().last, None);
     assert_eq!(app.project, None);
@@ -344,4 +349,39 @@ fn the_mouse_moves_through_tasks_and_steps() {
 
     key(&mut app, KeyCode::Char('q'));
     assert!(app.quit);
+}
+
+#[test]
+fn the_language_switches_and_is_remembered() {
+    let env = Env::new();
+    let root = env.path("test");
+    project(&root);
+    let mut app = env.app(&root);
+    assert!(screen(&mut app).contains("1 Tasks"));
+
+    click(&mut app, "[ EN ]");
+    let text = screen(&mut app);
+    for part in [
+        "1 Задачи │ 2 Роли",
+        "[ + Новый проект ] [ RU ]",
+        "q выход",
+        "раунд 1 · tester",
+    ] {
+        assert!(text.contains(part), "missing {part:?} in:\n{text}");
+    }
+    // The choice is kept for the next start.
+    let mut again = env.app(&root);
+    assert!(screen(&mut again).contains("1 Задачи"));
+
+    // The button in the top bar opens the new project form from any tab.
+    click(&mut again, "+ Новый проект");
+    let (purpose, form) = again.form.as_ref().unwrap();
+    assert_eq!(
+        (purpose, form.title.as_str()),
+        (&Purpose::NewProject, "Новый проект")
+    );
+    key(&mut again, KeyCode::Esc);
+
+    key(&mut again, KeyCode::Char('L'));
+    assert!(screen(&mut again).contains("1 Tasks"));
 }

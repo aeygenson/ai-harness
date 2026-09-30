@@ -1,0 +1,78 @@
+# The texts of `harness tui` in English, the default language.
+#
+# To add a language, copy this file to ~/.harness/locales/<code>.toml
+# (for example de.toml), translate the texts and restart the TUI: the language
+# button in the top right corner then offers it too. A text missing from a
+# translation is shown in English. {name} marks a value filled in by the TUI.
+# A file there with the code of a built-in language (en, ru) replaces its texts.
+
+# Shown on the language button.
+language = "EN"
+
+[tabs]
+tasks = "Tasks"
+roles = "Roles"
+skills = "Skills"
+mcp = "MCP"
+plugins = "Plugins"
+retro = "Retro"
+projects = "Projects"
+no_project = "no project"
+new_project = "+ New project"
+coming = "This tab arrives in step {step} of the plan.\n\nUntil then these settings are changed in .harness/harness.toml or with harness commands."
+no_open_project = "No project is open. Open or create one on the «Projects» tab (7)."
+
+[footer]
+hint = "click or 1–7 tabs · ↑↓ select · wheel scroll · Shift+mouse select text · L language · q quit"
+
+[tasks]
+title = " Tasks "
+roles = " Roles "
+empty = "No tasks yet.\n\nTo create one:\n  harness task new task-001 \"what to do\""
+header = " {task} · round {round} of {max} · {stage}{failures} "
+failures = " · {count} failed attempts"
+step = " round {round} · {role} "
+verdict = "verdict: "
+issues = "Issues:"
+files = "Files:"
+skills_used = "Skills used: {skills}"
+notes = "Notes:"
+
+[projects]
+open = "Open"
+new = "New project"
+open_folder = "Open folder…"
+remove = "Remove from list"
+title = " Projects "
+about = " About the project "
+empty = "No projects in the list yet.\n\n«New project» creates a folder, git and the harness settings.\n«Open folder…» adds an existing folder."
+missing = "The folder is gone."
+ready = "A harness project."
+no_config = "The folder has no .harness/harness.toml."
+open_hint = "Double click or Enter opens the project."
+opened = "Opened project {name}"
+not_saved = "The project list was not saved: {error}"
+not_a_project = "{path} is not a harness project"
+gone = "The folder {path} is gone"
+removed = "The project was removed from the list, the folder stays"
+created = "Project «{name}» created: {git}.harness/harness.toml"
+
+[form]
+cancel = "Cancel"
+new_title = "New project"
+new_text = "A new folder with a git repository and .harness/harness.toml.\nAll roles start on claude; change them on the «Roles» tab."
+new_folder = "Folder of the new project, for example ~/code/my-app"
+new_name = "Name (empty: the folder name)"
+create = "Create"
+no_folder = "Type the folder of the new project"
+exists = "There already is a harness project there: open it"
+open_title = "Open folder"
+folder = "Folder"
+open = "Open"
+type_folder = "Type a folder"
+no_such_folder = "There is no folder {path}"
+init_title = "Prepare the folder?"
+init_text = "{path} has no harness settings.\nCreate .harness/harness.toml (and git, if there is none)?"
+remove_title = "Remove from the list?"
+remove_text = "Project «{name}» leaves the list.\nThe folder {path} stays as it is."
+remove = "Remove"

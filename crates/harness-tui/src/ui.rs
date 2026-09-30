@@ -37,6 +37,7 @@ pub enum ButtonId {
     UseProject,
     Ok,
     Cancel,
+    Language,
 }
 
 /// Where the clickable things were drawn in the last frame. Drawing fills it,
@@ -174,7 +175,8 @@ impl Form {
         }
     }
 
-    pub fn draw(&self, frame: &mut Frame, hits: &mut Hits) {
+    /// `cancel` is the label of the Cancel button in the current language.
+    pub fn draw(&self, frame: &mut Frame, hits: &mut Hits, cancel: &str) {
         let width = frame.area().width.saturating_sub(4).min(72);
         let text_lines = u16::try_from(self.text.lines().count()).unwrap_or(0);
         let fields = u16::try_from(self.fields.len()).unwrap_or(0);
@@ -234,7 +236,7 @@ impl Form {
             hits,
             &[
                 (&self.ok, ButtonId::Ok, true),
-                ("Отмена", ButtonId::Cancel, true),
+                (cancel, ButtonId::Cancel, true),
             ],
         );
     }
