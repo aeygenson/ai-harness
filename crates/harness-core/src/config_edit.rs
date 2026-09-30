@@ -88,6 +88,31 @@ pub fn set_plugin_commit(text: &str, name: &str, commit: &str) -> Result<String,
     finish(doc)
 }
 
+/// Adds `skill` to a role's `skills` list, or to `always_skills` if `always`.
+/// A skill already in that list is not added twice.
+pub fn add_role_skill(
+    text: &str,
+    role: Role,
+    skill: &str,
+    always: bool,
+) -> Result<String, EditError> {
+    let mut doc: DocumentMut = text.parse()?;
+    let key = role_key(role);
+    let list_name = if always { "always_skills" } else { "skills" };
+    let list = table(&mut doc, "roles")?
+        .get_mut(&key)
+        .and_then(Item::as_table_mut)
+        .ok_or_else(|| EditError::NoRole(key.clone()))?
+        .entry(list_name)
+        .or_insert(value(Array::new()))
+        .as_array_mut()
+        .ok_or_else(|| EditError::NotATable(format!("roles.{key}.{list_name}")))?;
+    if !list.iter().any(|item| item.as_str() == Some(skill)) {
+        list.push(skill);
+    }
+    finish(doc)
+}
+
 /// Removes `[plugins.<name>]` and the name from every role's `plugins` list.
 pub fn remove_plugin(text: &str, name: &str) -> Result<String, EditError> {
     let mut doc: DocumentMut = text.parse()?;
@@ -202,6 +227,22 @@ mod tests {
         .unwrap();
         assert!(text.contains("[plugins.review]"), "{text}");
         assert!(Config::parse(&text).unwrap().plugins["review"].allow_hooks);
+    }
+
+    #[test]
+    fn a_skill_is_added_to_a_role_once() {
+        let text = add_role_skill(TOML, Role::Developer, "rust-errors", false).unwrap();
+        let text = add_role_skill(&text, Role::Developer, "rust-errors", false).unwrap();
+        let text = add_role_skill(&text, Role::Developer, "style", true).unwrap();
+        assert!(text.contains("agent = \"codex\" # fast"), "{text}");
+        let config = Config::parse(&text).unwrap();
+        let developer = &config.roles[&Role::Developer];
+        assert_eq!(developer.skills, ["rust-errors"]);
+        assert_eq!(developer.always_skills, ["style"]);
+        assert!(matches!(
+            add_role_skill(TOML, Role::Security, "x", false),
+            Err(EditError::NoRole(_))
+        ));
     }
 
     #[test]

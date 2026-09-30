@@ -14,7 +14,7 @@ pub const HARNESS_DIR: &str = ".harness";
 
 /// What `.harness/.gitignore` must contain: scratch space and per-project agent
 /// settings (which may hold a login token) never go into git.
-const HARNESS_IGNORES: &str = "runs/*/inbox/\nagents/\n";
+const HARNESS_IGNORES: &str = "runs/*/inbox/\nretros/*/inbox/\nagents/\n";
 
 /// Every commit is made by this name, so Lisa can see which commits the harness made.
 const AUTHOR_NAME: &str = "AI Harness";

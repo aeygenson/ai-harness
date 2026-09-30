@@ -62,6 +62,12 @@ agent_timeout_minutes = 30
 # Each role picks its own: `skills = ["rust-errors"]` are listed in the prompt and
 # the agent reads them when needed; `always_skills = ["style"]` go into the prompt
 # in full.
+#
+# `harness retro <task> --suggest` asks the [retro] agent to read the history
+# and propose skill changes; nothing changes until `harness retro apply`.
+
+[retro]
+agent = "claude"
 
 [roles.architect]
 agent = "claude"
@@ -92,6 +98,18 @@ pub struct Config {
     /// Agent plugins kept in the project, by name; see `crate::plugins`.
     #[serde(default)]
     pub plugins: BTreeMap<String, PluginConfig>,
+    /// The agent that writes `harness retro --suggest`.
+    #[serde(default)]
+    pub retro: Option<RetroConfig>,
+}
+
+/// `[retro]`: which agent reads the history and proposes skill changes.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RetroConfig {
+    pub agent: String,
+    #[serde(default)]
+    pub model: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -218,6 +236,8 @@ mod tests {
         ] {
             assert_eq!(config.role(role).unwrap().agent, "claude");
         }
+        assert_eq!(config.retro.unwrap().agent, "claude");
+        assert_eq!(Config::parse("").unwrap().retro, None);
     }
 
     #[test]
