@@ -58,6 +58,15 @@ pub enum StoreError {
     Refused(#[from] TransitionError),
 }
 
+/// One saved step: a role's (or Lisa's) handoff with its notes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Step {
+    /// For example `runs/task-001/round-02/03-tester`.
+    pub dir: PathBuf,
+    pub handoff: Handoff,
+    pub notes: String,
+}
+
 /// Access to one task's folder.
 #[derive(Debug)]
 pub struct TaskStore {
@@ -176,17 +185,28 @@ impl TaskStore {
 
     /// All saved handoffs, in the order they happened.
     pub fn history(&self) -> Result<Vec<Handoff>, StoreError> {
-        let mut handoffs = Vec::new();
+        Ok(self.steps()?.into_iter().map(|step| step.handoff).collect())
+    }
+
+    /// All saved steps with their folders and notes, in the order they happened.
+    pub fn steps(&self) -> Result<Vec<Step>, StoreError> {
+        let mut steps = Vec::new();
         let rounds = sorted_subdirs(&self.dir)?.into_iter().filter(|dir| {
             dir.file_name()
                 .is_some_and(|name| name.to_string_lossy().starts_with("round-"))
         });
         for round_dir in rounds {
             for step_dir in sorted_subdirs(&round_dir)? {
-                handoffs.push(read_json(&step_dir.join(HANDOFF_FILE))?);
+                let handoff = read_json(&step_dir.join(HANDOFF_FILE))?;
+                let notes = fs::read_to_string(step_dir.join(NOTES_FILE)).unwrap_or_default();
+                steps.push(Step {
+                    dir: step_dir,
+                    handoff,
+                    notes,
+                });
             }
         }
-        Ok(handoffs)
+        Ok(steps)
     }
 
     pub fn dir(&self) -> &Path {
@@ -573,9 +593,15 @@ mod tests {
                 NextStep::To(Role::Tester),
             ),
         ];
-        for h in &steps {
-            store.record(&mut state, h, "").unwrap();
+        for (i, h) in steps.iter().enumerate() {
+            store.record(&mut state, h, &format!("notes {i}")).unwrap();
         }
         assert_eq!(store.history().unwrap(), steps);
+
+        let saved = store.steps().unwrap();
+        assert_eq!(saved.len(), 5);
+        assert!(saved[3].dir.ends_with("round-01/04-tester"));
+        assert_eq!(saved[3].notes, "notes 3");
+        assert_eq!(saved[4].handoff, steps[4]);
     }
 }
