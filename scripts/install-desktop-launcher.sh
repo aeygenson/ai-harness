@@ -27,7 +27,7 @@ Name=AI Harness
 Comment=Tasks, roles and projects of the AI harness
 Exec=$EXEC
 Terminal=true
-Icon=utilities-terminal
+Icon=$REPO/assets/icons/ai-harness.svg
 Categories=Development;
 ENTRY
 }
