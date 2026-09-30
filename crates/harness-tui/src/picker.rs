@@ -241,11 +241,13 @@ impl Browser {
             Constraint::Length(1),
         ])
         .areas(inner);
+        let label = tr.t("picker.folder");
+        let room = usize::from(path.width).saturating_sub(label.chars().count());
         frame.render_widget(
             Line::from(vec![
-                Span::raw(tr.t("picker.folder").to_string()),
+                Span::raw(label.to_string()),
                 Span::styled(
-                    self.chosen().display().to_string(),
+                    keep_end(&self.chosen().display().to_string(), room),
                     Style::new().fg(Color::Cyan),
                 ),
             ]),
@@ -314,6 +316,16 @@ impl Browser {
     }
 }
 
+/// A long path cut from the left, so its end (the folder itself) stays visible.
+fn keep_end(text: &str, width: usize) -> String {
+    let count = text.chars().count();
+    if count <= width {
+        return text.to_string();
+    }
+    let tail: String = text.chars().skip(count + 1 - width.max(1)).collect();
+    format!("…{tail}")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -356,6 +368,13 @@ mod tests {
             run_dialog(Command::new("/no/such/dialog")),
             Native::Unavailable
         );
+    }
+
+    #[test]
+    fn a_long_path_keeps_its_end() {
+        assert_eq!(keep_end("/home/me/code", 20), "/home/me/code");
+        assert_eq!(keep_end("/home/me/code/app", 8), "…ode/app");
+        assert_eq!(keep_end("/home/me/code/app", 8).chars().count(), 8);
     }
 
     #[test]
