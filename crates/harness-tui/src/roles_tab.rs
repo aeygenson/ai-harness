@@ -1,5 +1,8 @@
-//! The Roles tab: which agent and model each role runs on, and which skills,
-//! MCP servers and plugins it gets; plus the agent of `[retro]`.
+//! The Roles tab: which agent, model and effort level each role runs on, and
+//! which skills, MCP servers and plugins it gets; plus the agent of `[retro]`.
+//!
+//! The models and levels come from what the agents themselves said last
+//! (`harness_core::models`, «Refresh models»); a model can also be typed in.
 //!
 //! Changes are kept here until «Save». Saving goes through
 //! `harness_core::settings::save`: the same checks as before a run, then
@@ -14,6 +17,7 @@ use harness_core::config::{Config, RetroConfig, RoleConfig, AGENTS, CONFIG_FILE}
 use harness_core::config_edit;
 use harness_core::git::{Repo, HARNESS_DIR};
 use harness_core::handoff::Role;
+use harness_core::models::{self, ModelList};
 use harness_core::plugins::family;
 use harness_core::settings;
 use harness_core::skills;
@@ -41,7 +45,12 @@ pub const WHO: [Option<Role>; 5] = [
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Row {
     Agent(&'static str),
-    Model,
+    /// A model from the agent's list; `None` is the agent's own default.
+    Model(Option<String>),
+    /// A model typed in by hand.
+    OtherModel,
+    /// The effort level: a click moves to the next one.
+    Effort,
     Skill(String),
     Mcp(String),
     Plugin(String),
@@ -73,6 +82,10 @@ struct SkillFile {
 #[derive(Debug)]
 pub struct RolesTab {
     root: PathBuf,
+    /// `~/.harness`, where the agents' model lists are kept.
+    home: Option<PathBuf>,
+    /// The model list of each agent, as it answered last.
+    models: BTreeMap<String, ModelList>,
     /// `harness.toml` as it is on disk, and what it says.
     text: String,
     saved: Config,
@@ -87,12 +100,16 @@ pub struct RolesTab {
     pub row: usize,
     focus: Focus,
     pub problem: Option<String>,
+    /// The agents are being asked for their models.
+    pub refreshing: bool,
 }
 
 impl RolesTab {
-    pub fn load(root: &Path) -> Self {
+    pub fn load(root: &Path, home: Option<&Path>) -> Self {
         let mut tab = Self {
             root: root.to_path_buf(),
+            home: home.map(Path::to_path_buf),
+            models: BTreeMap::new(),
             text: String::new(),
             saved: Config::parse("").unwrap_or_else(|_| unreachable!("an empty config is valid")),
             roles: BTreeMap::new(),
@@ -103,6 +120,7 @@ impl RolesTab {
             row: 0,
             focus: Focus::List,
             problem: None,
+            refreshing: false,
         };
         tab.reload();
         tab
@@ -138,6 +156,18 @@ impl RolesTab {
                 (agent, saved)
             })
             .collect();
+        self.reload_models();
+    }
+
+    /// Reads the saved model lists again (after «Refresh models»).
+    pub fn reload_models(&mut self) {
+        self.models = match &self.home {
+            Some(home) => AGENTS
+                .iter()
+                .filter_map(|agent| models::load(home, agent).map(|l| (agent.to_string(), l)))
+                .collect(),
+            None => BTreeMap::new(),
+        };
         self.row = self.row.min(self.rows().len().saturating_sub(1));
     }
 
@@ -157,20 +187,100 @@ impl RolesTab {
 
     /// The agent and model of the selected role or of `[retro]`.
     fn agent(&self) -> (Option<&str>, Option<&str>) {
+        let (agent, model, _) = self.choice();
+        (agent, model)
+    }
+
+    /// The agent, model and effort of the selected role or of `[retro]`.
+    fn choice(&self) -> (Option<&str>, Option<&str>, Option<&str>) {
         match self.who() {
-            Some(role) => self.roles.get(&role).map_or((None, None), |r| {
-                (Some(r.agent.as_str()), r.model.as_deref())
+            Some(role) => self.roles.get(&role).map_or((None, None, None), |r| {
+                (
+                    Some(r.agent.as_str()),
+                    r.model.as_deref(),
+                    r.effort.as_deref(),
+                )
             }),
-            None => self.retro.as_ref().map_or((None, None), |r| {
-                (Some(r.agent.as_str()), r.model.as_deref())
+            None => self.retro.as_ref().map_or((None, None, None), |r| {
+                (
+                    Some(r.agent.as_str()),
+                    r.model.as_deref(),
+                    r.effort.as_deref(),
+                )
             }),
+        }
+    }
+
+    /// The model list of the selected role's agent.
+    fn model_list(&self) -> Option<&ModelList> {
+        self.agent().0.and_then(|agent| self.models.get(agent))
+    }
+
+    /// The levels the chosen model takes (for the agent's default model,
+    /// those of the model the agent calls its default).
+    fn effort_levels(&self) -> Vec<String> {
+        let Some(list) = self.model_list() else {
+            return Vec::new();
+        };
+        let model = match self.agent().1 {
+            Some(id) => list.find(id),
+            None => list.models.iter().find(|m| m.default),
+        };
+        model.map(|m| m.efforts.clone()).unwrap_or_default()
+    }
+
+    /// Sets the model and effort of the selected role or of `[retro]`.
+    fn set_choice(&mut self, model: Option<String>, effort: Option<String>) {
+        match self.who() {
+            Some(role) => {
+                if let Some(settings) = self.roles.get_mut(&role) {
+                    (settings.model, settings.effort) = (model, effort);
+                }
+            }
+            None => {
+                if let Some(retro) = &mut self.retro {
+                    (retro.model, retro.effort) = (model, effort);
+                }
+            }
+        }
+    }
+
+    /// What a role gets when it moves to `agent`: the model and level of
+    /// another role on that agent, otherwise the agent's own default.
+    fn first_choice(&self, agent: &str) -> (Option<String>, Option<String>) {
+        let who = self.who();
+        let other = self
+            .roles
+            .iter()
+            .filter(|(role, _)| Some(**role) != who)
+            .map(|(_, r)| (r.agent.as_str(), &r.model, &r.effort))
+            .chain(
+                self.retro
+                    .iter()
+                    .filter(|_| who.is_some())
+                    .map(|r| (r.agent.as_str(), &r.model, &r.effort)),
+            )
+            .find(|(a, model, _)| *a == agent && model.is_some());
+        match other {
+            Some((_, model, effort)) => (model.clone(), effort.clone()),
+            None => self
+                .models
+                .get(agent)
+                .map_or((None, None), ModelList::default_choice),
         }
     }
 
     /// The rows of the details, in order.
     pub fn rows(&self) -> Vec<Row> {
         let mut rows: Vec<Row> = AGENTS.iter().map(|a| Row::Agent(a)).collect();
-        rows.push(Row::Model);
+        rows.push(Row::Model(None));
+        if let Some(list) = self.model_list() {
+            rows.extend(list.models.iter().map(|m| Row::Model(Some(m.id.clone()))));
+        }
+        rows.push(Row::OtherModel);
+        if !self.effort_levels().is_empty() || self.choice().2.is_some() {
+            rows.push(Row::Effort);
+        }
         let Some(role) = self.who() else {
             return rows;
         };
@@ -269,7 +379,37 @@ impl RolesTab {
         let who = self.who();
         match row {
             Row::Agent(agent) => self.set_agent(agent, tr),
-            Row::Model => Action::EditModel(self.agent().1.unwrap_or_default().to_string()),
+            Row::Model(model) => {
+                let effort = match (&model, self.model_list()) {
+                    (None, _) => None,
+                    (Some(id), Some(list)) => {
+                        list.find(id).and_then(|m| m.effort_for(self.choice().2))
+                    }
+                    (Some(_), None) => self.choice().2.map(str::to_string),
+                };
+                self.set_choice(model, effort);
+                Action::None
+            }
+            Row::OtherModel => {
+                let typed = self
+                    .agent()
+                    .1
+                    .filter(|m| self.model_list().is_none_or(|l| l.find(m).is_none()));
+                Action::EditModel(typed.unwrap_or_default().to_string())
+            }
+            Row::Effort => {
+                // The agent's default -> each level -> the agent's default.
+                let mut levels: Vec<Option<String>> = vec![None];
+                levels.extend(self.effort_levels().into_iter().map(Some));
+                let (_, model, effort) = self.choice();
+                let at = levels
+                    .iter()
+                    .position(|l| l.as_deref() == effort)
+                    .map_or(0, |i| (i + 1) % levels.len());
+                let model = model.map(str::to_string);
+                self.set_choice(model, levels[at].clone());
+                Action::None
+            }
             Row::Skill(name) => {
                 if let Some(settings) = who.and_then(|role| self.roles.get_mut(&role)) {
                     // Not used -> read when needed -> always in the prompt -> not used.
@@ -303,9 +443,11 @@ impl RolesTab {
     fn set_agent(&mut self, agent: &str, tr: &I18n) -> Action {
         match self.who() {
             Some(role) => {
+                let first = self.first_choice(agent);
                 let settings = self.roles.entry(role).or_insert_with(|| RoleConfig {
                     agent: agent.to_string(),
                     model: None,
+                    effort: None,
                     skills: Vec::new(),
                     always_skills: Vec::new(),
                     mcp: Vec::new(),
@@ -314,8 +456,8 @@ impl RolesTab {
                 if settings.agent == agent {
                     return Action::None;
                 }
-                // A model name belongs to one agent.
-                settings.model = None;
+                // A model belongs to one agent: take the new agent's.
+                (settings.model, settings.effort) = first;
                 settings.agent = agent.to_string();
                 // Plugins are made for one kind of agent.
                 let plugins = &self.saved.plugins;
@@ -332,34 +474,34 @@ impl RolesTab {
                 }
             }
             None => {
-                let model = match &self.retro {
-                    Some(retro) if retro.agent == agent => return Action::None,
-                    _ => None,
-                };
+                if self.retro.as_ref().is_some_and(|r| r.agent == agent) {
+                    return Action::None;
+                }
+                let (model, effort) = self.first_choice(agent);
                 self.retro = Some(RetroConfig {
                     agent: agent.to_string(),
                     model,
+                    effort,
                 });
             }
         }
         Action::None
     }
 
-    /// The model from the form; empty means the agent's own default.
+    /// The model from the form; empty means the agent's own default. The
+    /// level stays if the model is in the list and takes it.
     pub fn set_model(&mut self, model: &str) {
         let model = Some(model.trim().to_string()).filter(|m| !m.is_empty());
-        match self.who() {
-            Some(role) => {
-                if let Some(settings) = self.roles.get_mut(&role) {
-                    settings.model = model;
-                }
-            }
-            None => {
-                if let Some(retro) = &mut self.retro {
-                    retro.model = model;
-                }
-            }
-        }
+        let effort = self.choice().2.map(str::to_string);
+        let effort = match (&model, self.model_list()) {
+            (None, _) => None,
+            (Some(id), Some(list)) => match list.find(id) {
+                Some(found) => found.effort_for(effort.as_deref()),
+                None => effort,
+            },
+            (Some(_), None) => effort,
+        };
+        self.set_choice(model, effort);
     }
 
     pub fn undo(&mut self) {
@@ -398,6 +540,11 @@ impl RolesTab {
             &[
                 (tr.t("roles.save"), ButtonId::Save, changed),
                 (tr.t("roles.undo"), ButtonId::Undo, changed),
+                (
+                    tr.t("roles.refresh"),
+                    ButtonId::RefreshModels,
+                    !self.refreshing,
+                ),
             ],
         );
         if changed {
@@ -482,7 +629,8 @@ impl RolesTab {
         if self.problem.is_some() {
             return lines;
         }
-        let (agent, model) = self.agent();
+        let (agent, model, effort) = self.choice();
+        let list = self.model_list();
         let who = self.who();
         let settings = who.and_then(|role| self.roles.get(&role));
         let heading = |key: &str| (None, Line::styled(tr.t(key).to_string(), bold));
@@ -514,15 +662,81 @@ impl RolesTab {
                     };
                     Line::from(vec![Span::raw(format!("  {mark} {name:<16}")), login])
                 }
-                Row::Model => {
+                Row::Model(None) => {
                     lines.push((None, Line::default()));
-                    let shown = model
-                        .map_or_else(|| tr.t("roles.default_model").to_string(), str::to_string);
+                    lines.push(heading("roles.model"));
+                    let mark = if model.is_none() { "(•)" } else { "( )" };
+                    Line::from(format!("  {mark} {}", tr.t("roles.default_model")))
+                }
+                Row::Model(Some(id)) => {
+                    let mark = if model == Some(id.as_str()) {
+                        "(•)"
+                    } else {
+                        "( )"
+                    };
+                    let about = list
+                        .and_then(|l| l.find(&id))
+                        .map(|m| {
+                            let default = if m.default {
+                                format!("{} ", tr.t("roles.agents_default"))
+                            } else {
+                                String::new()
+                            };
+                            format!("{default}{}", m.name.clone().unwrap_or_default())
+                        })
+                        .unwrap_or_default();
                     Line::from(vec![
-                        Span::styled(format!("{:<10}", tr.t("roles.model")), bold),
-                        Span::raw(format!("[ {shown} ]  ")),
-                        Span::styled(tr.t("roles.model_hint").to_string(), dim),
+                        Span::raw(format!("  {mark} {id:<24} ")),
+                        Span::styled(about, dim),
                     ])
+                }
+                Row::OtherModel => {
+                    let typed = model.filter(|m| list.is_none_or(|l| l.find(m).is_none()));
+                    let line = match typed {
+                        Some(m) => Line::from(vec![
+                            Span::raw(format!(
+                                "  (•) {} ",
+                                tr.f("roles.model_typed", &[("model", &m)])
+                            )),
+                            Span::styled(tr.t("roles.model_hint").to_string(), dim),
+                        ]),
+                        None => Line::from(format!("  ( ) {}", tr.t("roles.model_other"))),
+                    };
+                    if list.is_none() {
+                        lines.push((Some(index), line));
+                        let hint = tr.f("roles.no_models", &[("agent", &agent.unwrap_or(""))]);
+                        lines.push((None, Line::styled(hint, dim)));
+                        continue;
+                    }
+                    line
+                }
+                Row::Effort => {
+                    lines.push((None, Line::default()));
+                    let mut spans =
+                        vec![Span::styled(format!("{:<10}", tr.t("roles.effort")), bold)];
+                    let mut levels: Vec<Option<String>> = vec![None];
+                    levels.extend(self.effort_levels().into_iter().map(Some));
+                    if effort.is_some() && !levels.iter().any(|l| l.as_deref() == effort) {
+                        levels.push(effort.map(str::to_string));
+                    }
+                    for (i, level) in levels.iter().enumerate() {
+                        let name = level
+                            .clone()
+                            .unwrap_or_else(|| tr.t("roles.default_effort").to_string());
+                        if i > 0 {
+                            spans.push(Span::styled(" · ", dim));
+                        }
+                        if level.as_deref() == effort {
+                            spans.push(Span::styled(format!("[{name}]"), bold));
+                        } else {
+                            spans.push(Span::styled(name, dim));
+                        }
+                    }
+                    spans.push(Span::styled(
+                        format!("   {}", tr.t("roles.effort_hint")),
+                        dim,
+                    ));
+                    Line::from(spans)
                 }
                 Row::Skill(name) => {
                     if !skills_seen {
@@ -646,6 +860,7 @@ fn empty_role() -> RoleConfig {
     RoleConfig {
         agent: String::new(),
         model: None,
+        effort: None,
         skills: Vec::new(),
         always_skills: Vec::new(),
         mcp: Vec::new(),

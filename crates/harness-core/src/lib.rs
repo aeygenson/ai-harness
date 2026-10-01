@@ -7,6 +7,7 @@ pub mod config_edit;
 pub mod git;
 pub mod handoff;
 pub mod mcp;
+pub mod models;
 pub mod orchestrator;
 pub mod permissions;
 pub mod plugin_install;

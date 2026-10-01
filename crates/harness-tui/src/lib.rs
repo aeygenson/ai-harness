@@ -16,10 +16,13 @@
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
+use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
+use harness_agents::credentials;
 use harness_core::git::{Repo, HARNESS_DIR};
+use harness_core::models::{self, ModelList};
 use harness_core::projects::{self, name_of};
 use harness_core::skills::{self, SKILLS_DIR};
 use ratatui::crossterm::cursor::Hide;
@@ -188,6 +191,16 @@ fn edit_outside(terminal: &mut DefaultTerminal, file: &Path, tr: &I18n) -> Resul
     result
 }
 
+/// Each agent's answer: its model list, or why there is none.
+type Answers = Vec<(String, Result<ModelList, String>)>;
+
+/// Asks the agents with a saved login (in `credentials_dir`) for their models.
+type ModelAsker = fn(&Path) -> Answers;
+
+fn ask_agents(credentials_dir: &Path) -> Answers {
+    harness_agents::models::ask_all(credentials_dir, &Default::default())
+}
+
 #[derive(Debug)]
 struct App {
     tab: Tab,
@@ -215,6 +228,9 @@ struct App {
     last_click: Option<(Instant, Target, u16)>,
     /// Builds the agents that run the roles.
     builder: Builder,
+    asker: ModelAsker,
+    /// The answers of «Refresh models», while the agents are being asked.
+    asking: Option<mpsc::Receiver<Answers>>,
     /// `q` was pressed once with unsaved changes.
     quit_warned: bool,
     quit: bool,
@@ -240,6 +256,8 @@ impl App {
             hits: Hits::default(),
             last_click: None,
             builder: harness_agents::build::build_team,
+            asker: ask_agents,
+            asking: None,
             quit_warned: false,
             quit: false,
         };
@@ -266,7 +284,7 @@ impl App {
             return;
         }
         self.tasks = Some(TasksTab::load(root));
-        self.roles = Some(RolesTab::load(root));
+        self.roles = Some(RolesTab::load(root, self.home.as_deref()));
         self.skills = Some(SkillsTab::load(root));
         self.project = Some(root.to_path_buf());
         self.tab = Tab::Tasks;
@@ -296,6 +314,15 @@ impl App {
 
     /// Takes what the background work sent.
     fn tick(&mut self) {
+        let answers = self.asking.as_ref().and_then(|rx| match rx.try_recv() {
+            Ok(answers) => Some(Some(answers)),
+            Err(mpsc::TryRecvError::Empty) => None,
+            Err(mpsc::TryRecvError::Disconnected) => Some(None),
+        });
+        if let Some(answers) = answers {
+            self.asking = None;
+            self.models_answered(answers.unwrap_or_default());
+        }
         if let Some(tasks) = &mut self.tasks {
             if let Some(message) = tasks.tick(&self.tr) {
                 self.message = Some(message);
@@ -780,9 +807,72 @@ impl App {
         Ok(())
     }
 
+    /// «Refresh models»: the agents are asked in the background.
+    fn ask_for_models(&mut self) {
+        if self.asking.is_some() {
+            return;
+        }
+        let Some(dir) = credentials::default_dir() else {
+            return;
+        };
+        let (tx, rx) = mpsc::channel();
+        let asker = self.asker;
+        std::thread::spawn(move || {
+            let _ = tx.send(asker(&dir));
+        });
+        self.asking = Some(rx);
+        if let Some(roles) = &mut self.roles {
+            roles.refreshing = true;
+        }
+        self.message = Some((self.tr.t("roles.refreshing").to_string(), false));
+    }
+
+    /// The agents answered: keep the lists and say what came back.
+    fn models_answered(&mut self, answers: Answers) {
+        let mut got = Vec::new();
+        let mut failed = Vec::new();
+        for (agent, answer) in answers {
+            let saved = answer.and_then(|list| {
+                let count = list.models.len();
+                match &self.home {
+                    Some(home) => models::save(home, &list).map_err(|e| e.to_string()),
+                    None => Err("HOME is not set".into()),
+                }
+                .map(|()| count)
+            });
+            match saved {
+                Ok(count) => got.push(format!("{agent} {count}")),
+                Err(error) => failed.push(format!("{agent}: {error}")),
+            }
+        }
+        let text = match (got.is_empty(), failed.is_empty()) {
+            (true, true) => (self.tr.t("roles.no_logins").to_string(), true),
+            (_, true) => (
+                self.tr.f("roles.refreshed", &[("lists", &got.join(", "))]),
+                false,
+            ),
+            _ => {
+                let mut text = failed.join("; ");
+                if !got.is_empty() {
+                    text = format!(
+                        "{}; {text}",
+                        self.tr.f("roles.refreshed", &[("lists", &got.join(", "))])
+                    );
+                }
+                (text, true)
+            }
+        };
+        self.message = Some(text);
+        if let Some(roles) = &mut self.roles {
+            roles.refreshing = false;
+            roles.reload_models();
+        }
+    }
+
     /// A button, clicked or chosen with its key.
     fn press(&mut self, id: ButtonId) {
         match id {
+            ButtonId::RefreshModels => self.ask_for_models(),
             ButtonId::SkillRole(_)
             | ButtonId::SkillEdit
             | ButtonId::SkillNew

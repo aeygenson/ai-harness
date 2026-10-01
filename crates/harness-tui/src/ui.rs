@@ -48,6 +48,8 @@ pub enum ButtonId {
     Language,
     Save,
     Undo,
+    /// «Refresh models» on the Roles tab.
+    RefreshModels,
     Choose,
     Up,
     NewFolder,

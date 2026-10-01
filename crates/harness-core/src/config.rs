@@ -7,6 +7,7 @@
 //! [roles.architect]
 //! agent = "claude"
 //! model = "opus"        # optional: otherwise the agent's default model
+//! effort = "high"       # optional: how hard the model thinks (see `crate::models`)
 //! skills = ["write-docs"]  # optional: see `crate::skills`
 //! ```
 
@@ -34,7 +35,9 @@ agent_timeout_minutes = 30
 # "codex+deepseek" (Codex CLI with DeepSeek models; `harness login deepseek`
 # saves the API key) or "antigravity" (Antigravity CLI).
 # Add `model = "..."` to pick a model, for example "opus" for claude or
-# "deepseek-v4-pro" for codex+deepseek (default "deepseek-flash").
+# "deepseek-v4-pro" for codex+deepseek (default "deepseek-flash"), and
+# `effort = "..."` for how hard it thinks, for example "high". `harness models`
+# lists what each agent offers.
 #
 # MCP servers: describe each once, then list it in the roles that need it.
 #   [mcp.context7]
@@ -113,6 +116,8 @@ pub struct RetroConfig {
     pub agent: String,
     #[serde(default)]
     pub model: Option<String>,
+    #[serde(default, deserialize_with = "effort")]
+    pub effort: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -121,6 +126,9 @@ pub struct RoleConfig {
     pub agent: String,
     #[serde(default)]
     pub model: Option<String>,
+    /// The reasoning effort, such as "high"; the agent's default if not set.
+    #[serde(default, deserialize_with = "effort")]
+    pub effort: Option<String>,
     /// Skills from `.harness/skills/` the agent reads when it needs them.
     #[serde(default)]
     pub skills: Vec<String>,
@@ -189,6 +197,19 @@ pub enum ConfigError {
     MissingRole(Role),
 }
 
+/// An effort level is a plain word: it goes into an agent's command line.
+fn effort<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<String>, D::Error> {
+    let value = Option::<String>::deserialize(d)?;
+    match &value {
+        Some(v) if v.is_empty() || !v.chars().all(|c| c.is_ascii_lowercase()) => {
+            Err(serde::de::Error::custom(format!(
+                "effort {v:?} is not allowed; use a word such as \"high\""
+            )))
+        }
+        _ => Ok(value),
+    }
+}
+
 fn default_max_rounds() -> u32 {
     DEFAULT_MAX_ROUNDS
 }
@@ -241,6 +262,18 @@ mod tests {
         }
         assert_eq!(config.retro.unwrap().agent, "claude");
         assert_eq!(Config::parse("").unwrap().retro, None);
+    }
+
+    #[test]
+    fn effort_is_a_plain_word() {
+        let base = "[roles.tester]\nagent = \"claude\"\n";
+        let config = Config::parse(&format!("{base}effort = \"high\"\n")).unwrap();
+        assert_eq!(
+            config.role(Role::Tester).unwrap().effort.as_deref(),
+            Some("high")
+        );
+        assert!(Config::parse(&format!("{base}effort = \"high\\\" x\"\n")).is_err());
+        assert!(Config::parse(&format!("{base}effort = \"\"\n")).is_err());
     }
 
     #[test]

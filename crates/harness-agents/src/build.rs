@@ -56,6 +56,7 @@ pub fn build_team(config: &Config, project_dir: &Path) -> Result<Team, BuildErro
                 who: &format!("{role:?}"),
                 agent: &settings.agent,
                 model: settings.model.as_deref(),
+                effort: settings.effort.as_deref(),
                 role,
             },
             servers.for_role(role),
@@ -80,6 +81,7 @@ pub fn retro_agent(config: &Config) -> Result<AnyAgent, BuildError> {
             who: "[retro]",
             agent: &settings.agent,
             model: settings.model.as_deref(),
+            effort: settings.effort.as_deref(),
             role: suggest::RULES_OF,
         },
         Vec::new(),
@@ -93,6 +95,7 @@ pub struct AgentChoice<'a> {
     pub who: &'a str,
     pub agent: &'a str,
     pub model: Option<&'a str>,
+    pub effort: Option<&'a str>,
     /// The role whose rules the agent gets.
     pub role: Role,
 }
@@ -118,6 +121,9 @@ pub fn build_agent(
             if let Some(model) = choice.model {
                 agent = agent.with_model(role, model);
             }
+            if let Some(effort) = choice.effort {
+                agent = agent.with_effort(role, effort);
+            }
             AnyAgent::Claude(
                 agent
                     .with_mcp_servers(role, servers)
@@ -134,6 +140,9 @@ pub fn build_agent(
             let mut agent = Codex::new(auth_dir).with_timeout(timeout);
             if let Some(model) = choice.model {
                 agent = agent.with_model(role, model);
+            }
+            if let Some(effort) = choice.effort {
+                agent = agent.with_effort(role, effort);
             }
             AnyAgent::Codex(
                 agent
@@ -154,6 +163,12 @@ pub fn build_agent(
             if let Some(model) = choice.model {
                 agent = agent.with_model(role, model);
             }
+            if choice.effort.is_some() {
+                return Err(problem(format!(
+                    "{} uses codex+deepseek, which has no effort levels: remove `effort`",
+                    choice.who
+                )));
+            }
             AnyAgent::Codex(
                 agent
                     .with_launcher(&harness)
@@ -171,6 +186,9 @@ pub fn build_agent(
             let mut agent = Antigravity::new(auth_dir).with_timeout(timeout);
             if let Some(model) = choice.model {
                 agent = agent.with_model(role, model);
+            }
+            if let Some(effort) = choice.effort {
+                agent = agent.with_effort(role, effort);
             }
             AnyAgent::Antigravity(agent.with_mcp_servers(role, servers))
         }

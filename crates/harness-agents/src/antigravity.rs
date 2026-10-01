@@ -56,6 +56,7 @@ pub struct Antigravity {
     /// `~/.harness/credentials/antigravity`: the `HOME` Lisa logged in with.
     auth_dir: PathBuf,
     models: HashMap<Role, String>,
+    efforts: HashMap<Role, String>,
     mcp: HashMap<Role, Vec<McpServer>>,
     timeout: Duration,
 }
@@ -66,6 +67,7 @@ impl Antigravity {
             program: PathBuf::from("agy"),
             auth_dir: auth_dir.into(),
             models: HashMap::new(),
+            efforts: HashMap::new(),
             mcp: HashMap::new(),
             timeout: Duration::from_secs(30 * 60),
         }
@@ -78,6 +80,12 @@ impl Antigravity {
 
     pub fn with_model(mut self, role: Role, model: impl Into<String>) -> Self {
         self.models.insert(role, model.into());
+        self
+    }
+
+    /// The reasoning effort of a role, such as "high".
+    pub fn with_effort(mut self, role: Role, effort: impl Into<String>) -> Self {
+        self.efforts.insert(role, effort.into());
         self
     }
 
@@ -112,6 +120,9 @@ impl Antigravity {
             .arg("--dangerously-skip-permissions");
         if let Some(model) = self.models.get(&job.role) {
             command.args(["--model", model]);
+        }
+        if let Some(effort) = self.efforts.get(&job.role) {
+            command.args(["--effort", effort]);
         }
         command
     }
@@ -344,7 +355,7 @@ fn last_line(text: &str) -> &str {
 }
 
 /// Copies the saved login folder, leaving out logs and history.
-fn copy_dir(from: &Path, to: &Path) -> io::Result<()> {
+pub(crate) fn copy_dir(from: &Path, to: &Path) -> io::Result<()> {
     fs::create_dir_all(to)?;
     for entry in fs::read_dir(from)? {
         let entry = entry?;
