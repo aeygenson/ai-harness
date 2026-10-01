@@ -42,6 +42,7 @@ use ratatui::{DefaultTerminal, Frame, Terminal};
 mod editor;
 mod i18n;
 mod keys;
+mod mcp_tab;
 mod picker;
 mod projects_tab;
 mod roles_tab;
@@ -51,6 +52,7 @@ mod tasks;
 mod ui;
 
 use i18n::I18n;
+use mcp_tab::McpTab;
 use picker::{Browser, Native};
 use projects_tab::{has_config, ProjectsTab};
 use roles_tab::{Action, RolesTab};
@@ -212,6 +214,7 @@ struct App {
     tasks: Option<TasksTab>,
     roles: Option<RolesTab>,
     skills: Option<SkillsTab>,
+    mcp: Option<McpTab>,
     /// A skill to open in the editor after this event.
     edit: Option<EditJob>,
     projects: ProjectsTab,
@@ -246,6 +249,7 @@ impl App {
             tasks: None,
             roles: None,
             skills: None,
+            mcp: None,
             edit: None,
             projects: ProjectsTab::load(home),
             form: None,
@@ -286,6 +290,7 @@ impl App {
         self.tasks = Some(TasksTab::load(root, self.home.as_deref()));
         self.roles = Some(RolesTab::load(root, self.home.as_deref()));
         self.skills = Some(SkillsTab::load(root));
+        self.mcp = Some(McpTab::load(self.home.as_deref()));
         self.project = Some(root.to_path_buf());
         self.tab = Tab::Tasks;
         let saved = self.projects.update(|list| {
@@ -432,6 +437,9 @@ impl App {
                 if let Some(skills) = &mut self.skills {
                     skills.reload();
                 }
+                if let Some(mcp) = &mut self.mcp {
+                    mcp.reload();
+                }
                 self.projects.reload();
             }
             code => match self.tab {
@@ -456,6 +464,16 @@ impl App {
                         self.skill_action(action);
                     }
                 }
+                Tab::Mcp => match code {
+                    KeyCode::Char('s') => self.press(ButtonId::Save),
+                    KeyCode::Char('u') => self.press(ButtonId::Undo),
+                    KeyCode::Char(' ') | KeyCode::Enter => self.press(ButtonId::McpToggle),
+                    code => {
+                        if let (Some(mcp), Some(roles)) = (&mut self.mcp, &self.roles) {
+                            mcp.on_key(code, roles);
+                        }
+                    }
+                },
                 Tab::Projects => match code {
                     KeyCode::Enter => self.press(ButtonId::UseProject),
                     KeyCode::Char('n') => self.press(ButtonId::NewProject),
@@ -529,6 +547,11 @@ impl App {
                     (Tab::Skills, _) => {
                         if let Some(skills) = &mut self.skills {
                             skills.on_wheel(down);
+                        }
+                    }
+                    (Tab::Mcp, _) => {
+                        if let (Some(mcp), Some(roles)) = (&mut self.mcp, &self.roles) {
+                            mcp.move_by(if down { 1 } else { -1 }, roles);
                         }
                     }
                     _ => {}
@@ -622,6 +645,14 @@ impl App {
                     }
                     if double {
                         self.press(ButtonId::SkillEdit);
+                    }
+                }
+                Some((ListId::Mcp, index)) => {
+                    if let (Some(mcp), Some(roles)) = (&mut self.mcp, &self.roles) {
+                        mcp.select(index, roles);
+                    }
+                    if double {
+                        self.press(ButtonId::McpToggle);
                     }
                 }
                 Some((ListId::RoleFilter, index)) => {
@@ -877,6 +908,18 @@ impl App {
     fn press(&mut self, id: ButtonId) {
         match id {
             ButtonId::RefreshModels => self.ask_for_models(),
+            ButtonId::McpRole(index) => {
+                if let Some(mcp) = &mut self.mcp {
+                    mcp.choose_role(index);
+                }
+            }
+            ButtonId::McpToggle => {
+                if let (Some(mcp), Some(roles)) = (&self.mcp, &mut self.roles) {
+                    if let Err(key) = mcp.toggle(roles) {
+                        self.message = Some((self.tr.t(key).to_string(), true));
+                    }
+                }
+            }
             ButtonId::SkillRole(_)
             | ButtonId::SkillEdit
             | ButtonId::SkillNew
@@ -1023,6 +1066,7 @@ impl App {
                     self.tasks = None;
                     self.roles = None;
                     self.skills = None;
+                    self.mcp = None;
                 }
                 result.map(|()| {
                     self.message = Some((self.tr.t("projects.removed").to_string(), false));
@@ -1174,6 +1218,15 @@ impl App {
                     frame,
                     main,
                     &format!(" {} ", self.tr.t("tabs.skills")),
+                    self.tr.t("tabs.no_open_project"),
+                ),
+            },
+            Tab::Mcp => match (&self.mcp, &self.roles) {
+                (Some(mcp), Some(roles)) => mcp.draw(frame, main, &mut self.hits, &self.tr, roles),
+                _ => placeholder(
+                    frame,
+                    main,
+                    &format!(" {} ", self.tr.t("tabs.mcp")),
                     self.tr.t("tabs.no_open_project"),
                 ),
             },

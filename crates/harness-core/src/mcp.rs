@@ -189,6 +189,13 @@ fn resolve(
     })
 }
 
+/// Can `agent` start this server? Every agent of the harness starts a
+/// program server (`stdio`) the same way, so for now this is any known
+/// agent; servers some agent cannot start would be refused here.
+pub fn agent_runs(agent: &str, _server: &crate::config::McpConfig) -> bool {
+    crate::config::AGENTS.contains(&agent)
+}
+
 /// Lowercase letters, digits, `-` and `_`: safe in file names, in Codex's
 /// `-c mcp_servers.<name>...` and in Claude Code's `mcp__<name>` rules.
 pub fn is_simple_name(name: &str) -> bool {

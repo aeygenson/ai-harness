@@ -36,7 +36,7 @@ use ratatui::widgets::{List, ListItem, ListState, Paragraph, Wrap};
 use ratatui::Frame;
 
 use crate::i18n::I18n;
-use crate::ui::{buttons, panel, selected, ButtonId, Hits, ListId, Target};
+use crate::ui::{buttons, panel, selected, selector, ButtonId, Hits, ListId, Target};
 
 /// The roles the selector offers, in the order of the flow.
 pub const ROLES: [Role; 4] = [
@@ -290,28 +290,16 @@ impl SkillsTab {
         ])
         .areas(area);
 
-        // The role selector.
-        let label = format!(" {} ", tr.t("skills.role"));
-        let width = u16::try_from(label.chars().count()).unwrap_or(0);
-        frame.render_widget(Span::raw(label), top);
-        let names: Vec<String> = ROLES.iter().map(|r| role_name(*r).to_string()).collect();
-        let mut x = top.x + width;
-        for (index, name) in names.iter().enumerate() {
-            let text = format!("[ {name} ]");
-            let w = u16::try_from(text.chars().count()).unwrap_or(0);
-            if x + w > top.right() {
-                break;
-            }
-            let rect = Rect::new(x, top.y, w, 1);
-            let style = if index == self.role {
-                Style::new().fg(Color::Black).bg(Color::Cyan)
-            } else {
-                Style::new().fg(Color::Cyan).add_modifier(Modifier::BOLD)
-            };
-            frame.render_widget(Span::styled(text, style), rect);
-            hits.add(rect, Target::Button(ButtonId::SkillRole(index)));
-            x += w + 1;
-        }
+        let names: Vec<&str> = ROLES.iter().map(|r| role_name(*r)).collect();
+        selector(
+            frame,
+            top,
+            hits,
+            tr.t("skills.role"),
+            &names,
+            self.role,
+            ButtonId::SkillRole,
+        );
 
         let [left, right] =
             Layout::horizontal([Constraint::Percentage(40), Constraint::Percentage(60)])
@@ -473,7 +461,7 @@ fn reflow(text: &str) -> Vec<String> {
     lines
 }
 
-fn role_name(role: Role) -> &'static str {
+pub fn role_name(role: Role) -> &'static str {
     match role {
         Role::Architect => "architect",
         Role::Developer => "developer",
