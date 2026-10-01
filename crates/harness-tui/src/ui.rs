@@ -82,6 +82,8 @@ pub enum ButtonId {
     McpSecret,
     /// Starts the selected MCP server and asks it for its tools.
     McpCheck,
+    /// Signs in to the selected web MCP server in the browser.
+    McpSignIn,
     /// Opens the catalog of the MCP registry.
     McpCatalog,
     /// In the catalog: a new search, add the chosen server, back to the list.

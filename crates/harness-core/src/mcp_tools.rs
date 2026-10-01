@@ -40,6 +40,9 @@ pub fn cache_path(home: &Path, name: &str, server: &McpConfig) -> PathBuf {
     if server.url.is_some() || !server.headers.is_empty() {
         settings = serde_json::json!([settings, server.url, server.headers]);
     }
+    if server.auth.is_some() {
+        settings = serde_json::json!([settings, server.auth]);
+    }
     let key = fingerprint(&settings.to_string());
     home.join(MCP_DIR).join(format!("{name}-{key}.json"))
 }

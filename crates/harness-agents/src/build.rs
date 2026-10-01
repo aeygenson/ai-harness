@@ -44,7 +44,7 @@ pub const ROLES: [Role; 4] = [
 /// and plugins set there.
 pub fn build_team(config: &Config, project_dir: &Path) -> Result<Team, BuildError> {
     let dir = credentials::default_dir().ok_or_else(|| problem("HOME is not set"))?;
-    let servers = McpServers::load(config, |name| credentials::load_secret(&dir, name).ok())
+    let servers = McpServers::load(config, |name| crate::mcp_oauth::mcp_secret(&dir, name))
         .map_err(|e| problem(e.to_string()))?;
     let plugins = Plugins::load(project_dir, config).map_err(|e| problem(e.to_string()))?;
     let mut team = Team::new();

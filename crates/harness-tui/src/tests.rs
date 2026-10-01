@@ -1521,3 +1521,67 @@ fn a_web_server_shows_its_address_and_is_checked_through_the_bridge() {
     assert!(text.contains("wiki: 1 tools"), "{text}");
     assert!(!text.contains("web-key"), "{text}");
 }
+
+fn fake_sign_in(dir: &Path, name: &str, url: &str) -> Result<(), String> {
+    // As a real sign-in would leave it.
+    let file = harness_agents::mcp_oauth::path(dir, name);
+    fs::create_dir_all(file.parent().unwrap()).unwrap();
+    let saved = serde_json::json!({
+        "url": url, "token_endpoint": "https://auth.example.com/token",
+        "client_id": "c", "access_token": "oauth-token-1",
+    });
+    fs::write(&file, saved.to_string()).unwrap();
+    Ok(())
+}
+
+#[test]
+fn a_web_server_with_a_sign_in_is_signed_in_from_the_tab() {
+    let env = Env::new();
+    let root = env.path("test");
+    project(&root);
+    let path = root.join(".harness/harness.toml");
+    let text = fs::read_to_string(&path).unwrap()
+        + "\n[mcp.notion]\nurl = \"https://mcp.example.com/mcp\"\nauth = \"oauth\"\n";
+    fs::write(&path, text).unwrap();
+    let mut app = env.app(&root);
+    app.signer = fake_sign_in;
+    app.checker = |server, _| {
+        assert_eq!(
+            server.env["HARNESS_MCP_HEADER_1"].expose(),
+            "Authorization: Bearer oauth-token-1"
+        );
+        Ok(Vec::new())
+    };
+    click(&mut app, "4 MCP");
+    let text = screen(&mut app);
+    assert!(text.contains("✗ sign-in"), "{text}");
+    assert!(text.contains("Sign-in: ✗ not signed in"), "{text}");
+    // Without a sign-in, «Check» says what to do.
+    key(&mut app, KeyCode::Char('c'));
+    let (message, problem) = app.message.clone().unwrap();
+    assert!(
+        problem && message.contains("harness mcp login notion"),
+        "{message}"
+    );
+
+    key(&mut app, KeyCode::Char('i'));
+    let start = Instant::now();
+    while app.signing.is_some() {
+        assert!(start.elapsed() < Duration::from_secs(10));
+        std::thread::sleep(Duration::from_millis(10));
+        app.tick();
+    }
+    let text = screen(&mut app);
+    assert!(text.contains("Signed in to notion"), "{text}");
+    assert!(text.contains("Sign-in: ✓ signed in"), "{text}");
+    assert!(!text.contains("oauth-token-1"), "{text}");
+
+    key(&mut app, KeyCode::Char('c'));
+    let start = Instant::now();
+    while app.checking.is_some() {
+        assert!(start.elapsed() < Duration::from_secs(10));
+        std::thread::sleep(Duration::from_millis(10));
+        app.tick();
+    }
+    assert!(screen(&mut app).contains("notion: 0 tools"));
+}

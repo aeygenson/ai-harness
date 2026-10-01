@@ -241,6 +241,7 @@ pub fn set_mcp(
     set_map(&mut entry, "env", &server.env);
     set_text(&mut entry, "url", server.url.as_deref());
     set_map(&mut entry, "headers", &server.headers);
+    set_text(&mut entry, "auth", server.auth.as_deref());
     servers.insert(name, Item::Table(entry));
     if let (Some(old), true) = (old, renamed) {
         for_role_lists(&mut doc, "mcp", |list| {
