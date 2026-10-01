@@ -187,9 +187,13 @@ impl ClaudeCode {
     }
 
     fn header(&self, job: &RoleJob) -> String {
+        let effort = self
+            .efforts
+            .get(&job.role)
+            .map_or("default", String::as_str);
         let model = self.models.get(&job.role).map_or("default", String::as_str);
         format!(
-            "agent: claude, model: {model}, role: {:?}, round: {}\n",
+            "agent: claude, model: {model}, effort: {effort}, role: {:?}, round: {}\n",
             job.role, job.round
         )
     }

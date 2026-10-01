@@ -58,6 +58,9 @@ pub enum ButtonId {
     Input,
     /// «To ▾» on the Tasks tab.
     To,
+    /// «Model ▾» and «Level ▾» on the Tasks tab: for the next launch only.
+    Model,
+    Level,
     Send,
     /// A role of the Skills tab's selector, an index into its `ROLES`.
     SkillRole(usize),

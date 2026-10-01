@@ -178,9 +178,13 @@ impl Antigravity {
     }
 
     fn header(&self, job: &RoleJob) -> String {
+        let effort = self
+            .efforts
+            .get(&job.role)
+            .map_or("default", String::as_str);
         let model = self.models.get(&job.role).map_or("default", String::as_str);
         format!(
-            "agent: antigravity, model: {model}, role: {:?}, round: {}\n",
+            "agent: antigravity, model: {model}, effort: {effort}, role: {:?}, round: {}\n",
             job.role, job.round
         )
     }

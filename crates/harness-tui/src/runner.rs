@@ -13,7 +13,7 @@ use harness_agents::process;
 use harness_agents::Team;
 use harness_core::config::Config;
 use harness_core::git::{Repo, HARNESS_DIR};
-use harness_core::handoff::{NextStep, Verdict};
+use harness_core::handoff::{NextStep, Role, Verdict};
 use harness_core::orchestrator::{self, StopReason};
 use harness_core::skills::Skills;
 use harness_core::store::{next_task_id, TaskStore};
@@ -38,6 +38,15 @@ pub enum Request {
     },
     /// A role stopped part-way (a limit, a failure): run the task again.
     Continue(String),
+}
+
+/// The model and level Lisa chose for one role for this launch only;
+/// `harness.toml` stays as it is.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RunChoice {
+    pub role: Role,
+    pub model: Option<String>,
+    pub effort: Option<String>,
 }
 
 /// How the work ended.
@@ -65,13 +74,18 @@ pub struct Running {
 }
 
 impl Running {
-    pub fn start(root: &Path, request: Request, builder: Builder) -> Self {
+    pub fn start(
+        root: &Path,
+        request: Request,
+        choice: Option<RunChoice>,
+        builder: Builder,
+    ) -> Self {
         let (events, events_rx) = channel();
         let (log, log_rx) = channel();
         let root = root.to_path_buf();
         thread::spawn(move || {
             process::set_live_log(Some(log));
-            let result = work(&root, request, builder, &events);
+            let result = work(&root, request, choice, builder, &events);
             process::set_live_log(None);
             let _ = events.send(Event::Finished(result));
         });
@@ -111,13 +125,20 @@ pub fn push_line(log: &mut VecDeque<String>, line: String) {
 fn work(
     root: &Path,
     request: Request,
+    choice: Option<RunChoice>,
     builder: Builder,
     events: &Sender<Event>,
 ) -> Result<Outcome, String> {
     let text = |e: &dyn std::fmt::Display| e.to_string();
     let repo = Repo::open(root).map_err(|e| text(&e))?;
     let harness_dir = root.join(HARNESS_DIR);
-    let config = Config::load(&harness_dir).map_err(|e| text(&e))?;
+    let mut config = Config::load(&harness_dir).map_err(|e| text(&e))?;
+    if let Some(choice) = choice {
+        if let Some(settings) = config.roles.get_mut(&choice.role) {
+            settings.model = choice.model;
+            settings.effort = choice.effort;
+        }
+    }
     let runs = repo.runs_dir();
     // Everything the agents need is checked before anything is saved: a
     // missing login leaves the task as it was.
