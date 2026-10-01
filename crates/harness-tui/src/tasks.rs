@@ -1,14 +1,18 @@
 //! The Tasks tab: tasks, the steps of the selected task, and one step in full.
-//! At the bottom a line to act: a text, whom it goes to, and «Send».
+//! At the bottom a box to act: a text of several lines, whom it goes to,
+//! and «Send».
 //!
 //! ```text
-//! ┌ Message ──────────────────────────────────────────────────────────────┐
-//! │ Use serde for the parser▏               [ To: developer ▾ ] [ Send ]  │
-//! └───────────────────────────────────────────────────────────────────────┘
+//! ┌ Message ─────────────────────────────────────────────────────┐
+//! │ Use serde for the parser.                                    │
+//! │ Keep the public API as in the design▏                        │
+//! │                               [ To: developer ▾ ] [ Send ]   │
+//! └──────────────────────────────────────────────────────────────┘
 //! ```
 //!
-//! «To» offers a new task, Lisa's answer to one of the roles, or approving
-//! and finishing the task. The roles then run in the background (see
+//! «To» lists a new task (the architect starts it), Lisa's answer to one of
+//! the roles and approving and finishing the task; what the selected task
+//! cannot take now is grey. The roles then run in the background (see
 //! `runner`) and the live log shows what the agent prints. What is saved in
 //! `.harness/` is read again every few seconds, so a `harness run` in another
 //! terminal shows up here too.
@@ -32,7 +36,6 @@ use ratatui::widgets::{Clear, List, ListItem, ListState, Paragraph, Wrap};
 use ratatui::Frame;
 
 use crate::i18n::I18n;
-use crate::picker::keep_end;
 use crate::runner::{push_line, Builder, Outcome, Request, Running};
 use crate::ui::{buttons, panel, selected, ButtonId, Hits, ListId, Target};
 
@@ -173,23 +176,35 @@ impl TasksTab {
         }
     }
 
-    /// What «To» offers for the selected task.
-    pub fn options(&self) -> Vec<Choice> {
-        let roles = [
+    /// Everything «To» lists, and whether it can be chosen now. The roles
+    /// are always listed, so it is clear who can get a message; they are
+    /// grey until the selected task waits for Lisa's answer.
+    pub fn menu_items(&self) -> Vec<(Choice, bool)> {
+        let stage = self.current().map(|t| t.state.stage);
+        let waiting = matches!(stage, Some(Stage::WaitingForHuman(_)));
+        let mut items = vec![(Choice::NewTask, true)];
+        if let Some(Stage::Working(role)) = stage {
+            items.push((Choice::Continue(role), true));
+        }
+        for role in [
             Role::Architect,
             Role::Developer,
             Role::Tester,
             Role::Security,
-        ];
-        match self.current().map(|t| t.state.stage) {
-            Some(Stage::WaitingForHuman(_)) => roles
-                .into_iter()
-                .map(Choice::Role)
-                .chain([Choice::Finish, Choice::NewTask])
-                .collect(),
-            Some(Stage::Working(role)) => vec![Choice::Continue(role), Choice::NewTask],
-            Some(Stage::Done) | None => vec![Choice::NewTask],
+        ] {
+            items.push((Choice::Role(role), waiting));
         }
+        items.push((Choice::Finish, waiting));
+        items
+    }
+
+    /// What can be chosen in «To» now.
+    pub fn options(&self) -> Vec<Choice> {
+        self.menu_items()
+            .into_iter()
+            .filter(|(_, enabled)| *enabled)
+            .map(|(choice, _)| choice)
+            .collect()
     }
 
     /// What the selected task needs next: the developer after the design, the
@@ -222,12 +237,17 @@ impl TasksTab {
         }
     }
 
-    /// Picks the option at `index` of the «To» list.
-    pub fn choose(&mut self, index: usize) {
-        if let Some(choice) = self.options().get(index) {
-            self.choice = *choice;
-        }
+    /// Picks the option at `index` of the «To» list; `false` if it is grey.
+    pub fn choose(&mut self, index: usize) -> bool {
         self.menu = false;
+        match self.menu_items().get(index) {
+            Some((choice, true)) => {
+                self.choice = *choice;
+                true
+            }
+            Some((_, false)) => false,
+            None => true,
+        }
     }
 
     /// The next (`1`) or previous (`-1`) option of «To».
@@ -358,6 +378,7 @@ impl TasksTab {
                 }
                 KeyCode::Up => self.cycle_choice(-1),
                 KeyCode::Down => self.cycle_choice(1),
+                KeyCode::Enter => self.input.push('\n'),
                 KeyCode::Backspace => {
                     self.input.pop();
                 }
@@ -446,7 +467,8 @@ impl TasksTab {
 
     pub fn draw(&self, frame: &mut Frame, area: Rect, hits: &mut Hits, tr: &I18n) {
         let [area, input_area] =
-            Layout::vertical([Constraint::Min(0), Constraint::Length(3)]).areas(area);
+            Layout::vertical([Constraint::Min(0), Constraint::Length(input_height(area))])
+                .areas(area);
         let [left, right] =
             Layout::horizontal([Constraint::Percentage(30), Constraint::Percentage(70)])
                 .areas(area);
@@ -558,12 +580,16 @@ impl TasksTab {
         }
     }
 
-    /// The message line: the text, «To ▾» and «Send».
+    /// The message box: several lines of text, «To ▾» and «Send».
     fn draw_input(&self, frame: &mut Frame, area: Rect, hits: &mut Hits, tr: &I18n) {
         let block = panel(tr.t("tasks.input_title"), self.focus == Focus::Input);
         let inner = block.inner(area);
         frame.render_widget(block, area);
+        if inner.height == 0 {
+            return;
+        }
 
+        // The buttons on the bottom row, on the right.
         let to = format!(
             "{} {} ▾",
             tr.t("tasks.to"),
@@ -575,31 +601,43 @@ impl TasksTab {
             tr.t("tasks.send")
         };
         let width = |label: &str| u16::try_from(label.chars().count() + 4).unwrap_or(u16::MAX);
-        let buttons_width = width(&to) + 1 + width(send);
-        let field_width = inner.width.saturating_sub(buttons_width + 1);
-        let field = Rect::new(inner.x, inner.y, field_width, inner.height.min(1));
-        let typing = self.focus == Focus::Input;
-        let (text, style) = if self.input.is_empty() && !typing {
-            (
-                tr.t("tasks.input_hint").to_string(),
-                Style::new().fg(Color::DarkGray),
-            )
+        let buttons_width = (width(&to) + 1 + width(send)).min(inner.width);
+        let bottom = inner.bottom() - 1;
+        let row = Rect::new(inner.right() - buttons_width, bottom, buttons_width, 1);
+
+        // The text above them; with a short window it shares the bottom row.
+        let text_rows = if inner.height > 1 {
+            inner.height - 1
         } else {
-            // A pasted text may have several lines; the line shows them as one.
-            let shown = self.input.replace('\n', " ⏎ ");
-            let cursor = if typing { "▏" } else { "" };
-            let room = usize::from(field_width.saturating_sub(1));
-            (keep_end(&format!("{shown}{cursor}"), room), Style::new())
+            1
         };
-        frame.render_widget(Span::styled(format!(" {text}"), style), field);
+        let text_width = if inner.height > 1 {
+            inner.width
+        } else {
+            inner.width.saturating_sub(buttons_width + 1)
+        };
+        let field = Rect::new(inner.x, inner.y, text_width, text_rows);
+        let typing = self.focus == Focus::Input;
+        let lines: Vec<Line> = if self.input.is_empty() && !typing {
+            vec![Line::styled(
+                format!(" {}", tr.t("tasks.input_hint")),
+                Style::new().fg(Color::DarkGray),
+            )]
+        } else {
+            let cursor = if typing { "▏" } else { "" };
+            let room = usize::from(text_width.saturating_sub(2)).max(1);
+            let wrapped = wrap(&format!("{}{cursor}", self.input), room);
+            // The end of a long text stays visible: that is where one types.
+            let skip = wrapped.len().saturating_sub(usize::from(text_rows));
+            wrapped
+                .into_iter()
+                .skip(skip)
+                .map(|l| Line::from(format!(" {l}")))
+                .collect()
+        };
+        frame.render_widget(Paragraph::new(lines), field);
         hits.add(field, Target::Button(ButtonId::Input));
 
-        let row = Rect::new(
-            field.right() + 1,
-            inner.y,
-            inner.width.saturating_sub(field_width + 1),
-            inner.height.min(1),
-        );
         buttons(
             frame,
             row,
@@ -614,28 +652,42 @@ impl TasksTab {
         }
     }
 
-    /// The open «To» list, above the button.
+    /// The open «To» list, above the box; what cannot be chosen now is grey.
     fn draw_menu(&self, frame: &mut Frame, hits: &mut Hits, row: Rect, top: u16, tr: &I18n) {
-        let options = self.options();
-        let labels: Vec<String> = options.iter().map(|c| Self::choice_label(*c, tr)).collect();
+        let items = self.menu_items();
+        let labels: Vec<String> = items
+            .iter()
+            .map(|(c, _)| Self::choice_label(*c, tr))
+            .collect();
         let width = labels.iter().map(|l| l.chars().count()).max().unwrap_or(0) + 4;
-        let width = u16::try_from(width)
-            .unwrap_or(u16::MAX)
-            .min(row.width.max(10));
-        let height = u16::try_from(options.len() + 2)
-            .unwrap_or(u16::MAX)
-            .min(top);
-        let area = Rect::new(row.x, top.saturating_sub(height), width, height);
+        let width = u16::try_from(width).unwrap_or(u16::MAX);
+        let height = u16::try_from(items.len() + 2).unwrap_or(u16::MAX).min(top);
+        let x = row.x.min(frame.area().right().saturating_sub(width));
+        let area = Rect::new(x, top.saturating_sub(height), width, height);
         frame.render_widget(Clear, area);
-        let current = options.iter().position(|c| *c == self.choice).unwrap_or(0);
-        let items = labels.into_iter().map(ListItem::new).collect();
+        let current = items
+            .iter()
+            .position(|(c, _)| *c == self.choice)
+            .unwrap_or(0);
+        let list = labels
+            .into_iter()
+            .zip(&items)
+            .map(|(label, (_, enabled))| {
+                let style = if *enabled {
+                    Style::new()
+                } else {
+                    Style::new().fg(Color::DarkGray)
+                };
+                ListItem::new(Line::styled(label, style))
+            })
+            .collect();
         draw_list(
             frame,
             hits,
             area,
             ListId::Choices,
             tr.t("tasks.to"),
-            items,
+            list,
             current,
             true,
         );
@@ -666,6 +718,21 @@ impl TasksTab {
             area,
         );
     }
+}
+
+/// `text` cut into lines of at most `width` characters; line breaks stay.
+fn wrap(text: &str, width: usize) -> Vec<String> {
+    let mut lines = Vec::new();
+    for line in text.split('\n') {
+        let chars: Vec<char> = line.chars().collect();
+        if chars.is_empty() {
+            lines.push(String::new());
+        }
+        for chunk in chars.chunks(width.max(1)) {
+            lines.push(chunk.iter().collect());
+        }
+    }
+    lines
 }
 
 /// The message after the work: what happened and what Lisa does next.
@@ -728,6 +795,15 @@ fn outcome_text(outcome: &Outcome, tr: &I18n) -> (String, bool) {
             ),
             true,
         ),
+    }
+}
+
+/// Room for five lines of text and the buttons; less in a small window.
+fn input_height(area: Rect) -> u16 {
+    match area.height {
+        0..=15 => 3,
+        16..=24 => 5,
+        _ => 8,
     }
 }
 

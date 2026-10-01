@@ -285,9 +285,15 @@ impl App {
         // Writing the message: every key is text, except these.
         if self.tab == Tab::Tasks {
             if let Some(tasks) = self.tasks.as_mut().filter(|t| t.typing()) {
-                match key.code {
-                    KeyCode::Enter => self.press(ButtonId::Send),
-                    code => tasks.on_key(code),
+                let control = key.modifiers.contains(KeyModifiers::CONTROL);
+                let alt = key.modifiers.contains(KeyModifiers::ALT);
+                match (key.code, keys::latin(key.code)) {
+                    // Enter is a new line; these send.
+                    (_, KeyCode::Char('s')) if control => self.press(ButtonId::Send),
+                    (KeyCode::Enter, _) if control || alt => self.press(ButtonId::Send),
+                    // Other Ctrl and Alt keys are not text.
+                    _ if control || alt => {}
+                    (code, _) => tasks.on_key(code),
                 }
                 return;
             }
@@ -296,6 +302,11 @@ impl App {
         let code = keys::latin(key.code);
         let unsaved = self.roles.as_ref().is_some_and(RolesTab::changed);
         let running = self.tasks.as_ref().is_some_and(TasksTab::is_running);
+        // A message written but not sent is not thrown away by one key.
+        let unsent = self
+            .tasks
+            .as_ref()
+            .is_some_and(|t| !t.input.trim().is_empty());
         match code {
             KeyCode::Esc if self.tasks.as_ref().is_some_and(|t| t.menu) => {
                 if let Some(tasks) = &mut self.tasks {
@@ -316,6 +327,10 @@ impl App {
             KeyCode::Char('q') | KeyCode::Esc if unsaved && !quit_warned => {
                 self.quit_warned = true;
                 self.message = Some((self.tr.t("roles.unsaved_quit").to_string(), true));
+            }
+            KeyCode::Char('q') | KeyCode::Esc if unsent && !quit_warned => {
+                self.quit_warned = true;
+                self.message = Some((self.tr.t("tasks.unsent_quit").to_string(), true));
             }
             KeyCode::Char('q') | KeyCode::Esc => self.quit = true,
             KeyCode::Char('L') | KeyCode::F(2) => self.press(ButtonId::Language),
@@ -434,7 +449,10 @@ impl App {
             )) = hit
             {
                 if let Some((_, index)) = Hits::row(target, row) {
-                    tasks.choose(index);
+                    if !tasks.choose(index) {
+                        self.message =
+                            Some((self.tr.t("tasks.choice_unavailable").to_string(), true));
+                    }
                 }
             }
             if !matches!(
