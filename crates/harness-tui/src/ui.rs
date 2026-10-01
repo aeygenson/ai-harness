@@ -198,6 +198,10 @@ pub fn selector(
     }
 }
 
+/// The field being typed in. Its text colour is set too: with only a
+/// background, a light terminal theme draws dark text on dark gray.
+pub const INPUT: Style = Style::new().fg(Color::White).bg(Color::Blue);
+
 /// A small window over the screen with text fields and OK / Cancel.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Form {
@@ -326,11 +330,7 @@ impl Form {
             let rect = Rect::new(inner.x, y + 1, inner.width, 1);
             let focused = i == self.focus;
             let cursor = if focused { "▏" } else { "" };
-            let style = if focused {
-                Style::new().bg(Color::DarkGray)
-            } else {
-                Style::new().fg(Color::Gray)
-            };
+            let style = if focused { INPUT } else { Style::new() };
             let shown = if field.hidden {
                 "•".repeat(field.value.chars().count())
             } else {
@@ -415,6 +415,30 @@ mod tests {
         assert_eq!((form.value(0), form.value(1)), ("xy", "w"));
         form.next_field();
         assert_eq!(form.focus, 0);
+    }
+
+    #[test]
+    fn typed_text_has_its_own_colours() {
+        use ratatui::backend::TestBackend;
+        use ratatui::Terminal;
+        let mut form = Form::new("New", "", "OK").field("a", "").field("b", "old");
+        form.type_char('q');
+        let mut terminal = Terminal::new(TestBackend::new(60, 20)).unwrap();
+        terminal
+            .draw(|frame| form.draw(frame, &mut Hits::default(), "Cancel"))
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+        let cell = |text: &str| {
+            let (x, y) = (0..20u16)
+                .flat_map(|y| (0..60u16).map(move |x| (x, y)))
+                .find(|&(x, y)| buffer[(x, y)].symbol() == text)
+                .unwrap();
+            buffer[(x, y)].clone()
+        };
+        let typed = cell("q");
+        assert_eq!((typed.fg, typed.bg), (Color::White, Color::Blue));
+        // Other fields keep the terminal's own text colour.
+        assert_eq!(cell("o").fg, Color::Reset);
     }
 
     #[test]
