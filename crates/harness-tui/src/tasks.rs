@@ -6,9 +6,13 @@
 //! ┌ Message ─────────────────────────────────────────────────────┐
 //! │ Use serde for the parser.                                    │
 //! │ Keep the public API as in the design▏                        │
-//! │                               [ To: developer ▾ ] [ Send ]   │
+//! │      [ To: developer ▾ ] [ Model: opus ▾ ] [ Level: high ▾ ] [ Send ]
 //! └──────────────────────────────────────────────────────────────┘
 //! ```
+//!
+//! «Model» and «Level» are for the role that runs first, for this launch
+//! only; they start from what `harness.toml` says and `harness.toml` is not
+//! changed.
 //!
 //! «To» lists a new task (the architect starts it), Lisa's answer to one of
 //! the roles and approving and finishing the task; what the selected task
@@ -17,13 +21,14 @@
 //! `.harness/` is read again every few seconds, so a `harness run` in another
 //! terminal shows up here too.
 
-use std::collections::VecDeque;
+use std::collections::{BTreeMap, VecDeque};
 use std::path::{Path, PathBuf};
 
 use anyhow::Result;
-use harness_core::config::Config;
+use harness_core::config::{Config, RoleConfig, AGENTS};
 use harness_core::git::HARNESS_DIR;
 use harness_core::handoff::{NextStep, Role, Severity, Verdict};
+use harness_core::models::{self, ModelList};
 use harness_core::orchestrator::StopReason;
 use harness_core::retro::stage_text;
 use harness_core::store::{self, Step, TaskStore};
@@ -36,7 +41,7 @@ use ratatui::widgets::{Clear, List, ListItem, ListState, Paragraph, Wrap};
 use ratatui::Frame;
 
 use crate::i18n::I18n;
-use crate::runner::{push_line, Builder, Outcome, Request, Running};
+use crate::runner::{push_line, Builder, Outcome, Request, RunChoice, Running};
 use crate::ui::{buttons, panel, selected, ButtonId, Hits, ListId, Target};
 
 /// Whom the message goes to.
@@ -50,6 +55,17 @@ pub enum Choice {
     Continue(Role),
     /// Approve and finish the task.
     Finish,
+}
+
+/// The open list of the message box.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Menu {
+    /// Whom the message goes to.
+    To,
+    /// The model of the role that runs first, for this launch.
+    Model,
+    /// Its effort level, for this launch.
+    Level,
 }
 
 /// One task as the tab shows it.
@@ -73,6 +89,12 @@ enum Focus {
 #[derive(Debug)]
 pub struct TasksTab {
     root: PathBuf,
+    /// `~/.harness`, where the agents' model lists are kept.
+    home: Option<PathBuf>,
+    /// What `harness.toml` says about each role.
+    settings: BTreeMap<Role, RoleConfig>,
+    /// The models each agent said it has.
+    models: BTreeMap<String, ModelList>,
     tasks: Vec<TaskView>,
     /// `architect  claude (opus)`, one line per role.
     roles: Vec<(Option<Role>, String)>,
@@ -92,8 +114,11 @@ pub struct TasksTab {
     /// The task and its number of steps the choice was made for: when they
     /// change, the choice goes back to what the task needs next.
     choice_for: Option<(String, usize)>,
-    /// The «To» list is open.
-    pub(crate) menu: bool,
+    /// The open list, if any.
+    pub(crate) menu: Option<Menu>,
+    /// The model and level chosen for the next launch; `harness.toml` is
+    /// not changed. Only for the role it was chosen for.
+    pub(crate) run: Option<RunChoice>,
     /// Roles working in the background.
     pub(crate) running: Option<Running>,
     /// What the agent printed in the last run.
@@ -101,9 +126,12 @@ pub struct TasksTab {
 }
 
 impl TasksTab {
-    pub fn load(root: &Path) -> Self {
+    pub fn load(root: &Path, home: Option<&Path>) -> Self {
         let mut tab = Self {
             root: root.to_path_buf(),
+            home: home.map(Path::to_path_buf),
+            settings: BTreeMap::new(),
+            models: BTreeMap::new(),
             tasks: Vec::new(),
             roles: Vec::new(),
             all: Vec::new(),
@@ -116,7 +144,8 @@ impl TasksTab {
             input: String::new(),
             choice: Choice::NewTask,
             choice_for: None,
-            menu: false,
+            menu: None,
+            run: None,
             running: None,
             log: VecDeque::new(),
         };
@@ -146,8 +175,16 @@ impl TasksTab {
         }
 
         self.roles.clear();
+        self.models = match &self.home {
+            Some(home) => AGENTS
+                .iter()
+                .filter_map(|agent| models::load(home, agent).map(|l| (agent.to_string(), l)))
+                .collect(),
+            None => BTreeMap::new(),
+        };
         match Config::load(&harness_dir) {
             Ok(config) => {
+                self.settings = config.roles.clone();
                 for (role, settings) in &config.roles {
                     self.roles.push((
                         Some(*role),
@@ -273,22 +310,161 @@ impl TasksTab {
     fn sync_choice(&mut self) {
         let now = self.current().map(|t| (t.id.clone(), t.steps.len()));
         if now != self.choice_for || !self.options().contains(&self.choice) {
-            self.choice = self.default_choice();
+            self.set_choice(self.default_choice());
             self.choice_for = now;
         }
     }
 
-    /// Picks the option at `index` of the «To» list; `false` if it is grey.
-    pub fn choose(&mut self, index: usize) -> bool {
-        self.menu = false;
-        match self.menu_items().get(index) {
-            Some((choice, true)) => {
-                self.choice = *choice;
+    /// Another addressee: a model or level chosen for another role is
+    /// forgotten.
+    fn set_choice(&mut self, choice: Choice) {
+        self.choice = choice;
+        if self.run.as_ref().map(|r| r.role) != self.target() {
+            self.run = None;
+        }
+    }
+
+    /// Opens `menu`, or closes it if it is open.
+    pub fn toggle_menu(&mut self, menu: Menu) {
+        self.menu = if self.menu == Some(menu) {
+            None
+        } else {
+            Some(menu)
+        };
+    }
+
+    /// Picks the option at `index` of `menu`; `false` if it is grey.
+    pub fn choose(&mut self, menu: Menu, index: usize) -> bool {
+        self.menu = None;
+        match menu {
+            Menu::To => match self.menu_items().get(index) {
+                Some((choice, true)) => {
+                    self.set_choice(*choice);
+                    true
+                }
+                Some((_, false)) => false,
+                None => true,
+            },
+            Menu::Model => {
+                if let Some(model) = self.model_items().get(index).cloned() {
+                    self.pick_model(model);
+                }
                 true
             }
-            Some((_, false)) => false,
-            None => true,
+            Menu::Level => {
+                if let Some(effort) = self.level_items().get(index).cloned() {
+                    self.pick_level(effort);
+                }
+                true
+            }
         }
+    }
+
+    /// The role that runs first after «Send», whose model and level
+    /// «Model» and «Level» set; none when the task is only finished.
+    pub fn target(&self) -> Option<Role> {
+        match self.choice {
+            Choice::NewTask => Some(Role::Architect),
+            Choice::Role(role) | Choice::Continue(role) => Some(role),
+            Choice::Finish => None,
+        }
+    }
+
+    /// The agent, model and level the target role gets in the next launch:
+    /// what was chosen here, otherwise what `harness.toml` says. `None` when
+    /// no role runs or the role has no settings.
+    pub fn run_choice(&self) -> Option<(&str, Option<&str>, Option<&str>)> {
+        let role = self.target()?;
+        let settings = self.settings.get(&role)?;
+        let (model, effort) = match self.run.as_ref().filter(|r| r.role == role) {
+            Some(run) => (run.model.as_deref(), run.effort.as_deref()),
+            None => (settings.model.as_deref(), settings.effort.as_deref()),
+        };
+        Some((settings.agent.as_str(), model, effort))
+    }
+
+    /// The model list of the target role's agent.
+    fn model_list(&self) -> Option<&ModelList> {
+        self.models.get(self.run_choice()?.0)
+    }
+
+    /// What «Model» lists: the agent's default (`None`), its models, and
+    /// the models in use that the list does not have.
+    pub fn model_items(&self) -> Vec<Option<String>> {
+        let Some((_, model, _)) = self.run_choice() else {
+            return Vec::new();
+        };
+        let mut items = vec![None];
+        if let Some(list) = self.model_list() {
+            items.extend(list.models.iter().map(|m| Some(m.id.clone())));
+        }
+        let configured = self
+            .target()
+            .and_then(|role| self.settings.get(&role))
+            .and_then(|s| s.model.as_deref());
+        for extra in [configured, model].into_iter().flatten() {
+            if !items.iter().any(|m| m.as_deref() == Some(extra)) {
+                items.push(Some(extra.to_string()));
+            }
+        }
+        items
+    }
+
+    /// What «Level» lists: the agent's default (`None`) and the levels the
+    /// model takes; empty if it takes none or nothing is known about it.
+    pub fn level_items(&self) -> Vec<Option<String>> {
+        let Some((_, model, _)) = self.run_choice() else {
+            return Vec::new();
+        };
+        let Some(list) = self.model_list() else {
+            return Vec::new();
+        };
+        let found = match model {
+            Some(id) => list.find(id),
+            None => list.models.iter().find(|m| m.default),
+        };
+        let levels = found.map(|m| m.efforts.clone()).unwrap_or_default();
+        if levels.is_empty() {
+            return Vec::new();
+        }
+        std::iter::once(None)
+            .chain(levels.into_iter().map(Some))
+            .collect()
+    }
+
+    /// Another model for the next launch; the level stays if the model
+    /// takes it, otherwise the model's own default level.
+    fn pick_model(&mut self, model: Option<String>) {
+        let (Some(role), Some((_, _, effort))) = (self.target(), self.run_choice()) else {
+            return;
+        };
+        let effort = effort.map(str::to_string);
+        let found = self.model_list().and_then(|list| match &model {
+            Some(id) => list.find(id),
+            None => list.models.iter().find(|m| m.default),
+        });
+        let effort = match (effort, found) {
+            (None, _) => None,
+            (Some(e), Some(m)) => m.effort_for(Some(&e)),
+            (Some(e), None) => Some(e),
+        };
+        self.run = Some(RunChoice {
+            role,
+            model,
+            effort,
+        });
+    }
+
+    /// Another level for the next launch.
+    fn pick_level(&mut self, effort: Option<String>) {
+        let (Some(role), Some((_, model, _))) = (self.target(), self.run_choice()) else {
+            return;
+        };
+        self.run = Some(RunChoice {
+            role,
+            model: model.map(str::to_string),
+            effort,
+        });
     }
 
     /// The next (`1`) or previous (`-1`) option of «To».
@@ -298,7 +474,7 @@ impl TasksTab {
         let len = options.len() as isize;
         let next = (at as isize + delta).rem_euclid(len.max(1)) as usize;
         if let Some(choice) = options.get(next) {
-            self.choice = *choice;
+            self.set_choice(*choice);
         }
     }
 
@@ -360,9 +536,24 @@ impl TasksTab {
             (Choice::Continue(_), Some((task, _))) => Request::Continue(task),
         };
         self.log.clear();
-        self.running = Some(Running::start(&self.root, request, builder));
+        if let (Some(role), Some((agent, model, effort))) = (self.target(), self.run_choice()) {
+            let default = tr.t("tasks.default");
+            let line = tr.f(
+                "tasks.run_with",
+                &[
+                    ("role", &role_name(role)),
+                    ("agent", &agent),
+                    ("model", &model.unwrap_or(default)),
+                    ("level", &effort.unwrap_or(default)),
+                ],
+            );
+            push_line(&mut self.log, format!("── {line}"));
+        }
+        let target = self.target();
+        let run = self.run.take().filter(|r| Some(r.role) == target);
+        self.running = Some(Running::start(&self.root, request, run, builder));
         self.input.clear();
-        self.menu = false;
+        self.menu = None;
         self.focus = Focus::Tasks;
         Ok(tr.t("tasks.started").to_string())
     }
@@ -415,7 +606,7 @@ impl TasksTab {
             match key {
                 KeyCode::Esc | KeyCode::Tab => {
                     self.focus = Focus::Tasks;
-                    self.menu = false;
+                    self.menu = None;
                 }
                 KeyCode::Up => self.cycle_choice(-1),
                 KeyCode::Down => self.cycle_choice(1),
@@ -676,8 +867,35 @@ impl TasksTab {
         } else {
             tr.t("tasks.send")
         };
+        let default = tr.t("tasks.default");
+        let mut items: Vec<(String, ButtonId, bool)> = vec![(to, ButtonId::To, true)];
+        if let Some((_, model, effort)) = self.run_choice() {
+            let levels = !self.level_items().is_empty();
+            items.push((
+                format!("{} {} ▾", tr.t("tasks.model"), model.unwrap_or(default)),
+                ButtonId::Model,
+                true,
+            ));
+            items.push((
+                format!("{} {} ▾", tr.t("tasks.level"), effort.unwrap_or(default)),
+                ButtonId::Level,
+                levels,
+            ));
+        }
+        items.push((send.to_string(), ButtonId::Send, self.running.is_none()));
         let width = |label: &str| u16::try_from(label.chars().count() + 4).unwrap_or(u16::MAX);
-        let buttons_width = (width(&to) + 1 + width(send)).min(inner.width);
+        let total = |items: &[(String, ButtonId, bool)]| {
+            items
+                .iter()
+                .map(|(label, _, _)| width(label) + 1)
+                .sum::<u16>()
+                .saturating_sub(1)
+        };
+        // In a narrow window «Send» stays; the model and level go first.
+        if total(&items) > inner.width && items.len() > 2 {
+            items.drain(1..3);
+        }
+        let buttons_width = total(&items).min(inner.width);
         let bottom = inner.bottom() - 1;
         let row = Rect::new(inner.right() - buttons_width, bottom, buttons_width, 1);
 
@@ -714,42 +932,89 @@ impl TasksTab {
         frame.render_widget(Paragraph::new(lines), field);
         hits.add(field, Target::Button(ButtonId::Input));
 
-        buttons(
-            frame,
-            row,
-            hits,
-            &[
-                (&to, ButtonId::To, true),
-                (send, ButtonId::Send, self.running.is_none()),
-            ],
-        );
-        if self.menu {
-            self.draw_menu(frame, hits, row, area.y, tr);
+        let shown: Vec<(&str, ButtonId, bool)> = items
+            .iter()
+            .map(|(label, id, enabled)| (label.as_str(), *id, *enabled))
+            .collect();
+        buttons(frame, row, hits, &shown);
+        let Some(menu) = self.menu else {
+            return;
+        };
+        // The list opens above its own button.
+        let wanted = match menu {
+            Menu::To => ButtonId::To,
+            Menu::Model => ButtonId::Model,
+            Menu::Level => ButtonId::Level,
+        };
+        let mut x = row.x;
+        for (label, id, _) in &items {
+            if *id == wanted {
+                break;
+            }
+            x += width(label) + 1;
         }
+        self.draw_menu(frame, hits, menu, x, area.y, tr);
     }
 
-    /// The open «To» list, above the box; what cannot be chosen now is grey.
-    fn draw_menu(&self, frame: &mut Frame, hits: &mut Hits, row: Rect, top: u16, tr: &I18n) {
-        let items = self.menu_items();
-        let labels: Vec<String> = items
+    /// The open list, above the box; what cannot be chosen now is grey.
+    fn draw_menu(
+        &self,
+        frame: &mut Frame,
+        hits: &mut Hits,
+        menu: Menu,
+        x: u16,
+        top: u16,
+        tr: &I18n,
+    ) {
+        let default = || tr.t("tasks.default").to_string();
+        let (title, items, current): (&str, Vec<(String, bool)>, usize) = match menu {
+            Menu::To => {
+                let items = self.menu_items();
+                let current = items
+                    .iter()
+                    .position(|(c, _)| *c == self.choice)
+                    .unwrap_or(0);
+                let labels = items
+                    .iter()
+                    .map(|(c, enabled)| (Self::choice_label(*c, tr), *enabled))
+                    .collect();
+                (tr.t("tasks.to"), labels, current)
+            }
+            Menu::Model | Menu::Level => {
+                let (items, now) = if menu == Menu::Model {
+                    (self.model_items(), self.run_choice().and_then(|c| c.1))
+                } else {
+                    (self.level_items(), self.run_choice().and_then(|c| c.2))
+                };
+                let current = items.iter().position(|m| m.as_deref() == now).unwrap_or(0);
+                let labels = items
+                    .into_iter()
+                    .map(|m| (m.unwrap_or_else(default), true))
+                    .collect();
+                let title = if menu == Menu::Model {
+                    tr.t("tasks.model")
+                } else {
+                    tr.t("tasks.level")
+                };
+                (title, labels, current)
+            }
+        };
+        let width = items
             .iter()
-            .map(|(c, _)| Self::choice_label(*c, tr))
-            .collect();
-        let width = labels.iter().map(|l| l.chars().count()).max().unwrap_or(0) + 4;
+            .map(|(l, _)| l.chars().count())
+            .max()
+            .unwrap_or(0)
+            .max(title.chars().count())
+            + 4;
         let width = u16::try_from(width).unwrap_or(u16::MAX);
         let height = u16::try_from(items.len() + 2).unwrap_or(u16::MAX).min(top);
-        let x = row.x.min(frame.area().right().saturating_sub(width));
+        let x = x.min(frame.area().right().saturating_sub(width));
         let area = Rect::new(x, top.saturating_sub(height), width, height);
         frame.render_widget(Clear, area);
-        let current = items
-            .iter()
-            .position(|(c, _)| *c == self.choice)
-            .unwrap_or(0);
-        let list = labels
+        let list = items
             .into_iter()
-            .zip(&items)
-            .map(|(label, (_, enabled))| {
-                let style = if *enabled {
+            .map(|(label, enabled)| {
+                let style = if enabled {
                     Style::new()
                 } else {
                     Style::new().fg(Color::DarkGray)
@@ -762,7 +1027,7 @@ impl TasksTab {
             hits,
             area,
             ListId::Choices,
-            tr.t("tasks.to"),
+            title,
             list,
             current,
             true,

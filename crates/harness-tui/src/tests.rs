@@ -587,7 +587,7 @@ fn a_new_task_runs_the_architect_then_the_answer_goes_to_the_developer() {
         "{text}"
     );
     assert!(
-        text.contains("[ To: architect · new task ▾ ] [ Send ]"),
+        text.contains("[ To: architect · new task ▾ ] [ Model: default ▾ ]"),
         "{text}"
     );
 
@@ -698,7 +698,7 @@ fn the_to_list_offers_the_roles_and_finishing() {
         assert!(text.contains(option), "missing {option:?} in:\n{text}");
     }
     click(&mut app, "Approve and finish");
-    assert!(!app.tasks.as_ref().unwrap().menu);
+    assert!(app.tasks.as_ref().unwrap().menu.is_none());
     assert!(screen(&mut app).contains("[ To: Approve and finish ▾ ]"));
 
     // ↑↓ in the field change whom it goes to.
@@ -1026,4 +1026,92 @@ fn models_and_levels_come_from_the_agents_lists() {
     let text = screen(&mut app);
     assert!(text.contains("(•) agent's default"), "{text}");
     assert!(!text.contains("Effort"), "{text}");
+}
+
+/// The architect's model and level each time the recording builder ran.
+static ARCHITECT_RUNS: std::sync::Mutex<Vec<(Option<String>, Option<String>)>> =
+    std::sync::Mutex::new(Vec::new());
+
+fn recording_team(
+    config: &harness_core::config::Config,
+    root: &Path,
+) -> Result<harness_agents::Team, harness_agents::build::BuildError> {
+    let architect = &config.roles[&Role::Architect];
+    ARCHITECT_RUNS
+        .lock()
+        .unwrap()
+        .push((architect.model.clone(), architect.effort.clone()));
+    mock_team(config, root)
+}
+
+#[test]
+fn a_model_and_level_can_be_chosen_for_one_run() {
+    let env = Env::new();
+    harness_core::models::save(
+        env.home.path(),
+        &ModelList {
+            agent: "claude".into(),
+            fetched: 1,
+            models: vec![
+                model("sonnet", &["low", "high"], Some("high"), true),
+                model("opus", &["low", "high", "max"], Some("high"), false),
+                model("haiku", &[], None, false),
+            ],
+        },
+    )
+    .unwrap();
+    let (root, mut app) = empty_project(&env);
+    app.builder = recording_team;
+    // The architect starts a new task, with what harness.toml says.
+    let text = screen(&mut app);
+    assert!(text.contains("[ Model: default ▾ ]"), "{text}");
+    assert!(text.contains("[ Level: default ▾ ]"), "{text}");
+
+    click(&mut app, "[ Model: default ▾ ]");
+    let text = screen(&mut app);
+    assert!(text.contains("│  haiku"), "{text}");
+    click(&mut app, "│  opus");
+    click(&mut app, "[ Level: default ▾ ]");
+    click(&mut app, "│  max");
+    let text = screen(&mut app);
+    assert!(text.contains("[ Model: opus ▾ ]"), "{text}");
+    assert!(text.contains("[ Level: max ▾ ]"), "{text}");
+    // A model without that level gets its own default; haiku takes none.
+    click(&mut app, "[ Model: opus ▾ ]");
+    click(&mut app, "│  sonnet");
+    assert!(screen(&mut app).contains("[ Level: high ▾ ]"));
+    click(&mut app, "[ Model: sonnet ▾ ]");
+    click(&mut app, "│  opus");
+
+    app.tasks.as_mut().unwrap().paste("Build a parser");
+    send(&mut app);
+    wait(&mut app);
+    assert_eq!(
+        ARCHITECT_RUNS.lock().unwrap().last().unwrap(),
+        &(Some("opus".into()), Some("high".into()))
+    );
+    let text = screen(&mut app);
+    assert!(
+        text.contains("architect runs on claude · model opus · level high"),
+        "{text}"
+    );
+    // Only for that run: harness.toml is as it was, and the developer,
+    // who gets the answer now, has its own settings.
+    let architect = &config(&root).roles[&Role::Architect];
+    assert_eq!((&architect.model, &architect.effort), (&None, &None));
+    assert!(text.contains("[ Model: default ▾ ]"), "{text}");
+
+    // A choice made for one role is dropped when the message goes to another.
+    click(&mut app, "[ Model: default ▾ ]");
+    click(&mut app, "│  haiku");
+    let text = screen(&mut app);
+    assert!(text.contains("[ Model: haiku ▾ ]"), "{text}");
+    assert!(text.contains("[ Level: default ▾ ]"), "{text}");
+    click(&mut app, "[ To: developer ▾ ]");
+    click(&mut app, "│  security");
+    assert!(screen(&mut app).contains("[ Model: default ▾ ]"));
+    // Finishing runs no role: no model to choose.
+    click(&mut app, "[ To: security ▾ ]");
+    click(&mut app, "Approve and finish");
+    assert!(!screen(&mut app).contains("[ Model:"));
 }

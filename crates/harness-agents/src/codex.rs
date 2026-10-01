@@ -349,13 +349,17 @@ impl Codex {
     }
 
     fn header(&self, job: &RoleJob) -> String {
+        let effort = self
+            .efforts
+            .get(&job.role)
+            .map_or("default", String::as_str);
         let model = self.model(job.role).unwrap_or("default");
         let agent = match self.provider {
             Provider::ChatGpt => "codex",
             Provider::DeepSeek(_) => "codex+deepseek",
         };
         format!(
-            "agent: {agent}, model: {model}, role: {:?}, round: {}\n",
+            "agent: {agent}, model: {model}, effort: {effort}, role: {:?}, round: {}\n",
             job.role, job.round
         )
     }

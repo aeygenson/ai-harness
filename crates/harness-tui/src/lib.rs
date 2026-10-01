@@ -56,7 +56,7 @@ use projects_tab::{has_config, ProjectsTab};
 use roles_tab::{Action, RolesTab};
 use runner::Builder;
 use skills_tab::SkillsTab;
-use tasks::TasksTab;
+use tasks::{Menu, TasksTab};
 use ui::{buttons, panel, ButtonId, Form, Hits, ListId, Target};
 
 /// How often the open project is read again.
@@ -283,7 +283,7 @@ impl App {
             self.message = Some((text, true));
             return;
         }
-        self.tasks = Some(TasksTab::load(root));
+        self.tasks = Some(TasksTab::load(root, self.home.as_deref()));
         self.roles = Some(RolesTab::load(root, self.home.as_deref()));
         self.skills = Some(SkillsTab::load(root));
         self.project = Some(root.to_path_buf());
@@ -391,9 +391,9 @@ impl App {
             .as_ref()
             .is_some_and(|t| !t.input.trim().is_empty());
         match code {
-            KeyCode::Esc if self.tasks.as_ref().is_some_and(|t| t.menu) => {
+            KeyCode::Esc if self.tasks.as_ref().is_some_and(|t| t.menu.is_some()) => {
                 if let Some(tasks) = &mut self.tasks {
-                    tasks.menu = false;
+                    tasks.menu = None;
                 }
             }
             KeyCode::Char('q') | KeyCode::Esc if running => {
@@ -539,9 +539,13 @@ impl App {
     }
 
     fn click(&mut self, hit: Option<(Target, u16)>, double: bool) {
-        // The open «To» list closes with any click; a click on it chooses.
-        if let Some(tasks) = self.tasks.as_mut().filter(|t| t.menu) {
-            tasks.menu = false;
+        // An open list of the message box closes with any click; a click on
+        // it chooses.
+        if let Some((tasks, menu)) = self
+            .tasks
+            .as_mut()
+            .and_then(|t| t.menu.take().map(|menu| (t, menu)))
+        {
             if let Some((
                 target @ Target::List {
                     list: ListId::Choices,
@@ -551,7 +555,7 @@ impl App {
             )) = hit
             {
                 if let Some((_, index)) = Hits::row(target, row) {
-                    if !tasks.choose(index) {
+                    if !tasks.choose(menu, index) {
                         self.message =
                             Some((self.tr.t("tasks.choice_unavailable").to_string(), true));
                     }
@@ -887,9 +891,13 @@ impl App {
                     tasks.focus_input();
                 }
             }
-            ButtonId::To => {
+            ButtonId::To | ButtonId::Model | ButtonId::Level => {
                 if let Some(tasks) = &mut self.tasks {
-                    tasks.menu = !tasks.menu;
+                    tasks.toggle_menu(match id {
+                        ButtonId::Model => Menu::Model,
+                        ButtonId::Level => Menu::Level,
+                        _ => Menu::To,
+                    });
                 }
             }
             ButtonId::Send => {
