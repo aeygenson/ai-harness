@@ -158,6 +158,14 @@ impl Repo {
         self.commit(message, &paths)
     }
 
+    /// Is `path` in the last commit or staged?
+    pub fn is_tracked(&self, path: &Path) -> bool {
+        path.to_str().is_some_and(|p| {
+            self.git_literal(&["ls-files", "--error-unmatch", "--", p])
+                .is_ok()
+        })
+    }
+
     /// Throws away every change outside `.harness/`, so a failed attempt of a role
     /// leaves nothing behind. Ignored files (like `target/`) are kept.
     pub fn discard_changes(&self) -> Result<(), GitError> {

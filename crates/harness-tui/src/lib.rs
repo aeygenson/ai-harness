@@ -13,29 +13,37 @@
 //! Every change goes through the same core functions as the CLI. The texts
 //! come from translation files (see `i18n`); English is the default.
 
+use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
+use harness_core::git::{Repo, HARNESS_DIR};
 use harness_core::projects::{self, name_of};
+use harness_core::skills::{self, SKILLS_DIR};
+use ratatui::crossterm::cursor::Hide;
 use ratatui::crossterm::event::{
     self, DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
     Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
 };
 use ratatui::crossterm::execute;
+use ratatui::crossterm::terminal::{enable_raw_mode, Clear, ClearType, EnterAlternateScreen};
 use ratatui::layout::{Constraint, Layout, Rect};
+use ratatui::prelude::CrosstermBackend;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Paragraph, Wrap};
-use ratatui::{DefaultTerminal, Frame};
+use ratatui::{DefaultTerminal, Frame, Terminal};
 
+mod editor;
 mod i18n;
 mod keys;
 mod picker;
 mod projects_tab;
 mod roles_tab;
 mod runner;
+mod skills_tab;
 mod tasks;
 mod ui;
 
@@ -44,6 +52,7 @@ use picker::{Browser, Native};
 use projects_tab::{has_config, ProjectsTab};
 use roles_tab::{Action, RolesTab};
 use runner::Builder;
+use skills_tab::SkillsTab;
 use tasks::TasksTab;
 use ui::{buttons, panel, ButtonId, Form, Hits, ListId, Target};
 
@@ -86,6 +95,20 @@ enum Purpose {
     Remove(PathBuf),
     /// The model of the role selected on the Roles tab.
     Model,
+    /// A new skill: its name and description.
+    NewSkill,
+    /// Delete the project's copy of a built-in skill.
+    RestoreSkill(String),
+}
+
+/// A skill file waiting to be opened in the editor.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct EditJob {
+    name: String,
+    path: PathBuf,
+    /// The file is a fresh copy of the built-in skill: if Lisa changes
+    /// nothing, it is deleted again.
+    copied: bool,
 }
 
 /// What a folder is being chosen for.
@@ -128,6 +151,10 @@ fn event_loop(terminal: &mut DefaultTerminal, app: &mut App) -> Result<()> {
             }
         }
         app.tick();
+        if let Some(job) = app.edit.take() {
+            let result = edit_outside(terminal, &job.path, &app.tr);
+            app.finish_edit(&job, result);
+        }
         if loaded.elapsed() >= RELOAD_EVERY {
             if let Some(tasks) = &mut app.tasks {
                 tasks.reload();
@@ -136,6 +163,29 @@ fn event_loop(terminal: &mut DefaultTerminal, app: &mut App) -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// Gives the terminal to the editor and takes it back when the editor is closed.
+fn edit_outside(terminal: &mut DefaultTerminal, file: &Path, tr: &I18n) -> Result<(), String> {
+    let _ = execute!(io::stdout(), DisableMouseCapture, DisableBracketedPaste);
+    ratatui::restore();
+    println!("{}", tr.f("skills.editing", &[("path", &file.display())]));
+    let result = editor::run(file);
+    let _ = enable_raw_mode();
+    let _ = execute!(
+        io::stdout(),
+        EnterAlternateScreen,
+        Clear(ClearType::All),
+        Hide,
+        EnableMouseCapture,
+        EnableBracketedPaste
+    );
+    // A new terminal draws everything again. (`Terminal::clear` would ask the
+    // terminal where its cursor is, and not every terminal answers.)
+    if let Ok(fresh) = Terminal::new(CrosstermBackend::new(io::stdout())) {
+        *terminal = fresh;
+    }
+    result
 }
 
 #[derive(Debug)]
@@ -148,6 +198,9 @@ struct App {
     project: Option<PathBuf>,
     tasks: Option<TasksTab>,
     roles: Option<RolesTab>,
+    skills: Option<SkillsTab>,
+    /// A skill to open in the editor after this event.
+    edit: Option<EditJob>,
     projects: ProjectsTab,
     form: Option<(Purpose, Form)>,
     /// The folder browser, when the system has no folder dialog.
@@ -176,6 +229,8 @@ impl App {
             project: None,
             tasks: None,
             roles: None,
+            skills: None,
+            edit: None,
             projects: ProjectsTab::load(home),
             form: None,
             browser: None,
@@ -212,6 +267,7 @@ impl App {
         }
         self.tasks = Some(TasksTab::load(root));
         self.roles = Some(RolesTab::load(root));
+        self.skills = Some(SkillsTab::load(root));
         self.project = Some(root.to_path_buf());
         self.tab = Tab::Tasks;
         let saved = self.projects.update(|list| {
@@ -346,6 +402,9 @@ impl App {
                 if let Some(roles) = self.roles.as_mut().filter(|r| !r.changed()) {
                     roles.reload();
                 }
+                if let Some(skills) = &mut self.skills {
+                    skills.reload();
+                }
                 self.projects.reload();
             }
             code => match self.tab {
@@ -364,6 +423,12 @@ impl App {
                         }
                     }
                 },
+                Tab::Skills => {
+                    if let Some(skills) = &mut self.skills {
+                        let action = skills.on_key(code);
+                        self.skill_action(action);
+                    }
+                }
                 Tab::Projects => match code {
                     KeyCode::Enter => self.press(ButtonId::UseProject),
                     KeyCode::Char('n') => self.press(ButtonId::NewProject),
@@ -427,6 +492,16 @@ impl App {
                     (Tab::Roles, _) => {
                         if let Some(roles) = &mut self.roles {
                             roles.on_wheel(down);
+                        }
+                    }
+                    (Tab::Skills, Some((ListId::Skills, _))) => {
+                        if let Some(skills) = &mut self.skills {
+                            skills.move_by(if down { 1 } else { -1 });
+                        }
+                    }
+                    (Tab::Skills, _) => {
+                        if let Some(skills) = &mut self.skills {
+                            skills.on_wheel(down);
                         }
                     }
                     _ => {}
@@ -510,6 +585,14 @@ impl App {
                         roles.select(index);
                     }
                 }
+                Some((ListId::Skills, index)) => {
+                    if let Some(skills) = &mut self.skills {
+                        skills.select(index);
+                    }
+                    if double {
+                        self.press(ButtonId::SkillEdit);
+                    }
+                }
                 Some((ListId::RoleFilter, index)) => {
                     if let Some(tasks) = &mut self.tasks {
                         tasks.toggle_filter(index);
@@ -552,9 +635,163 @@ impl App {
         }
     }
 
+    /// What the Skills tab asks for.
+    fn skill_action(&mut self, action: skills_tab::Action) {
+        use skills_tab::Action as A;
+        let Some(root) = self.project.clone() else {
+            return;
+        };
+        let tr = &self.tr;
+        match action {
+            A::None => {}
+            A::Edit(name) => {
+                let path = skill_path(&root, &name);
+                let mut copied = false;
+                if !path.is_file() {
+                    let Some(copy) = skills::copy_of_built_in(&name) else {
+                        return;
+                    };
+                    let written = path
+                        .parent()
+                        .map_or(Ok(()), fs::create_dir_all)
+                        .and_then(|()| fs::write(&path, copy));
+                    if let Err(error) = written {
+                        self.message = Some((format!("{}: {error}", path.display()), true));
+                        return;
+                    }
+                    copied = true;
+                }
+                self.edit = Some(EditJob { name, path, copied });
+            }
+            A::New => {
+                self.form = Some((
+                    Purpose::NewSkill,
+                    Form::new(
+                        tr.t("skills.new_title"),
+                        tr.t("skills.new_text"),
+                        tr.t("skills.create"),
+                    )
+                    .field(tr.t("skills.new_name"), "")
+                    .field(tr.t("skills.new_description"), ""),
+                ));
+            }
+            A::Restore(name) => {
+                let text = tr.f("skills.restore_text", &[("name", &name)]);
+                self.form = Some((
+                    Purpose::RestoreSkill(name),
+                    Form::new(tr.t("skills.restore_title"), &text, tr.t("skills.restore")),
+                ));
+            }
+        }
+    }
+
+    /// The editor was closed: keep the change in git, or drop a copy of a
+    /// built-in skill that was not changed.
+    fn finish_edit(&mut self, job: &EditJob, result: Result<(), String>) {
+        let tr = &self.tr;
+        let mut message = result
+            .err()
+            .map(|error| (tr.f("skills.editor_failed", &[("error", &error)]), true));
+        let text = fs::read_to_string(&job.path).unwrap_or_default();
+        let unchanged_copy =
+            job.copied && skills::copy_of_built_in(&job.name).as_deref() == Some(text.as_str());
+        if unchanged_copy {
+            let _ = fs::remove_file(&job.path);
+            message.get_or_insert((tr.t("skills.unchanged").to_string(), false));
+        } else if job.path.is_file() {
+            let saved = self
+                .project
+                .as_deref()
+                .ok_or_else(String::new)
+                .and_then(|root| Repo::open(root).map_err(|e| e.to_string()))
+                .and_then(|repo| {
+                    repo.commit_paths(&[&job.path], &format!("harness: skill {}", job.name))
+                        .map_err(|e| e.to_string())
+                });
+            let next = match saved {
+                Err(error) => (error, true),
+                Ok(_) if skills::split_header(&text).is_none() => {
+                    (tr.f("skills.broken", &[("name", &job.name)]), true)
+                }
+                Ok(true) => (tr.f("skills.saved", &[("name", &job.name)]), false),
+                Ok(false) => (tr.t("skills.unchanged").to_string(), false),
+            };
+            message.get_or_insert(next);
+        }
+        self.message = message;
+        self.reload_skills(Some(&job.name));
+    }
+
+    /// The skills changed: both tabs that show them read them again.
+    fn reload_skills(&mut self, select: Option<&str>) {
+        if let Some(skills) = &mut self.skills {
+            skills.reload();
+            if select.is_some() {
+                skills.select_named(select);
+            }
+        }
+        if let Some(roles) = self.roles.as_mut().filter(|r| !r.changed()) {
+            roles.reload();
+        }
+    }
+
+    /// OK in the «New skill» form: write the file and open it.
+    fn create_skill(&mut self, form: &Form) -> Result<(), String> {
+        let root = self.project.clone().ok_or_else(String::new)?;
+        let (name, description) = (form.value(0), form.value(1));
+        skills::check_name(name).map_err(|e| e.to_string())?;
+        if self.skills.as_ref().is_some_and(|s| s.exists(name)) {
+            return Err(self.tr.f("skills.exists", &[("name", &name)]));
+        }
+        if description.is_empty() {
+            return Err(self.tr.t("skills.need_description").to_string());
+        }
+        let path = skill_path(&root, name);
+        let text = format!("---\ndescription: {description}\n---\n# {name}\n\n");
+        path.parent()
+            .map_or(Ok(()), fs::create_dir_all)
+            .and_then(|()| fs::write(&path, text))
+            .map_err(|e| format!("{}: {e}", path.display()))?;
+        self.reload_skills(Some(name));
+        self.edit = Some(EditJob {
+            name: name.to_string(),
+            path,
+            copied: false,
+        });
+        Ok(())
+    }
+
+    /// OK in the «Restore built-in» form: delete the project's copy.
+    fn restore_skill(&mut self, name: &str) -> Result<(), String> {
+        let root = self.project.clone().ok_or_else(String::new)?;
+        let path = skill_path(&root, name);
+        let repo = Repo::open(&root).map_err(|e| e.to_string())?;
+        let tracked = repo.is_tracked(&path);
+        fs::remove_file(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+        if tracked {
+            repo.commit_paths(
+                &[&path],
+                &format!("harness: skill {name} is built-in again"),
+            )
+            .map_err(|e| e.to_string())?;
+        }
+        self.message = Some((self.tr.f("skills.restored", &[("name", &name)]), false));
+        self.reload_skills(Some(name));
+        Ok(())
+    }
+
     /// A button, clicked or chosen with its key.
     fn press(&mut self, id: ButtonId) {
         match id {
+            ButtonId::SkillRole(_)
+            | ButtonId::SkillEdit
+            | ButtonId::SkillNew
+            | ButtonId::SkillRestore => {
+                if let Some(skills) = &mut self.skills {
+                    let action = skills.press(id);
+                    self.skill_action(action);
+                }
+            }
             ButtonId::Input => {
                 if let Some(tasks) = &mut self.tasks {
                     tasks.focus_input();
@@ -642,9 +879,12 @@ impl App {
                         Ok(()) => (self.tr.t("roles.saved").to_string(), false),
                         Err(error) => (error, true),
                     });
-                    // The Tasks tab shows the agents too.
+                    // The Tasks and Skills tabs show the agents and skills too.
                     if let Some(tasks) = &mut self.tasks {
                         tasks.reload();
+                    }
+                    if let Some(skills) = &mut self.skills {
+                        skills.reload();
                     }
                 }
             }
@@ -675,6 +915,8 @@ impl App {
                 }
                 Ok(())
             }
+            Purpose::NewSkill => self.create_skill(&form),
+            Purpose::RestoreSkill(name) => self.restore_skill(&name.clone()),
             Purpose::Remove(path) => {
                 let path = path.clone();
                 let result = self.projects.update(|list| list.remove(&path));
@@ -682,6 +924,7 @@ impl App {
                     self.project = None;
                     self.tasks = None;
                     self.roles = None;
+                    self.skills = None;
                 }
                 result.map(|()| {
                     self.message = Some((self.tr.t("projects.removed").to_string(), false));
@@ -827,6 +1070,15 @@ impl App {
                     self.tr.t("tabs.no_open_project"),
                 ),
             },
+            Tab::Skills => match &self.skills {
+                Some(skills) => skills.draw(frame, main, &mut self.hits, &self.tr),
+                None => placeholder(
+                    frame,
+                    main,
+                    &format!(" {} ", self.tr.t("tabs.skills")),
+                    self.tr.t("tabs.no_open_project"),
+                ),
+            },
             Tab::Projects => {
                 self.projects.draw(
                     frame,
@@ -857,6 +1109,7 @@ impl App {
             .tasks
             .as_ref()
             .and_then(|t| t.problem.clone())
+            .or_else(|| self.skills.as_ref().and_then(|s| s.problem.clone()))
             .or_else(|| self.projects.problem.clone())
             .or_else(|| self.tr.problems.first().cloned());
         if let Some((text, error)) = &self.message {
@@ -946,6 +1199,13 @@ impl App {
             Form::new(tr.t("form.init_title"), &text, tr.t("form.create")),
         )
     }
+}
+
+/// The project's file of skill `name`.
+fn skill_path(root: &Path, name: &str) -> PathBuf {
+    root.join(HARNESS_DIR)
+        .join(SKILLS_DIR)
+        .join(format!("{name}.md"))
 }
 
 /// `~/code` if it exists, otherwise the home folder.

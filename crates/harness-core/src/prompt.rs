@@ -64,9 +64,13 @@ pub fn build(
     prompt
 }
 
-/// The role's skills: the always-on ones in full, the others as a list of files.
+/// The role's skills: its base and the always-on ones in full, the others as
+/// a list of files.
 fn skills_text(skills: &RoleSkills) -> String {
     let mut text = String::new();
+    for skill in &skills.base {
+        text.push_str(&format!("\n{}\n", skill.body));
+    }
     for skill in &skills.always {
         text.push_str(&format!(
             "\nAlways follow the skill \"{}\":\n{}\n",
@@ -215,7 +219,7 @@ mod tests {
 
     #[test]
     fn the_prompt_lists_skills_and_includes_always_skills_in_full() {
-        use crate::skills::Skill;
+        use crate::skills::{Skill, Source};
         use std::path::PathBuf;
 
         let skill = |name: &str, body: &str| Skill {
@@ -223,8 +227,10 @@ mod tests {
             description: format!("About {name}."),
             path: PathBuf::from(format!("/p/.harness/skills/{name}.md")),
             body: body.to_string(),
+            source: Source::Own,
         };
         let skills = RoleSkills {
+            base: vec![skill("developer", "# Developer\nImplement the design.")],
             on_demand: vec![skill("rust-errors", "Use thiserror.")],
             always: vec![skill("style", "Run clippy.")],
         };
@@ -244,6 +250,8 @@ mod tests {
         assert!(!prompt.contains("Use thiserror."));
         assert!(prompt.contains("Always follow the skill \"style\":\nRun clippy."));
         assert!(prompt.contains("in skills_used"));
+        // The role's base is in full, without a heading of its own.
+        assert!(prompt.contains("\n# Developer\nImplement the design.\n"));
     }
 
     #[test]

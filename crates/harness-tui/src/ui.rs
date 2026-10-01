@@ -33,6 +33,8 @@ pub enum ListId {
     Choices,
     /// «Roles» on the Tasks tab: a click filters the tasks.
     RoleFilter,
+    /// The skills of the Skills tab.
+    Skills,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -55,6 +57,11 @@ pub enum ButtonId {
     /// «To ▾» on the Tasks tab.
     To,
     Send,
+    /// A role of the Skills tab's selector, an index into its `ROLES`.
+    SkillRole(usize),
+    SkillEdit,
+    SkillNew,
+    SkillRestore,
 }
 
 /// Where the clickable things were drawn in the last frame. Drawing fills it,
