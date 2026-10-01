@@ -800,6 +800,13 @@ impl App {
         let server = harness_core::mcp::server(&name, &config, |secret| {
             credentials::load_secret(secrets.as_deref()?, secret).ok()
         });
+        // A web server is reached through this same program.
+        let server = server.map(|server| match std::env::current_exe() {
+            Ok(harness) => harness_agents::launcher::with_bridge(vec![server.clone()], &harness)
+                .pop()
+                .unwrap_or(server),
+            Err(_) => server,
+        });
         let server = match server {
             Ok(server) => server,
             Err(error) => {

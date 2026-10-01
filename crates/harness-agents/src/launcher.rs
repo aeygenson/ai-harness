@@ -22,6 +22,22 @@ use crate::credentials::{write_private, Secret};
 pub const MCP_EXEC: &str = "mcp-exec";
 pub const PRINT_SECRET: &str = "print-secret";
 
+/// The servers with the web bridge (`harness mcp-remote`) pointed at
+/// `harness`, the running program; other servers stay as they are.
+pub fn with_bridge(servers: Vec<McpServer>, harness: &Path) -> Vec<McpServer> {
+    servers
+        .into_iter()
+        .map(|mut server| {
+            if server.command == harness_core::mcp::BRIDGE_COMMAND
+                && server.args == [harness_core::mcp::BRIDGE_ARG]
+            {
+                server.command = harness.display().to_string();
+            }
+            server
+        })
+        .collect()
+}
+
 /// Writes how to start `server` into `<dir>/<name>.json`.
 pub fn write_server(dir: &Path, server: &McpServer) -> io::Result<PathBuf> {
     let env: serde_json::Map<String, serde_json::Value> = server
@@ -129,5 +145,24 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = write_secret(dir.path(), "deepseek-key", &Secret::new("sk-abc")).unwrap();
         assert_eq!(read_secret(&path).unwrap(), "sk-abc");
+    }
+
+    #[test]
+    fn the_web_bridge_points_at_the_running_harness() {
+        let web = McpServer {
+            name: "github".into(),
+            command: harness_core::mcp::BRIDGE_COMMAND.into(),
+            args: vec![harness_core::mcp::BRIDGE_ARG.into()],
+            env: BTreeMap::new(),
+        };
+        let program = McpServer {
+            name: "docs".into(),
+            command: "harness".into(),
+            args: vec!["other".into()],
+            env: BTreeMap::new(),
+        };
+        let servers = with_bridge(vec![web, program], Path::new("/opt/bin/harness"));
+        assert_eq!(servers[0].command, "/opt/bin/harness");
+        assert_eq!(servers[1].command, "harness");
     }
 }

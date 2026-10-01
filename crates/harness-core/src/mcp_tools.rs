@@ -35,7 +35,11 @@ pub struct Tool {
 
 /// `<home>/mcp/<name>-<fingerprint>.json` (`home` is `~/.harness`).
 pub fn cache_path(home: &Path, name: &str, server: &McpConfig) -> PathBuf {
-    let settings = serde_json::json!([name, server.command, server.args, server.env]);
+    let mut settings = serde_json::json!([name, server.command, server.args, server.env]);
+    // A web server's address and headers; a program server keeps its old key.
+    if server.url.is_some() || !server.headers.is_empty() {
+        settings = serde_json::json!([settings, server.url, server.headers]);
+    }
     let key = fingerprint(&settings.to_string());
     home.join(MCP_DIR).join(format!("{name}-{key}.json"))
 }
@@ -66,6 +70,7 @@ mod tests {
             command: "npx".into(),
             args: vec!["docs-mcp".into()],
             env: [("KEY".to_string(), "secret:docs".to_string())].into(),
+            ..McpConfig::default()
         };
         let list = ToolList {
             server: "docs".into(),

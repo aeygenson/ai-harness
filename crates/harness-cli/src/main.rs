@@ -127,6 +127,9 @@ enum Command {
     /// Used by Codex: start an MCP server from its private settings file.
     #[command(name = "mcp-exec", hide = true)]
     McpExec { file: PathBuf },
+    /// Used by the agents: the bridge to an MCP server on the web.
+    #[command(name = "mcp-remote", hide = true)]
+    McpRemote,
     /// Used by Codex: print a key from its private file.
     #[command(name = "print-secret", hide = true)]
     PrintSecret { file: PathBuf },
@@ -323,6 +326,9 @@ async fn main() -> Result<()> {
                 "cannot start the MCP server from {}: {error}",
                 file.display()
             )
+        }
+        Command::McpRemote => {
+            harness_agents::mcp_remote::run_from_env().map_err(anyhow::Error::msg)
         }
         Command::PrintSecret { file } => {
             println!("{}", launcher::read_secret(&file)?);

@@ -1463,3 +1463,61 @@ fn a_server_from_the_catalog_opens_in_the_form_before_it_is_saved() {
     assert!(!app.quit);
     assert!(screen(&mut app).contains("> [ ] docs"));
 }
+
+fn fake_web_check(
+    server: &harness_core::mcp::McpServer,
+    _: &Path,
+) -> Result<Vec<harness_core::mcp_tools::Tool>, String> {
+    // The web server is reached through this program, with its header.
+    assert_eq!(server.args, ["mcp-remote"]);
+    assert_eq!(Path::new(&server.command), std::env::current_exe().unwrap());
+    assert_eq!(
+        server.env["HARNESS_MCP_HEADER_1"].expose(),
+        "Authorization: Bearer web-key"
+    );
+    Ok(vec![harness_core::mcp_tools::Tool {
+        name: "ask".into(),
+        description: None,
+    }])
+}
+
+#[test]
+fn a_web_server_shows_its_address_and_is_checked_through_the_bridge() {
+    let env = Env::new();
+    let root = env.path("test");
+    project(&root);
+    let path = root.join(".harness/harness.toml");
+    let text = fs::read_to_string(&path).unwrap()
+        + "\n[mcp.wiki]\nurl = \"https://mcp.example.com/mcp\"\n\
+           headers = { Authorization = \"Bearer secret:wiki\" }\n";
+    fs::write(&path, text).unwrap();
+    let mut app = env.app(&root);
+    app.checker = fake_web_check;
+    click(&mut app, "4 MCP");
+    let text = screen(&mut app);
+    assert!(
+        text.contains("Address: https://mcp.example.com/mcp"),
+        "{text}"
+    );
+    assert!(text.contains("Authorization: Bearer secret:wiki"), "{text}");
+    assert!(text.contains("✗ secret"), "{text}");
+    assert!(!text.contains("Command:"), "{text}");
+
+    harness_agents::credentials::save_secret(
+        &env.home.path().join("credentials"),
+        "wiki",
+        &harness_agents::credentials::Secret::new("web-key"),
+    )
+    .unwrap();
+    key(&mut app, KeyCode::Char('r'));
+    key(&mut app, KeyCode::Char('c'));
+    let start = Instant::now();
+    while app.checking.is_some() {
+        assert!(start.elapsed() < Duration::from_secs(10));
+        std::thread::sleep(Duration::from_millis(10));
+        app.tick();
+    }
+    let text = screen(&mut app);
+    assert!(text.contains("wiki: 1 tools"), "{text}");
+    assert!(!text.contains("web-key"), "{text}");
+}

@@ -19,6 +19,18 @@
 //! `harness secret set context7` saved in `~/.harness/credentials/secrets/`.
 //! The project keeps only the name, so the key never gets into git.
 //!
+//! A server on the web is described by its address instead of a command:
+//!
+//! ```toml
+//! [mcp.github]
+//! url = "https://api.githubcopilot.com/mcp/"
+//! headers = { Authorization = "Bearer secret:github" }
+//! ```
+//!
+//! The agents start it like any other server, as the program
+//! `harness mcp-remote`, which talks to the address and adds the headers
+//! with the secrets itself (see [`BRIDGE_COMMAND`]).
+//!
 //! Every adapter turns the same list into its agent's own settings.
 
 use std::collections::BTreeMap;
@@ -29,6 +41,15 @@ use crate::secret::Secret;
 
 /// A value `"secret:<name>"` in `env` is read from a saved secret.
 pub const SECRET_PREFIX: &str = "secret:";
+
+/// A web server becomes this program with the argument [`BRIDGE_ARG`]: the
+/// adapters replace it with the path of the running `harness`.
+pub const BRIDGE_COMMAND: &str = "harness";
+pub const BRIDGE_ARG: &str = "mcp-remote";
+/// The bridge reads the address from this variable and each header, as
+/// `Name: value`, from `HARNESS_MCP_HEADER_1`, `_2`, ...
+pub const BRIDGE_URL: &str = "HARNESS_MCP_URL";
+pub const BRIDGE_HEADER: &str = "HARNESS_MCP_HEADER_";
 
 /// One server as an agent starts it, with every secret already read.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -57,6 +78,17 @@ pub enum McpError {
     UnknownServer { role: Role, name: String },
     #[error("MCP server {0:?} has an empty command")]
     EmptyCommand(String),
+    #[error("MCP server {0:?} has both a command and a url; it is one or the other")]
+    CommandAndUrl(String),
+    #[error(
+        "MCP server {server:?}: url {url:?} is not allowed; use https:// \
+         (http:// only for localhost)"
+    )]
+    BadUrl { server: String, url: String },
+    #[error("MCP server {0:?} is on the web (url): it takes headers, not args or env")]
+    WebServerParts(String),
+    #[error("MCP server {server:?}: header {name:?} is not allowed")]
+    BadHeader { server: String, name: String },
     #[error(
         "MCP server {server:?}: variable name {name:?} is not allowed; \
          use capital letters, digits and '_', for example API_KEY"
@@ -102,6 +134,7 @@ const RESERVED_PREFIXES: &[&str] = &[
     "AGY_",
     "GEMINI_",
     "GOOGLE_",
+    "HARNESS_",
 ];
 
 impl McpServers {
@@ -157,6 +190,15 @@ fn resolve(
     config: &crate::config::McpConfig,
     secret: &impl Fn(&str) -> Option<Secret>,
 ) -> Result<McpServer, McpError> {
+    if let Some(url) = &config.url {
+        return resolve_web(name, config, url, secret);
+    }
+    if !config.headers.is_empty() {
+        return Err(McpError::BadHeader {
+            server: name.to_string(),
+            name: config.headers.keys().next().cloned().unwrap_or_default(),
+        });
+    }
     if config.command.trim().is_empty() {
         return Err(McpError::EmptyCommand(name.to_string()));
     }
@@ -164,19 +206,7 @@ fn resolve(
     for (variable, value) in &config.env {
         check_variable(name, variable)?;
         let value = match value.strip_prefix(SECRET_PREFIX) {
-            Some(secret_name) => {
-                let secret_name = secret_name.trim();
-                if !is_simple_name(secret_name) {
-                    return Err(McpError::BadSecretName {
-                        server: name.to_string(),
-                        name: secret_name.to_string(),
-                    });
-                }
-                secret(secret_name).ok_or_else(|| McpError::MissingSecret {
-                    server: name.to_string(),
-                    name: secret_name.to_string(),
-                })?
-            }
+            Some(secret_name) => read_secret(name, secret_name, secret)?,
             None => Secret::new(value.clone()),
         };
         env.insert(variable.clone(), value);
@@ -185,6 +215,113 @@ fn resolve(
         name: name.to_string(),
         command: config.command.clone(),
         args: config.args.clone(),
+        env,
+    })
+}
+
+fn read_secret(
+    server: &str,
+    secret_name: &str,
+    secret: &impl Fn(&str) -> Option<Secret>,
+) -> Result<Secret, McpError> {
+    let secret_name = secret_name.trim();
+    if !is_simple_name(secret_name) {
+        return Err(McpError::BadSecretName {
+            server: server.to_string(),
+            name: secret_name.to_string(),
+        });
+    }
+    secret(secret_name).ok_or_else(|| McpError::MissingSecret {
+        server: server.to_string(),
+        name: secret_name.to_string(),
+    })
+}
+
+/// Is `url` an address the bridge may use: `https://`, or `http://` to this
+/// computer (for tests and local servers)?
+pub fn is_allowed_url(url: &str) -> bool {
+    let plain = |rest: &str| {
+        !rest.is_empty()
+            && !rest.starts_with('/')
+            && rest
+                .chars()
+                .all(|c| c.is_ascii_graphic() && !matches!(c, '"' | '\\' | '<' | '>' | '`'))
+    };
+    if let Some(rest) = url.strip_prefix("https://") {
+        return plain(rest);
+    }
+    url.strip_prefix("http://").is_some_and(|rest| {
+        let host = rest.split(['/', '?']).next().unwrap_or_default();
+        let host = host.rsplit_once(':').map_or(host, |(h, _)| h);
+        plain(rest) && matches!(host, "localhost" | "127.0.0.1" | "[::1]")
+    })
+}
+
+/// A web server: the bridge program, with the address and the headers (their
+/// secrets read) in its variables.
+fn resolve_web(
+    name: &str,
+    config: &crate::config::McpConfig,
+    url: &str,
+    secret: &impl Fn(&str) -> Option<Secret>,
+) -> Result<McpServer, McpError> {
+    if !config.command.trim().is_empty() {
+        return Err(McpError::CommandAndUrl(name.to_string()));
+    }
+    if !config.args.is_empty() || !config.env.is_empty() {
+        return Err(McpError::WebServerParts(name.to_string()));
+    }
+    let url = url.trim();
+    if !is_allowed_url(url) {
+        return Err(McpError::BadUrl {
+            server: name.to_string(),
+            url: url.to_string(),
+        });
+    }
+    let mut env = BTreeMap::from([(BRIDGE_URL.to_string(), Secret::new(url))]);
+    for (index, (header, value)) in config.headers.iter().enumerate() {
+        let bad = || McpError::BadHeader {
+            server: name.to_string(),
+            name: header.clone(),
+        };
+        let token = !header.is_empty()
+            && header
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
+        // The bridge and a few headers belong to the protocol.
+        let reserved = [
+            "content-type",
+            "accept",
+            "content-length",
+            "host",
+            "mcp-session-id",
+            "mcp-protocol-version",
+        ]
+        .contains(&header.to_ascii_lowercase().as_str());
+        if !token || reserved {
+            return Err(bad());
+        }
+        // `Bearer secret:github`: the secret's name is the rest of the value.
+        let value = match value.split_once(SECRET_PREFIX) {
+            Some((before, secret_name)) => {
+                let key = read_secret(name, secret_name, secret)?;
+                Secret::new(format!("{before}{}", key.expose()))
+            }
+            None => Secret::new(value.clone()),
+        };
+        // A line break would start another header.
+        if value.expose().chars().any(char::is_control) {
+            return Err(bad());
+        }
+        env.insert(
+            format!("{BRIDGE_HEADER}{}", index + 1),
+            Secret::new(format!("{header}: {}", value.expose().trim())),
+        );
+    }
+    Ok(McpServer {
+        name: name.to_string(),
+        command: BRIDGE_COMMAND.to_string(),
+        args: vec![BRIDGE_ARG.to_string()],
         env,
     })
 }
@@ -356,5 +493,80 @@ mod tests {
             McpServers::load(&config, |_| None),
             Err(McpError::VariableTwice { .. })
         ));
+    }
+
+    #[test]
+    fn a_web_server_becomes_the_bridge_with_its_headers_and_secrets() {
+        let config = Config::parse(
+            "[roles.developer]\nagent = \"codex\"\nmcp = [\"github\"]\n\
+             [mcp.github]\nurl = \"https://api.githubcopilot.com/mcp/\"\n\
+             headers = { Authorization = \"Bearer secret:github\", X-Toolsets = \"repos\" }\n",
+        )
+        .unwrap();
+        let servers =
+            McpServers::load(&config, |n| (n == "github").then(|| Secret::new("ghp_x"))).unwrap();
+        let github = &servers.for_role(Role::Developer)[0];
+        assert_eq!(github.command, BRIDGE_COMMAND);
+        assert_eq!(github.args, [BRIDGE_ARG]);
+        assert_eq!(
+            github.env[BRIDGE_URL].expose(),
+            "https://api.githubcopilot.com/mcp/"
+        );
+        assert_eq!(
+            github.env["HARNESS_MCP_HEADER_1"].expose(),
+            "Authorization: Bearer ghp_x"
+        );
+        assert_eq!(
+            github.env["HARNESS_MCP_HEADER_2"].expose(),
+            "X-Toolsets: repos"
+        );
+        assert!(!format!("{github:?}").contains("ghp_x"));
+    }
+
+    #[test]
+    fn web_servers_are_checked() {
+        let check = |toml: &str| {
+            let config: crate::config::McpConfig = toml::from_str(toml).unwrap();
+            check_server("web", &config)
+        };
+        assert!(check("url = \"https://example.com/mcp\"").is_ok());
+        assert!(check("url = \"http://127.0.0.1:8080/mcp\"").is_ok());
+        assert!(matches!(
+            check("url = \"http://example.com/mcp\""),
+            Err(McpError::BadUrl { .. })
+        ));
+        assert!(matches!(
+            check("url = \"https://\""),
+            Err(McpError::BadUrl { .. })
+        ));
+        assert!(matches!(
+            check("url = \"https://a.b\"\ncommand = \"npx\""),
+            Err(McpError::CommandAndUrl(_))
+        ));
+        assert!(matches!(
+            check("url = \"https://a.b\"\nenv = { KEY = \"1\" }"),
+            Err(McpError::WebServerParts(_))
+        ));
+        assert!(matches!(
+            check("url = \"https://a.b\"\nheaders = { \"Bad Name\" = \"1\" }"),
+            Err(McpError::BadHeader { .. })
+        ));
+        assert!(matches!(
+            check("url = \"https://a.b\"\nheaders = { X = \"1\\nEvil: 2\" }"),
+            Err(McpError::BadHeader { .. })
+        ));
+        assert!(matches!(
+            check("url = \"https://a.b\"\nheaders = { Mcp-Session-Id = \"1\" }"),
+            Err(McpError::BadHeader { .. })
+        ));
+        assert!(matches!(
+            check("command = \"npx\"\nheaders = { X = \"1\" }"),
+            Err(McpError::BadHeader { .. })
+        ));
+        // A secret with a line break is refused too, without showing it.
+        let config: crate::config::McpConfig =
+            toml::from_str("url = \"https://a.b\"\nheaders = { X = \"secret:k\" }").unwrap();
+        let error = server("web", &config, |_| Some(Secret::new("a\nb"))).unwrap_err();
+        assert!(matches!(error, McpError::BadHeader { .. }));
     }
 }

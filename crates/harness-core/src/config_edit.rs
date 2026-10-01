@@ -231,31 +231,16 @@ pub fn set_mcp(
             .ok_or_else(|| EditError::NoMcp(old.to_string()))?,
         None => Table::new(),
     };
-    set_text(&mut entry, "command", Some(&server.command));
-    set_list(&mut entry, "args", &server.args);
-    let current: Option<Vec<(String, String)>> = entry.get("env").and_then(|env| {
-        env.as_table_like().map(|t| {
-            t.iter()
-                .filter_map(|(k, v)| Some((k.to_string(), v.as_str()?.to_string())))
-                .collect()
-        })
-    });
-    let wanted: Vec<(String, String)> = server
-        .env
-        .iter()
-        .map(|(k, v)| (k.clone(), v.clone()))
-        .collect();
-    if current.as_ref() != Some(&wanted) {
-        if wanted.is_empty() {
-            entry.remove("env");
-        } else {
-            let mut env = toml_edit::InlineTable::new();
-            for (key, text) in &wanted {
-                env.insert(key, text.as_str().into());
-            }
-            entry.insert("env", value(env));
-        }
+    let command = Some(server.command.as_str()).filter(|c| !c.is_empty());
+    set_text(&mut entry, "command", command);
+    if server.args.is_empty() {
+        entry.remove("args");
+    } else {
+        set_list(&mut entry, "args", &server.args);
     }
+    set_map(&mut entry, "env", &server.env);
+    set_text(&mut entry, "url", server.url.as_deref());
+    set_map(&mut entry, "headers", &server.headers);
     servers.insert(name, Item::Table(entry));
     if let (Some(old), true) = (old, renamed) {
         for_role_lists(&mut doc, "mcp", |list| {
@@ -267,6 +252,32 @@ pub fn set_mcp(
         });
     }
     finish(doc)
+}
+
+/// `key = { NAME = "value", ... }`, left as it is when it already says that,
+/// removed when `wanted` is empty.
+fn set_map(entry: &mut Table, key: &str, wanted: &std::collections::BTreeMap<String, String>) {
+    let current: Option<Vec<(String, String)>> = entry.get(key).and_then(|map| {
+        map.as_table_like().map(|t| {
+            t.iter()
+                .filter_map(|(k, v)| Some((k.to_string(), v.as_str()?.to_string())))
+                .collect()
+        })
+    });
+    let wanted: Vec<(String, String)> =
+        wanted.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+    if current.as_ref() == Some(&wanted) {
+        return;
+    }
+    if wanted.is_empty() {
+        entry.remove(key);
+    } else {
+        let mut map = toml_edit::InlineTable::new();
+        for (name, text) in &wanted {
+            map.insert(name, text.as_str().into());
+        }
+        entry.insert(key, value(map));
+    }
 }
 
 /// Removes `[mcp.<name>]` and the name from every role's `mcp` list.
@@ -498,6 +509,7 @@ mod tests {
                 .iter()
                 .map(|(k, v)| (k.to_string(), v.to_string()))
                 .collect(),
+            ..McpConfig::default()
         };
 
         let added = set_mcp(
@@ -540,5 +552,27 @@ mod tests {
         assert!(config.mcp.is_empty());
         assert!(config.roles[&Role::Developer].mcp.is_empty());
         assert!(matches!(remove_mcp(text, "nope"), Err(EditError::NoMcp(_))));
+    }
+
+    #[test]
+    fn a_web_server_is_written_with_its_address_and_headers() {
+        let text = "[mcp.docs]\ncommand = \"npx\"\nargs = [\"docs-mcp\"]\n";
+        let web = McpConfig {
+            url: Some("https://example.com/mcp".into()),
+            headers: [(
+                "Authorization".to_string(),
+                "Bearer secret:docs".to_string(),
+            )]
+            .into(),
+            ..McpConfig::default()
+        };
+        let text = set_mcp(text, Some("docs"), "docs", &web).unwrap();
+        let config = crate::config::Config::parse(&text).unwrap();
+        assert_eq!(config.mcp["docs"], web);
+        assert!(!text.contains("command"), "{text}");
+        assert!(
+            text.contains("Authorization = \"Bearer secret:docs\""),
+            "{text}"
+        );
     }
 }

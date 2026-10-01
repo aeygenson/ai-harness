@@ -9,6 +9,7 @@ pub mod credentials;
 pub mod launcher;
 pub mod mcp_check;
 pub mod mcp_registry;
+pub mod mcp_remote;
 pub mod mock;
 pub mod models;
 pub mod process;

@@ -515,6 +515,46 @@ impl McpTab {
         );
     }
 
+    /// The address and headers of a web server.
+    fn web_details(
+        &self,
+        server: &McpConfig,
+        url: &str,
+        tr: &I18n,
+        lines: &mut Vec<Line<'static>>,
+    ) {
+        let dim = Style::new().fg(Color::DarkGray);
+        let red = Style::new().fg(Color::LightRed);
+        let green = Style::new().fg(Color::Green);
+        let bold = Style::new().add_modifier(Modifier::BOLD);
+        lines.push(Line::from(vec![
+            Span::styled(format!("{} ", tr.t("mcp.address")), bold),
+            Span::raw(url.to_string()),
+        ]));
+        lines.push(Line::styled(tr.t("mcp.address_hint").to_string(), dim));
+        lines.push(Line::default());
+        if server.headers.is_empty() {
+            lines.push(Line::styled(tr.t("mcp.no_headers").to_string(), dim));
+        } else {
+            lines.push(Line::styled(tr.t("mcp.headers").to_string(), bold));
+            for (header, value) in &server.headers {
+                let mut spans = vec![Span::raw(format!("  {header}: {value}"))];
+                if let Some((_, secret)) = value.split_once(SECRET_PREFIX) {
+                    let secret = secret.trim();
+                    spans.push(if self.secrets.iter().any(|s| s == secret) {
+                        Span::styled(format!("  {}", tr.t("mcp.secret_saved")), green)
+                    } else {
+                        Span::styled(
+                            format!("  {}", tr.f("mcp.secret_missing", &[("name", &secret)])),
+                            red,
+                        )
+                    });
+                }
+                lines.push(Line::from(spans));
+            }
+        }
+    }
+
     /// What the details show about the server `name`.
     fn details(&self, roles: &RolesTab, name: &str, tr: &I18n) -> Vec<Line<'static>> {
         let dim = Style::new().fg(Color::DarkGray);
@@ -529,41 +569,44 @@ impl McpTab {
             ));
             return lines;
         };
-        let command = std::iter::once(&server.command)
-            .chain(&server.args)
-            .map(|part| {
-                if part.contains(char::is_whitespace) || part.is_empty() {
-                    format!("{part:?}")
-                } else {
-                    part.clone()
-                }
-            })
-            .collect::<Vec<_>>()
-            .join(" ");
-        lines.push(Line::from(vec![
-            Span::styled(format!("{} ", tr.t("mcp.command")), bold),
-            Span::raw(command),
-        ]));
-
-        lines.push(Line::default());
-        if server.env.is_empty() {
-            lines.push(Line::styled(tr.t("mcp.no_variables").to_string(), dim));
+        if let Some(url) = &server.url {
+            self.web_details(server, url, tr, &mut lines);
         } else {
-            lines.push(Line::styled(tr.t("mcp.variables").to_string(), bold));
-            for (variable, value) in &server.env {
-                let mut spans = vec![Span::raw(format!("  {variable} = {value}"))];
-                if let Some(secret) = value.strip_prefix(SECRET_PREFIX) {
-                    let secret = secret.trim();
-                    spans.push(if self.secrets.iter().any(|s| s == secret) {
-                        Span::styled(format!("  {}", tr.t("mcp.secret_saved")), green)
+            let command = std::iter::once(&server.command)
+                .chain(&server.args)
+                .map(|part| {
+                    if part.contains(char::is_whitespace) || part.is_empty() {
+                        format!("{part:?}")
                     } else {
-                        Span::styled(
-                            format!("  {}", tr.f("mcp.secret_missing", &[("name", &secret)])),
-                            red,
-                        )
-                    });
+                        part.clone()
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join(" ");
+            lines.push(Line::from(vec![
+                Span::styled(format!("{} ", tr.t("mcp.command")), bold),
+                Span::raw(command),
+            ]));
+            lines.push(Line::default());
+            if server.env.is_empty() {
+                lines.push(Line::styled(tr.t("mcp.no_variables").to_string(), dim));
+            } else {
+                lines.push(Line::styled(tr.t("mcp.variables").to_string(), bold));
+                for (variable, value) in &server.env {
+                    let mut spans = vec![Span::raw(format!("  {variable} = {value}"))];
+                    if let Some(secret) = value.strip_prefix(SECRET_PREFIX) {
+                        let secret = secret.trim();
+                        spans.push(if self.secrets.iter().any(|s| s == secret) {
+                            Span::styled(format!("  {}", tr.t("mcp.secret_saved")), green)
+                        } else {
+                            Span::styled(
+                                format!("  {}", tr.f("mcp.secret_missing", &[("name", &secret)])),
+                                red,
+                            )
+                        });
+                    }
+                    lines.push(Line::from(spans));
                 }
-                lines.push(Line::from(spans));
             }
         }
 
@@ -820,13 +863,18 @@ fn short_name(name: &str) -> String {
     name.rsplit('/').next().unwrap_or(name).to_string()
 }
 
-/// The names of the secrets a server's variables use.
+/// The names of the secrets a server's variables (or a web server's
+/// headers, as in `Bearer secret:<name>`) use.
 fn secret_names(server: &McpConfig) -> impl Iterator<Item = String> + '_ {
-    server
+    let variables = server
         .env
         .values()
-        .filter_map(|v| v.strip_prefix(SECRET_PREFIX))
-        .map(|n| n.trim().to_string())
+        .filter_map(|v| v.strip_prefix(SECRET_PREFIX));
+    let headers = server
+        .headers
+        .values()
+        .filter_map(|v| v.split_once(SECRET_PREFIX).map(|(_, name)| name));
+    variables.chain(headers).map(|n| n.trim().to_string())
 }
 
 /// `npx -y "a b"` → `npx`, `-y`, `a b`: words split at spaces, a quoted
@@ -894,6 +942,7 @@ pub fn server_from(command: &str, variables: &str) -> Result<McpConfig, String> 
         command,
         args: words.collect(),
         env,
+        ..McpConfig::default()
     })
 }
 
