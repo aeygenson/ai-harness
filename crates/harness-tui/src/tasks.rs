@@ -75,7 +75,11 @@ pub struct TasksTab {
     root: PathBuf,
     tasks: Vec<TaskView>,
     /// `architect  claude (opus)`, one line per role.
-    roles: Vec<String>,
+    roles: Vec<(Option<Role>, String)>,
+    /// Every task; `tasks` holds the ones the role filter lets through.
+    all: Vec<TaskView>,
+    /// A click on a role in «Roles» shows only the tasks waiting on it.
+    pub(crate) filter: Option<Role>,
     /// A file that could not be read.
     pub problem: Option<String>,
     pub(crate) task: usize,
@@ -102,6 +106,8 @@ impl TasksTab {
             root: root.to_path_buf(),
             tasks: Vec::new(),
             roles: Vec::new(),
+            all: Vec::new(),
+            filter: None,
             problem: None,
             task: 0,
             step: 0,
@@ -126,12 +132,12 @@ impl TasksTab {
         let runs = harness_dir.join("runs");
         let mut problems = Vec::new();
 
-        self.tasks.clear();
+        self.all.clear();
         match store::task_ids(&runs) {
             Ok(ids) => {
                 for id in ids {
                     match load_task(&runs, &id) {
-                        Ok(task) => self.tasks.push(task),
+                        Ok(task) => self.all.push(task),
                         Err(error) => problems.push(format!("{id}: {error}")),
                     }
                 }
@@ -143,31 +149,66 @@ impl TasksTab {
         match Config::load(&harness_dir) {
             Ok(config) => {
                 for (role, settings) in &config.roles {
-                    self.roles.push(agent_line(
-                        role_name(*role),
-                        &settings.agent,
-                        &settings.model,
+                    self.roles.push((
+                        Some(*role),
+                        agent_line(role_name(*role), &settings.agent, &settings.model),
                     ));
                 }
                 if let Some(retro) = &config.retro {
                     self.roles
-                        .push(agent_line("retro", &retro.agent, &retro.model));
+                        .push((None, agent_line("retro", &retro.agent, &retro.model)));
                 }
             }
             Err(error) => problems.push(error.to_string()),
         }
         self.problem = problems.into_iter().next();
+        self.apply_filter(selected);
+    }
 
-        self.task = selected
-            .and_then(|id| self.tasks.iter().position(|t| t.id == id))
-            .unwrap_or(0);
+    /// Lets through the tasks of the filter's role, keeping `selected` if it
+    /// is still there.
+    fn apply_filter(&mut self, selected: Option<String>) {
+        let filter = self.filter;
+        self.tasks = self
+            .all
+            .iter()
+            .filter(|t| filter.is_none_or(|role| waits_on(t, role)))
+            .cloned()
+            .collect();
+        let at = selected.and_then(|id| self.tasks.iter().position(|t| t.id == id));
+        if at.is_none() {
+            // Another task is shown now: at its latest step.
+            self.step = usize::MAX;
+            self.scroll = 0;
+        }
+        self.task = at.unwrap_or(0);
         self.step = self.step.min(self.last_step());
         self.sync_choice();
+    }
+
+    /// A click on a line of «Roles»: show only the tasks waiting on that
+    /// role; a second click on it shows all again.
+    pub fn toggle_filter(&mut self, index: usize) {
+        let Some((Some(role), _)) = self.roles.get(index) else {
+            return;
+        };
+        self.filter = if self.filter == Some(*role) {
+            None
+        } else {
+            Some(*role)
+        };
+        let selected = self.current().map(|t| t.id.clone());
+        self.apply_filter(selected);
     }
 
     /// Shows the task `id` at its latest step.
     fn show_task(&mut self, id: &str) {
         self.reload();
+        if !self.tasks.iter().any(|t| t.id == id) && self.filter.is_some() {
+            // The filter must not hide what was just sent.
+            self.filter = None;
+            self.apply_filter(Some(id.to_string()));
+        }
         if let Some(index) = self.tasks.iter().position(|t| t.id == id) {
             self.task = index;
             self.step = self.last_step();
@@ -430,7 +471,11 @@ impl TasksTab {
         match list {
             ListId::Tasks => self.focus = Focus::Tasks,
             ListId::Steps => self.focus = Focus::Steps,
-            ListId::Projects | ListId::Roles | ListId::Folders | ListId::Choices => {}
+            ListId::Projects
+            | ListId::Roles
+            | ListId::Folders
+            | ListId::Choices
+            | ListId::RoleFilter => {}
         }
     }
 
@@ -492,25 +537,28 @@ impl TasksTab {
             .iter()
             .map(|t| ListItem::new(format!("{}  {}", t.id, short_stage(&t.state))))
             .collect();
+        let title = match self.filter {
+            Some(role) => tr.f("tasks.title_filtered", &[("role", &role_name(role))]),
+            None => tr.t("tasks.title").to_string(),
+        };
         draw_list(
             frame,
             hits,
             tasks_area,
             ListId::Tasks,
-            tr.t("tasks.title"),
+            &title,
             items,
             self.task,
             self.focus == Focus::Tasks,
         );
-
-        let roles: Vec<Line> = self.roles.iter().map(|r| Line::from(r.as_str())).collect();
-        frame.render_widget(
-            Paragraph::new(roles).block(panel(tr.t("tasks.roles"), false)),
-            roles_area,
-        );
+        self.draw_roles(frame, roles_area, hits, tr);
 
         let Some(task) = self.current() else {
-            let empty = Paragraph::new(tr.t("tasks.empty").to_string())
+            let empty = match self.filter {
+                Some(role) => tr.f("tasks.empty_filtered", &[("role", &role_name(role))]),
+                None => tr.t("tasks.empty").to_string(),
+            };
+            let empty = Paragraph::new(empty)
                 .block(panel(tr.t("tasks.title"), false))
                 .wrap(Wrap { trim: false });
             frame.render_widget(empty, right);
@@ -568,6 +616,32 @@ impl TasksTab {
             detail_area,
         );
         self.draw_input(frame, input_area, hits, tr);
+    }
+
+    /// The agents of the roles; a click on a role filters the tasks.
+    fn draw_roles(&self, frame: &mut Frame, area: Rect, hits: &mut Hits, tr: &I18n) {
+        let block = panel(tr.t("tasks.roles"), false);
+        let inner = block.inner(area);
+        let items: Vec<ListItem> = self
+            .roles
+            .iter()
+            .map(|(role, line)| {
+                let style = if role.is_some() && *role == self.filter {
+                    selected()
+                } else {
+                    Style::new()
+                };
+                ListItem::new(Line::styled(line.clone(), style))
+            })
+            .collect();
+        frame.render_widget(List::new(items).block(block), area);
+        hits.add(
+            inner,
+            Target::List {
+                list: ListId::RoleFilter,
+                first: 0,
+            },
+        );
     }
 
     /// The label of an option of «To».
@@ -717,6 +791,20 @@ impl TasksTab {
             Paragraph::new(lines).block(panel(&title, self.running.is_some())),
             area,
         );
+    }
+}
+
+/// Is it `role`'s turn in the task, or is Lisa's answer for `role` awaited?
+fn waits_on(task: &TaskView, role: Role) -> bool {
+    match task.state.stage {
+        Stage::Working(working) => working == role,
+        Stage::WaitingForHuman(WaitReason::RoleAskedForHelp(asking)) => asking == role,
+        Stage::WaitingForHuman(WaitReason::ApproveDesign) => role == Role::Architect,
+        Stage::WaitingForHuman(WaitReason::RoundLimitReached) => task
+            .steps
+            .last()
+            .is_some_and(|s| s.handoff.next_role == NextStep::To(role)),
+        Stage::Done => false,
     }
 }
 

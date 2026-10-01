@@ -510,6 +510,11 @@ impl App {
                         roles.select(index);
                     }
                 }
+                Some((ListId::RoleFilter, index)) => {
+                    if let Some(tasks) = &mut self.tasks {
+                        tasks.toggle_filter(index);
+                    }
+                }
                 Some((list, index)) => {
                     if let Some(tasks) = &mut self.tasks {
                         tasks.on_click(list, index);

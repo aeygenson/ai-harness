@@ -31,6 +31,8 @@ pub enum ListId {
     Folders,
     /// The «To» list of the Tasks tab.
     Choices,
+    /// «Roles» on the Tasks tab: a click filters the tasks.
+    RoleFilter,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -746,3 +746,36 @@ fn quitting_waits_for_the_running_roles() {
     key(&mut app, KeyCode::Char('q'));
     assert!(app.quit);
 }
+
+#[test]
+fn a_click_on_a_role_shows_only_the_tasks_waiting_on_it() {
+    let env = Env::new();
+    let root = env.path("test");
+    project(&root);
+    let mut app = env.app(&root);
+    // task-001 is back with the developer, task-002 with the architect.
+    click(&mut app, "developer  claude");
+    let text = screen(&mut app);
+    assert!(text.contains(" Tasks of developer "), "{text}");
+    assert!(text.contains("> task-001"), "{text}");
+    assert!(!text.contains("task-002"), "{text}");
+
+    click(&mut app, "architect  claude");
+    let text = screen(&mut app);
+    assert!(text.contains("> task-002"), "{text}");
+    assert!(!text.contains("task-001"), "{text}");
+    assert!(text.contains("Second task"), "{text}");
+
+    click(&mut app, "tester     claude");
+    let text = screen(&mut app);
+    assert!(text.contains("No task waits on the tester now."), "{text}");
+
+    // A second click on the same role shows all tasks again.
+    click(&mut app, "tester     claude");
+    let text = screen(&mut app);
+    assert!(
+        text.contains("task-001") && text.contains("task-002"),
+        "{text}"
+    );
+    assert_eq!(app.tasks.as_ref().unwrap().filter, None);
+}

@@ -27,6 +27,8 @@ hint = "click or 1–7 tabs · ↑↓ select · wheel scroll · Shift+mouse sele
 
 [tasks]
 title = " Tasks "
+title_filtered = " Tasks of {role} "
+empty_filtered = "No task waits on the {role} now.\n\nClick {role} in «Roles» again to see all tasks."
 roles = " Roles "
 empty = "No tasks yet.\n\nWrite what to do in the line below and press «Send»: the architect starts."
 header = " {task} · round {round} of {max} · {stage}{failures} "
