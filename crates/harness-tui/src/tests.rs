@@ -1307,3 +1307,68 @@ fn mcp_servers_are_added_changed_and_removed_and_secrets_saved() {
     assert!(saved.roles[&Role::Developer].mcp.is_empty());
     assert!(file.is_file());
 }
+
+fn fake_check(
+    server: &harness_core::mcp::McpServer,
+    _: &Path,
+) -> Result<Vec<harness_core::mcp_tools::Tool>, String> {
+    // The server gets its secret, as a run would give it.
+    if server.env["API_KEY"].expose() != "docs-key" {
+        return Err("wrong key".into());
+    }
+    Ok(vec![
+        harness_core::mcp_tools::Tool {
+            name: "search".into(),
+            description: Some("Searches the docs.".into()),
+        },
+        harness_core::mcp_tools::Tool {
+            name: "fetch".into(),
+            description: None,
+        },
+    ])
+}
+
+#[test]
+fn check_asks_a_server_for_its_tools() {
+    let env = Env::new();
+    let root = env.path("test");
+    project(&root);
+    let path = root.join(".harness/harness.toml");
+    let text = fs::read_to_string(&path).unwrap()
+        + "\n[mcp.docs]\ncommand = \"npx\"\nargs = [\"docs-mcp\"]\nenv = { API_KEY = \"secret:docs\" }\n\n\
+           [mcp.other]\ncommand = \"npx\"\nenv = { KEY = \"secret:other\" }\n";
+    fs::write(&path, text).unwrap();
+    harness_agents::credentials::save_secret(
+        &env.home.path().join("credentials"),
+        "docs",
+        &harness_agents::credentials::Secret::new("docs-key"),
+    )
+    .unwrap();
+    let mut app = env.app(&root);
+    app.checker = fake_check;
+    click(&mut app, "4 MCP");
+    assert!(screen(&mut app).contains("Tools: not checked yet."));
+
+    key(&mut app, KeyCode::Char('c'));
+    let start = Instant::now();
+    while app.checking.is_some() {
+        assert!(start.elapsed() < Duration::from_secs(10));
+        std::thread::sleep(Duration::from_millis(10));
+        app.tick();
+    }
+    let text = screen(&mut app);
+    assert!(text.contains("docs: 2 tools"), "{text}");
+    assert!(text.contains("Tools (2):"), "{text}");
+    assert!(text.contains("search  Searches the docs."), "{text}");
+    assert!(!text.contains("docs-key"), "{text}");
+
+    // A server whose secret is not saved is not started.
+    click(&mut app, "[ ] other");
+    click(&mut app, "[ Check ]");
+    assert!(app.checking.is_none());
+    let (message, problem) = app.message.clone().unwrap();
+    assert!(
+        problem && message.contains("harness secret set other"),
+        "{message}"
+    );
+}
