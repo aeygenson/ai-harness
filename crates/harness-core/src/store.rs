@@ -267,6 +267,17 @@ pub fn task_ids(runs_dir: &Path) -> Result<Vec<String>, StoreError> {
         .collect())
 }
 
+/// The id for the next new task: `task-001`, or one more than the highest
+/// `task-NNN` in `runs_dir`.
+pub fn next_task_id(runs_dir: &Path) -> Result<String, StoreError> {
+    let highest = task_ids(runs_dir)?
+        .iter()
+        .filter_map(|id| id.strip_prefix("task-")?.parse::<u32>().ok())
+        .max()
+        .unwrap_or(0);
+    Ok(format!("task-{:03}", highest + 1))
+}
+
 /// `round-02-tester-1.log` -> (2, Tester).
 fn parse_failure(name: &str) -> Option<(u32, Role)> {
     let rest = name.strip_prefix("round-")?.strip_suffix(".log")?;
@@ -436,6 +447,16 @@ mod tests {
             fs::read_to_string(step_dir.join("notes.md")).unwrap(),
             "Design is ready."
         );
+    }
+
+    #[test]
+    fn the_next_task_id_follows_the_highest() {
+        let runs = tempfile::tempdir().unwrap();
+        assert_eq!(next_task_id(runs.path()).unwrap(), "task-001");
+        new_task(runs.path());
+        TaskStore::create(runs.path(), "task-009", "x", 5).unwrap();
+        TaskStore::create(runs.path(), "csv-parser", "x", 5).unwrap();
+        assert_eq!(next_task_id(runs.path()).unwrap(), "task-010");
     }
 
     #[test]

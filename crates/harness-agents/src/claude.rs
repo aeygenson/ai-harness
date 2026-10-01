@@ -203,15 +203,14 @@ impl AgentRunner for ClaudeCode {
             Some(file) => self.command_with_mcp(job, file.path().as_os_str()),
             None => self.command(job),
         };
-        let result = process::run(command, &job.prompt, self.timeout).await;
-        let secrets = self
+        let secrets: Vec<&str> = self
             .servers(job.role)
             .iter()
-            .flat_map(|server| server.env.values());
-        let result = process::hide_secrets(
-            result,
-            secrets.map(|v| v.expose()).chain([self.token.expose()]),
-        );
+            .flat_map(|server| server.env.values().map(|v| v.expose()))
+            .chain([self.token.expose()])
+            .collect();
+        let result = process::run(command, &job.prompt, self.timeout, &secrets).await;
+        let result = process::hide_secrets(result, secrets);
         let finished = match result {
             Ok(finished) => finished,
             Err(message) => return failed(log, message),

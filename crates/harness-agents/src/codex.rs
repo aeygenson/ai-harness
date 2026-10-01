@@ -377,23 +377,23 @@ impl AgentRunner for Codex {
             }
         };
         let command = self.command(job, secrets.path());
-        let result = process::run(command, &job.prompt, self.timeout).await;
+        let deepseek_key = match &self.provider {
+            Provider::DeepSeek(key) => Some(key.expose()),
+            Provider::ChatGpt => None,
+        };
+        let hidden: Vec<&str> = self
+            .servers(job.role)
+            .iter()
+            .flat_map(|server| server.env.values().map(|v| v.expose()))
+            .chain(deepseek_key)
+            .collect();
+        let result = process::run(command, &job.prompt, self.timeout, &hidden).await;
         drop(secrets);
         if chatgpt {
             self.take_auth_back(job);
         }
         remove_extras(job);
-        let deepseek_key = match &self.provider {
-            Provider::DeepSeek(key) => Some(key.expose()),
-            Provider::ChatGpt => None,
-        };
-        let result = process::hide_secrets(
-            result,
-            self.servers(job.role)
-                .iter()
-                .flat_map(|server| server.env.values().map(|v| v.expose()))
-                .chain(deepseek_key),
-        );
+        let result = process::hide_secrets(result, hidden);
         let finished = match result {
             Ok(finished) => finished,
             Err(message) => return failed(log, message),

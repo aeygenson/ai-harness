@@ -29,6 +29,10 @@ pub enum ListId {
     Projects,
     Roles,
     Folders,
+    /// The «To» list of the Tasks tab.
+    Choices,
+    /// «Roles» on the Tasks tab: a click filters the tasks.
+    RoleFilter,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -46,6 +50,11 @@ pub enum ButtonId {
     Up,
     NewFolder,
     ToggleHidden,
+    /// The message field of the Tasks tab.
+    Input,
+    /// «To ▾» on the Tasks tab.
+    To,
+    Send,
 }
 
 /// Where the clickable things were drawn in the last frame. Drawing fills it,

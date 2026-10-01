@@ -2,6 +2,7 @@
 //! The mock, Claude Code, Codex CLI and Antigravity CLI.
 
 pub mod antigravity;
+pub mod build;
 pub mod claude;
 pub mod codex;
 pub mod credentials;

@@ -5,6 +5,7 @@ use harness_core::git::Repo;
 use harness_core::handoff::{Handoff, Issue, NextStep, Role, Severity, Verdict};
 use harness_core::orchestrator;
 use harness_core::projects::Projects;
+use harness_core::store::TaskStore;
 use ratatui::backend::TestBackend;
 use ratatui::Terminal;
 
@@ -504,4 +505,277 @@ fn settings_that_fail_the_checks_are_not_saved() {
     assert!(screen(&mut app).contains("[ ] broken"));
     key(&mut app, KeyCode::Char('q'));
     assert!(app.quit);
+}
+
+/// Scripted agents: the architect finishes a design, the others approve.
+fn mock_team(
+    _: &harness_core::config::Config,
+    _: &Path,
+) -> Result<harness_agents::Team, harness_agents::build::BuildError> {
+    use harness_agents::{AnyAgent, MockAgent, MockStep, Team};
+    let agent = |role, next| {
+        AnyAgent::Mock(MockAgent::new().then(role, MockStep::finish(Verdict::Approved, next)))
+    };
+    Ok(Team::new()
+        .with(
+            Role::Architect,
+            agent(Role::Architect, NextStep::To(Role::Human)),
+        )
+        .with(
+            Role::Developer,
+            agent(Role::Developer, NextStep::To(Role::Tester)),
+        )
+        .with(
+            Role::Tester,
+            agent(Role::Tester, NextStep::To(Role::Security)),
+        )
+        .with(Role::Security, agent(Role::Security, NextStep::Done)))
+}
+
+fn no_login(
+    _: &harness_core::config::Config,
+    _: &Path,
+) -> Result<harness_agents::Team, harness_agents::build::BuildError> {
+    Err(harness_agents::build::BuildError(
+        "no Claude token saved; run `harness login claude` first".into(),
+    ))
+}
+
+/// Lets the background work finish, as the event loop does.
+fn wait(app: &mut App) {
+    let start = Instant::now();
+    while app.tasks.as_ref().unwrap().is_running() {
+        assert!(
+            start.elapsed() < Duration::from_secs(30),
+            "the run did not finish"
+        );
+        std::thread::sleep(Duration::from_millis(20));
+        app.tick();
+    }
+}
+
+/// Ctrl+S: sends the message (Enter is a new line).
+fn send(app: &mut App) {
+    app.on_key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL));
+}
+
+fn empty_project(env: &Env) -> (PathBuf, App) {
+    let root = env.path("fresh");
+    projects::init(&root).unwrap();
+    let mut app = env.app(&root);
+    app.builder = mock_team;
+    (root, app)
+}
+
+fn stage(app: &App) -> harness_core::task::Stage {
+    let tasks = app.tasks.as_ref().unwrap();
+    tasks.tasks_state(tasks.task).unwrap()
+}
+
+#[test]
+fn a_new_task_runs_the_architect_then_the_answer_goes_to_the_developer() {
+    use harness_core::task::{Stage, WaitReason};
+    let env = Env::new();
+    let (root, mut app) = empty_project(&env);
+    let text = screen(&mut app);
+    assert!(
+        text.contains("Write what to do in the line below"),
+        "{text}"
+    );
+    assert!(
+        text.contains("[ To: architect · new task ▾ ] [ Send ]"),
+        "{text}"
+    );
+
+    // Sending nothing is refused.
+    click(&mut app, "[ Send ]");
+    assert_eq!(app.message.as_ref().unwrap().0, "Write the task first");
+
+    click(&mut app, "Write here");
+    assert!(app.tasks.as_ref().unwrap().typing());
+    // Typing keys are text, not hot keys: q does not quit, 2 stays.
+    type_text(&mut app, "Build a CSV parser, q 2");
+    assert!(!app.quit);
+    assert_eq!(app.tab, Tab::Tasks);
+    assert!(screen(&mut app).contains("Build a CSV parser, q 2▏"));
+    // Enter starts a new line; Ctrl+S sends.
+    // Leaving the box and pressing Esc does not lose the text.
+    key(&mut app, KeyCode::Esc);
+    key(&mut app, KeyCode::Esc);
+    assert!(!app.quit);
+    assert!(app.message.as_ref().unwrap().0.contains("not sent"));
+    click(&mut app, "Build a CSV");
+    key(&mut app, KeyCode::Enter);
+    type_text(&mut app, "Second line");
+    assert!(!app.tasks.as_ref().unwrap().is_running());
+    let text = screen(&mut app);
+    assert!(text.contains("│ Build a CSV parser, q 2"), "{text}");
+    assert!(text.contains("│ Second line▏"), "{text}");
+    send(&mut app);
+    assert!(app.tasks.as_ref().unwrap().is_running());
+    assert!(screen(&mut app).contains("[ Working… ]"));
+    wait(&mut app);
+
+    let store_dir = root.join(".harness/runs/task-001");
+    assert_eq!(
+        fs::read_to_string(store_dir.join("task.md")).unwrap(),
+        "Build a CSV parser, q 2\nSecond line"
+    );
+    assert_eq!(
+        stage(&app),
+        Stage::WaitingForHuman(WaitReason::ApproveDesign)
+    );
+    let (message, problem) = app.message.clone().unwrap();
+    assert!(message.contains("the design is ready"), "{message}");
+    assert!(!problem);
+    // The answer goes to the developer unless Lisa chooses otherwise.
+    let text = screen(&mut app);
+    assert!(text.contains("[ To: developer ▾ ]"), "{text}");
+    assert!(text.contains(" Agent log "), "{text}");
+
+    key(&mut app, KeyCode::Enter);
+    type_text(&mut app, "Use serde");
+    send(&mut app);
+    wait(&mut app);
+    assert_eq!(stage(&app), Stage::Done);
+    let steps = TaskStore::open(&root.join(".harness/runs"), "task-001")
+        .unwrap()
+        .0
+        .steps()
+        .unwrap();
+    let who: Vec<Role> = steps.iter().map(|s| s.handoff.role).collect();
+    assert_eq!(
+        who,
+        [
+            Role::Architect,
+            Role::Human,
+            Role::Developer,
+            Role::Tester,
+            Role::Security
+        ]
+    );
+    assert_eq!(steps[1].handoff.summary, "Use serde");
+    assert_eq!(steps[1].handoff.verdict, Verdict::Approved);
+    assert!(app.message.as_ref().unwrap().0.contains("done"));
+    // A finished task offers only a new one.
+    assert!(screen(&mut app).contains("[ To: architect · new task ▾ ]"));
+}
+
+#[test]
+fn the_to_list_offers_the_roles_and_finishing() {
+    use harness_core::task::Stage;
+    let env = Env::new();
+    let (root, mut app) = empty_project(&env);
+    // Before there is a task, only a new one can be sent: the roles are
+    // listed, but grey.
+    click(&mut app, "[ To: architect · new task ▾ ]");
+    let text = screen(&mut app);
+    assert!(text.contains("Approve and finish"), "{text}");
+    // The list is drawn over the tab: «security» in it, not in «Roles».
+    click(&mut app, "│  security");
+    assert!(app
+        .message
+        .as_ref()
+        .unwrap()
+        .0
+        .contains("waits for your answer"));
+    assert_eq!(app.tasks.as_ref().unwrap().choice, tasks::Choice::NewTask);
+
+    app.tasks.as_mut().unwrap().paste("Line one\nLine two");
+    let text = screen(&mut app);
+    assert!(text.contains("│ Line one"), "{text}");
+    assert!(text.contains("│ Line two▏"), "{text}");
+    send(&mut app);
+    wait(&mut app);
+
+    click(&mut app, "[ To: developer ▾ ]");
+    let text = screen(&mut app);
+    for option in ["Approve and finish", "architect · new task", "security"] {
+        assert!(text.contains(option), "missing {option:?} in:\n{text}");
+    }
+    click(&mut app, "Approve and finish");
+    assert!(!app.tasks.as_ref().unwrap().menu);
+    assert!(screen(&mut app).contains("[ To: Approve and finish ▾ ]"));
+
+    // ↑↓ in the field change whom it goes to.
+    click(&mut app, "Write here");
+    key(&mut app, KeyCode::Down);
+    key(&mut app, KeyCode::Up);
+    type_text(&mut app, "Good enough");
+    send(&mut app);
+    wait(&mut app);
+    assert_eq!(stage(&app), Stage::Done);
+    assert_eq!(app.message.as_ref().unwrap().0, "task-001: saved");
+    let steps = TaskStore::open(&root.join(".harness/runs"), "task-001")
+        .unwrap()
+        .0
+        .steps()
+        .unwrap();
+    assert_eq!(steps.len(), 2);
+    assert_eq!(steps[1].handoff.next_role, NextStep::Done);
+}
+
+#[test]
+fn a_missing_login_stops_before_anything_is_saved() {
+    let env = Env::new();
+    let (root, mut app) = empty_project(&env);
+    app.builder = no_login;
+    click(&mut app, "Write here");
+    type_text(&mut app, "Something");
+    send(&mut app);
+    wait(&mut app);
+    let (message, problem) = app.message.clone().unwrap();
+    assert!(message.contains("harness login claude"), "{message}");
+    assert!(problem);
+    assert!(!root.join(".harness/runs/task-001").exists());
+    // The error is in the log too, where it is not cut off.
+    assert!(screen(&mut app).contains("── no Claude token saved"));
+}
+
+#[test]
+fn quitting_waits_for_the_running_roles() {
+    let env = Env::new();
+    let (_, mut app) = empty_project(&env);
+    click(&mut app, "Write here");
+    type_text(&mut app, "Something");
+    send(&mut app);
+    key(&mut app, KeyCode::Char('q'));
+    assert!(!app.quit);
+    assert!(app.message.as_ref().unwrap().1);
+    wait(&mut app);
+    key(&mut app, KeyCode::Char('q'));
+    assert!(app.quit);
+}
+
+#[test]
+fn a_click_on_a_role_shows_only_the_tasks_waiting_on_it() {
+    let env = Env::new();
+    let root = env.path("test");
+    project(&root);
+    let mut app = env.app(&root);
+    // task-001 is back with the developer, task-002 with the architect.
+    click(&mut app, "developer  claude");
+    let text = screen(&mut app);
+    assert!(text.contains(" Tasks of developer "), "{text}");
+    assert!(text.contains("> task-001"), "{text}");
+    assert!(!text.contains("task-002"), "{text}");
+
+    click(&mut app, "architect  claude");
+    let text = screen(&mut app);
+    assert!(text.contains("> task-002"), "{text}");
+    assert!(!text.contains("task-001"), "{text}");
+    assert!(text.contains("Second task"), "{text}");
+
+    click(&mut app, "tester     claude");
+    let text = screen(&mut app);
+    assert!(text.contains("No task waits on the tester now."), "{text}");
+
+    // A second click on the same role shows all tasks again.
+    click(&mut app, "tester     claude");
+    let text = screen(&mut app);
+    assert!(
+        text.contains("task-001") && text.contains("task-002"),
+        "{text}"
+    );
+    assert_eq!(app.tasks.as_ref().unwrap().filter, None);
 }
