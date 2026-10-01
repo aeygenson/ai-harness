@@ -128,6 +128,7 @@ pub fn set_role(text: &str, role: Role, settings: &RoleConfig) -> Result<String,
         .ok_or_else(|| EditError::NotATable(format!("roles.{key}")))?;
     set_text(role_table, "agent", Some(&settings.agent));
     set_text(role_table, "model", settings.model.as_deref());
+    set_text(role_table, "effort", settings.effort.as_deref());
     set_list(role_table, "skills", &settings.skills);
     set_list(role_table, "always_skills", &settings.always_skills);
     set_list(role_table, "mcp", &settings.mcp);
@@ -146,6 +147,7 @@ pub fn set_retro(text: &str, retro: &RetroConfig) -> Result<String, EditError> {
         .ok_or_else(|| EditError::NotATable("retro".into()))?;
     set_text(retro_table, "agent", Some(&retro.agent));
     set_text(retro_table, "model", retro.model.as_deref());
+    set_text(retro_table, "effort", retro.effort.as_deref());
     finish(doc)
 }
 
@@ -266,6 +268,7 @@ mod tests {
         assert_eq!(set_role(TOML, Role::Developer, &developer).unwrap(), TOML);
 
         developer.model = Some("gpt-5.5".into());
+        developer.effort = Some("xhigh".into());
         developer.plugins.clear();
         developer.skills = vec!["rust-errors".into()];
         let text = set_role(TOML, Role::Developer, &developer).unwrap();
@@ -278,9 +281,11 @@ mod tests {
 
         developer.agent = "claude".into();
         developer.model = None;
+        developer.effort = None;
         let text = set_role(&text, Role::Developer, &developer).unwrap();
         assert!(text.contains("agent = \"claude\" # fast"), "{text}");
         assert!(!text.contains("model"), "{text}");
+        assert!(!text.contains("effort"), "{text}");
 
         // A role that is not in the file yet gets its table.
         let text = set_role(TOML, Role::Security, &developer).unwrap();
@@ -295,6 +300,7 @@ mod tests {
         let retro = RetroConfig {
             agent: "codex+deepseek".into(),
             model: Some("deepseek-v4-pro".into()),
+            effort: None,
         };
         let text = set_retro(TOML, &retro).unwrap();
         assert_eq!(Config::parse(&text).unwrap().retro.as_ref(), Some(&retro));
@@ -303,6 +309,7 @@ mod tests {
             &RetroConfig {
                 agent: "claude".into(),
                 model: None,
+                effort: Some("high".into()),
             },
         )
         .unwrap();

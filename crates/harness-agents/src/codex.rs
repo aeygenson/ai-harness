@@ -105,6 +105,7 @@ pub struct Codex {
     /// `~/.harness/credentials/codex`: holds the saved `auth.json`.
     auth_dir: PathBuf,
     models: HashMap<Role, String>,
+    efforts: HashMap<Role, String>,
     mcp: HashMap<Role, Vec<McpServer>>,
     plugins: HashMap<Role, Vec<Plugin>>,
     /// The `harness` program, which starts MCP servers and hands over keys.
@@ -119,6 +120,7 @@ impl Codex {
             provider: Provider::ChatGpt,
             auth_dir: auth_dir.into(),
             models: HashMap::new(),
+            efforts: HashMap::new(),
             mcp: HashMap::new(),
             plugins: HashMap::new(),
             launcher: PathBuf::from("harness"),
@@ -141,6 +143,12 @@ impl Codex {
 
     pub fn with_model(mut self, role: Role, model: impl Into<String>) -> Self {
         self.models.insert(role, model.into());
+        self
+    }
+
+    /// The reasoning effort of a role, such as "high".
+    pub fn with_effort(mut self, role: Role, effort: impl Into<String>) -> Self {
+        self.efforts.insert(role, effort.into());
         self
     }
 
@@ -235,6 +243,10 @@ impl Codex {
         self.add_mcp_servers(&mut command, job.role, secrets_dir);
         if let Some(model) = self.model(job.role) {
             command.args(["--model", model]);
+        }
+        // A plain word (checked when harness.toml is read), so no quoting issue.
+        if let Some(effort) = self.efforts.get(&job.role) {
+            command.args(["-c", &format!("model_reasoning_effort=\"{effort}\"")]);
         }
         command.arg("-");
         command
@@ -696,6 +708,17 @@ mod tests {
             !args(&codex.command(&job(Role::Architect), Path::new("/secrets")))
                 .contains(&"--model".to_string())
         );
+    }
+
+    #[test]
+    fn the_effort_is_set_per_role() {
+        let codex = Codex::new("/creds").with_effort(Role::Tester, "xhigh");
+        let tester = args(&codex.command(&job(Role::Tester), Path::new("/secrets")));
+        assert!(tester.contains(&"model_reasoning_effort=\"xhigh\"".to_string()));
+        let architect = args(&codex.command(&job(Role::Architect), Path::new("/secrets")));
+        assert!(!architect
+            .iter()
+            .any(|a| a.contains("model_reasoning_effort")));
     }
 
     #[test]

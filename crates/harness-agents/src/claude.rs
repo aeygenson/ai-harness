@@ -33,6 +33,7 @@ pub struct ClaudeCode {
     program: PathBuf,
     token: Secret,
     models: HashMap<Role, String>,
+    efforts: HashMap<Role, String>,
     mcp: HashMap<Role, Vec<McpServer>>,
     plugins: HashMap<Role, Vec<Plugin>>,
     timeout: Duration,
@@ -44,6 +45,7 @@ impl ClaudeCode {
             program: PathBuf::from("claude"),
             token,
             models: HashMap::new(),
+            efforts: HashMap::new(),
             mcp: HashMap::new(),
             plugins: HashMap::new(),
             timeout: Duration::from_secs(30 * 60),
@@ -58,6 +60,12 @@ impl ClaudeCode {
 
     pub fn with_model(mut self, role: Role, model: impl Into<String>) -> Self {
         self.models.insert(role, model.into());
+        self
+    }
+
+    /// The reasoning effort of a role, such as "high".
+    pub fn with_effort(mut self, role: Role, effort: impl Into<String>) -> Self {
+        self.efforts.insert(role, effort.into());
         self
     }
 
@@ -118,6 +126,9 @@ impl ClaudeCode {
         }
         if let Some(model) = self.models.get(&job.role) {
             command.args(["--model", model]);
+        }
+        if let Some(effort) = self.efforts.get(&job.role) {
+            command.args(["--effort", effort]);
         }
         command
     }
@@ -366,6 +377,17 @@ mod tests {
             .get_args()
             .map(|a| a.to_string_lossy().into_owned())
             .collect()
+    }
+
+    #[test]
+    fn model_and_effort_are_set_per_role() {
+        let agent = ClaudeCode::new(Secret::new("t"))
+            .with_model(Role::Tester, "opus")
+            .with_effort(Role::Tester, "max");
+        let tester = args(&agent.command(&job(Role::Tester)));
+        assert!(tester.windows(2).any(|w| w == ["--model", "opus"]));
+        assert!(tester.windows(2).any(|w| w == ["--effort", "max"]));
+        assert!(!args(&agent.command(&job(Role::Developer))).contains(&"--effort".to_string()));
     }
 
     fn arg_after(command: &Command, flag: &str) -> String {

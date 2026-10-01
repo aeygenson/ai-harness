@@ -118,6 +118,12 @@ enum Command {
     Retro(RetroArgs),
     /// A full-screen window with tabs: tasks, role settings, projects.
     Tui,
+    /// The models (and effort levels) each agent offers, as last asked.
+    Models {
+        /// Ask every agent with a saved login again first.
+        #[arg(long)]
+        refresh: bool,
+    },
     /// Used by Codex: start an MCP server from its private settings file.
     #[command(name = "mcp-exec", hide = true)]
     McpExec { file: PathBuf },
@@ -304,6 +310,7 @@ async fn main() -> Result<()> {
             Some(RetroCommand::Apply { number, ids }) => retro_apply(project, &number, &ids),
             None => retro(project, args.task_id.as_deref(), args.suggest).await,
         },
+        Command::Models { refresh } => models(refresh),
         Command::Tui => {
             // Inside a project it opens that project, anywhere else the last one.
             let start =
@@ -343,6 +350,63 @@ fn init(project: &Path) -> Result<()> {
         println!("Created {}.", config.display());
     } else {
         println!("{} already exists, left as it is.", config.display());
+    }
+    Ok(())
+}
+
+/// `harness models`: the saved lists, after asking the agents again with
+/// `--refresh`.
+fn models(refresh: bool) -> Result<()> {
+    use harness_core::models;
+    let home = projects::harness_home().context("HOME is not set")?;
+    if refresh {
+        let dir = credentials::default_dir().context("HOME is not set")?;
+        println!("Asking the agents with a saved login…");
+        for (agent, result) in harness_agents::models::ask_all(&dir, &Default::default()) {
+            match result {
+                Ok(list) => {
+                    models::save(&home, &list)
+                        .with_context(|| format!("cannot save the models of {agent}"))?;
+                }
+                Err(error) => println!("{agent}: {error}"),
+            }
+        }
+    }
+    let mut any = false;
+    for agent in harness_core::config::AGENTS {
+        let Some(list) = models::load(&home, agent) else {
+            continue;
+        };
+        any = true;
+        println!("\n{agent}:");
+        for model in &list.models {
+            let default = if model.default { " (default)" } else { "" };
+            let efforts = if model.efforts.is_empty() {
+                String::new()
+            } else {
+                let levels: Vec<String> = model
+                    .efforts
+                    .iter()
+                    .map(|e| {
+                        if model.default_effort.as_ref() == Some(e) {
+                            format!("[{e}]")
+                        } else {
+                            e.clone()
+                        }
+                    })
+                    .collect();
+                format!("  effort: {}", levels.join(" "))
+            };
+            let name = model
+                .name
+                .as_deref()
+                .map(|n| format!("  {n}"))
+                .unwrap_or_default();
+            println!("  {}{default}{name}{efforts}", model.id);
+        }
+    }
+    if !any {
+        println!("No model lists yet: run `harness models --refresh`.");
     }
     Ok(())
 }
