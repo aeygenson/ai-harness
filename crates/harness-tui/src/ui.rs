@@ -37,6 +37,8 @@ pub enum ListId {
     Skills,
     /// The servers of the MCP tab.
     Mcp,
+    /// The servers found in the MCP registry.
+    McpCatalog,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -80,6 +82,12 @@ pub enum ButtonId {
     McpSecret,
     /// Starts the selected MCP server and asks it for its tools.
     McpCheck,
+    /// Opens the catalog of the MCP registry.
+    McpCatalog,
+    /// In the catalog: a new search, add the chosen server, back to the list.
+    McpSearch,
+    McpUse,
+    McpBack,
 }
 
 /// Where the clickable things were drawn in the last frame. Drawing fills it,
@@ -276,7 +284,14 @@ impl Form {
     /// `cancel` is the label of the Cancel button in the current language.
     pub fn draw(&self, frame: &mut Frame, hits: &mut Hits, cancel: &str) {
         let width = frame.area().width.saturating_sub(4).min(72);
-        let text_lines = u16::try_from(self.text.lines().count()).unwrap_or(0);
+        // Long lines wrap inside the window's borders.
+        let inner_width = usize::from(width.saturating_sub(2)).max(1);
+        let text_lines = self
+            .text
+            .lines()
+            .map(|line| wrapped_lines(line, inner_width))
+            .sum::<usize>();
+        let text_lines = u16::try_from(text_lines).unwrap_or(0);
         let fields = u16::try_from(self.fields.len()).unwrap_or(0);
         let height = 2 + text_lines + u16::from(text_lines > 0) + fields * 2 + 2 + 2;
         let [area] = Layout::vertical([Constraint::Length(height)])
@@ -342,6 +357,30 @@ impl Form {
     }
 }
 
+/// How many rows `line` takes when wrapped at words to `width` columns.
+fn wrapped_lines(line: &str, width: usize) -> usize {
+    let mut rows = 1;
+    let mut used = 0;
+    for word in line.split(' ') {
+        let len = word.chars().count();
+        let needed = if used == 0 { len } else { used + 1 + len };
+        if needed <= width {
+            used = needed;
+        } else {
+            if used > 0 {
+                rows += 1;
+            }
+            used = len;
+            // A word longer than the row is broken.
+            while used > width {
+                rows += 1;
+                used -= width;
+            }
+        }
+    }
+    rows
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -374,5 +413,12 @@ mod tests {
         assert_eq!((form.value(0), form.value(1)), ("xy", "w"));
         form.next_field();
         assert_eq!(form.focus, 0);
+    }
+
+    #[test]
+    fn long_lines_wrap_at_words() {
+        assert_eq!(wrapped_lines("", 10), 1);
+        assert_eq!(wrapped_lines("one two three", 9), 2);
+        assert_eq!(wrapped_lines("abcdefghijkl", 5), 3);
     }
 }
