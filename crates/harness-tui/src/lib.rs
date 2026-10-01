@@ -25,6 +25,7 @@ use harness_core::git::{Repo, HARNESS_DIR};
 use harness_core::models::{self, ModelList};
 use harness_core::projects::{self, name_of};
 use harness_core::skills::{self, SKILLS_DIR};
+use harness_core::{config_edit, settings};
 use ratatui::crossterm::cursor::Hide;
 use ratatui::crossterm::event::{
     self, DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
@@ -52,7 +53,7 @@ mod tasks;
 mod ui;
 
 use i18n::I18n;
-use mcp_tab::McpTab;
+use mcp_tab::{join_words, McpTab};
 use picker::{Browser, Native};
 use projects_tab::{has_config, ProjectsTab};
 use roles_tab::{Action, RolesTab};
@@ -104,6 +105,12 @@ enum Purpose {
     NewSkill,
     /// Delete the project's copy of a built-in skill.
     RestoreSkill(String),
+    /// A new MCP server (`None`) or a change to this one.
+    McpServer(Option<String>),
+    /// Remove this MCP server.
+    RemoveMcp(String),
+    /// Save a secret for MCP servers: its name and value.
+    Secret,
 }
 
 /// A skill file waiting to be opened in the editor.
@@ -470,7 +477,8 @@ impl App {
                     KeyCode::Char(' ') | KeyCode::Enter => self.press(ButtonId::McpToggle),
                     code => {
                         if let (Some(mcp), Some(roles)) = (&mut self.mcp, &self.roles) {
-                            mcp.on_key(code, roles);
+                            let action = mcp.on_key(code, roles);
+                            self.mcp_action(action);
                         }
                     }
                 },
@@ -697,6 +705,137 @@ impl App {
         }
     }
 
+    /// What the MCP tab asks for.
+    fn mcp_action(&mut self, action: mcp_tab::Action) {
+        use mcp_tab::Action as A;
+        let tr = &self.tr;
+        let servers = self.roles.as_ref().map(RolesTab::servers);
+        self.form = match action {
+            A::None => return,
+            A::New => Some((
+                Purpose::McpServer(None),
+                Form::new(tr.t("mcp.new_title"), tr.t("mcp.form_text"), tr.t("mcp.ok"))
+                    .field(tr.t("mcp.name"), "")
+                    .field(tr.t("mcp.command_field"), "")
+                    .field(tr.t("mcp.variables_field"), ""),
+            )),
+            A::Edit(name) => {
+                let server = servers.and_then(|s| s.get(&name));
+                let (command, variables) = server.map_or_else(Default::default, |s| {
+                    let command = join_words(std::iter::once(&s.command).chain(&s.args));
+                    let variables: Vec<String> =
+                        s.env.iter().map(|(k, v)| format!("{k}={v}")).collect();
+                    (command, join_words(&variables))
+                });
+                let old = server.map(|_| name.clone());
+                Some((
+                    Purpose::McpServer(old),
+                    Form::new(
+                        &tr.f("mcp.edit_title", &[("name", &name)]),
+                        tr.t("mcp.form_text"),
+                        tr.t("mcp.ok"),
+                    )
+                    .field(tr.t("mcp.name"), &name)
+                    .field(tr.t("mcp.command_field"), &command)
+                    .field(tr.t("mcp.variables_field"), &variables),
+                ))
+            }
+            A::Remove(name) => {
+                let text = tr.f("mcp.remove_text", &[("name", &name)]);
+                Some((
+                    Purpose::RemoveMcp(name),
+                    Form::new(tr.t("mcp.remove_title"), &text, tr.t("mcp.remove")),
+                ))
+            }
+            A::Secret(name) => Some((
+                Purpose::Secret,
+                Form::new(
+                    tr.t("mcp.secret_title"),
+                    tr.t("mcp.secret_text"),
+                    tr.t("mcp.ok"),
+                )
+                .field(tr.t("mcp.secret_name"), &name)
+                .secret(tr.t("mcp.secret_value")),
+            )),
+        };
+        // The value is typed into the second field.
+        if let Some((Purpose::Secret, form)) = &mut self.form {
+            form.focus = 1;
+        }
+    }
+
+    /// Writes a changed harness.toml after the same checks as «Save», and
+    /// reads it again everywhere.
+    fn save_settings(
+        &mut self,
+        change: impl FnOnce(&str) -> Result<String, String>,
+    ) -> Result<(), String> {
+        let (Some(root), Some(roles)) = (self.project.clone(), &mut self.roles) else {
+            return Err(self.tr.t("tabs.no_open_project").to_string());
+        };
+        if roles.changed() {
+            return Err(self.tr.t("mcp.save_first").to_string());
+        }
+        let text = change(roles.text())?;
+        let repo = Repo::open(&root).map_err(|e| e.to_string())?;
+        settings::save(&repo, &text).map_err(|e| e.to_string())?;
+        roles.reload();
+        if let Some(tasks) = &mut self.tasks {
+            tasks.reload();
+        }
+        if let Some(skills) = &mut self.skills {
+            skills.reload();
+        }
+        Ok(())
+    }
+
+    /// OK in the server form.
+    fn save_mcp(&mut self, old: Option<String>, form: &Form) -> Result<(), String> {
+        let name = form.value(0).to_string();
+        let server = mcp_tab::server_from(form.value(1), form.value(2))?;
+        harness_core::mcp::check_server(&name, &server).map_err(|e| e.to_string())?;
+        self.save_settings(|text| {
+            config_edit::set_mcp(text, old.as_deref(), &name, &server).map_err(|e| e.to_string())
+        })?;
+        if let (Some(mcp), Some(roles)) = (&mut self.mcp, &self.roles) {
+            mcp.select_named(&name, roles);
+        }
+        self.message = Some((self.tr.f("mcp.saved", &[("name", &name)]), false));
+        Ok(())
+    }
+
+    fn remove_mcp(&mut self, name: &str) -> Result<(), String> {
+        self.save_settings(|text| config_edit::remove_mcp(text, name).map_err(|e| e.to_string()))?;
+        self.message = Some((self.tr.f("mcp.removed", &[("name", &name)]), false));
+        Ok(())
+    }
+
+    /// OK in the secret form: the value goes to a private file, nowhere else.
+    fn save_secret(&mut self, form: &Form) -> Result<(), String> {
+        let name = form.value(0).to_string();
+        if !harness_core::mcp::is_simple_name(&name) {
+            return Err(self.tr.f("mcp.bad_secret_name", &[("name", &name)]));
+        }
+        let value = form.value(1);
+        if value.is_empty() {
+            return Err(self.tr.t("mcp.empty_secret").to_string());
+        }
+        let Some(home) = &self.home else {
+            return Err("HOME is not set".into());
+        };
+        credentials::save_secret(
+            &home.join("credentials"),
+            &name,
+            &credentials::Secret::new(value),
+        )
+        .map_err(|e| e.to_string())?;
+        if let Some(mcp) = &mut self.mcp {
+            mcp.reload();
+        }
+        self.message = Some((self.tr.f("mcp.secret_saved_as", &[("name", &name)]), false));
+        Ok(())
+    }
+
     /// What the Skills tab asks for.
     fn skill_action(&mut self, action: skills_tab::Action) {
         use skills_tab::Action as A;
@@ -913,6 +1052,12 @@ impl App {
                     mcp.choose_role(index);
                 }
             }
+            ButtonId::McpNew | ButtonId::McpEdit | ButtonId::McpRemove | ButtonId::McpSecret => {
+                if let (Some(mcp), Some(roles)) = (&self.mcp, &self.roles) {
+                    let action = mcp.press(id, roles);
+                    self.mcp_action(action);
+                }
+            }
             ButtonId::McpToggle => {
                 if let (Some(mcp), Some(roles)) = (&self.mcp, &mut self.roles) {
                     if let Err(key) = mcp.toggle(roles) {
@@ -1058,6 +1203,9 @@ impl App {
             }
             Purpose::NewSkill => self.create_skill(&form),
             Purpose::RestoreSkill(name) => self.restore_skill(&name.clone()),
+            Purpose::McpServer(old) => self.save_mcp(old.clone(), &form),
+            Purpose::RemoveMcp(name) => self.remove_mcp(&name.clone()),
+            Purpose::Secret => self.save_secret(&form),
             Purpose::Remove(path) => {
                 let path = path.clone();
                 let result = self.projects.update(|list| list.remove(&path));

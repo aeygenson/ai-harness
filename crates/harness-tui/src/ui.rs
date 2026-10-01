@@ -73,6 +73,11 @@ pub enum ButtonId {
     McpRole(usize),
     /// Gives the selected MCP server to the role, or takes it away.
     McpToggle,
+    McpNew,
+    McpEdit,
+    McpRemove,
+    /// Saves a secret the selected MCP server needs.
+    McpSecret,
 }
 
 /// Where the clickable things were drawn in the last frame. Drawing fills it,
@@ -194,10 +199,22 @@ pub struct Form {
     pub error: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct Field {
     pub label: String,
     pub value: String,
+    /// A secret: shown as dots, never printed.
+    pub hidden: bool,
+}
+
+impl std::fmt::Debug for Field {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let value = if self.hidden { "***" } else { &self.value };
+        f.debug_struct("Field")
+            .field("label", &self.label)
+            .field("value", &value)
+            .finish()
+    }
 }
 
 impl Form {
@@ -216,6 +233,17 @@ impl Form {
         self.fields.push(Field {
             label: label.into(),
             value: value.into(),
+            hidden: false,
+        });
+        self
+    }
+
+    /// A field for a secret: what is typed or pasted shows as dots.
+    pub fn secret(mut self, label: &str) -> Self {
+        self.fields.push(Field {
+            label: label.into(),
+            value: String::new(),
+            hidden: true,
         });
         self
     }
@@ -284,10 +312,12 @@ impl Form {
             } else {
                 Style::new().fg(Color::Gray)
             };
-            frame.render_widget(
-                Span::styled(format!(" {}{cursor}", field.value), style),
-                rect,
-            );
+            let shown = if field.hidden {
+                "•".repeat(field.value.chars().count())
+            } else {
+                field.value.clone()
+            };
+            frame.render_widget(Span::styled(format!(" {shown}{cursor}"), style), rect);
             hits.add(rect, Target::Field(i));
             y += 2;
         }
