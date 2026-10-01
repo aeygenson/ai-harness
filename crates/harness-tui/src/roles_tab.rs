@@ -13,7 +13,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use harness_agents::credentials;
-use harness_core::config::{Config, McpConfig, RetroConfig, RoleConfig, AGENTS, CONFIG_FILE};
+use harness_core::config::{
+    Config, McpConfig, PluginConfig, RetroConfig, RoleConfig, AGENTS, CONFIG_FILE,
+};
 use harness_core::config_edit;
 use harness_core::git::{Repo, HARNESS_DIR};
 use harness_core::handoff::Role;
@@ -524,6 +526,19 @@ impl RolesTab {
     pub fn toggle_mcp(&mut self, role: Role, name: &str) {
         if let Some(settings) = self.roles.get_mut(&role) {
             toggle(&mut settings.mcp, name.to_string());
+        }
+    }
+
+    /// The plugins `harness.toml` describes.
+    pub fn plugins(&self) -> &BTreeMap<String, PluginConfig> {
+        &self.saved.plugins
+    }
+
+    /// Gives `role` the plugin `name`, or takes it away; saved with the
+    /// rest of the changes.
+    pub fn toggle_plugin(&mut self, role: Role, name: &str) {
+        if let Some(settings) = self.roles.get_mut(&role) {
+            toggle(&mut settings.plugins, name.to_string());
         }
     }
 

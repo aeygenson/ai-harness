@@ -204,7 +204,9 @@ fn without_a_project_it_starts_on_the_projects_tab() {
     key(&mut app, KeyCode::Char('4'));
     assert!(screen(&mut app).contains("No project is open"));
     key(&mut app, KeyCode::Char('5'));
-    assert!(screen(&mut app).contains("arrives in step 4 of the plan"));
+    assert!(screen(&mut app).contains("No project is open"));
+    key(&mut app, KeyCode::Char('6'));
+    assert!(screen(&mut app).contains("arrives in step 6 of the plan"));
 }
 
 #[test]
@@ -1653,4 +1655,159 @@ fn a_web_server_with_a_sign_in_is_signed_in_from_the_tab() {
         app.tick();
     }
     assert!(screen(&mut app).contains("notion: 0 tools"));
+}
+
+/// A plugin folder for `agent` in the project, with extra files.
+fn plugin_folder(root: &Path, name: &str, agent: &str, extra: &[(&str, &str)]) {
+    let folder = root.join(".harness/plugins").join(name);
+    let manifest = folder.join(harness_core::plugins::manifest(agent));
+    fs::create_dir_all(manifest.parent().unwrap()).unwrap();
+    fs::write(
+        manifest,
+        format!(r#"{{"name": "{name}", "description": "The {name} plugin", "version": "1.0.0"}}"#),
+    )
+    .unwrap();
+    for (file, text) in extra {
+        let path = folder.join(file);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, text).unwrap();
+    }
+}
+
+#[test]
+fn the_plugins_tab_gives_allows_and_removes_plugins() {
+    let env = Env::new();
+    let root = env.path("test");
+    project(&root);
+    plugin_folder(
+        &root,
+        "review",
+        "claude",
+        &[
+            ("skills/audit/SKILL.md", "---\n---\n"),
+            ("commands/review.md", "# review"),
+            ("hooks/hooks.json", "{}"),
+        ],
+    );
+    plugin_folder(&root, "lint", "codex", &[]);
+    let path = root.join(".harness/harness.toml");
+    let text = fs::read_to_string(&path).unwrap()
+        + "\n[plugins.review]\nagent = \"claude\"\nsource = \"official/review\"\n\
+           commit = \"0123456789abcdef\"\n\n[plugins.lint]\nagent = \"codex\"\n";
+    let text = text
+        .replace(
+            "[roles.developer]\nagent = \"claude\"",
+            "[roles.developer]\nagent = \"codex\"",
+        )
+        .replace(
+            "[roles.security]\nagent = \"claude\"",
+            "[roles.security]\nagent = \"antigravity\"",
+        );
+    fs::write(&path, text).unwrap();
+    let repo = Repo::open(&root).unwrap();
+    repo.commit_all("plugins").unwrap();
+
+    let mut app = env.app(&root);
+    click(&mut app, "5 Plugins");
+    let text = screen(&mut app);
+    for part in [
+        " Plugins of the architect ",
+        "> [ ] review",
+        "✗ not allowed",
+        "[ ] lint",
+        "Agent: claude",
+        "From: official/review · 0123456",
+        "Inside: 1 skills, 1 commands, 0 subagents",
+        "Hooks: yes, not allowed",
+        "The review plugin",
+        "[ Give to the architect ]",
+        "[ Allow hooks ]",
+    ] {
+        assert!(text.contains(part), "missing {part:?} in:\n{text}");
+    }
+
+    // Saving checks the plugin as a run would: its hooks are not allowed.
+    key(&mut app, KeyCode::Char(' '));
+    assert!(screen(&mut app).contains("> [x] review"));
+    key(&mut app, KeyCode::Char('s'));
+    let (message, problem) = app.message.clone().unwrap();
+    assert!(problem && message.contains("hooks"), "{message}");
+    key(&mut app, KeyCode::Char('u'));
+
+    // Allowing hooks asks first, then writes and commits.
+    click(&mut app, "[ Allow hooks ]");
+    assert!(screen(&mut app).contains("Allow the plugin to run programs"));
+    key(&mut app, KeyCode::Enter);
+    assert!(app.form.is_none(), "{:?}", app.form);
+    assert!(config(&root).plugins["review"].allow_hooks);
+    let text = screen(&mut app);
+    assert!(text.contains("Hooks: yes, allowed"), "{text}");
+    assert!(text.contains("[ Forbid hooks ]"), "{text}");
+    key(&mut app, KeyCode::Char(' '));
+    key(&mut app, KeyCode::Char('s'));
+    assert_eq!(config(&root).roles[&Role::Architect].plugins, ["review"]);
+    assert!(repo.changed_files().unwrap().is_empty());
+
+    // Forbidding hooks the architect needs is refused, and nothing changes.
+    click(&mut app, "[ Forbid hooks ]");
+    let (message, problem) = app.message.clone().unwrap();
+    assert!(
+        problem && message.contains("Take review from its roles first"),
+        "{message}"
+    );
+    assert!(config(&root).plugins["review"].allow_hooks);
+
+    // A Codex role gets Codex plugins only.
+    click(&mut app, "[ developer ]");
+    let text = screen(&mut app);
+    assert!(text.contains("> [ ] lint"), "{text}");
+    click(&mut app, "[ ] review");
+    assert!(screen(&mut app).contains("The developer runs on codex"));
+    key(&mut app, KeyCode::Char(' '));
+    assert_eq!(
+        app.message.as_ref().unwrap().0,
+        "This plugin is for another agent"
+    );
+    // Antigravity has none at all.
+    click(&mut app, "[ security ]");
+    key(&mut app, KeyCode::Char(' '));
+    assert_eq!(
+        app.message.as_ref().unwrap().0,
+        "The role's agent has no plugins"
+    );
+
+    // «Open in Zed» opens the folder; what was changed there is committed.
+    click(&mut app, "[ architect ]");
+    key(&mut app, KeyCode::Char('e'));
+    let job = app.edit.take().unwrap();
+    assert!(job.plugin && job.path.ends_with(".harness/plugins/review"));
+    app.finish_edit(&job, Ok(()));
+    assert_eq!(
+        app.message.as_ref().unwrap().0,
+        "Nothing changed in the plugin"
+    );
+    fs::write(job.path.join("commands/new.md"), "# new").unwrap();
+    app.finish_edit(&job, Ok(()));
+    assert!(app
+        .message
+        .as_ref()
+        .unwrap()
+        .0
+        .contains("changes committed"));
+    assert!(repo.changed_files().unwrap().is_empty());
+    assert!(screen(&mut app).contains("2 commands"));
+
+    // Removing asks first; the folder and the settings go in one commit.
+    click(&mut app, "[ developer ]");
+    key(&mut app, KeyCode::Delete);
+    assert!(screen(&mut app).contains("Remove plugin lint from the project?"));
+    key(&mut app, KeyCode::Enter);
+    assert!(!config(&root).plugins.contains_key("lint"));
+    assert!(!root.join(".harness/plugins/lint").exists());
+    assert!(repo.changed_files().unwrap().is_empty());
+    let text = screen(&mut app);
+    assert!(
+        !text.contains("] lint") && text.contains("Plugin lint removed"),
+        "{text}"
+    );
 }

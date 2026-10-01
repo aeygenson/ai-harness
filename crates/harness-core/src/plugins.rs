@@ -194,29 +194,78 @@ pub struct Contents {
 /// Reads the manifest of `agent`'s plugin in `path` and looks at what the
 /// plugin brings. `name` is only for messages.
 pub fn inspect(path: &Path, name: &str, agent: &str) -> Result<Contents, PluginError> {
+    let manifest = read_manifest(path, name, agent)?;
+    Ok(contents_of(path, &manifest))
+}
+
+/// What the Plugins tab shows about a plugin folder.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Details {
+    pub contents: Contents,
+    /// `description` and `version` from its manifest.
+    pub description: Option<String>,
+    pub version: Option<String>,
+    /// Skills (`skills/<name>/SKILL.md`), commands (`commands/*.md`) and
+    /// subagents (`agents/*.md`).
+    pub skills: usize,
+    pub commands: usize,
+    pub agents: usize,
+}
+
+/// Reads what `agent`'s plugin in `path` brings, for showing it.
+pub fn describe(path: &Path, name: &str, agent: &str) -> Result<Details, PluginError> {
+    let manifest = read_manifest(path, name, agent)?;
+    let text = |key: &str| {
+        manifest
+            .get(key)
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_string)
+    };
+    let count = |dir: &str, wanted: &dyn Fn(&Path) -> bool| {
+        fs::read_dir(path.join(dir)).map_or(0, |entries| {
+            entries
+                .filter_map(Result::ok)
+                .filter(|entry| wanted(&entry.path()))
+                .count()
+        })
+    };
+    let markdown = |p: &Path| p.is_file() && p.extension().is_some_and(|e| e == "md");
+    Ok(Details {
+        contents: contents_of(path, &manifest),
+        description: text("description"),
+        version: text("version"),
+        skills: count("skills", &|p| p.join("SKILL.md").is_file()),
+        commands: count("commands", &markdown),
+        agents: count("agents", &markdown),
+    })
+}
+
+fn read_manifest(path: &Path, name: &str, agent: &str) -> Result<serde_json::Value, PluginError> {
     let manifest_path = path.join(manifest(agent));
-    let shown = manifest_path.display().to_string();
     let text = fs::read_to_string(&manifest_path).map_err(|_| PluginError::NoManifest {
         name: name.to_string(),
         path: path.display().to_string(),
         manifest: manifest(agent),
         agent: agent.to_string(),
     })?;
-    let manifest: serde_json::Value = serde_json::from_str(&text)
+    serde_json::from_str(&text)
         .ok()
         .filter(serde_json::Value::is_object)
         .ok_or_else(|| PluginError::BadManifest {
             name: name.to_string(),
-            path: shown,
-        })?;
-    Ok(Contents {
+            path: manifest_path.display().to_string(),
+        })
+}
+
+fn contents_of(path: &Path, manifest: &serde_json::Value) -> Contents {
+    Contents {
         hooks: path.join("hooks/hooks.json").exists() || manifest.get("hooks").is_some(),
         servers: path.join(".mcp.json").exists()
             || path.join(".lsp.json").exists()
             || manifest.get("mcpServers").is_some()
             || manifest.get("lspServers").is_some(),
         apps: path.join(".app.json").exists() || manifest.get("apps").is_some(),
-    })
+    }
 }
 
 /// Copies a plugin folder, without its `.git`. Symbolic links and other
@@ -309,6 +358,34 @@ mod tests {
 
     const MANIFEST_OK: &str = r#"{"name": "review", "description": "Reviews code"}"#;
     const ROLE: &str = "[roles.security]\nagent = \"claude\"\nplugins = [\"review\"]\n";
+
+    #[test]
+    fn a_plugin_is_described_by_what_it_brings() {
+        let dir = project(
+            r#"{"name": "review", "description": "Reviews code", "version": "1.2.0"}"#,
+            &[
+                ("skills/audit/SKILL.md", "---\n---\n"),
+                ("skills/notes.txt", "not a skill"),
+                ("commands/review.md", "# review"),
+                ("commands/fix.md", "# fix"),
+                ("agents/checker.md", "# checker"),
+                ("hooks/hooks.json", "{}"),
+            ],
+        );
+        let path = dir.path().join(PLUGINS_DIR).join("review");
+        let details = describe(&path, "review", CLAUDE).unwrap();
+        assert_eq!(details.description.as_deref(), Some("Reviews code"));
+        assert_eq!(details.version.as_deref(), Some("1.2.0"));
+        assert_eq!(
+            (details.skills, details.commands, details.agents),
+            (1, 2, 1)
+        );
+        assert!(details.contents.hooks && !details.contents.servers);
+        assert!(matches!(
+            describe(&path, "review", CODEX),
+            Err(PluginError::NoManifest { .. })
+        ));
+    }
 
     #[test]
     fn a_role_gets_its_plugin_folder() {

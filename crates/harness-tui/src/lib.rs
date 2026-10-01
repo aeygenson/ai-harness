@@ -29,7 +29,7 @@ use harness_core::mcp_tools::{self, Tool, ToolList};
 use harness_core::models::{self, ModelList};
 use harness_core::projects::{self, name_of};
 use harness_core::skills::{self, SKILLS_DIR};
-use harness_core::{config_edit, settings};
+use harness_core::{config_edit, plugin_ops, settings};
 use ratatui::crossterm::cursor::Hide;
 use ratatui::crossterm::event::{
     self, DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
@@ -49,6 +49,7 @@ mod i18n;
 mod keys;
 mod mcp_tab;
 mod picker;
+mod plugins_tab;
 mod projects_tab;
 mod roles_tab;
 mod runner;
@@ -59,6 +60,7 @@ mod ui;
 use i18n::I18n;
 use mcp_tab::McpTab;
 use picker::{Browser, Native};
+use plugins_tab::PluginsTab;
 use projects_tab::{has_config, ProjectsTab};
 use roles_tab::{Action, RolesTab};
 use runner::Builder;
@@ -117,9 +119,17 @@ enum Purpose {
     Secret,
     /// What to search in the MCP registry.
     McpSearch,
+    /// Remove this plugin from the project.
+    RemovePlugin(String),
+    /// Let this plugin run its hooks, its own servers.
+    AllowPlugin {
+        name: String,
+        hooks: bool,
+        servers: bool,
+    },
 }
 
-/// A skill file waiting to be opened in the editor.
+/// A skill file, or a plugin folder, waiting to be opened in the editor.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct EditJob {
     name: String,
@@ -127,6 +137,8 @@ struct EditJob {
     /// The file is a fresh copy of the built-in skill: if Lisa changes
     /// nothing, it is deleted again.
     copied: bool,
+    /// The folder of the plugin `name`, not a skill.
+    plugin: bool,
 }
 
 /// What a folder is being chosen for.
@@ -261,6 +273,7 @@ struct App {
     roles: Option<RolesTab>,
     skills: Option<SkillsTab>,
     mcp: Option<McpTab>,
+    plugins: Option<PluginsTab>,
     /// A skill to open in the editor after this event.
     edit: Option<EditJob>,
     projects: ProjectsTab,
@@ -305,6 +318,7 @@ impl App {
             roles: None,
             skills: None,
             mcp: None,
+            plugins: None,
             edit: None,
             projects: ProjectsTab::load(home),
             form: None,
@@ -349,7 +363,9 @@ impl App {
             return;
         }
         self.tasks = Some(TasksTab::load(root, self.home.as_deref()));
-        self.roles = Some(RolesTab::load(root, self.home.as_deref()));
+        let roles = RolesTab::load(root, self.home.as_deref());
+        self.plugins = Some(PluginsTab::load(root, &roles));
+        self.roles = Some(roles);
         self.skills = Some(SkillsTab::load(root));
         self.mcp = Some(McpTab::load(self.home.as_deref()));
         self.project = Some(root.to_path_buf());
@@ -551,6 +567,9 @@ impl App {
                 if let Some(mcp) = &mut self.mcp {
                     mcp.reload();
                 }
+                if let (Some(plugins), Some(roles)) = (&mut self.plugins, &self.roles) {
+                    plugins.reload(roles);
+                }
                 self.projects.reload();
             }
             code => match self.tab {
@@ -590,6 +609,17 @@ impl App {
                         if let (Some(mcp), Some(roles)) = (&mut self.mcp, &self.roles) {
                             let action = mcp.on_key(code, roles);
                             self.mcp_action(action);
+                        }
+                    }
+                },
+                Tab::Plugins => match code {
+                    KeyCode::Char('s') => self.press(ButtonId::Save),
+                    KeyCode::Char('u') => self.press(ButtonId::Undo),
+                    KeyCode::Char(' ') | KeyCode::Enter => self.press(ButtonId::PluginToggle),
+                    code => {
+                        if let (Some(plugins), Some(roles)) = (&mut self.plugins, &self.roles) {
+                            let action = plugins.on_key(code, roles);
+                            self.plugin_action(action);
                         }
                     }
                 },
@@ -675,6 +705,11 @@ impl App {
                             } else {
                                 mcp.move_by(if down { 1 } else { -1 }, roles);
                             }
+                        }
+                    }
+                    (Tab::Plugins, _) => {
+                        if let (Some(plugins), Some(roles)) = (&mut self.plugins, &self.roles) {
+                            plugins.move_by(if down { 1 } else { -1 }, roles);
                         }
                     }
                     _ => {}
@@ -776,6 +811,14 @@ impl App {
                     }
                     if double {
                         self.press(ButtonId::McpToggle);
+                    }
+                }
+                Some((ListId::Plugins, index)) => {
+                    if let (Some(plugins), Some(roles)) = (&mut self.plugins, &self.roles) {
+                        plugins.select(index, roles);
+                    }
+                    if double {
+                        self.press(ButtonId::PluginToggle);
                     }
                 }
                 Some((ListId::McpCatalog, index)) => {
@@ -1047,6 +1090,9 @@ impl App {
         let repo = Repo::open(&root).map_err(|e| e.to_string())?;
         settings::save(&repo, &text).map_err(|e| e.to_string())?;
         roles.reload();
+        if let Some(plugins) = &mut self.plugins {
+            plugins.reload(roles);
+        }
         if let Some(tasks) = &mut self.tasks {
             tasks.reload();
         }
@@ -1105,6 +1151,108 @@ impl App {
         Ok(())
     }
 
+    /// What the Plugins tab asks for.
+    fn plugin_action(&mut self, action: plugins_tab::Action) {
+        use plugins_tab::Action as A;
+        let tr = &self.tr;
+        match action {
+            A::None => {}
+            A::Remove(name) => {
+                let text = tr.f("plugins.remove_text", &[("name", &name)]);
+                self.form = Some((
+                    Purpose::RemovePlugin(name),
+                    Form::new(tr.t("plugins.remove_title"), &text, tr.t("plugins.remove")),
+                ));
+            }
+            A::Allow {
+                name,
+                hooks,
+                servers,
+            } => {
+                let old = self.roles.as_ref().and_then(|r| r.plugins().get(&name));
+                let more =
+                    old.is_none_or(|p| (hooks && !p.allow_hooks) || (servers && !p.allow_mcp));
+                if !more {
+                    // Forbidding needs no question; it fails while a role
+                    // still has the plugin.
+                    if self.allow_plugin(&name, hooks, servers).is_err() {
+                        let text = self.tr.f("plugins.forbid_used", &[("name", &name)]);
+                        self.message = Some((text, true));
+                    }
+                    return;
+                }
+                let key = if old.is_some_and(|p| hooks && !p.allow_hooks) {
+                    "plugins.allow_hooks_text"
+                } else {
+                    "plugins.allow_servers_text"
+                };
+                let text = tr.f(key, &[("name", &name)]);
+                self.form = Some((
+                    Purpose::AllowPlugin {
+                        name,
+                        hooks,
+                        servers,
+                    },
+                    Form::new(tr.t("plugins.allow_title"), &text, tr.t("plugins.allow")),
+                ));
+            }
+            A::Open(name) => {
+                let path = self.plugins.as_ref().and_then(|tab| {
+                    let plugin = self.roles.as_ref()?.plugins().get(&name)?;
+                    Some(tab.folder(&name, plugin))
+                });
+                match path {
+                    Some(path) if path.is_dir() => {
+                        self.edit = Some(EditJob {
+                            name,
+                            path,
+                            copied: false,
+                            plugin: true,
+                        });
+                    }
+                    Some(path) => {
+                        let text = tr.f("plugins.no_folder", &[("path", &path.display())]);
+                        self.message = Some((text, true));
+                    }
+                    None => {}
+                }
+            }
+        }
+    }
+
+    /// OK in «Remove the plugin»: its folder and settings go, in one commit.
+    fn remove_plugin(&mut self, name: &str) -> Result<(), String> {
+        let (Some(root), Some(roles)) = (self.project.clone(), &mut self.roles) else {
+            return Err(self.tr.t("tabs.no_open_project").to_string());
+        };
+        if roles.changed() {
+            return Err(self.tr.t("mcp.save_first").to_string());
+        }
+        let repo = Repo::open(&root).map_err(|e| e.to_string())?;
+        plugin_ops::remove(&repo, name).map_err(|e| e.to_string())?;
+        roles.reload();
+        if let Some(plugins) = &mut self.plugins {
+            plugins.reload(roles);
+        }
+        if let Some(tasks) = &mut self.tasks {
+            tasks.reload();
+        }
+        self.message = Some((self.tr.f("plugins.removed", &[("name", &name)]), false));
+        Ok(())
+    }
+
+    /// Writes what the plugin may run by itself; checked like «Save».
+    fn allow_plugin(&mut self, name: &str, hooks: bool, servers: bool) -> Result<(), String> {
+        self.save_settings(|text| {
+            config_edit::set_plugin_allow(text, name, hooks, servers).map_err(|e| e.to_string())
+        })?;
+        if let (Some(plugins), Some(roles)) = (&mut self.plugins, &self.roles) {
+            plugins.select_named(name, roles);
+        }
+        self.message = Some((self.tr.f("plugins.allow_saved", &[("name", &name)]), false));
+        Ok(())
+    }
+
     /// What the Skills tab asks for.
     fn skill_action(&mut self, action: skills_tab::Action) {
         use skills_tab::Action as A;
@@ -1131,7 +1279,12 @@ impl App {
                     }
                     copied = true;
                 }
-                self.edit = Some(EditJob { name, path, copied });
+                self.edit = Some(EditJob {
+                    name,
+                    path,
+                    copied,
+                    plugin: false,
+                });
             }
             A::New => {
                 self.form = Some((
@@ -1158,6 +1311,10 @@ impl App {
     /// The editor was closed: keep the change in git, or drop a copy of a
     /// built-in skill that was not changed.
     fn finish_edit(&mut self, job: &EditJob, result: Result<(), String>) {
+        if job.plugin {
+            self.finish_plugin_edit(job, result);
+            return;
+        }
         let tr = &self.tr;
         let mut message = result
             .err()
@@ -1190,6 +1347,29 @@ impl App {
         }
         self.message = message;
         self.reload_skills(Some(&job.name));
+    }
+
+    /// The plugin's folder was open in the editor: keep what changed in git.
+    fn finish_plugin_edit(&mut self, job: &EditJob, result: Result<(), String>) {
+        let tr = &self.tr;
+        let saved = self
+            .project
+            .as_deref()
+            .ok_or_else(String::new)
+            .and_then(|root| Repo::open(root).map_err(|e| e.to_string()))
+            .and_then(|repo| {
+                repo.commit_paths(&[&job.path], &format!("harness: plugin {}", job.name))
+                    .map_err(|e| e.to_string())
+            });
+        self.message = Some(match (result, saved) {
+            (Err(error), _) => (tr.f("skills.editor_failed", &[("error", &error)]), true),
+            (_, Err(error)) => (error, true),
+            (_, Ok(true)) => (tr.f("plugins.edited", &[("name", &job.name)]), false),
+            (_, Ok(false)) => (tr.t("plugins.unchanged").to_string(), false),
+        });
+        if let (Some(plugins), Some(roles)) = (&mut self.plugins, &self.roles) {
+            plugins.reload(roles);
+        }
     }
 
     /// The skills changed: both tabs that show them read them again.
@@ -1227,6 +1407,7 @@ impl App {
             name: name.to_string(),
             path,
             copied: false,
+            plugin: false,
         });
         Ok(())
     }
@@ -1349,6 +1530,27 @@ impl App {
                     if let Err(key) = mcp.toggle(roles) {
                         self.message = Some((self.tr.t(key).to_string(), true));
                     }
+                }
+            }
+            ButtonId::PluginRole(index) => {
+                if let Some(plugins) = &mut self.plugins {
+                    plugins.choose_role(index);
+                }
+            }
+            ButtonId::PluginToggle => {
+                if let (Some(plugins), Some(roles)) = (&self.plugins, &mut self.roles) {
+                    if let Err(key) = plugins.toggle(roles) {
+                        self.message = Some((self.tr.t(key).to_string(), true));
+                    }
+                }
+            }
+            ButtonId::PluginHooks
+            | ButtonId::PluginServers
+            | ButtonId::PluginRemove
+            | ButtonId::PluginOpen => {
+                if let (Some(plugins), Some(roles)) = (&self.plugins, &self.roles) {
+                    let action = plugins.press(id, roles);
+                    self.plugin_action(action);
                 }
             }
             ButtonId::SkillRole(_)
@@ -1496,6 +1698,12 @@ impl App {
                 self.search_registry(form.value(0));
                 Ok(())
             }
+            Purpose::RemovePlugin(name) => self.remove_plugin(&name.clone()),
+            Purpose::AllowPlugin {
+                name,
+                hooks,
+                servers,
+            } => self.allow_plugin(&name.clone(), *hooks, *servers),
             Purpose::Remove(path) => {
                 let path = path.clone();
                 let result = self.projects.update(|list| list.remove(&path));
@@ -1505,6 +1713,7 @@ impl App {
                     self.roles = None;
                     self.skills = None;
                     self.mcp = None;
+                    self.plugins = None;
                 }
                 result.map(|()| {
                     self.message = Some((self.tr.t("projects.removed").to_string(), false));
@@ -1665,6 +1874,17 @@ impl App {
                     frame,
                     main,
                     &format!(" {} ", self.tr.t("tabs.mcp")),
+                    self.tr.t("tabs.no_open_project"),
+                ),
+            },
+            Tab::Plugins => match (&self.plugins, &self.roles) {
+                (Some(plugins), Some(roles)) => {
+                    plugins.draw(frame, main, &mut self.hits, &self.tr, roles);
+                }
+                _ => placeholder(
+                    frame,
+                    main,
+                    &format!(" {} ", self.tr.t("tabs.plugins")),
                     self.tr.t("tabs.no_open_project"),
                 ),
             },

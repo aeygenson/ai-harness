@@ -669,7 +669,8 @@ impl TasksTab {
             | ListId::RoleFilter
             | ListId::Skills
             | ListId::Mcp
-            | ListId::McpCatalog => {}
+            | ListId::McpCatalog
+            | ListId::Plugins => {}
         }
     }
 
