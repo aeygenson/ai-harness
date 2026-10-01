@@ -77,11 +77,18 @@ fn entry(server: &Value) -> Option<Entry> {
     let text = |key: &str| server[key].as_str().map(clean).filter(|t| !t.is_empty());
     let version = text("version").unwrap_or_default();
     let packages = server["packages"].as_array().cloned().unwrap_or_default();
-    let offer = packages.iter().find_map(|p| offer(&name, p));
-    let unusable = match (&offer, packages.is_empty()) {
-        (Some(_), _) => None,
-        (None, true) => Some("only on the web (HTTP); not supported yet".to_string()),
-        (None, false) => Some("no npm, PyPI or container package to start".to_string()),
+    let remotes = server["remotes"].as_array().cloned().unwrap_or_default();
+    // A program on this computer first, else the address on the web.
+    let offer = packages
+        .iter()
+        .find_map(|p| offer(&name, p))
+        .or_else(|| remotes.iter().find_map(|r| remote_offer(&name, r)));
+    let unusable = match (&offer, packages.is_empty(), remotes.is_empty()) {
+        (Some(_), _, _) => None,
+        (None, true, false) => {
+            Some("its web address uses the old SSE way, or has parts to fill in".to_string())
+        }
+        (None, _, _) => Some("no npm, PyPI or container package, and no web address".to_string()),
     };
     Some(Entry {
         title: text("title"),
@@ -91,6 +98,68 @@ fn entry(server: &Value) -> Option<Entry> {
         offer,
         unusable,
         name,
+    })
+}
+
+/// A server on the web (`streamable-http`), reached through the bridge.
+fn remote_offer(registry_name: &str, remote: &Value) -> Option<Offer> {
+    if remote["type"].as_str()? != "streamable-http" {
+        return None;
+    }
+    let url = clean(remote["url"].as_str()?);
+    if url.contains('{') || !crate::mcp::is_allowed_url(&url) {
+        return None;
+    }
+    let name = local_name(registry_name);
+    let mut headers = BTreeMap::new();
+    let mut variables = Vec::new();
+    let mut secrets = 0;
+    for header in remote["headers"].as_array().into_iter().flatten() {
+        let Some(header_name) = header["name"].as_str().map(clean) else {
+            continue;
+        };
+        let description = header["description"]
+            .as_str()
+            .map(clean)
+            .unwrap_or_default();
+        let given = header["value"]
+            .as_str()
+            .or_else(|| header["default"].as_str())
+            .map(clean);
+        let value = if header["isSecret"] == true {
+            secrets += 1;
+            let secret = if secrets == 1 {
+                name.clone()
+            } else {
+                format!("{name}-{}", header_name.to_lowercase().replace('_', "-"))
+            };
+            let secret = format!("{SECRET_PREFIX}{secret}");
+            // `Bearer {token}` keeps its `Bearer `.
+            Some(match given.as_deref().and_then(|g| g.split_once('{')) {
+                Some((before, _)) => format!("{before}{secret}"),
+                None => secret,
+            })
+        } else if let Some(given) = given.filter(|g| !g.contains('{')) {
+            Some(given)
+        } else if header["isRequired"] == true {
+            Some(String::new())
+        } else {
+            None
+        };
+        if let Some(value) = value {
+            headers.insert(header_name.clone(), value);
+        }
+        variables.push((header_name, description));
+    }
+    Some(Offer {
+        name,
+        server: McpConfig {
+            url: Some(url),
+            headers,
+            ..McpConfig::default()
+        },
+        variables,
+        kind: "web".to_string(),
     })
 }
 
@@ -285,7 +354,7 @@ mod tests {
         "remotes": [{"type": "streamable-http", "url": "https://mcp.context7.com/mcp"}]}},
       {"server": {"name": "io.github.upstash/context7", "version": "4.0.0"}},
       {"server": {"name": "ac.inference.sh/mcp", "description": "Web only\u001b[2J",
-        "version": "1.0.0", "remotes": [{"type": "streamable-http", "url": "https://x"}]}},
+        "version": "1.0.0", "remotes": [{"type": "sse", "url": "https://x"}]}},
       {"server": {"name": "io.github.x/Files Server", "version": "latest",
         "packages": [{"registryType": "pypi", "identifier": "files-mcp", "version": "latest",
           "runtimeArguments": [{"type": "positional", "value": "--quiet"}],
@@ -370,5 +439,39 @@ mod tests {
         assert_eq!(local_name("x/__"), "server");
         assert_eq!(local_name("ai.smithery/9lives"), "9lives");
         assert!(parse("not json").is_err());
+    }
+
+    #[test]
+    fn a_server_on_the_web_becomes_an_address_with_headers() {
+        let answer = r#"{"servers": [
+          {"server": {"name": "io.github.github/github-mcp-server", "version": "1.0.0",
+            "remotes": [{"type": "streamable-http", "url": "https://api.githubcopilot.com/mcp/",
+              "headers": [
+                {"name": "Authorization", "value": "Bearer {token}", "isSecret": true,
+                 "description": "A GitHub token"},
+                {"name": "X-MCP-Toolsets", "value": "repos,issues"},
+                {"name": "X-Optional", "description": "not needed"}]}]}},
+          {"server": {"name": "x/templated", "version": "1",
+            "remotes": [{"type": "streamable-http", "url": "https://{tenant}.example.com/mcp"}]}}
+        ]}"#;
+        let entries = parse(answer).unwrap();
+        let github = entries[0].offer.as_ref().unwrap();
+        assert_eq!(github.kind, "web");
+        assert_eq!(github.name, "github-mcp-server");
+        let server = &github.server;
+        assert_eq!(
+            server.url.as_deref(),
+            Some("https://api.githubcopilot.com/mcp/")
+        );
+        assert_eq!(
+            server.headers["Authorization"],
+            "Bearer secret:github-mcp-server"
+        );
+        assert_eq!(server.headers["X-MCP-Toolsets"], "repos,issues");
+        assert!(!server.headers.contains_key("X-Optional"));
+        assert_eq!(github.variables.len(), 3);
+        crate::mcp::check_server(&github.name, server).unwrap();
+        assert!(entries[1].offer.is_none());
+        assert!(entries[1].unusable.as_ref().unwrap().contains("fill in"));
     }
 }

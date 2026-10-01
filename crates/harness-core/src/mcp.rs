@@ -27,6 +27,10 @@
 //! headers = { Authorization = "Bearer secret:github" }
 //! ```
 //!
+//! A server that wants a sign-in in the browser (OAuth) says `auth = "oauth"`
+//! instead of a key in its headers; `harness mcp login <name>` signs in once
+//! and the harness keeps the tokens (see [`OAUTH_SECRET`]).
+//!
 //! The agents start it like any other server, as the program
 //! `harness mcp-remote`, which talks to the address and adds the headers
 //! with the secrets itself (see [`BRIDGE_COMMAND`]).
@@ -50,6 +54,11 @@ pub const BRIDGE_ARG: &str = "mcp-remote";
 /// `Name: value`, from `HARNESS_MCP_HEADER_1`, `_2`, ...
 pub const BRIDGE_URL: &str = "HARNESS_MCP_URL";
 pub const BRIDGE_HEADER: &str = "HARNESS_MCP_HEADER_";
+/// The only `auth` there is: a sign-in in the browser.
+pub const AUTH_OAUTH: &str = "oauth";
+/// A server with `auth = "oauth"` asks the secret function for
+/// `oauth/<server> <url>`: the access token of the sign-in, still valid.
+pub const OAUTH_SECRET: &str = "oauth/";
 
 /// One server as an agent starts it, with every secret already read.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -89,6 +98,13 @@ pub enum McpError {
     WebServerParts(String),
     #[error("MCP server {server:?}: header {name:?} is not allowed")]
     BadHeader { server: String, name: String },
+    #[error(
+        "MCP server {0:?}: auth may only be \"oauth\", for a server on the web (url) \
+         without its own Authorization header"
+    )]
+    BadAuth(String),
+    #[error("MCP server {0:?} needs a sign-in: run `harness mcp login {0}`")]
+    NotSignedIn(String),
     #[error(
         "MCP server {server:?}: variable name {name:?} is not allowed; \
          use capital letters, digits and '_', for example API_KEY"
@@ -193,6 +209,9 @@ fn resolve(
     if let Some(url) = &config.url {
         return resolve_web(name, config, url, secret);
     }
+    if config.auth.is_some() {
+        return Err(McpError::BadAuth(name.to_string()));
+    }
     if !config.headers.is_empty() {
         return Err(McpError::BadHeader {
             server: name.to_string(),
@@ -278,6 +297,18 @@ fn resolve_web(
             url: url.to_string(),
         });
     }
+    let oauth = match config.auth.as_deref() {
+        None => false,
+        Some(AUTH_OAUTH)
+            if !config
+                .headers
+                .keys()
+                .any(|h| h.eq_ignore_ascii_case("authorization")) =>
+        {
+            true
+        }
+        Some(_) => return Err(McpError::BadAuth(name.to_string())),
+    };
     let mut env = BTreeMap::from([(BRIDGE_URL.to_string(), Secret::new(url))]);
     for (index, (header, value)) in config.headers.iter().enumerate() {
         let bad = || McpError::BadHeader {
@@ -316,6 +347,17 @@ fn resolve_web(
         env.insert(
             format!("{BRIDGE_HEADER}{}", index + 1),
             Secret::new(format!("{header}: {}", value.expose().trim())),
+        );
+    }
+    if oauth {
+        let token = secret(&format!("{OAUTH_SECRET}{name} {url}"))
+            .ok_or_else(|| McpError::NotSignedIn(name.to_string()))?;
+        if token.expose().is_empty() || token.expose().chars().any(char::is_control) {
+            return Err(McpError::NotSignedIn(name.to_string()));
+        }
+        env.insert(
+            format!("{BRIDGE_HEADER}{}", config.headers.len() + 1),
+            Secret::new(format!("Authorization: Bearer {}", token.expose())),
         );
     }
     Ok(McpServer {
@@ -568,5 +610,38 @@ mod tests {
             toml::from_str("url = \"https://a.b\"\nheaders = { X = \"secret:k\" }").unwrap();
         let error = server("web", &config, |_| Some(Secret::new("a\nb"))).unwrap_err();
         assert!(matches!(error, McpError::BadHeader { .. }));
+    }
+
+    #[test]
+    fn a_signed_in_server_gets_its_access_token() {
+        let config: crate::config::McpConfig =
+            toml::from_str("url = \"https://mcp.example.com/mcp\"\nauth = \"oauth\"").unwrap();
+        let asked = std::cell::RefCell::new(Vec::new());
+        let server = server("notion", &config, |key| {
+            asked.borrow_mut().push(key.to_string());
+            Some(Secret::new("at-1"))
+        })
+        .unwrap();
+        assert_eq!(
+            asked.borrow()[0],
+            "oauth/notion https://mcp.example.com/mcp"
+        );
+        assert_eq!(
+            server.env["HARNESS_MCP_HEADER_1"].expose(),
+            "Authorization: Bearer at-1"
+        );
+        assert!(matches!(
+            super::server("notion", &config, |_| None),
+            Err(McpError::NotSignedIn(_))
+        ));
+        let bad = |toml: &str| {
+            let config: crate::config::McpConfig = toml::from_str(toml).unwrap();
+            matches!(check_server("x", &config), Err(McpError::BadAuth(_)))
+        };
+        assert!(bad("command = \"npx\"\nauth = \"oauth\""));
+        assert!(bad("url = \"https://a.b\"\nauth = \"basic\""));
+        assert!(bad(
+            "url = \"https://a.b\"\nauth = \"oauth\"\nheaders = { authorization = \"x\" }"
+        ));
     }
 }

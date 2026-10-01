@@ -186,6 +186,10 @@ pub struct McpConfig {
     /// `Authorization = "Bearer secret:<name>"`.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub headers: BTreeMap<String, String>,
+    /// `"oauth"`: a web server Lisa signs in to once in the browser
+    /// (`harness mcp login <name>`); the harness keeps the tokens.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auth: Option<String>,
 }
 
 #[derive(Debug, thiserror::Error)]

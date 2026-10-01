@@ -210,9 +210,8 @@ impl Shared {
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
-        let mut child = command
-            .spawn()
-            .map_err(|e| format!("cannot start curl: {e}"))?;
+        let mut child =
+            crate::process::spawn(&mut command).map_err(|e| format!("cannot start curl: {e}"))?;
         if let Some(mut stdin) = child.stdin.take() {
             let _ = stdin.write_all(message.to_string().as_bytes());
         }
@@ -349,7 +348,7 @@ impl Shared {
 /// The status and headers of an HTTP answer, as `curl -i` prints them. The
 /// proxy's «Connection established» and `100 Continue` come first and are
 /// skipped.
-fn read_head(reader: &mut impl BufRead) -> Option<(u16, Vec<(String, String)>)> {
+pub(crate) fn read_head(reader: &mut impl BufRead) -> Option<(u16, Vec<(String, String)>)> {
     loop {
         let mut status = String::new();
         if reader.read_line(&mut status).ok()? == 0 {

@@ -77,6 +77,11 @@ enum Command {
         #[command(subcommand)]
         command: SecretCommand,
     },
+    /// MCP servers on the web that want a sign-in in the browser (OAuth).
+    Mcp {
+        #[command(subcommand)]
+        command: McpCommand,
+    },
     /// Plugin catalogs, for all projects (kept in ~/.harness/).
     Marketplace {
         #[command(subcommand)]
@@ -171,6 +176,15 @@ enum SecretCommand {
 }
 
 #[derive(Subcommand)]
+enum McpCommand {
+    /// Sign in to [mcp.<name>] (auth = "oauth") in the browser, once; the
+    /// harness keeps the tokens in ~/.harness/credentials/oauth/.
+    Login { name: String },
+    /// Forget the sign-in of [mcp.<name>].
+    Logout { name: String },
+}
+
+#[derive(Subcommand)]
 enum MarketplaceCommand {
     /// Add a catalog: `owner/repo` on GitHub, a git address or a local folder.
     Add {
@@ -255,6 +269,17 @@ async fn main() -> Result<()> {
         Command::Secret {
             command: SecretCommand::List,
         } => list_secrets(),
+        Command::Mcp {
+            command: McpCommand::Login { name },
+        } => mcp_login(project, &name),
+        Command::Mcp {
+            command: McpCommand::Logout { name },
+        } => {
+            let dir = credentials::default_dir().context("HOME is not set")?;
+            harness_agents::mcp_oauth::logout(&dir, &name)?;
+            println!("Forgot the sign-in of {name}.");
+            Ok(())
+        }
         Command::Marketplace { command } => match command {
             MarketplaceCommand::Add { source, name } => {
                 catalogs::marketplace_add(&source, name.as_deref())
@@ -533,6 +558,33 @@ fn set_secret(name: &str) -> Result<()> {
         path.display()
     );
     println!("Use it in harness.toml as \"secret:{name}\".");
+    Ok(())
+}
+
+fn mcp_login(project: &Path, name: &str) -> Result<()> {
+    use harness_agents::mcp_oauth;
+    let repo = open_repo(project)?;
+    let config = Config::load(&repo.root().join(HARNESS_DIR))?;
+    let url = mcp_oauth::oauth_url(&config, name).map_err(anyhow::Error::msg)?;
+    let dir = credentials::default_dir().context("HOME is not set")?;
+    println!("Signing in to {name} ({url}).");
+    let open = |address: &str| {
+        println!("Opening the browser. If it does not open, visit:\n{address}");
+        if let Err(why) = mcp_oauth::open_in_browser(address) {
+            println!("({why})");
+        }
+        Ok(())
+    };
+    let tools = mcp_oauth::Tools {
+        curl: "curl".into(),
+        open: &open,
+        browser_limit: mcp_oauth::BROWSER_LIMIT,
+    };
+    mcp_oauth::login(&dir, name, &url, &tools).map_err(anyhow::Error::msg)?;
+    println!(
+        "Signed in. The tokens are in {} (only you can read them).",
+        mcp_oauth::path(&dir, name).display()
+    );
     Ok(())
 }
 

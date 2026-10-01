@@ -57,7 +57,7 @@ mod tasks;
 mod ui;
 
 use i18n::I18n;
-use mcp_tab::{join_words, McpTab};
+use mcp_tab::McpTab;
 use picker::{Browser, Native};
 use projects_tab::{has_config, ProjectsTab};
 use roles_tab::{Action, RolesTab};
@@ -219,8 +219,32 @@ fn ask_agents(credentials_dir: &Path) -> Answers {
 /// Starts an MCP server in the project folder and asks it for its tools.
 type McpChecker = fn(&McpServer, &Path) -> Result<Vec<Tool>, String>;
 
+/// The form for a new or changed MCP server.
+fn server_form(tr: &I18n, title: &str, text: &str, name: &str, server: &McpConfig) -> Form {
+    let [command, variables, sign_in] = mcp_tab::form_values(server);
+    Form::new(title, text, tr.t("mcp.ok"))
+        .field(tr.t("mcp.name"), name)
+        .field(tr.t("mcp.command_field"), &command)
+        .field(tr.t("mcp.variables_field"), &variables)
+        .field(tr.t("mcp.sign_in_field"), &sign_in)
+}
+
 /// Searches the MCP registry.
 type McpSearcher = fn(&str) -> Result<Vec<Entry>, String>;
+
+/// Signs in to a web MCP server in the browser: credentials folder, server
+/// name, address.
+type McpSigner = fn(&Path, &str, &str) -> Result<(), String>;
+
+fn sign_in(credentials_dir: &Path, name: &str, url: &str) -> Result<(), String> {
+    use harness_agents::mcp_oauth;
+    let tools = mcp_oauth::Tools {
+        curl: "curl".into(),
+        open: &mcp_oauth::open_in_browser,
+        browser_limit: mcp_oauth::BROWSER_LIMIT,
+    };
+    mcp_oauth::login(credentials_dir, name, url, &tools)
+}
 
 /// A server being checked: its name, settings and the coming answer.
 type Checking = (String, McpConfig, mpsc::Receiver<Result<Vec<Tool>, String>>);
@@ -262,6 +286,9 @@ struct App {
     searcher: McpSearcher,
     /// The registry's answer, while it is asked.
     searching: Option<mpsc::Receiver<Result<Vec<Entry>, String>>>,
+    signer: McpSigner,
+    /// The end of a sign-in in the browser: the server and how it went.
+    signing: Option<(String, mpsc::Receiver<Result<(), String>>)>,
     /// `q` was pressed once with unsaved changes.
     quit_warned: bool,
     quit: bool,
@@ -294,6 +321,8 @@ impl App {
             checking: None,
             searcher: harness_agents::mcp_registry::search,
             searching: None,
+            signer: sign_in,
+            signing: None,
             quit_warned: false,
             quit: false,
         };
@@ -382,6 +411,25 @@ impl App {
             self.searching = None;
             if let Some(catalog) = self.mcp.as_mut().and_then(|m| m.catalog.as_mut()) {
                 catalog.found(answer);
+            }
+        }
+        let signed = self
+            .signing
+            .as_ref()
+            .and_then(|(_, rx)| match rx.try_recv() {
+                Ok(answer) => Some(answer),
+                Err(mpsc::TryRecvError::Empty) => None,
+                Err(mpsc::TryRecvError::Disconnected) => Some(Err("the sign-in stopped".into())),
+            });
+        if let Some(answer) = signed {
+            if let Some((name, _)) = self.signing.take() {
+                if let Some(mcp) = &mut self.mcp {
+                    mcp.signing = None;
+                }
+                self.message = Some(match answer {
+                    Ok(()) => (self.tr.f("mcp.signed_in_as", &[("name", &name)]), false),
+                    Err(error) => (error, true),
+                });
             }
         }
         if let Some(tasks) = &mut self.tasks {
@@ -798,7 +846,7 @@ impl App {
         };
         let secrets = self.home.as_ref().map(|h| h.join("credentials"));
         let server = harness_core::mcp::server(&name, &config, |secret| {
-            credentials::load_secret(secrets.as_deref()?, secret).ok()
+            harness_agents::mcp_oauth::mcp_secret(secrets.as_deref()?, secret)
         });
         // A web server is reached through this same program.
         let server = server.map(|server| match std::env::current_exe() {
@@ -855,6 +903,27 @@ impl App {
         });
     }
 
+    /// Signs in to the web server `name` in the background: the browser
+    /// opens, and the answer comes in `tick`.
+    fn start_sign_in(&mut self, name: &str) {
+        let url = self
+            .roles
+            .as_ref()
+            .and_then(|r| r.servers().get(name))
+            .and_then(|s| s.url.clone());
+        let (Some(url), Some(home), Some(mcp)) = (url, &self.home, &mut self.mcp) else {
+            return;
+        };
+        let (tx, rx) = mpsc::channel();
+        let (signer, dir, server) = (self.signer, home.join("credentials"), name.to_string());
+        std::thread::spawn(move || {
+            let _ = tx.send(signer(&dir, &server, url.trim()));
+        });
+        mcp.signing = Some(name.to_string());
+        self.message = Some((self.tr.f("mcp.sign_in_started", &[("name", &name)]), false));
+        self.signing = Some((name.to_string(), rx));
+    }
+
     /// Asks the registry in the background; the catalog shows the answer.
     fn search_registry(&mut self, query: &str) {
         let Some(mcp) = &mut self.mcp else {
@@ -882,6 +951,10 @@ impl App {
         let servers = self.roles.as_ref().map(RolesTab::servers);
         self.form = match action {
             A::None => return,
+            A::SignIn(name) => {
+                self.start_sign_in(&name);
+                return;
+            }
             A::Unusable(why) => {
                 self.message = Some((tr.f("mcp.cannot_use", &[("why", &why)]), true));
                 return;
@@ -902,45 +975,36 @@ impl App {
                     .chain((2..).map(|n| format!("{}-{n}", offer.name)))
                     .find(|n| !taken(n))
                     .unwrap_or_default();
-                let server = &offer.server;
-                let command = join_words(std::iter::once(&server.command).chain(&server.args));
-                let variables: Vec<String> =
-                    server.env.iter().map(|(k, v)| format!("{k}={v}")).collect();
                 let text = format!("{}\n{}", tr.t("mcp.from_catalog"), tr.t("mcp.form_text"));
                 Some((
                     Purpose::McpServer(None),
-                    Form::new(tr.t("mcp.new_title"), &text, tr.t("mcp.ok"))
-                        .field(tr.t("mcp.name"), &name)
-                        .field(tr.t("mcp.command_field"), &command)
-                        .field(tr.t("mcp.variables_field"), &join_words(&variables)),
+                    server_form(tr, tr.t("mcp.new_title"), &text, &name, &offer.server),
                 ))
             }
             A::New => Some((
                 Purpose::McpServer(None),
-                Form::new(tr.t("mcp.new_title"), tr.t("mcp.form_text"), tr.t("mcp.ok"))
-                    .field(tr.t("mcp.name"), "")
-                    .field(tr.t("mcp.command_field"), "")
-                    .field(tr.t("mcp.variables_field"), ""),
+                server_form(
+                    tr,
+                    tr.t("mcp.new_title"),
+                    tr.t("mcp.form_text"),
+                    "",
+                    &McpConfig::default(),
+                ),
             )),
             A::Edit(name) => {
                 let server = servers.and_then(|s| s.get(&name));
-                let (command, variables) = server.map_or_else(Default::default, |s| {
-                    let command = join_words(std::iter::once(&s.command).chain(&s.args));
-                    let variables: Vec<String> =
-                        s.env.iter().map(|(k, v)| format!("{k}={v}")).collect();
-                    (command, join_words(&variables))
-                });
                 let old = server.map(|_| name.clone());
+                let title = tr.f("mcp.edit_title", &[("name", &name)]);
+                let empty = McpConfig::default();
                 Some((
                     Purpose::McpServer(old),
-                    Form::new(
-                        &tr.f("mcp.edit_title", &[("name", &name)]),
+                    server_form(
+                        tr,
+                        &title,
                         tr.t("mcp.form_text"),
-                        tr.t("mcp.ok"),
-                    )
-                    .field(tr.t("mcp.name"), &name)
-                    .field(tr.t("mcp.command_field"), &command)
-                    .field(tr.t("mcp.variables_field"), &variables),
+                        &name,
+                        server.unwrap_or(&empty),
+                    ),
                 ))
             }
             A::Remove(name) => {
@@ -995,7 +1059,7 @@ impl App {
     /// OK in the server form.
     fn save_mcp(&mut self, old: Option<String>, form: &Form) -> Result<(), String> {
         let name = form.value(0).to_string();
-        let server = mcp_tab::server_from(form.value(1), form.value(2))?;
+        let server = mcp_tab::server_from(form.value(1), form.value(2), form.value(3))?;
         harness_core::mcp::check_server(&name, &server).map_err(|e| e.to_string())?;
         self.save_settings(|text| {
             config_edit::set_mcp(text, old.as_deref(), &name, &server).map_err(|e| e.to_string())
@@ -1270,7 +1334,11 @@ impl App {
                     self.mcp_action(action);
                 }
             }
-            ButtonId::McpNew | ButtonId::McpEdit | ButtonId::McpRemove | ButtonId::McpSecret => {
+            ButtonId::McpNew
+            | ButtonId::McpEdit
+            | ButtonId::McpRemove
+            | ButtonId::McpSecret
+            | ButtonId::McpSignIn => {
                 if let (Some(mcp), Some(roles)) = (&self.mcp, &self.roles) {
                     let action = mcp.press(id, roles);
                     self.mcp_action(action);

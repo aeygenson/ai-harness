@@ -169,12 +169,12 @@ pub(crate) fn command(program: &Path, dir: &Path) -> Command {
 /// printed. `secrets` never appear in an error.
 pub(crate) fn run(mut command: Command, input: &str, secrets: &[&str]) -> Result<String, String> {
     let program = command.get_program().to_string_lossy().into_owned();
-    let mut child = command
+    command
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|e| format!("cannot start {program}: {e}"))?;
+        .stderr(Stdio::piped());
+    let mut child =
+        crate::process::spawn(&mut command).map_err(|e| format!("cannot start {program}: {e}"))?;
     if let Some(mut stdin) = child.stdin.take() {
         let _ = stdin.write_all(input.as_bytes());
     }
