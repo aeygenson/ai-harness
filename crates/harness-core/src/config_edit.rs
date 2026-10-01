@@ -7,7 +7,7 @@
 
 use toml_edit::{value, Array, DocumentMut, Item, Table};
 
-use crate::config::{Config, RetroConfig, RoleConfig};
+use crate::config::{Config, McpConfig, RetroConfig, RoleConfig};
 use crate::handoff::Role;
 
 #[derive(Debug, thiserror::Error)]
@@ -18,6 +18,10 @@ pub enum EditError {
     PluginExists(String),
     #[error("harness.toml has no [plugins.{0}]")]
     NoPlugin(String),
+    #[error("harness.toml has no [mcp.{0}]")]
+    NoMcp(String),
+    #[error("harness.toml already has [mcp.{0}]")]
+    McpExists(String),
     #[error("harness.toml has no [roles.{0}]")]
     NoRole(String),
     #[error("`{0}` in harness.toml is not a table")]
@@ -198,18 +202,98 @@ pub fn remove_plugin(text: &str, name: &str) -> Result<String, EditError> {
     if table(&mut doc, "plugins")?.remove(name).is_none() {
         return Err(EditError::NoPlugin(name.to_string()));
     }
+    for_role_lists(&mut doc, "plugins", |list| {
+        list.retain(|item| item.as_str() != Some(name));
+    });
+    finish(doc)
+}
+
+/// Writes `[mcp.<name>]`. With `old`, that server is changed: when the name
+/// is different it is renamed, in the roles' `mcp` lists too. Without `old`
+/// the server is new and must not exist yet.
+pub fn set_mcp(
+    text: &str,
+    old: Option<&str>,
+    name: &str,
+    server: &McpConfig,
+) -> Result<String, EditError> {
+    let mut doc: DocumentMut = text.parse()?;
+    let servers = table(&mut doc, "mcp")?;
+    let renamed = old.is_some_and(|old| old != name);
+    if (old.is_none() || renamed) && servers.contains_key(name) {
+        return Err(EditError::McpExists(name.to_string()));
+    }
+    // A changed server keeps its place and the comments above it.
+    let mut entry = match old {
+        Some(old) => servers
+            .remove(old)
+            .and_then(|item| item.into_table().ok())
+            .ok_or_else(|| EditError::NoMcp(old.to_string()))?,
+        None => Table::new(),
+    };
+    set_text(&mut entry, "command", Some(&server.command));
+    set_list(&mut entry, "args", &server.args);
+    let current: Option<Vec<(String, String)>> = entry.get("env").and_then(|env| {
+        env.as_table_like().map(|t| {
+            t.iter()
+                .filter_map(|(k, v)| Some((k.to_string(), v.as_str()?.to_string())))
+                .collect()
+        })
+    });
+    let wanted: Vec<(String, String)> = server
+        .env
+        .iter()
+        .map(|(k, v)| (k.clone(), v.clone()))
+        .collect();
+    if current.as_ref() != Some(&wanted) {
+        if wanted.is_empty() {
+            entry.remove("env");
+        } else {
+            let mut env = toml_edit::InlineTable::new();
+            for (key, text) in &wanted {
+                env.insert(key, text.as_str().into());
+            }
+            entry.insert("env", value(env));
+        }
+    }
+    servers.insert(name, Item::Table(entry));
+    if let (Some(old), true) = (old, renamed) {
+        for_role_lists(&mut doc, "mcp", |list| {
+            for item in list.iter_mut() {
+                if item.as_str() == Some(old) {
+                    *item = name.into();
+                }
+            }
+        });
+    }
+    finish(doc)
+}
+
+/// Removes `[mcp.<name>]` and the name from every role's `mcp` list.
+pub fn remove_mcp(text: &str, name: &str) -> Result<String, EditError> {
+    let mut doc: DocumentMut = text.parse()?;
+    if table(&mut doc, "mcp")?.remove(name).is_none() {
+        return Err(EditError::NoMcp(name.to_string()));
+    }
+    for_role_lists(&mut doc, "mcp", |list| {
+        list.retain(|item| item.as_str() != Some(name));
+    });
+    finish(doc)
+}
+
+/// Calls `change` with the list `key` of every role that has one.
+fn for_role_lists(doc: &mut DocumentMut, key: &str, mut change: impl FnMut(&mut Array)) {
     if let Some(roles) = doc.get_mut("roles").and_then(Item::as_table_mut) {
         for (_, role) in roles.iter_mut() {
             if let Some(list) = role
                 .as_table_mut()
-                .and_then(|role| role.get_mut("plugins"))
+                .and_then(|role| role.get_mut(key))
                 .and_then(Item::as_array_mut)
             {
-                list.retain(|item| item.as_str() != Some(name));
+                change(list);
             }
         }
     }
-    finish(doc)
 }
 
 /// The top-level table `key`, created (without its own header line) if missing.
@@ -400,5 +484,61 @@ mod tests {
         assert!(config.plugins.is_empty());
         assert!(config.roles[&Role::Developer].plugins.is_empty());
         assert!(text.contains("agent = \"codex\" # fast"), "{text}");
+    }
+
+    #[test]
+    fn mcp_servers_are_added_changed_renamed_and_removed() {
+        let text = "[roles.developer]\nagent = \"codex\"\nmcp = [\"docs\"]\n\n\
+                    # Documentation search.\n[mcp.docs]\ncommand = \"npx\" # pinned\n\
+                    args = [\"-y\", \"docs-mcp\"]\n";
+        let server = |command: &str, args: &[&str], env: &[(&str, &str)]| McpConfig {
+            command: command.into(),
+            args: args.iter().map(|a| a.to_string()).collect(),
+            env: env
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect(),
+        };
+
+        let added = set_mcp(
+            text,
+            None,
+            "fetch",
+            &server("uvx", &["mcp-server-fetch"], &[]),
+        )
+        .unwrap();
+        let config = Config::parse(&added).unwrap();
+        assert_eq!(config.mcp["fetch"].command, "uvx");
+        assert!(matches!(
+            set_mcp(text, None, "docs", &server("x", &[], &[])),
+            Err(EditError::McpExists(_))
+        ));
+
+        // A change keeps the comments; a variable is an inline table.
+        let changed = set_mcp(
+            text,
+            Some("docs"),
+            "docs",
+            &server("npx", &["-y", "docs-mcp@2"], &[("API_KEY", "secret:docs")]),
+        )
+        .unwrap();
+        assert!(changed.contains("# Documentation search."), "{changed}");
+        assert!(changed.contains("command = \"npx\" # pinned"), "{changed}");
+        assert!(
+            changed.contains("env = { API_KEY = \"secret:docs\" }"),
+            "{changed}"
+        );
+
+        // A new name is a rename, in the roles too.
+        let renamed = set_mcp(text, Some("docs"), "manuals", &server("npx", &[], &[])).unwrap();
+        let config = Config::parse(&renamed).unwrap();
+        assert!(!config.mcp.contains_key("docs"));
+        assert_eq!(config.roles[&Role::Developer].mcp, ["manuals"]);
+
+        let removed = remove_mcp(text, "docs").unwrap();
+        let config = Config::parse(&removed).unwrap();
+        assert!(config.mcp.is_empty());
+        assert!(config.roles[&Role::Developer].mcp.is_empty());
+        assert!(matches!(remove_mcp(text, "nope"), Err(EditError::NoMcp(_))));
     }
 }

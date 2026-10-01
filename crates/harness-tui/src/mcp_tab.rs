@@ -37,6 +37,21 @@ use crate::skills_tab::{role_name, ROLES};
 use crate::tasks::draw_list;
 use crate::ui::{buttons, panel, selector, ButtonId, Hits, ListId};
 
+/// What the tab asks the App to do.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Action {
+    None,
+    /// Ask for a new server.
+    New,
+    /// Change this server; one harness.toml does not describe yet gets
+    /// described.
+    Edit(String),
+    /// Ask before removing this server.
+    Remove(String),
+    /// Ask for a secret; the name offered first.
+    Secret(String),
+}
+
 #[derive(Debug)]
 pub struct McpTab {
     /// `~/.harness`, where the secrets are kept.
@@ -144,13 +159,52 @@ impl McpTab {
         Ok(())
     }
 
-    pub fn on_key(&mut self, key: KeyCode, roles: &RolesTab) {
+    pub fn on_key(&mut self, key: KeyCode, roles: &RolesTab) -> Action {
         match key {
             KeyCode::Up | KeyCode::Char('k') => self.move_by(-1, roles),
             KeyCode::Down | KeyCode::Char('j') => self.move_by(1, roles),
             KeyCode::Left | KeyCode::Char('h') => self.choose_role(self.role.saturating_sub(1)),
             KeyCode::Right | KeyCode::Char('l') => self.choose_role(self.role + 1),
+            KeyCode::Char('n') => return self.press(ButtonId::McpNew, roles),
+            KeyCode::Char('e') => return self.press(ButtonId::McpEdit, roles),
+            KeyCode::Delete => return self.press(ButtonId::McpRemove, roles),
             _ => {}
+        }
+        Action::None
+    }
+
+    /// A button about the servers themselves.
+    pub fn press(&self, id: ButtonId, roles: &RolesTab) -> Action {
+        let current = self.current(roles);
+        match (id, current) {
+            (ButtonId::McpNew, _) => Action::New,
+            (ButtonId::McpEdit, Some(name)) => Action::Edit(name),
+            (ButtonId::McpRemove, Some(name)) if roles.servers().contains_key(&name) => {
+                Action::Remove(name)
+            }
+            (ButtonId::McpSecret, Some(name)) => {
+                // The first secret not saved yet, else the first one.
+                let wanted: Vec<String> = roles
+                    .servers()
+                    .get(&name)
+                    .map(|s| secret_names(s).collect())
+                    .unwrap_or_default();
+                let offered = wanted
+                    .iter()
+                    .find(|n| !self.secrets.contains(n))
+                    .or(wanted.first())
+                    .cloned()
+                    .unwrap_or(name);
+                Action::Secret(offered)
+            }
+            _ => Action::None,
+        }
+    }
+
+    /// Selects the server `name`, if it is in the list.
+    pub fn select_named(&mut self, name: &str, roles: &RolesTab) {
+        if let Some(at) = Self::names(roles).iter().position(|n| n == name) {
+            self.row = at;
         }
     }
 
@@ -162,11 +216,7 @@ impl McpTab {
 
     /// The secrets a server needs that are not saved.
     fn missing_secrets(&self, server: &McpConfig) -> Vec<String> {
-        server
-            .env
-            .values()
-            .filter_map(|v| v.strip_prefix(SECRET_PREFIX))
-            .map(|n| n.trim().to_string())
+        secret_names(server)
             .filter(|n| !self.secrets.contains(n))
             .collect()
     }
@@ -179,9 +229,10 @@ impl McpTab {
         tr: &I18n,
         roles: &RolesTab,
     ) {
-        let [top, main, bottom] = Layout::vertical([
+        let [top, main, bottom, servers_row] = Layout::vertical([
             Constraint::Length(1),
             Constraint::Min(0),
+            Constraint::Length(1),
             Constraint::Length(1),
         ])
         .areas(area);
@@ -296,6 +347,30 @@ impl McpTab {
                 Rect::new(x.max(bottom.x), bottom.y, width.min(bottom.width), 1),
             );
         }
+        // The servers themselves: they change harness.toml at once.
+        let described = current
+            .as_deref()
+            .and_then(|name| roles.servers().get(name));
+        let edit = if current.is_some() && described.is_none() {
+            tr.t("mcp.describe")
+        } else {
+            tr.t("mcp.edit")
+        };
+        buttons(
+            frame,
+            servers_row,
+            hits,
+            &[
+                (tr.t("mcp.new"), ButtonId::McpNew, true),
+                (edit, ButtonId::McpEdit, current.is_some()),
+                (tr.t("mcp.remove"), ButtonId::McpRemove, described.is_some()),
+                (
+                    tr.t("mcp.set_secret"),
+                    ButtonId::McpSecret,
+                    described.is_some_and(|s| secret_names(s).next().is_some()),
+                ),
+            ],
+        );
     }
 
     /// What the details show about the server `name`.
@@ -394,5 +469,103 @@ impl McpTab {
             Span::raw(users),
         ]));
         lines
+    }
+}
+
+/// The names of the secrets a server's variables use.
+fn secret_names(server: &McpConfig) -> impl Iterator<Item = String> + '_ {
+    server
+        .env
+        .values()
+        .filter_map(|v| v.strip_prefix(SECRET_PREFIX))
+        .map(|n| n.trim().to_string())
+}
+
+/// `npx -y "a b"` → `npx`, `-y`, `a b`: words split at spaces, a quoted
+/// part stays one word.
+pub fn split_words(text: &str) -> Result<Vec<String>, String> {
+    let mut words = Vec::new();
+    let mut word = String::new();
+    let mut quoted = false;
+    let mut started = false;
+    for c in text.chars() {
+        match c {
+            '"' => {
+                quoted = !quoted;
+                started = true;
+            }
+            c if c.is_whitespace() && !quoted => {
+                if started {
+                    words.push(std::mem::take(&mut word));
+                    started = false;
+                }
+            }
+            c => {
+                word.push(c);
+                started = true;
+            }
+        }
+    }
+    if quoted {
+        return Err("a quote \" is not closed".into());
+    }
+    if started {
+        words.push(word);
+    }
+    Ok(words)
+}
+
+/// The words again as one line; a word with a space is quoted.
+pub fn join_words<'a>(words: impl IntoIterator<Item = &'a String>) -> String {
+    words
+        .into_iter()
+        .map(|w| {
+            if w.is_empty() || w.contains(char::is_whitespace) {
+                format!("\"{w}\"")
+            } else {
+                w.clone()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// A server from the form's command line and variables (`NAME=value`,
+/// separated by spaces).
+pub fn server_from(command: &str, variables: &str) -> Result<McpConfig, String> {
+    let mut words = split_words(command)?.into_iter();
+    let command = words.next().unwrap_or_default();
+    let mut env = std::collections::BTreeMap::new();
+    for word in split_words(variables)? {
+        let Some((name, value)) = word.split_once('=') else {
+            return Err(format!("{word:?} is not NAME=value"));
+        };
+        env.insert(name.trim().to_string(), value.trim().to_string());
+    }
+    Ok(McpConfig {
+        command,
+        args: words.collect(),
+        env,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_form_lines_become_a_server_and_back() {
+        let server = server_from(
+            "npx -y \"@scope/a b\"",
+            "API_KEY=secret:docs  MODE=\"read only\"",
+        )
+        .unwrap();
+        assert_eq!(server.command, "npx");
+        assert_eq!(server.args, ["-y", "@scope/a b"]);
+        assert_eq!(server.env["API_KEY"], "secret:docs");
+        assert_eq!(server.env["MODE"], "read only");
+        assert_eq!(join_words(&server.args), "-y \"@scope/a b\"");
+        assert!(server_from("npx \"open", "").is_err());
+        assert!(server_from("npx", "NOVALUE").is_err());
     }
 }

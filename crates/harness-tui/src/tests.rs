@@ -1213,3 +1213,97 @@ fn the_mcp_tab_gives_servers_to_roles() {
     assert_eq!(saved.roles[&Role::Developer].mcp, ["context7", "fetch"]);
     assert!(saved.roles[&Role::Tester].mcp.is_empty());
 }
+
+#[test]
+fn mcp_servers_are_added_changed_and_removed_and_secrets_saved() {
+    let env = Env::new();
+    let root = env.path("test");
+    project(&root);
+    let mut app = env.app(&root);
+    click(&mut app, "4 MCP");
+    assert!(screen(&mut app).contains("No MCP servers yet."));
+
+    click(&mut app, "[ New server ]");
+    fill(&mut app, "docs");
+    key(&mut app, KeyCode::Tab);
+    fill(&mut app, "npx -y docs-mcp");
+    key(&mut app, KeyCode::Tab);
+    fill(&mut app, "API_KEY=secret:docs");
+    key(&mut app, KeyCode::Enter);
+    assert!(app.form.is_none(), "{:?}", app.form);
+    let docs = &config(&root).mcp["docs"];
+    assert_eq!(
+        (docs.command.as_str(), &docs.args[..]),
+        ("npx", &["-y".to_string(), "docs-mcp".to_string()][..])
+    );
+    assert_eq!(docs.env["API_KEY"], "secret:docs");
+    let text = screen(&mut app);
+    assert!(text.contains("> [ ] docs"), "{text}");
+    assert!(text.contains("MCP server docs saved"), "{text}");
+
+    // A wrong variable name is refused in the form, nothing is written.
+    key(&mut app, KeyCode::Char('n'));
+    fill(&mut app, "bad");
+    key(&mut app, KeyCode::Tab);
+    fill(&mut app, "npx bad");
+    key(&mut app, KeyCode::Tab);
+    fill(&mut app, "api_key=1");
+    key(&mut app, KeyCode::Enter);
+    assert!(app.form.as_ref().unwrap().1.error.is_some());
+    key(&mut app, KeyCode::Esc);
+    assert!(!config(&root).mcp.contains_key("bad"));
+
+    // The developer gets it; a rename follows in its list.
+    click(&mut app, "[ developer ]");
+    key(&mut app, KeyCode::Char(' '));
+    // Servers change only when the roles have no unsaved changes.
+    key(&mut app, KeyCode::Char('e'));
+    key(&mut app, KeyCode::Enter);
+    assert!(app
+        .form
+        .as_ref()
+        .unwrap()
+        .1
+        .error
+        .as_ref()
+        .unwrap()
+        .contains("Save or undo"));
+    key(&mut app, KeyCode::Esc);
+    key(&mut app, KeyCode::Char('s'));
+    key(&mut app, KeyCode::Char('e'));
+    assert_eq!(app.form.as_ref().unwrap().1.value(1), "npx -y docs-mcp");
+    fill(&mut app, "manuals");
+    key(&mut app, KeyCode::Enter);
+    let saved = config(&root);
+    assert!(!saved.mcp.contains_key("docs"));
+    assert_eq!(saved.roles[&Role::Developer].mcp, ["manuals"]);
+    assert!(screen(&mut app).contains("> [x] manuals"));
+
+    // The secret: typed in a hidden field, saved in a private file only.
+    assert!(screen(&mut app).contains("✗ secret"));
+    click(&mut app, "[ Set secret ]");
+    assert_eq!(app.form.as_ref().unwrap().1.value(0), "docs");
+    type_text(&mut app, "s3cr3t-value");
+    let text = screen(&mut app);
+    assert!(text.contains("••••••••••••"), "{text}");
+    assert!(!text.contains("s3cr3t"), "{text}");
+    assert!(!format!("{:?}", app.form).contains("s3cr3t"));
+    key(&mut app, KeyCode::Enter);
+    let file = env.home.path().join("credentials/secrets/docs");
+    assert_eq!(fs::read_to_string(&file).unwrap().trim(), "s3cr3t-value");
+    let text = screen(&mut app);
+    assert!(text.contains("secret:docs  ✓ saved"), "{text}");
+    assert!(!text.contains("s3cr3t"), "{text}");
+    assert!(!fs::read_to_string(root.join(".harness/harness.toml"))
+        .unwrap()
+        .contains("s3cr3t"));
+
+    // Removing asks first, then takes it from the roles too.
+    key(&mut app, KeyCode::Delete);
+    assert!(screen(&mut app).contains("Remove [mcp.manuals]"));
+    key(&mut app, KeyCode::Enter);
+    let saved = config(&root);
+    assert!(saved.mcp.is_empty());
+    assert!(saved.roles[&Role::Developer].mcp.is_empty());
+    assert!(file.is_file());
+}

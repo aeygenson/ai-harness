@@ -504,6 +504,11 @@ impl RolesTab {
         self.set_choice(model, effort);
     }
 
+    /// `harness.toml` as it is on disk.
+    pub fn text(&self) -> &str {
+        &self.text
+    }
+
     /// The MCP servers `harness.toml` describes.
     pub fn servers(&self) -> &BTreeMap<String, McpConfig> {
         &self.saved.mcp

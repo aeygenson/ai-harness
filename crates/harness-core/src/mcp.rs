@@ -189,6 +189,13 @@ fn resolve(
     })
 }
 
+/// Checks one server as `harness.toml` describes it, the way a run would,
+/// without reading its secrets: its name, command and variables.
+pub fn check_server(name: &str, config: &crate::config::McpConfig) -> Result<(), McpError> {
+    check_server_name(name)?;
+    resolve(name, config, &|_| Some(Secret::new("unused"))).map(|_| ())
+}
+
 /// Can `agent` start this server? Every agent of the harness starts a
 /// program server (`stdio`) the same way, so for now this is any known
 /// agent; servers some agent cannot start would be refused here.
