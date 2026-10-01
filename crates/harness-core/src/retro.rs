@@ -252,7 +252,7 @@ impl Stats {
             .into_iter()
             .map(|((from, to), count)| Return { from, to, count })
             .collect();
-        returns.sort_by(|a, b| b.count.cmp(&a.count));
+        returns.sort_by_key(|a| std::cmp::Reverse(a.count));
 
         let mut repeated: Vec<RepeatedIssue> =
             repeated.into_values().filter(|i| i.count > 1).collect();

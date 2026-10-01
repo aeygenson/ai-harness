@@ -16,7 +16,7 @@ use harness_core::git::{Repo, HARNESS_DIR};
 use harness_core::handoff::Role;
 use harness_core::plugins::family;
 use harness_core::settings;
-use harness_core::skills::{split_header, SKILLS_DIR};
+use harness_core::skills;
 use ratatui::crossterm::event::KeyCode;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
@@ -63,7 +63,7 @@ enum Focus {
     Details,
 }
 
-/// A skill in `.harness/skills/`: its name and the description from its header.
+/// A skill a role can choose: its name and the description from its header.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct SkillFile {
     name: String,
@@ -127,7 +127,7 @@ impl RolesTab {
             }
             Err(problem) => self.problem = Some(problem),
         }
-        self.skills = read_skills(&harness_dir.join(SKILLS_DIR));
+        self.skills = read_skills(&harness_dir);
         let dir = credentials::default_dir();
         self.logins = AGENTS
             .iter()
@@ -663,24 +663,15 @@ pub fn role_key(role: Role) -> &'static str {
     }
 }
 
-/// The skill files of the project, sorted by name.
-fn read_skills(dir: &Path) -> Vec<SkillFile> {
-    let Ok(entries) = fs::read_dir(dir) else {
-        return Vec::new();
-    };
-    let mut skills: Vec<SkillFile> = entries
-        .filter_map(Result::ok)
-        .map(|e| e.path())
-        .filter(|p| p.extension().is_some_and(|e| e == "md"))
-        .filter_map(|path| {
-            let name = path.file_stem()?.to_string_lossy().into_owned();
-            let description = fs::read_to_string(&path)
-                .ok()
-                .and_then(|text| split_header(&text))
-                .map(|(description, _)| description);
-            Some(SkillFile { name, description })
+/// The skills a role can choose: built-in optional ones and the project's
+/// own, sorted by name. The base of each role is not chosen here.
+fn read_skills(harness_dir: &Path) -> Vec<SkillFile> {
+    skills::library(harness_dir)
+        .into_iter()
+        .filter(|s| !skills::is_base(&s.name))
+        .map(|s| SkillFile {
+            name: s.name,
+            description: s.description,
         })
-        .collect();
-    skills.sort_by(|a, b| a.name.cmp(&b.name));
-    skills
+        .collect()
 }
