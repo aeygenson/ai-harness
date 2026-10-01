@@ -6,8 +6,10 @@
 //! │ Always in the prompt              ││ ---                                      │
 //! │> common          built-in         ││ description: How the developer ...       │
 //! │  developer       changed          ││ ---                                      │
-//! │  agent-claude    built-in         ││ # Developer                              │
-//! │ Can be chosen on «Roles»          ││ ...                                      │
+//! │ Agent notes (● in the prompt)     ││ # Developer                              │
+//! │  ● agent-claude  built-in         ││ ...                                      │
+//! │  ○ agent-codex   built-in         ││                                          │
+//! │ Can be chosen on «Roles»          ││                                          │
 //! │  [x] crash-recovery  built-in     ││                                          │
 //! │  [ ] rust-errors     own          ││                                          │
 //! └───────────────────────────────────┘└──────────────────────────────────────────┘
@@ -43,6 +45,9 @@ pub const ROLES: [Role; 4] = [
     Role::Tester,
     Role::Security,
 ];
+
+/// How the names of the agents' notes start.
+const AGENT_NOTE: &str = "agent-";
 
 /// What the tab asks the App to do.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -128,7 +133,16 @@ impl SkillsTab {
         rows.extend(
             skills::base_names(self.role(), self.agent())
                 .into_iter()
+                .filter(|n| !n.starts_with(AGENT_NOTE))
                 .map(|n| Row::Skill(n.to_string())),
+        );
+        // Every agent's note: the one of this role's agent is in its prompt.
+        rows.push(Row::Heading("skills.agents"));
+        rows.extend(
+            self.library
+                .iter()
+                .filter(|s| s.name.starts_with(AGENT_NOTE))
+                .map(|s| Row::Skill(s.name.clone())),
         );
         rows.push(Row::Heading("skills.optional"));
         rows.extend(
@@ -162,7 +176,8 @@ impl SkillsTab {
             let keep = self.current().map(|s| s.name.clone());
             self.role = index;
             // The role's own skill follows the role; another skill stays.
-            let keep = keep.filter(|n| !skills::is_base(n) || n == "common");
+            let keep =
+                keep.filter(|n| !skills::is_base(n) || n == "common" || n.starts_with(AGENT_NOTE));
             self.select_named(keep.as_deref());
         }
     }
@@ -318,6 +333,19 @@ impl SkillsTab {
                         ));
                     };
                     let (status, style) = Self::status(skill, tr);
+                    if name.starts_with(AGENT_NOTE) {
+                        // ● in this role's prompt, ○ the note of another agent.
+                        let used = skills::agent_note(self.agent()) == Some(name.as_str());
+                        let (mark, look) = if used {
+                            ("●", Style::new())
+                        } else {
+                            ("○", dim)
+                        };
+                        return ListItem::new(Line::from(vec![
+                            Span::styled(format!("{mark} {name:<20} "), look),
+                            Span::styled(status, if used { style } else { dim }),
+                        ]));
+                    }
                     let mark = if skills::is_base(name) {
                         String::new()
                     } else {
@@ -361,7 +389,19 @@ impl SkillsTab {
                         Style::new().fg(Color::Red),
                     ));
                 }
-                if skills::is_base(&skill.name) {
+                if skill.name.starts_with(AGENT_NOTE) {
+                    let key = if skills::agent_note(self.agent()) == Some(skill.name.as_str()) {
+                        "skills.agent_used"
+                    } else {
+                        "skills.agent_unused"
+                    };
+                    let text = tr.f(
+                        key,
+                        &[("role", &role_name(self.role())), ("agent", &self.agent())],
+                    );
+                    lines.push(Line::styled(text, dim));
+                    lines.push(Line::default());
+                } else if skills::is_base(&skill.name) {
                     lines.push(Line::styled(tr.t("skills.base_hint").to_string(), dim));
                     lines.push(Line::default());
                 }

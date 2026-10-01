@@ -811,7 +811,9 @@ fn the_skills_tab_shows_each_roles_base_and_the_skills_to_choose() {
         "Skills of the architect",
         "Always in the prompt",
         "common",
-        "agent-claude",
+        "● agent-claude",
+        "○ agent-codex",
+        "○ agent-antigravity",
         "Can be chosen on «Roles»",
         "[ ] crash-recovery",
         "built-in",
@@ -832,6 +834,11 @@ fn the_skills_tab_shows_each_roles_base_and_the_skills_to_choose() {
         text.contains("redesign what the design already decided"),
         "{text}"
     );
+    // The note of an agent no role uses can be read and edited too.
+    click(&mut app, "○ agent-codex");
+    let text = screen(&mut app);
+    assert!(text.contains("agent-codex · built-in"), "{text}");
+    assert!(text.contains("Not in the tester's prompt"), "{text}");
     // A click on a skill shows its text.
     click(&mut app, "protocol-attacks");
     assert!(screen(&mut app).contains("protocol-attacks · built-in"));
