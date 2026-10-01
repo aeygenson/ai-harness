@@ -1504,7 +1504,9 @@ fn a_web_server_is_written_and_changed_in_the_form() {
     click(&mut app, "[ New server ]");
     fill(&mut app, "notion");
     key(&mut app, KeyCode::Tab);
-    fill(&mut app, "https://mcp.notion.com/mcp");
+    // The fields of a new server start empty: typing alone is enough.
+    assert_eq!(app.form.as_ref().unwrap().1.value(1), "");
+    type_text(&mut app, "https://mcp.notion.com/mcp");
     key(&mut app, KeyCode::Tab);
     key(&mut app, KeyCode::Tab);
     fill(&mut app, "да");

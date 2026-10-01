@@ -1001,6 +1001,10 @@ pub fn form_values(server: &McpConfig) -> [String; 3] {
             pairs(&server.headers),
             if server.auth.is_some() { "yes" } else { "" }.to_string(),
         ],
+        // A new server has no command yet: an empty field, not `""`.
+        None if server.command.is_empty() && server.args.is_empty() => {
+            [String::new(), pairs(&server.env), String::new()]
+        }
         None => [
             join_words(std::iter::once(&server.command).chain(&server.args)),
             pairs(&server.env),
@@ -1087,6 +1091,8 @@ mod tests {
         assert!(web.command.is_empty() && web.auth.is_none());
         let [address, headers, sign_in] = form_values(&web);
         assert_eq!(server_from(&address, &headers, &sign_in).unwrap(), web);
+
+        assert_eq!(form_values(&McpConfig::default()), ["", "", ""]);
 
         let oauth = server_from("https://a.b/mcp", "", "да").unwrap();
         assert_eq!(oauth.auth.as_deref(), Some("oauth"));
