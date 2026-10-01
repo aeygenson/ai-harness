@@ -24,6 +24,7 @@ use harness_agents::credentials;
 use harness_core::config::McpConfig;
 use harness_core::git::{Repo, HARNESS_DIR};
 use harness_core::mcp::McpServer;
+use harness_core::mcp_registry::Entry;
 use harness_core::mcp_tools::{self, Tool, ToolList};
 use harness_core::models::{self, ModelList};
 use harness_core::projects::{self, name_of};
@@ -114,6 +115,8 @@ enum Purpose {
     RemoveMcp(String),
     /// Save a secret for MCP servers: its name and value.
     Secret,
+    /// What to search in the MCP registry.
+    McpSearch,
 }
 
 /// A skill file waiting to be opened in the editor.
@@ -216,6 +219,9 @@ fn ask_agents(credentials_dir: &Path) -> Answers {
 /// Starts an MCP server in the project folder and asks it for its tools.
 type McpChecker = fn(&McpServer, &Path) -> Result<Vec<Tool>, String>;
 
+/// Searches the MCP registry.
+type McpSearcher = fn(&str) -> Result<Vec<Entry>, String>;
+
 /// A server being checked: its name, settings and the coming answer.
 type Checking = (String, McpConfig, mpsc::Receiver<Result<Vec<Tool>, String>>);
 
@@ -253,6 +259,9 @@ struct App {
     checker: McpChecker,
     /// «Check» on the MCP tab, while the server is asked.
     checking: Option<Checking>,
+    searcher: McpSearcher,
+    /// The registry's answer, while it is asked.
+    searching: Option<mpsc::Receiver<Result<Vec<Entry>, String>>>,
     /// `q` was pressed once with unsaved changes.
     quit_warned: bool,
     quit: bool,
@@ -283,6 +292,8 @@ impl App {
             asking: None,
             checker: harness_agents::mcp_check::list_tools,
             checking: None,
+            searcher: harness_agents::mcp_registry::search,
+            searching: None,
             quit_warned: false,
             quit: false,
         };
@@ -360,6 +371,17 @@ impl App {
         if let Some(answer) = checked {
             if let Some((name, server, _)) = self.checking.take() {
                 self.mcp_checked(&name, &server, answer);
+            }
+        }
+        let found = self.searching.as_ref().and_then(|rx| match rx.try_recv() {
+            Ok(answer) => Some(answer),
+            Err(mpsc::TryRecvError::Empty) => None,
+            Err(mpsc::TryRecvError::Disconnected) => Some(Err("the search stopped".into())),
+        });
+        if let Some(answer) = found {
+            self.searching = None;
+            if let Some(catalog) = self.mcp.as_mut().and_then(|m| m.catalog.as_mut()) {
+                catalog.found(answer);
             }
         }
         if let Some(tasks) = &mut self.tasks {
@@ -446,6 +468,13 @@ impl App {
                     roles.on_key(KeyCode::Esc, &self.tr);
                 }
             }
+            KeyCode::Esc
+                if self.tab == Tab::Mcp && self.mcp.as_ref().is_some_and(McpTab::in_catalog) =>
+            {
+                if let Some(mcp) = &mut self.mcp {
+                    mcp.catalog = None;
+                }
+            }
             KeyCode::Char('q') | KeyCode::Esc if unsaved && !quit_warned => {
                 self.quit_warned = true;
                 self.message = Some((self.tr.t("roles.unsaved_quit").to_string(), true));
@@ -496,6 +525,12 @@ impl App {
                     if let Some(skills) = &mut self.skills {
                         let action = skills.on_key(code);
                         self.skill_action(action);
+                    }
+                }
+                Tab::Mcp if self.mcp.as_ref().is_some_and(McpTab::in_catalog) => {
+                    if let Some(mcp) = &mut self.mcp {
+                        let action = mcp.catalog_key(code);
+                        self.mcp_action(action);
                     }
                 }
                 Tab::Mcp => match code {
@@ -587,7 +622,11 @@ impl App {
                     }
                     (Tab::Mcp, _) => {
                         if let (Some(mcp), Some(roles)) = (&mut self.mcp, &self.roles) {
-                            mcp.move_by(if down { 1 } else { -1 }, roles);
+                            if mcp.in_catalog() {
+                                mcp.move_found(if down { 1 } else { -1 });
+                            } else {
+                                mcp.move_by(if down { 1 } else { -1 }, roles);
+                            }
                         }
                     }
                     _ => {}
@@ -689,6 +728,14 @@ impl App {
                     }
                     if double {
                         self.press(ButtonId::McpToggle);
+                    }
+                }
+                Some((ListId::McpCatalog, index)) => {
+                    if let Some(mcp) = &mut self.mcp {
+                        mcp.select_found(index);
+                    }
+                    if double {
+                        self.press(ButtonId::McpUse);
                     }
                 }
                 Some((ListId::RoleFilter, index)) => {
@@ -801,6 +848,26 @@ impl App {
         });
     }
 
+    /// Asks the registry in the background; the catalog shows the answer.
+    fn search_registry(&mut self, query: &str) {
+        let Some(mcp) = &mut self.mcp else {
+            return;
+        };
+        query.clone_into(&mut mcp.last_query);
+        let Some(catalog) = &mut mcp.catalog else {
+            return;
+        };
+        let (tx, rx) = mpsc::channel();
+        let (searcher, query) = (self.searcher, query.to_string());
+        catalog.query.clone_from(&query);
+        catalog.searching = true;
+        catalog.error = None;
+        std::thread::spawn(move || {
+            let _ = tx.send(searcher(&query));
+        });
+        self.searching = Some(rx);
+    }
+
     /// What the MCP tab asks for.
     fn mcp_action(&mut self, action: mcp_tab::Action) {
         use mcp_tab::Action as A;
@@ -808,6 +875,39 @@ impl App {
         let servers = self.roles.as_ref().map(RolesTab::servers);
         self.form = match action {
             A::None => return,
+            A::Unusable(why) => {
+                self.message = Some((tr.f("mcp.cannot_use", &[("why", &why)]), true));
+                return;
+            }
+            A::Search(query) => Some((
+                Purpose::McpSearch,
+                Form::new(
+                    tr.t("mcp.search_title"),
+                    tr.t("mcp.search_text"),
+                    tr.t("mcp.search"),
+                )
+                .field(tr.t("mcp.search_field"), &query),
+            )),
+            A::Use(offer) => {
+                // A name harness.toml does not use yet.
+                let taken = |name: &str| servers.is_some_and(|s| s.contains_key(name));
+                let name = std::iter::once(offer.name.clone())
+                    .chain((2..).map(|n| format!("{}-{n}", offer.name)))
+                    .find(|n| !taken(n))
+                    .unwrap_or_default();
+                let server = &offer.server;
+                let command = join_words(std::iter::once(&server.command).chain(&server.args));
+                let variables: Vec<String> =
+                    server.env.iter().map(|(k, v)| format!("{k}={v}")).collect();
+                let text = format!("{}\n{}", tr.t("mcp.from_catalog"), tr.t("mcp.form_text"));
+                Some((
+                    Purpose::McpServer(None),
+                    Form::new(tr.t("mcp.new_title"), &text, tr.t("mcp.ok"))
+                        .field(tr.t("mcp.name"), &name)
+                        .field(tr.t("mcp.command_field"), &command)
+                        .field(tr.t("mcp.variables_field"), &join_words(&variables)),
+                ))
+            }
             A::New => Some((
                 Purpose::McpServer(None),
                 Form::new(tr.t("mcp.new_title"), tr.t("mcp.form_text"), tr.t("mcp.ok"))
@@ -894,6 +994,8 @@ impl App {
             config_edit::set_mcp(text, old.as_deref(), &name, &server).map_err(|e| e.to_string())
         })?;
         if let (Some(mcp), Some(roles)) = (&mut self.mcp, &self.roles) {
+            // A server from the catalog is now in the list.
+            mcp.catalog = None;
             mcp.select_named(&name, roles);
         }
         self.message = Some((self.tr.f("mcp.saved", &[("name", &name)]), false));
@@ -1149,6 +1251,18 @@ impl App {
                 }
             }
             ButtonId::McpCheck => self.check_mcp(),
+            ButtonId::McpCatalog => {
+                if let Some(mcp) = &mut self.mcp {
+                    let action = mcp.open_catalog();
+                    self.mcp_action(action);
+                }
+            }
+            ButtonId::McpSearch | ButtonId::McpUse | ButtonId::McpBack => {
+                if let Some(mcp) = &mut self.mcp {
+                    let action = mcp.catalog_press(id);
+                    self.mcp_action(action);
+                }
+            }
             ButtonId::McpNew | ButtonId::McpEdit | ButtonId::McpRemove | ButtonId::McpSecret => {
                 if let (Some(mcp), Some(roles)) = (&self.mcp, &self.roles) {
                     let action = mcp.press(id, roles);
@@ -1303,6 +1417,10 @@ impl App {
             Purpose::McpServer(old) => self.save_mcp(old.clone(), &form),
             Purpose::RemoveMcp(name) => self.remove_mcp(&name.clone()),
             Purpose::Secret => self.save_secret(&form),
+            Purpose::McpSearch => {
+                self.search_registry(form.value(0));
+                Ok(())
+            }
             Purpose::Remove(path) => {
                 let path = path.clone();
                 let result = self.projects.update(|list| list.remove(&path));

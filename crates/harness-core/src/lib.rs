@@ -7,6 +7,7 @@ pub mod config_edit;
 pub mod git;
 pub mod handoff;
 pub mod mcp;
+pub mod mcp_registry;
 pub mod mcp_tools;
 pub mod models;
 pub mod orchestrator;

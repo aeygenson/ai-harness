@@ -17,6 +17,10 @@
 //! way. A server the role's agent cannot start is grey. Giving a server to a
 //! role changes the same `mcp = [...]` as the «Roles» tab, and is kept with
 //! that tab's other changes until «Save».
+//!
+//! «From catalog» searches the official MCP registry. The chosen server
+//! opens in the «New server» form with its command, pinned version and
+//! variables filled in; nothing is written before that form is saved.
 
 use std::path::{Path, PathBuf};
 
@@ -24,6 +28,7 @@ use harness_agents::credentials;
 use harness_core::config::{McpConfig, AGENTS};
 use harness_core::handoff::Role;
 use harness_core::mcp::{self, SECRET_PREFIX};
+use harness_core::mcp_registry::{Entry, Offer};
 use harness_core::mcp_tools;
 use ratatui::crossterm::event::KeyCode;
 use ratatui::layout::{Constraint, Layout, Rect};
@@ -51,6 +56,64 @@ pub enum Action {
     Remove(String),
     /// Ask for a secret; the name offered first.
     Secret(String),
+    /// Ask what to search in the registry; the last search offered.
+    Search(String),
+    /// Open the «New server» form with this server from the registry.
+    Use(Offer),
+    /// The chosen registry server cannot be used; why.
+    Unusable(String),
+}
+
+/// The catalog of the MCP registry, while it is open.
+#[derive(Debug, Default)]
+pub struct Catalog {
+    /// The last search.
+    pub query: String,
+    pub entries: Vec<Entry>,
+    pub row: usize,
+    /// The registry is being asked.
+    pub searching: bool,
+    /// Why the last search failed.
+    pub error: Option<String>,
+}
+
+impl Catalog {
+    fn current(&self) -> Option<&Entry> {
+        self.entries.get(self.row)
+    }
+
+    /// The registry answered.
+    pub fn found(&mut self, answer: Result<Vec<Entry>, String>) {
+        self.searching = false;
+        self.row = 0;
+        match answer {
+            Ok(entries) => {
+                self.entries = entries;
+                self.error = None;
+            }
+            Err(error) => {
+                self.entries.clear();
+                self.error = Some(error);
+            }
+        }
+    }
+
+    fn move_by(&mut self, delta: isize) {
+        self.row = self
+            .row
+            .saturating_add_signed(delta)
+            .min(self.entries.len().saturating_sub(1));
+    }
+
+    fn choose(&self) -> Action {
+        match self.current() {
+            Some(Entry {
+                offer: Some(offer), ..
+            }) => Action::Use(offer.clone()),
+            Some(entry) => Action::Unusable(entry.unusable.clone().unwrap_or_default()),
+            None => Action::None,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -65,6 +128,10 @@ pub struct McpTab {
     secrets: Vec<String>,
     /// The server «Check» is asking now.
     pub(crate) checking: Option<String>,
+    /// «From catalog», while it is open.
+    pub(crate) catalog: Option<Catalog>,
+    /// The last search, offered again when the catalog opens.
+    pub(crate) last_query: String,
 }
 
 impl McpTab {
@@ -75,6 +142,8 @@ impl McpTab {
             row: 0,
             secrets: Vec::new(),
             checking: None,
+            catalog: None,
+            last_query: String::new(),
         };
         tab.reload();
         tab
@@ -170,11 +239,70 @@ impl McpTab {
             KeyCode::Left | KeyCode::Char('h') => self.choose_role(self.role.saturating_sub(1)),
             KeyCode::Right | KeyCode::Char('l') => self.choose_role(self.role + 1),
             KeyCode::Char('n') => return self.press(ButtonId::McpNew, roles),
+            KeyCode::Char('f') => return self.open_catalog(),
             KeyCode::Char('e') => return self.press(ButtonId::McpEdit, roles),
             KeyCode::Delete => return self.press(ButtonId::McpRemove, roles),
             _ => {}
         }
         Action::None
+    }
+
+    pub fn in_catalog(&self) -> bool {
+        self.catalog.is_some()
+    }
+
+    /// Opens the catalog and asks what to search.
+    pub fn open_catalog(&mut self) -> Action {
+        let query = self.last_query.clone();
+        let catalog = self.catalog.get_or_insert_with(|| Catalog {
+            query,
+            ..Catalog::default()
+        });
+        Action::Search(catalog.query.clone())
+    }
+
+    /// A click on a line of the catalog.
+    pub fn select_found(&mut self, index: usize) {
+        if let Some(catalog) = &mut self.catalog {
+            if index < catalog.entries.len() {
+                catalog.row = index;
+            }
+        }
+    }
+
+    pub fn move_found(&mut self, delta: isize) {
+        if let Some(catalog) = &mut self.catalog {
+            catalog.move_by(delta);
+        }
+    }
+
+    /// A key while the catalog is open.
+    pub fn catalog_key(&mut self, key: KeyCode) -> Action {
+        match key {
+            KeyCode::Up | KeyCode::Char('k') => self.move_found(-1),
+            KeyCode::Down | KeyCode::Char('j') => self.move_found(1),
+            KeyCode::Char('/' | 's' | 'f') => return self.catalog_press(ButtonId::McpSearch),
+            KeyCode::Enter | KeyCode::Char('a') => return self.catalog_press(ButtonId::McpUse),
+            KeyCode::Esc | KeyCode::Backspace => self.catalog = None,
+            _ => {}
+        }
+        Action::None
+    }
+
+    /// A button of the catalog.
+    pub fn catalog_press(&mut self, id: ButtonId) -> Action {
+        let Some(catalog) = &mut self.catalog else {
+            return Action::None;
+        };
+        match id {
+            ButtonId::McpSearch if !catalog.searching => Action::Search(catalog.query.clone()),
+            ButtonId::McpUse => catalog.choose(),
+            ButtonId::McpBack => {
+                self.catalog = None;
+                Action::None
+            }
+            _ => Action::None,
+        }
     }
 
     /// A button about the servers themselves.
@@ -233,6 +361,10 @@ impl McpTab {
         tr: &I18n,
         roles: &RolesTab,
     ) {
+        if let Some(catalog) = &self.catalog {
+            draw_catalog(catalog, frame, area, hits, tr, roles);
+            return;
+        }
         let [top, main, bottom, servers_row] = Layout::vertical([
             Constraint::Length(1),
             Constraint::Min(0),
@@ -366,6 +498,7 @@ impl McpTab {
             hits,
             &[
                 (tr.t("mcp.new"), ButtonId::McpNew, true),
+                (tr.t("mcp.catalog"), ButtonId::McpCatalog, true),
                 (edit, ButtonId::McpEdit, current.is_some()),
                 (tr.t("mcp.remove"), ButtonId::McpRemove, described.is_some()),
                 (
@@ -507,6 +640,184 @@ impl McpTab {
         ]));
         lines
     }
+}
+
+/// The catalog: the servers found on the left, the chosen one on the right.
+fn draw_catalog(
+    catalog: &Catalog,
+    frame: &mut Frame,
+    area: Rect,
+    hits: &mut Hits,
+    tr: &I18n,
+    roles: &RolesTab,
+) {
+    let [top, main, bottom] = Layout::vertical([
+        Constraint::Length(1),
+        Constraint::Min(0),
+        Constraint::Length(1),
+    ])
+    .areas(area);
+    let dim = Style::new().fg(Color::DarkGray);
+    let red = Style::new().fg(Color::LightRed);
+    let bold = Style::new().add_modifier(Modifier::BOLD);
+    let status = if catalog.searching {
+        Span::styled(tr.f("mcp.searching", &[("query", &catalog.query)]), dim)
+    } else if let Some(error) = &catalog.error {
+        Span::styled(tr.f("mcp.search_failed", &[("error", &error)]), red)
+    } else if catalog.query.is_empty() {
+        Span::styled(
+            tr.f("mcp.found_all", &[("count", &catalog.entries.len())]),
+            dim,
+        )
+    } else {
+        Span::styled(
+            tr.f(
+                "mcp.found",
+                &[("count", &catalog.entries.len()), ("query", &catalog.query)],
+            ),
+            dim,
+        )
+    };
+    frame.render_widget(
+        Line::from(vec![
+            Span::styled(format!("{} ", tr.t("mcp.catalog_title")), bold),
+            status,
+        ]),
+        top,
+    );
+
+    let [left, right] =
+        Layout::horizontal([Constraint::Percentage(35), Constraint::Percentage(65)]).areas(main);
+    let items: Vec<ListItem> = catalog
+        .entries
+        .iter()
+        .map(|entry| {
+            let shown = entry
+                .offer
+                .as_ref()
+                .map_or_else(|| short_name(&entry.name), |o| o.name.clone());
+            let added = entry
+                .offer
+                .as_ref()
+                .is_some_and(|o| roles.servers().contains_key(&o.name));
+            let style = if entry.offer.is_some() {
+                Style::new()
+            } else {
+                dim
+            };
+            let mut spans = vec![Span::styled(format!("{shown:<20} "), style)];
+            if added {
+                spans.push(Span::styled(tr.t("mcp.already_added").to_string(), dim));
+            } else if let Some(offer) = &entry.offer {
+                spans.push(Span::styled(offer.kind.clone(), dim));
+            } else {
+                spans.push(Span::styled(tr.t("mcp.web_only").to_string(), dim));
+            }
+            ListItem::new(Line::from(spans))
+        })
+        .collect();
+    draw_list(
+        frame,
+        hits,
+        left,
+        ListId::McpCatalog,
+        &format!(" {} ", tr.t("mcp.catalog_list")),
+        items,
+        catalog.row,
+        true,
+    );
+
+    let (title, lines) = match catalog.current() {
+        Some(entry) => (format!(" {} ", entry.name), entry_details(entry, tr)),
+        None => (
+            String::new(),
+            tr.t("mcp.catalog_empty")
+                .lines()
+                .map(|l| Line::from(l.to_string()))
+                .collect(),
+        ),
+    };
+    frame.render_widget(
+        Paragraph::new(lines)
+            .block(panel(&title, false))
+            .wrap(Wrap { trim: false }),
+        right,
+    );
+
+    let usable = catalog.current().is_some_and(|e| e.offer.is_some());
+    buttons(
+        frame,
+        bottom,
+        hits,
+        &[
+            (tr.t("mcp.search"), ButtonId::McpSearch, !catalog.searching),
+            (tr.t("mcp.use"), ButtonId::McpUse, usable),
+            (tr.t("mcp.back"), ButtonId::McpBack, true),
+        ],
+    );
+}
+
+/// What the catalog shows about one registry server.
+fn entry_details(entry: &Entry, tr: &I18n) -> Vec<Line<'static>> {
+    let dim = Style::new().fg(Color::DarkGray);
+    let red = Style::new().fg(Color::LightRed);
+    let bold = Style::new().add_modifier(Modifier::BOLD);
+    let mut lines = Vec::new();
+    if let Some(title) = &entry.title {
+        lines.push(Line::styled(title.clone(), bold));
+    }
+    if let Some(description) = &entry.description {
+        lines.push(Line::from(description.clone()));
+    }
+    lines.push(Line::default());
+    lines.push(Line::from(vec![
+        Span::styled(format!("{} ", tr.t("mcp.version")), bold),
+        Span::raw(entry.version.clone()),
+    ]));
+    if let Some(repository) = &entry.repository {
+        lines.push(Line::from(vec![
+            Span::styled(format!("{} ", tr.t("mcp.repository")), bold),
+            Span::raw(repository.clone()),
+        ]));
+    }
+    lines.push(Line::default());
+    let Some(offer) = &entry.offer else {
+        let why = entry.unusable.clone().unwrap_or_default();
+        lines.push(Line::styled(tr.f("mcp.cannot_use", &[("why", &why)]), red));
+        return lines;
+    };
+    lines.push(Line::from(vec![
+        Span::styled(format!("{} ", tr.t("mcp.command")), bold),
+        Span::raw(join_words(
+            std::iter::once(&offer.server.command).chain(&offer.server.args),
+        )),
+    ]));
+    lines.push(Line::default());
+    if offer.variables.is_empty() {
+        lines.push(Line::styled(tr.t("mcp.no_variables").to_string(), dim));
+    } else {
+        lines.push(Line::styled(tr.t("mcp.variables").to_string(), bold));
+        for (variable, description) in &offer.variables {
+            let value = match offer.server.env.get(variable) {
+                Some(value) if value.is_empty() => tr.t("mcp.fill_in").to_string(),
+                Some(value) => value.clone(),
+                None => tr.t("mcp.optional").to_string(),
+            };
+            lines.push(Line::from(format!("  {variable} = {value}")));
+            if !description.is_empty() {
+                lines.push(Line::styled(format!("    {description}"), dim));
+            }
+        }
+    }
+    lines.push(Line::default());
+    lines.push(Line::styled(tr.t("mcp.use_hint").to_string(), dim));
+    lines
+}
+
+/// `io.github.x/some-server` → `some-server`, for a server that gets no
+/// name of its own.
+fn short_name(name: &str) -> String {
+    name.rsplit('/').next().unwrap_or(name).to_string()
 }
 
 /// The names of the secrets a server's variables use.

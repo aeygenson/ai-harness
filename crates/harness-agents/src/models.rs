@@ -155,7 +155,7 @@ pub fn ask(agent: &str, credentials_dir: &Path, programs: &Programs) -> Result<M
 }
 
 /// `program` in `dir` with only the whitelisted environment.
-fn command(program: &Path, dir: &Path) -> Command {
+pub(crate) fn command(program: &Path, dir: &Path) -> Command {
     let mut command = Command::new(program);
     command.current_dir(dir).env_clear().envs(
         INHERITED_ENV
@@ -167,7 +167,7 @@ fn command(program: &Path, dir: &Path) -> Command {
 
 /// Runs `command` with `input`, waits at most `TIME_LIMIT`, returns what it
 /// printed. `secrets` never appear in an error.
-fn run(mut command: Command, input: &str, secrets: &[&str]) -> Result<String, String> {
+pub(crate) fn run(mut command: Command, input: &str, secrets: &[&str]) -> Result<String, String> {
     let program = command.get_program().to_string_lossy().into_owned();
     let mut child = command
         .stdin(Stdio::piped())

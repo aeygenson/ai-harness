@@ -8,6 +8,7 @@ pub mod codex;
 pub mod credentials;
 pub mod launcher;
 pub mod mcp_check;
+pub mod mcp_registry;
 pub mod mock;
 pub mod models;
 pub mod process;

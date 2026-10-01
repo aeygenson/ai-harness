@@ -1372,3 +1372,94 @@ fn check_asks_a_server_for_its_tools() {
         "{message}"
     );
 }
+
+fn fake_search(query: &str) -> Result<Vec<harness_core::mcp_registry::Entry>, String> {
+    if query != "docs" {
+        return Err("offline".into());
+    }
+    harness_core::mcp_registry::parse(
+        r#"{"servers":[
+        {"server":{"name":"io.github.someone/docs","title":"Docs","description":"Finds docs.",
+          "version":"1.2.0","repository":{"url":"https://github.com/someone/docs"},
+          "packages":[{"registryType":"npm","identifier":"docs-mcp","version":"1.2.0",
+            "transport":{"type":"stdio"},
+            "environmentVariables":[{"name":"DOCS_KEY","description":"Your key.","isSecret":true}]}]}},
+        {"server":{"name":"com.example/remote-docs","version":"0.1.0",
+          "remotes":[{"type":"streamable-http","url":"https://example.com/mcp"}]}}
+        ]}"#,
+    )
+}
+
+/// Waits until the registry search running in the background has answered.
+fn wait_search(app: &mut App) {
+    let start = Instant::now();
+    while app.searching.is_some() {
+        assert!(start.elapsed() < Duration::from_secs(10));
+        std::thread::sleep(Duration::from_millis(10));
+        app.tick();
+    }
+}
+
+#[test]
+fn a_server_from_the_catalog_opens_in_the_form_before_it_is_saved() {
+    let env = Env::new();
+    let root = env.path("test");
+    project(&root);
+    let mut app = env.app(&root);
+    app.searcher = fake_search;
+    click(&mut app, "4 MCP");
+
+    // A failed search says why.
+    click(&mut app, "[ From catalog ]");
+    fill(&mut app, "anything");
+    key(&mut app, KeyCode::Enter);
+    wait_search(&mut app);
+    assert!(screen(&mut app).contains("the search failed: offline"));
+
+    key(&mut app, KeyCode::Char('/'));
+    assert_eq!(app.form.as_ref().unwrap().1.value(0), "anything");
+    fill(&mut app, "docs");
+    key(&mut app, KeyCode::Enter);
+    wait_search(&mut app);
+    let text = screen(&mut app);
+    assert!(text.contains("2 servers for «docs»"), "{text}");
+    assert!(text.contains("Finds docs."), "{text}");
+    assert!(text.contains("npx -y docs-mcp@1.2.0"), "{text}");
+    assert!(text.contains("DOCS_KEY = secret:docs"), "{text}");
+    assert!(text.contains("web only"), "{text}");
+
+    // A server only on the web cannot be added.
+    key(&mut app, KeyCode::Down);
+    key(&mut app, KeyCode::Enter);
+    assert!(app.form.is_none());
+    let (message, problem) = app.message.clone().unwrap();
+    assert!(problem && message.contains("Cannot be added"), "{message}");
+
+    // The other opens filled in; nothing is written before Save.
+    key(&mut app, KeyCode::Up);
+    key(&mut app, KeyCode::Enter);
+    let form = &app.form.as_ref().unwrap().1;
+    assert_eq!(
+        (form.value(0), form.value(1), form.value(2)),
+        ("docs", "npx -y docs-mcp@1.2.0", "DOCS_KEY=secret:docs")
+    );
+    assert!(config(&root).mcp.is_empty());
+    key(&mut app, KeyCode::Enter);
+    assert!(app.form.is_none(), "{:?}", app.form);
+    assert_eq!(config(&root).mcp["docs"].args, ["-y", "docs-mcp@1.2.0"]);
+    let text = screen(&mut app);
+    assert!(text.contains("> [ ] docs"), "{text}");
+    assert!(text.contains("✗ secret"), "{text}");
+
+    // Added again, it gets a name of its own; Esc goes back to the list.
+    key(&mut app, KeyCode::Char('f'));
+    key(&mut app, KeyCode::Enter);
+    wait_search(&mut app);
+    assert!(screen(&mut app).contains("already added"));
+    key(&mut app, KeyCode::Enter);
+    assert_eq!(app.form.as_ref().unwrap().1.value(0), "docs-2");
+    key(&mut app, KeyCode::Esc);
+    key(&mut app, KeyCode::Esc);
+    assert!(!app.quit);
+    assert!(screen(&mut app).contains("> [ ] docs"));
+}
