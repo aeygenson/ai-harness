@@ -61,8 +61,7 @@ pub fn list_tools_within(
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    let mut child = command
-        .spawn()
+    let mut child = crate::process::spawn(&mut command)
         .map_err(|e| format!("cannot start {}: {e}", server.command))?;
     let (stderr_tx, stderr_rx) = channel();
     if let Some(mut pipe) = child.stderr.take() {

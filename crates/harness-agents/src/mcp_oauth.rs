@@ -584,9 +584,8 @@ fn http(
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    let mut child = command
-        .spawn()
-        .map_err(|e| format!("cannot start curl: {e}"))?;
+    let mut child =
+        crate::process::spawn(&mut command).map_err(|e| format!("cannot start curl: {e}"))?;
     if let Some(mut stdin) = child.stdin.take() {
         if let Some((_, text)) = body {
             let _ = stdin.write_all(text.as_bytes());

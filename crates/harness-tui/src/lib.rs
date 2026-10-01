@@ -57,7 +57,7 @@ mod tasks;
 mod ui;
 
 use i18n::I18n;
-use mcp_tab::{join_words, McpTab};
+use mcp_tab::McpTab;
 use picker::{Browser, Native};
 use projects_tab::{has_config, ProjectsTab};
 use roles_tab::{Action, RolesTab};
@@ -218,6 +218,16 @@ fn ask_agents(credentials_dir: &Path) -> Answers {
 
 /// Starts an MCP server in the project folder and asks it for its tools.
 type McpChecker = fn(&McpServer, &Path) -> Result<Vec<Tool>, String>;
+
+/// The form for a new or changed MCP server.
+fn server_form(tr: &I18n, title: &str, text: &str, name: &str, server: &McpConfig) -> Form {
+    let [command, variables, sign_in] = mcp_tab::form_values(server);
+    Form::new(title, text, tr.t("mcp.ok"))
+        .field(tr.t("mcp.name"), name)
+        .field(tr.t("mcp.command_field"), &command)
+        .field(tr.t("mcp.variables_field"), &variables)
+        .field(tr.t("mcp.sign_in_field"), &sign_in)
+}
 
 /// Searches the MCP registry.
 type McpSearcher = fn(&str) -> Result<Vec<Entry>, String>;
@@ -965,45 +975,36 @@ impl App {
                     .chain((2..).map(|n| format!("{}-{n}", offer.name)))
                     .find(|n| !taken(n))
                     .unwrap_or_default();
-                let server = &offer.server;
-                let command = join_words(std::iter::once(&server.command).chain(&server.args));
-                let variables: Vec<String> =
-                    server.env.iter().map(|(k, v)| format!("{k}={v}")).collect();
                 let text = format!("{}\n{}", tr.t("mcp.from_catalog"), tr.t("mcp.form_text"));
                 Some((
                     Purpose::McpServer(None),
-                    Form::new(tr.t("mcp.new_title"), &text, tr.t("mcp.ok"))
-                        .field(tr.t("mcp.name"), &name)
-                        .field(tr.t("mcp.command_field"), &command)
-                        .field(tr.t("mcp.variables_field"), &join_words(&variables)),
+                    server_form(tr, tr.t("mcp.new_title"), &text, &name, &offer.server),
                 ))
             }
             A::New => Some((
                 Purpose::McpServer(None),
-                Form::new(tr.t("mcp.new_title"), tr.t("mcp.form_text"), tr.t("mcp.ok"))
-                    .field(tr.t("mcp.name"), "")
-                    .field(tr.t("mcp.command_field"), "")
-                    .field(tr.t("mcp.variables_field"), ""),
+                server_form(
+                    tr,
+                    tr.t("mcp.new_title"),
+                    tr.t("mcp.form_text"),
+                    "",
+                    &McpConfig::default(),
+                ),
             )),
             A::Edit(name) => {
                 let server = servers.and_then(|s| s.get(&name));
-                let (command, variables) = server.map_or_else(Default::default, |s| {
-                    let command = join_words(std::iter::once(&s.command).chain(&s.args));
-                    let variables: Vec<String> =
-                        s.env.iter().map(|(k, v)| format!("{k}={v}")).collect();
-                    (command, join_words(&variables))
-                });
                 let old = server.map(|_| name.clone());
+                let title = tr.f("mcp.edit_title", &[("name", &name)]);
+                let empty = McpConfig::default();
                 Some((
                     Purpose::McpServer(old),
-                    Form::new(
-                        &tr.f("mcp.edit_title", &[("name", &name)]),
+                    server_form(
+                        tr,
+                        &title,
                         tr.t("mcp.form_text"),
-                        tr.t("mcp.ok"),
-                    )
-                    .field(tr.t("mcp.name"), &name)
-                    .field(tr.t("mcp.command_field"), &command)
-                    .field(tr.t("mcp.variables_field"), &variables),
+                        &name,
+                        server.unwrap_or(&empty),
+                    ),
                 ))
             }
             A::Remove(name) => {
@@ -1058,7 +1059,7 @@ impl App {
     /// OK in the server form.
     fn save_mcp(&mut self, old: Option<String>, form: &Form) -> Result<(), String> {
         let name = form.value(0).to_string();
-        let server = mcp_tab::server_from(form.value(1), form.value(2))?;
+        let server = mcp_tab::server_from(form.value(1), form.value(2), form.value(3))?;
         harness_core::mcp::check_server(&name, &server).map_err(|e| e.to_string())?;
         self.save_settings(|text| {
             config_edit::set_mcp(text, old.as_deref(), &name, &server).map_err(|e| e.to_string())

@@ -39,6 +39,22 @@ pub fn base_command(program: &Path, project_dir: &Path) -> Command {
     command
 }
 
+/// Starts `command`. A program file that another thread has just written can
+/// be «busy» for a moment (Linux `ETXTBSY`, seen when tests write fake
+/// programs in parallel); that is tried again a few times.
+pub fn spawn(command: &mut Command) -> std::io::Result<std::process::Child> {
+    let mut tries = 0;
+    loop {
+        match command.spawn() {
+            Err(e) if e.raw_os_error() == Some(26) && tries < 20 => {
+                tries += 1;
+                std::thread::sleep(Duration::from_millis(50));
+            }
+            result => return result,
+        }
+    }
+}
+
 /// What a finished agent printed.
 #[derive(Debug)]
 pub struct Finished {

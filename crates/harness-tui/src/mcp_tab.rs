@@ -872,19 +872,33 @@ fn entry_details(entry: &Entry, tr: &I18n) -> Vec<Line<'static>> {
         lines.push(Line::styled(tr.f("mcp.cannot_use", &[("why", &why)]), red));
         return lines;
     };
+    let (label, shown, values, none, title) = match &offer.server.url {
+        Some(url) => (
+            "mcp.address",
+            url.clone(),
+            &offer.server.headers,
+            "mcp.no_headers",
+            "mcp.headers",
+        ),
+        None => (
+            "mcp.command",
+            join_words(std::iter::once(&offer.server.command).chain(&offer.server.args)),
+            &offer.server.env,
+            "mcp.no_variables",
+            "mcp.variables",
+        ),
+    };
     lines.push(Line::from(vec![
-        Span::styled(format!("{} ", tr.t("mcp.command")), bold),
-        Span::raw(join_words(
-            std::iter::once(&offer.server.command).chain(&offer.server.args),
-        )),
+        Span::styled(format!("{} ", tr.t(label)), bold),
+        Span::raw(shown),
     ]));
     lines.push(Line::default());
     if offer.variables.is_empty() {
-        lines.push(Line::styled(tr.t("mcp.no_variables").to_string(), dim));
+        lines.push(Line::styled(tr.t(none).to_string(), dim));
     } else {
-        lines.push(Line::styled(tr.t("mcp.variables").to_string(), bold));
+        lines.push(Line::styled(tr.t(title).to_string(), bold));
         for (variable, description) in &offer.variables {
-            let value = match offer.server.env.get(variable) {
+            let value = match values.get(variable) {
                 Some(value) if value.is_empty() => tr.t("mcp.fill_in").to_string(),
                 Some(value) => value.clone(),
                 None => tr.t("mcp.optional").to_string(),
@@ -974,22 +988,68 @@ pub fn join_words<'a>(words: impl IntoIterator<Item = &'a String>) -> String {
         .join(" ")
 }
 
-/// A server from the form's command line and variables (`NAME=value`,
-/// separated by spaces).
-pub fn server_from(command: &str, variables: &str) -> Result<McpConfig, String> {
-    let mut words = split_words(command)?.into_iter();
-    let command = words.next().unwrap_or_default();
-    let mut env = std::collections::BTreeMap::new();
+/// What the server form shows for `server`: the command line (or the
+/// address), the variables (or headers) and «yes» for a browser sign-in.
+pub fn form_values(server: &McpConfig) -> [String; 3] {
+    let pairs = |map: &std::collections::BTreeMap<String, String>| {
+        let words: Vec<String> = map.iter().map(|(k, v)| format!("{k}={v}")).collect();
+        join_words(&words)
+    };
+    match &server.url {
+        Some(url) => [
+            url.clone(),
+            pairs(&server.headers),
+            if server.auth.is_some() { "yes" } else { "" }.to_string(),
+        ],
+        None => [
+            join_words(std::iter::once(&server.command).chain(&server.args)),
+            pairs(&server.env),
+            String::new(),
+        ],
+    }
+}
+
+/// A server from the form: a command line, or an address (`https://...`)
+/// on the web; `NAME=value` pairs separated by spaces, which are variables
+/// for a command and headers for an address; and whether to sign in through
+/// the browser.
+pub fn server_from(command: &str, variables: &str, sign_in: &str) -> Result<McpConfig, String> {
+    let mut pairs = std::collections::BTreeMap::new();
     for word in split_words(variables)? {
         let Some((name, value)) = word.split_once('=') else {
             return Err(format!("{word:?} is not NAME=value"));
         };
-        env.insert(name.trim().to_string(), value.trim().to_string());
+        pairs.insert(name.trim().to_string(), value.trim().to_string());
     }
+    let oauth = match sign_in.trim().to_lowercase().as_str() {
+        "" | "no" | "нет" => false,
+        "yes" | "да" | "oauth" => true,
+        other => {
+            return Err(format!(
+                "sign-in: write yes or leave it empty, not {other:?}"
+            ))
+        }
+    };
+    let command = command.trim();
+    if command.starts_with("https://") || command.starts_with("http://") {
+        if command.contains(char::is_whitespace) {
+            return Err("an address has no spaces".into());
+        }
+        return Ok(McpConfig {
+            url: Some(command.to_string()),
+            headers: pairs,
+            auth: oauth.then(|| harness_core::mcp::AUTH_OAUTH.to_string()),
+            ..McpConfig::default()
+        });
+    }
+    if oauth {
+        return Err("a sign-in through the browser is only for an address (https://...)".into());
+    }
+    let mut words = split_words(command)?.into_iter();
     Ok(McpConfig {
-        command,
+        command: words.next().unwrap_or_default(),
         args: words.collect(),
-        env,
+        env: pairs,
         ..McpConfig::default()
     })
 }
@@ -1003,6 +1063,7 @@ mod tests {
         let server = server_from(
             "npx -y \"@scope/a b\"",
             "API_KEY=secret:docs  MODE=\"read only\"",
+            "",
         )
         .unwrap();
         assert_eq!(server.command, "npx");
@@ -1010,7 +1071,25 @@ mod tests {
         assert_eq!(server.env["API_KEY"], "secret:docs");
         assert_eq!(server.env["MODE"], "read only");
         assert_eq!(join_words(&server.args), "-y \"@scope/a b\"");
-        assert!(server_from("npx \"open", "").is_err());
-        assert!(server_from("npx", "NOVALUE").is_err());
+        assert!(server_from("npx \"open", "", "").is_err());
+        assert!(server_from("npx", "NOVALUE", "").is_err());
+        assert!(server_from("npx", "", "yes").is_err());
+        assert!(server_from("https://a.b/mcp", "", "maybe").is_err());
+
+        let web = server_from(
+            " https://a.b/mcp ",
+            "Authorization=\"Bearer secret:gh\" X-Mode=read",
+            "",
+        )
+        .unwrap();
+        assert_eq!(web.url.as_deref(), Some("https://a.b/mcp"));
+        assert_eq!(web.headers["Authorization"], "Bearer secret:gh");
+        assert!(web.command.is_empty() && web.auth.is_none());
+        let [address, headers, sign_in] = form_values(&web);
+        assert_eq!(server_from(&address, &headers, &sign_in).unwrap(), web);
+
+        let oauth = server_from("https://a.b/mcp", "", "да").unwrap();
+        assert_eq!(oauth.auth.as_deref(), Some("oauth"));
+        assert_eq!(form_values(&oauth)[2], "yes");
     }
 }

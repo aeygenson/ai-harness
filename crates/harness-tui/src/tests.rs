@@ -1385,7 +1385,10 @@ fn fake_search(query: &str) -> Result<Vec<harness_core::mcp_registry::Entry>, St
             "transport":{"type":"stdio"},
             "environmentVariables":[{"name":"DOCS_KEY","description":"Your key.","isSecret":true}]}]}},
         {"server":{"name":"com.example/remote-docs","version":"0.1.0",
-          "remotes":[{"type":"streamable-http","url":"https://example.com/mcp"}]}}
+          "remotes":[{"type":"sse","url":"https://example.com/sse"}]}},
+        {"server":{"name":"com.example/web-docs","version":"0.2.0",
+          "remotes":[{"type":"streamable-http","url":"https://example.com/web",
+            "headers":[{"name":"Authorization","value":"Bearer {key}","isSecret":true}]}]}}
         ]}"#,
     )
 }
@@ -1422,20 +1425,22 @@ fn a_server_from_the_catalog_opens_in_the_form_before_it_is_saved() {
     key(&mut app, KeyCode::Enter);
     wait_search(&mut app);
     let text = screen(&mut app);
-    assert!(text.contains("2 servers for «docs»"), "{text}");
+    assert!(text.contains("3 servers for «docs»"), "{text}");
     assert!(text.contains("Finds docs."), "{text}");
     assert!(text.contains("npx -y docs-mcp@1.2.0"), "{text}");
     assert!(text.contains("DOCS_KEY = secret:docs"), "{text}");
-    assert!(text.contains("web only"), "{text}");
+    assert!(text.contains("cannot add"), "{text}");
 
-    // A server only on the web cannot be added.
+    // A server with only an old SSE address cannot be added.
+    key(&mut app, KeyCode::Down);
     key(&mut app, KeyCode::Down);
     key(&mut app, KeyCode::Enter);
     assert!(app.form.is_none());
     let (message, problem) = app.message.clone().unwrap();
     assert!(problem && message.contains("Cannot be added"), "{message}");
 
-    // The other opens filled in; nothing is written before Save.
+    // The first opens filled in; nothing is written before Save.
+    key(&mut app, KeyCode::Up);
     key(&mut app, KeyCode::Up);
     key(&mut app, KeyCode::Enter);
     let form = &app.form.as_ref().unwrap().1;
@@ -1459,9 +1464,71 @@ fn a_server_from_the_catalog_opens_in_the_form_before_it_is_saved() {
     key(&mut app, KeyCode::Enter);
     assert_eq!(app.form.as_ref().unwrap().1.value(0), "docs-2");
     key(&mut app, KeyCode::Esc);
-    key(&mut app, KeyCode::Esc);
+
+    // A server on the web: its address and headers, the key as a secret.
+    key(&mut app, KeyCode::Down);
+    let text = screen(&mut app);
+    assert!(text.contains("Address: https://example.com/web"), "{text}");
+    assert!(
+        text.contains("Authorization = Bearer secret:web-docs"),
+        "{text}"
+    );
+    key(&mut app, KeyCode::Enter);
+    let form = &app.form.as_ref().unwrap().1;
+    assert_eq!(
+        (form.value(0), form.value(1), form.value(2), form.value(3)),
+        (
+            "web-docs",
+            "https://example.com/web",
+            "\"Authorization=Bearer secret:web-docs\"",
+            ""
+        )
+    );
+    key(&mut app, KeyCode::Enter);
+    let web = &config(&root).mcp["web-docs"];
+    assert_eq!(web.url.as_deref(), Some("https://example.com/web"));
+    assert_eq!(web.headers["Authorization"], "Bearer secret:web-docs");
     assert!(!app.quit);
-    assert!(screen(&mut app).contains("> [ ] docs"));
+    let text = screen(&mut app);
+    assert!(text.contains("> [ ] web-docs"), "{text}");
+    assert!(text.contains("Address: https://example.com/web"), "{text}");
+}
+
+#[test]
+fn a_web_server_is_written_and_changed_in_the_form() {
+    let env = Env::new();
+    let root = env.path("test");
+    project(&root);
+    let mut app = env.app(&root);
+    click(&mut app, "4 MCP");
+    click(&mut app, "[ New server ]");
+    fill(&mut app, "notion");
+    key(&mut app, KeyCode::Tab);
+    fill(&mut app, "https://mcp.notion.com/mcp");
+    key(&mut app, KeyCode::Tab);
+    key(&mut app, KeyCode::Tab);
+    fill(&mut app, "да");
+    key(&mut app, KeyCode::Enter);
+    assert!(app.form.is_none(), "{:?}", app.form);
+    let notion = &config(&root).mcp["notion"];
+    assert_eq!(notion.url.as_deref(), Some("https://mcp.notion.com/mcp"));
+    assert_eq!(notion.auth.as_deref(), Some("oauth"));
+    assert!(screen(&mut app).contains("[ Sign in ]"));
+
+    // Changed back to a key in a header, in the same form.
+    key(&mut app, KeyCode::Char('e'));
+    assert_eq!(app.form.as_ref().unwrap().1.value(3), "yes");
+    key(&mut app, KeyCode::Tab);
+    key(&mut app, KeyCode::Tab);
+    fill(&mut app, "Authorization=\"Bearer secret:notion\"");
+    key(&mut app, KeyCode::Tab);
+    fill(&mut app, "");
+    key(&mut app, KeyCode::Enter);
+    let notion = &config(&root).mcp["notion"];
+    assert!(notion.auth.is_none());
+    assert_eq!(notion.headers["Authorization"], "Bearer secret:notion");
+    let text = fs::read_to_string(root.join(".harness/harness.toml")).unwrap();
+    assert!(!text.contains("auth"), "{text}");
 }
 
 fn fake_web_check(
