@@ -21,7 +21,10 @@ use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use harness_agents::credentials;
+use harness_core::config::McpConfig;
 use harness_core::git::{Repo, HARNESS_DIR};
+use harness_core::mcp::McpServer;
+use harness_core::mcp_tools::{self, Tool, ToolList};
 use harness_core::models::{self, ModelList};
 use harness_core::projects::{self, name_of};
 use harness_core::skills::{self, SKILLS_DIR};
@@ -210,6 +213,12 @@ fn ask_agents(credentials_dir: &Path) -> Answers {
     harness_agents::models::ask_all(credentials_dir, &Default::default())
 }
 
+/// Starts an MCP server in the project folder and asks it for its tools.
+type McpChecker = fn(&McpServer, &Path) -> Result<Vec<Tool>, String>;
+
+/// A server being checked: its name, settings and the coming answer.
+type Checking = (String, McpConfig, mpsc::Receiver<Result<Vec<Tool>, String>>);
+
 #[derive(Debug)]
 struct App {
     tab: Tab,
@@ -241,6 +250,9 @@ struct App {
     asker: ModelAsker,
     /// The answers of «Refresh models», while the agents are being asked.
     asking: Option<mpsc::Receiver<Answers>>,
+    checker: McpChecker,
+    /// «Check» on the MCP tab, while the server is asked.
+    checking: Option<Checking>,
     /// `q` was pressed once with unsaved changes.
     quit_warned: bool,
     quit: bool,
@@ -269,6 +281,8 @@ impl App {
             builder: harness_agents::build::build_team,
             asker: ask_agents,
             asking: None,
+            checker: harness_agents::mcp_check::list_tools,
+            checking: None,
             quit_warned: false,
             quit: false,
         };
@@ -334,6 +348,19 @@ impl App {
         if let Some(answers) = answers {
             self.asking = None;
             self.models_answered(answers.unwrap_or_default());
+        }
+        let checked = self
+            .checking
+            .as_ref()
+            .and_then(|(_, _, rx)| match rx.try_recv() {
+                Ok(answer) => Some(answer),
+                Err(mpsc::TryRecvError::Empty) => None,
+                Err(mpsc::TryRecvError::Disconnected) => Some(Err("the check stopped".into())),
+            });
+        if let Some(answer) = checked {
+            if let Some((name, server, _)) = self.checking.take() {
+                self.mcp_checked(&name, &server, answer);
+            }
         }
         if let Some(tasks) = &mut self.tasks {
             if let Some(message) = tasks.tick(&self.tr) {
@@ -475,6 +502,7 @@ impl App {
                     KeyCode::Char('s') => self.press(ButtonId::Save),
                     KeyCode::Char('u') => self.press(ButtonId::Undo),
                     KeyCode::Char(' ') | KeyCode::Enter => self.press(ButtonId::McpToggle),
+                    KeyCode::Char('c') => self.press(ButtonId::McpCheck),
                     code => {
                         if let (Some(mcp), Some(roles)) = (&mut self.mcp, &self.roles) {
                             let action = mcp.on_key(code, roles);
@@ -703,6 +731,74 @@ impl App {
                 ));
             }
         }
+    }
+
+    /// «Check»: the server starts in the background and is asked for its
+    /// tools, with its secrets as a run would give them.
+    fn check_mcp(&mut self) {
+        let (Some(root), Some(mcp), Some(roles)) = (&self.project, &mut self.mcp, &self.roles)
+        else {
+            return;
+        };
+        if self.checking.is_some() {
+            return;
+        }
+        let Some(name) = mcp.current(roles) else {
+            return;
+        };
+        let Some(config) = roles.servers().get(&name).cloned() else {
+            return;
+        };
+        let secrets = self.home.as_ref().map(|h| h.join("credentials"));
+        let server = harness_core::mcp::server(&name, &config, |secret| {
+            credentials::load_secret(secrets.as_deref()?, secret).ok()
+        });
+        let server = match server {
+            Ok(server) => server,
+            Err(error) => {
+                self.message = Some((error.to_string(), true));
+                return;
+            }
+        };
+        let (tx, rx) = mpsc::channel();
+        let (checker, root) = (self.checker, root.clone());
+        std::thread::spawn(move || {
+            let _ = tx.send(checker(&server, &root));
+        });
+        mcp.checking = Some(name.clone());
+        self.message = Some((self.tr.f("mcp.checking", &[("name", &name)]), false));
+        self.checking = Some((name, config, rx));
+    }
+
+    /// The server answered: keep its tools and say how many.
+    fn mcp_checked(&mut self, name: &str, server: &McpConfig, answer: Result<Vec<Tool>, String>) {
+        if let Some(mcp) = &mut self.mcp {
+            mcp.checking = None;
+        }
+        self.message = Some(match answer {
+            Ok(tools) => {
+                let count = tools.len();
+                let list = ToolList {
+                    server: name.to_string(),
+                    fetched: std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map_or(0, |d| d.as_secs()),
+                    tools,
+                };
+                match &self.home {
+                    Some(home) => match mcp_tools::save(home, server, &list) {
+                        Ok(()) => (
+                            self.tr
+                                .f("mcp.checked", &[("name", &name), ("count", &count)]),
+                            false,
+                        ),
+                        Err(error) => (error.to_string(), true),
+                    },
+                    None => ("HOME is not set".into(), true),
+                }
+            }
+            Err(error) => (error, true),
+        });
     }
 
     /// What the MCP tab asks for.
@@ -1052,6 +1148,7 @@ impl App {
                     mcp.choose_role(index);
                 }
             }
+            ButtonId::McpCheck => self.check_mcp(),
             ButtonId::McpNew | ButtonId::McpEdit | ButtonId::McpRemove | ButtonId::McpSecret => {
                 if let (Some(mcp), Some(roles)) = (&self.mcp, &self.roles) {
                     let action = mcp.press(id, roles);

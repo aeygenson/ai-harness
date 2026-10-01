@@ -78,6 +78,8 @@ pub enum ButtonId {
     McpRemove,
     /// Saves a secret the selected MCP server needs.
     McpSecret,
+    /// Starts the selected MCP server and asks it for its tools.
+    McpCheck,
 }
 
 /// Where the clickable things were drawn in the last frame. Drawing fills it,

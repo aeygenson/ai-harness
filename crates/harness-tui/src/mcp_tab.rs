@@ -24,6 +24,7 @@ use harness_agents::credentials;
 use harness_core::config::{McpConfig, AGENTS};
 use harness_core::handoff::Role;
 use harness_core::mcp::{self, SECRET_PREFIX};
+use harness_core::mcp_tools;
 use ratatui::crossterm::event::KeyCode;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
@@ -62,6 +63,8 @@ pub struct McpTab {
     pub(crate) row: usize,
     /// The names of the saved secrets; never their values.
     secrets: Vec<String>,
+    /// The server «Check» is asking now.
+    pub(crate) checking: Option<String>,
 }
 
 impl McpTab {
@@ -71,6 +74,7 @@ impl McpTab {
             role: 0,
             row: 0,
             secrets: Vec::new(),
+            checking: None,
         };
         tab.reload();
         tab
@@ -369,6 +373,11 @@ impl McpTab {
                     ButtonId::McpSecret,
                     described.is_some_and(|s| secret_names(s).next().is_some()),
                 ),
+                (
+                    tr.t("mcp.check"),
+                    ButtonId::McpCheck,
+                    described.is_some() && self.checking.is_none(),
+                ),
             ],
         );
     }
@@ -448,6 +457,34 @@ impl McpTab {
         }
         lines.push(Line::from(spans));
         lines.push(Line::styled(tr.t("mcp.agents_hint").to_string(), dim));
+
+        // The tools, as the server said when it was checked last.
+        lines.push(Line::default());
+        let saved = self
+            .home
+            .as_deref()
+            .and_then(|home| mcp_tools::load(home, name, server));
+        match (&self.checking, saved) {
+            (Some(checking), _) if checking == name => {
+                lines.push(Line::styled(tr.t("mcp.tools_checking").to_string(), dim));
+            }
+            (_, Some(list)) => {
+                lines.push(Line::styled(
+                    tr.f("mcp.tools", &[("count", &list.tools.len())]),
+                    bold,
+                ));
+                for tool in list.tools {
+                    let mut spans = vec![Span::raw(format!("  {}", tool.name))];
+                    if let Some(description) = tool.description {
+                        spans.push(Span::styled(format!("  {description}"), dim));
+                    }
+                    lines.push(Line::from(spans));
+                }
+            }
+            (_, None) => {
+                lines.push(Line::styled(tr.t("mcp.tools_unknown").to_string(), dim));
+            }
+        }
 
         lines.push(Line::default());
         let users: Vec<&str> = ROLES

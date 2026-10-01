@@ -196,6 +196,16 @@ pub fn check_server(name: &str, config: &crate::config::McpConfig) -> Result<(),
     resolve(name, config, &|_| Some(Secret::new("unused"))).map(|_| ())
 }
 
+/// One server ready to start, its secrets read with `secret(name)`.
+pub fn server(
+    name: &str,
+    config: &crate::config::McpConfig,
+    secret: impl Fn(&str) -> Option<Secret>,
+) -> Result<McpServer, McpError> {
+    check_server_name(name)?;
+    resolve(name, config, &secret)
+}
+
 /// Can `agent` start this server? Every agent of the harness starts a
 /// program server (`stdio`) the same way, so for now this is any known
 /// agent; servers some agent cannot start would be refused here.
