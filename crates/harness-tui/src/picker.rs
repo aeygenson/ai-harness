@@ -14,7 +14,7 @@ use ratatui::Frame;
 
 use crate::i18n::I18n;
 use crate::tasks::draw_list;
-use crate::ui::{buttons, panel, ButtonId, Hits, ListId, Target};
+use crate::ui::{self, buttons, panel, ButtonId, Hits, ListId, Target};
 
 /// What the system dialog answered.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -277,7 +277,7 @@ impl Browser {
             (Some(name), _) => frame.render_widget(
                 Line::from(vec![
                     Span::raw(tr.t("picker.new_name").to_string()),
-                    Span::styled(format!(" {name}▏"), Style::new().bg(Color::DarkGray)),
+                    Span::styled(format!(" {name}▏"), ui::INPUT),
                 ]),
                 message,
             ),
