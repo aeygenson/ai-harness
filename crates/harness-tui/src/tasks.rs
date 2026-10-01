@@ -520,8 +520,9 @@ impl TasksTab {
         let roles_height = u16::try_from(self.roles.len())
             .unwrap_or(u16::MAX)
             .saturating_add(2);
-        let [tasks_area, roles_area] =
-            Layout::vertical([Constraint::Min(3), Constraint::Length(roles_height)]).areas(left);
+        // The role filter above the tasks it filters.
+        let [roles_area, tasks_area] =
+            Layout::vertical([Constraint::Length(roles_height), Constraint::Min(3)]).areas(left);
         // The live log takes the bottom of the right side while there is one.
         let [right, log_area] = if self.running.is_some() || !self.log.is_empty() {
             Layout::vertical([Constraint::Percentage(65), Constraint::Percentage(35)]).areas(right)
