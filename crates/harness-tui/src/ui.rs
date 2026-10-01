@@ -35,6 +35,8 @@ pub enum ListId {
     RoleFilter,
     /// The skills of the Skills tab.
     Skills,
+    /// The servers of the MCP tab.
+    Mcp,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -67,6 +69,10 @@ pub enum ButtonId {
     SkillEdit,
     SkillNew,
     SkillRestore,
+    /// A role of the MCP tab's selector, an index into `skills_tab::ROLES`.
+    McpRole(usize),
+    /// Gives the selected MCP server to the role, or takes it away.
+    McpToggle,
 }
 
 /// Where the clickable things were drawn in the last frame. Drawing fills it,
@@ -139,6 +145,39 @@ pub fn buttons(frame: &mut Frame, area: Rect, hits: &mut Hits, items: &[(&str, B
             hits.add(rect, Target::Button(*id));
         }
         x += width + 1;
+    }
+}
+
+/// `Label: [ a ] [ b ] …` on one row; the chosen one is filled. Each one is
+/// a button `id(index)`.
+pub fn selector(
+    frame: &mut Frame,
+    area: Rect,
+    hits: &mut Hits,
+    label: &str,
+    names: &[&str],
+    chosen: usize,
+    id: fn(usize) -> ButtonId,
+) {
+    let label = format!(" {label} ");
+    let width = u16::try_from(label.chars().count()).unwrap_or(0);
+    frame.render_widget(Span::raw(label), area);
+    let mut x = area.x + width;
+    for (index, name) in names.iter().enumerate() {
+        let text = format!("[ {name} ]");
+        let w = u16::try_from(text.chars().count()).unwrap_or(0);
+        if x + w > area.right() {
+            break;
+        }
+        let rect = Rect::new(x, area.y, w, 1);
+        let style = if index == chosen {
+            Style::new().fg(Color::Black).bg(Color::Cyan)
+        } else {
+            Style::new().fg(Color::Cyan).add_modifier(Modifier::BOLD)
+        };
+        frame.render_widget(Span::styled(text, style), rect);
+        hits.add(rect, Target::Button(id(index)));
+        x += w + 1;
     }
 }
 

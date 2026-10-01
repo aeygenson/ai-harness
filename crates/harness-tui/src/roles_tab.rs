@@ -13,7 +13,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use harness_agents::credentials;
-use harness_core::config::{Config, RetroConfig, RoleConfig, AGENTS, CONFIG_FILE};
+use harness_core::config::{Config, McpConfig, RetroConfig, RoleConfig, AGENTS, CONFIG_FILE};
 use harness_core::config_edit;
 use harness_core::git::{Repo, HARNESS_DIR};
 use harness_core::handoff::Role;
@@ -502,6 +502,24 @@ impl RolesTab {
             (Some(_), None) => effort,
         };
         self.set_choice(model, effort);
+    }
+
+    /// The MCP servers `harness.toml` describes.
+    pub fn servers(&self) -> &BTreeMap<String, McpConfig> {
+        &self.saved.mcp
+    }
+
+    /// A role's settings with the changes not saved yet.
+    pub fn settings(&self, role: Role) -> Option<&RoleConfig> {
+        self.roles.get(&role)
+    }
+
+    /// Gives `role` the MCP server `name`, or takes it away; saved with
+    /// the rest of the changes.
+    pub fn toggle_mcp(&mut self, role: Role, name: &str) {
+        if let Some(settings) = self.roles.get_mut(&role) {
+            toggle(&mut settings.mcp, name.to_string());
+        }
     }
 
     pub fn undo(&mut self) {

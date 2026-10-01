@@ -667,7 +667,8 @@ impl TasksTab {
             | ListId::Folders
             | ListId::Choices
             | ListId::RoleFilter
-            | ListId::Skills => {}
+            | ListId::Skills
+            | ListId::Mcp => {}
         }
     }
 

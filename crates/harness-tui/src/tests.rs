@@ -202,7 +202,9 @@ fn without_a_project_it_starts_on_the_projects_tab() {
     key(&mut app, KeyCode::Char('3'));
     assert!(screen(&mut app).contains("No project is open"));
     key(&mut app, KeyCode::Char('4'));
-    assert!(screen(&mut app).contains("arrives in step 3 of the plan"));
+    assert!(screen(&mut app).contains("No project is open"));
+    key(&mut app, KeyCode::Char('5'));
+    assert!(screen(&mut app).contains("arrives in step 4 of the plan"));
 }
 
 #[test]
@@ -1114,4 +1116,100 @@ fn a_model_and_level_can_be_chosen_for_one_run() {
     click(&mut app, "[ To: security ▾ ]");
     click(&mut app, "Approve and finish");
     assert!(!screen(&mut app).contains("[ Model:"));
+}
+
+#[test]
+fn the_mcp_tab_gives_servers_to_roles() {
+    let env = Env::new();
+    let root = env.path("test");
+    project(&root);
+    let path = root.join(".harness/harness.toml");
+    let text = fs::read_to_string(&path).unwrap();
+    let text =
+        text.replace(
+            "\n[roles.developer]\n",
+            "\n[roles.developer]\nmcp = [\"context7\"]\n",
+        )
+        .replace(
+            "\n[roles.tester]\n",
+            "\n[roles.tester]\nmcp = [\"ghost\"]\n",
+        ) + "\n[mcp.context7]\ncommand = \"npx\"\nargs = [\"-y\", \"@upstash/context7-mcp\"]\n\
+           env = { CONTEXT7_API_KEY = \"secret:context7\" }\n\n\
+           [mcp.fetch]\ncommand = \"uvx\"\nargs = [\"mcp-server-fetch\"]\n";
+    fs::write(&path, text).unwrap();
+    let mut app = env.app(&root);
+    click(&mut app, "4 MCP");
+    let text = screen(&mut app);
+    for part in [
+        " MCP servers of the architect ",
+        "> [ ] context7",
+        "✗ secret",
+        "[ ] fetch",
+        "[ ] ghost",
+        "not described",
+        "Command: npx -y @upstash/context7-mcp",
+        "CONTEXT7_API_KEY = secret:context7  ✗ not saved: harness secret set",
+        "claude ✓",
+        "antigravity ✓",
+        "Roles: developer",
+        "[ Give to the architect ]",
+    ] {
+        assert!(text.contains(part), "missing {part:?} in:\n{text}");
+    }
+
+    // A saved secret shows up; its value never does.
+    harness_agents::credentials::save_secret(
+        &env.home.path().join("credentials"),
+        "context7",
+        &harness_agents::credentials::Secret::new("ctx-secret-value"),
+    )
+    .unwrap();
+    app.mcp.as_mut().unwrap().reload();
+    let text = screen(&mut app);
+    assert!(text.contains("secret:context7  ✓ saved"), "{text}");
+    assert!(!text.contains("ctx-secret-value"), "{text}");
+    assert!(!text.contains("✗ secret"), "{text}");
+
+    // The developer has context7; fetch is given with a double click.
+    click(&mut app, "[ developer ]");
+    let text = screen(&mut app);
+    assert!(text.contains("> [x] context7"), "{text}");
+    assert!(text.contains("[ Take from the developer ]"), "{text}");
+    click(&mut app, "[ ] fetch");
+    click(&mut app, "[ ] fetch");
+    let text = screen(&mut app);
+    assert!(text.contains("> [x] fetch"), "{text}");
+    assert!(text.contains("Changes not saved"), "{text}");
+    // The Roles tab shows the same change.
+    click(&mut app, "2 Roles");
+    click(&mut app, "developer");
+    assert!(screen(&mut app).contains("[x] fetch"));
+    click(&mut app, "4 MCP");
+    // Saving checks everything as before a run: the tester's unknown server
+    // stops it.
+    click(&mut app, "[ Save ]");
+    let (message, problem) = app.message.clone().unwrap();
+    assert!(problem && message.contains("ghost"), "{message}");
+
+    // A server harness.toml does not describe cannot be given ...
+    click(&mut app, "[ architect ]");
+    click(&mut app, "[ ] ghost");
+    let text = screen(&mut app);
+    assert!(text.contains("harness.toml has no [mcp.ghost]"), "{text}");
+    key(&mut app, KeyCode::Char(' '));
+    assert!(app
+        .message
+        .as_ref()
+        .unwrap()
+        .0
+        .contains("take it from the role"));
+    // ... only taken away; then no role lists it and it leaves the list.
+    click(&mut app, "[ tester ]");
+    click(&mut app, "[x] ghost");
+    key(&mut app, KeyCode::Char(' '));
+    assert!(!screen(&mut app).contains("ghost"));
+    key(&mut app, KeyCode::Char('s'));
+    let saved = config(&root);
+    assert_eq!(saved.roles[&Role::Developer].mcp, ["context7", "fetch"]);
+    assert!(saved.roles[&Role::Tester].mcp.is_empty());
 }
