@@ -187,6 +187,7 @@ fn offer(registry_name: &str, package: &Value) -> Option<Offer> {
             command: command.into(),
             args,
             env,
+            ..McpConfig::default()
         },
         variables,
         kind,

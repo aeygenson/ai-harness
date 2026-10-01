@@ -111,6 +111,7 @@ pub fn build_agent(
     let harness = std::env::current_exe()
         .map_err(|e| problem(format!("cannot find the harness program: {e}")))?;
     let timeout = Duration::from_secs(config.agent_timeout_minutes * 60);
+    let servers = crate::launcher::with_bridge(servers, &harness);
     let role = choice.role;
     let agent = match choice.agent {
         "claude" => {

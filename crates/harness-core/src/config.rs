@@ -166,17 +166,26 @@ pub struct PluginConfig {
     pub commit: Option<String>,
 }
 
-/// One MCP server, started by the agent as a program (`stdio`).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// One MCP server: a program the agent starts (`command`, `stdio`), or a
+/// server on the web (`url`) the agent reaches through `harness mcp-remote`.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct McpConfig {
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub command: String,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub args: Vec<String>,
     /// Variables for the server. A value `"secret:<name>"` is read from the
     /// secret `harness secret set <name>` saved; the file keeps only the name.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub env: BTreeMap<String, String>,
+    /// The address of a server on the web (streamable HTTP).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+    /// HTTP headers for a web server, such as
+    /// `Authorization = "Bearer secret:<name>"`.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub headers: BTreeMap<String, String>,
 }
 
 #[derive(Debug, thiserror::Error)]
