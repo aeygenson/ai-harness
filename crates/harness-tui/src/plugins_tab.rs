@@ -34,14 +34,19 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{ListItem, Paragraph, Wrap};
 use ratatui::Frame;
 
+use harness_core::catalog::Entry;
+
 use crate::i18n::I18n;
+use crate::plugin_catalog::{
+    draw_catalog, draw_catalogs, unusable, CatalogView, CatalogsView, OFFICIAL,
+};
 use crate::roles_tab::RolesTab;
 use crate::skills_tab::{role_name, ROLES};
 use crate::tasks::draw_list;
 use crate::ui::{buttons, panel, selector, ButtonId, Hits, ListId};
 
 /// What the tab asks the App to do.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Action {
     None,
     /// Ask before removing this plugin.
@@ -55,6 +60,26 @@ pub enum Action {
     },
     /// Open the plugin's folder in the editor.
     Open(String),
+    /// Open «From catalog».
+    OpenCatalog,
+    /// Ask what to look for in the catalogs; the last search offered.
+    Search(String),
+    /// Add this catalog plugin to the project, and give it to the role.
+    Add {
+        entry: Entry,
+        give: bool,
+    },
+    /// The chosen catalog plugin cannot be added; why.
+    Unusable(String),
+    /// Download the newest version of this plugin and show what changes.
+    Update(String),
+    /// Open «Catalogs».
+    OpenCatalogs,
+    /// Ask for a catalog to add; the address offered.
+    AddCatalog(String),
+    UpdateCatalog(String),
+    /// Ask before removing this catalog.
+    RemoveCatalog(String),
 }
 
 #[derive(Debug)]
@@ -66,6 +91,12 @@ pub struct PluginsTab {
     pub(crate) row: usize,
     /// What each plugin folder holds, or why it cannot be read.
     details: BTreeMap<String, Result<Details, String>>,
+    /// «From catalog», while it is open.
+    pub(crate) catalog: Option<CatalogView>,
+    /// «Catalogs», while it is open (over «From catalog»).
+    pub(crate) catalogs: Option<CatalogsView>,
+    /// What is being downloaded now, shown at the top.
+    pub(crate) busy: Option<String>,
 }
 
 impl PluginsTab {
@@ -75,6 +106,9 @@ impl PluginsTab {
             role: 0,
             row: 0,
             details: BTreeMap::new(),
+            catalog: None,
+            catalogs: None,
+            busy: None,
         };
         tab.reload(roles);
         tab
@@ -211,7 +245,95 @@ impl PluginsTab {
             KeyCode::Left | KeyCode::Char('h') => self.choose_role(self.role.saturating_sub(1)),
             KeyCode::Right | KeyCode::Char('l') => self.choose_role(self.role + 1),
             KeyCode::Char('e') => return self.press(ButtonId::PluginOpen, roles),
+            KeyCode::Char('f') => return Action::OpenCatalog,
+            KeyCode::Char('U') => return self.press(ButtonId::PluginUpdate, roles),
             KeyCode::Delete => return self.press(ButtonId::PluginRemove, roles),
+            _ => {}
+        }
+        Action::None
+    }
+
+    /// «From catalog» or «Catalogs» is open instead of the list.
+    pub fn in_catalog(&self) -> bool {
+        self.catalog.is_some() || self.catalogs.is_some()
+    }
+
+    /// A key while «From catalog» or «Catalogs» is open.
+    pub fn catalog_key(&mut self, key: KeyCode) -> Action {
+        if let Some(view) = &mut self.catalogs {
+            match key {
+                KeyCode::Up | KeyCode::Char('k') => view.move_by(-1),
+                KeyCode::Down | KeyCode::Char('j') => view.move_by(1),
+                KeyCode::Char('n') => return self.catalog_press(ButtonId::CatalogAdd),
+                KeyCode::Char('U') => return self.catalog_press(ButtonId::CatalogUpdate),
+                KeyCode::Delete => return self.catalog_press(ButtonId::CatalogRemove),
+                KeyCode::Esc | KeyCode::Backspace => self.catalogs = None,
+                _ => {}
+            }
+            return Action::None;
+        }
+        let Some(view) = &mut self.catalog else {
+            return Action::None;
+        };
+        match key {
+            KeyCode::Up | KeyCode::Char('k') => view.move_by(-1),
+            KeyCode::Down | KeyCode::Char('j') => view.move_by(1),
+            KeyCode::Left | KeyCode::Char('h') => {
+                view.choose_filter(view.filter.saturating_sub(1));
+            }
+            KeyCode::Right | KeyCode::Char('l') => view.choose_filter(view.filter + 1),
+            KeyCode::Char('/' | 's' | 'f') => return self.catalog_press(ButtonId::PluginSearch),
+            KeyCode::Enter | KeyCode::Char('a') => return self.catalog_press(ButtonId::PluginAdd),
+            KeyCode::Char('g') => return self.catalog_press(ButtonId::PluginAddGive),
+            KeyCode::Char('c') => return self.catalog_press(ButtonId::PluginCatalogs),
+            KeyCode::Esc | KeyCode::Backspace => self.catalog = None,
+            _ => {}
+        }
+        Action::None
+    }
+
+    /// A button of «From catalog» or «Catalogs».
+    pub fn catalog_press(&mut self, id: ButtonId) -> Action {
+        let busy = self.busy.is_some();
+        match id {
+            ButtonId::PluginBack if self.catalogs.is_some() => self.catalogs = None,
+            ButtonId::PluginBack => self.catalog = None,
+            ButtonId::PluginCatalogs => return Action::OpenCatalogs,
+            ButtonId::PluginFilter(index) => {
+                if let Some(view) = &mut self.catalog {
+                    view.choose_filter(index);
+                }
+            }
+            ButtonId::PluginSearch => {
+                if let Some(view) = &self.catalog {
+                    return Action::Search(view.query.clone());
+                }
+            }
+            ButtonId::PluginAdd | ButtonId::PluginAddGive if !busy => {
+                if let Some(entry) = self.catalog.as_ref().and_then(CatalogView::current) {
+                    if let Some(why) = unusable(entry) {
+                        return Action::Unusable(why);
+                    }
+                    return Action::Add {
+                        entry: entry.clone(),
+                        give: id == ButtonId::PluginAddGive,
+                    };
+                }
+            }
+            ButtonId::CatalogAdd if !busy => {
+                let empty = self.catalogs.as_ref().is_none_or(|v| v.list.is_empty());
+                return Action::AddCatalog(if empty { OFFICIAL } else { "" }.to_string());
+            }
+            ButtonId::CatalogUpdate if !busy => {
+                if let Some(c) = self.catalogs.as_ref().and_then(CatalogsView::current) {
+                    return Action::UpdateCatalog(c.name.clone());
+                }
+            }
+            ButtonId::CatalogRemove if !busy => {
+                if let Some(c) = self.catalogs.as_ref().and_then(CatalogsView::current) {
+                    return Action::RemoveCatalog(c.name.clone());
+                }
+            }
             _ => {}
         }
         Action::None
@@ -227,6 +349,9 @@ impl PluginsTab {
         };
         match id {
             ButtonId::PluginRemove => Action::Remove(name),
+            ButtonId::PluginUpdate if plugin.source.is_some() && self.busy.is_none() => {
+                Action::Update(name)
+            }
             ButtonId::PluginOpen => Action::Open(name),
             ButtonId::PluginHooks if self.brings(&name).0 || plugin.allow_hooks => Action::Allow {
                 name,
@@ -273,6 +398,16 @@ impl PluginsTab {
         tr: &I18n,
         roles: &RolesTab,
     ) {
+        let busy = self.busy.as_deref();
+        let role_label = role_name(self.role());
+        if let Some(view) = &self.catalogs {
+            draw_catalogs(view, frame, area, hits, tr, busy);
+            return;
+        }
+        if let Some(view) = &self.catalog {
+            draw_catalog(view, frame, area, hits, tr, roles, role_label, busy);
+            return;
+        }
         let [top, main, bottom, plugins_row] = Layout::vertical([
             Constraint::Length(1),
             Constraint::Min(0),
@@ -414,6 +549,12 @@ impl PluginsTab {
             plugins_row,
             hits,
             &[
+                (tr.t("plugins.from_catalog"), ButtonId::PluginCatalog, true),
+                (
+                    tr.t("plugins.update"),
+                    ButtonId::PluginUpdate,
+                    busy.is_none() && described.is_some_and(|(_, p)| p.source.is_some()),
+                ),
                 (
                     hooks_label,
                     ButtonId::PluginHooks,

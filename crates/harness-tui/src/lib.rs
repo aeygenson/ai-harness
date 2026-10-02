@@ -23,6 +23,7 @@ use anyhow::Result;
 use harness_agents::credentials;
 use harness_core::config::McpConfig;
 use harness_core::git::{Repo, HARNESS_DIR};
+use harness_core::handoff::Role;
 use harness_core::mcp::McpServer;
 use harness_core::mcp_registry::Entry;
 use harness_core::mcp_tools::{self, Tool, ToolList};
@@ -49,6 +50,7 @@ mod i18n;
 mod keys;
 mod mcp_tab;
 mod picker;
+mod plugin_catalog;
 mod plugins_tab;
 mod projects_tab;
 mod roles_tab;
@@ -121,12 +123,35 @@ enum Purpose {
     McpSearch,
     /// Remove this plugin from the project.
     RemovePlugin(String),
-    /// Let this plugin run its hooks, its own servers.
+    /// Let this plugin run its hooks, its own servers; then give it to
+    /// the role, if it was just added for it.
     AllowPlugin {
         name: String,
         hooks: bool,
         servers: bool,
+        give: Option<Role>,
     },
+    /// What to look for in the plugin catalogs.
+    PluginSearch,
+    /// A catalog to add: `owner/repo`, a git address or a folder.
+    AddCatalog,
+    /// Take this catalog off the list.
+    RemoveCatalog(String),
+    /// Take the new version of a plugin, after seeing what changes.
+    ApplyUpdate(Box<plugin_ops::Prepared>),
+}
+
+/// What a download in the background brought.
+#[derive(Debug)]
+enum PluginJob {
+    CatalogAdded(Result<String, String>),
+    CatalogUpdated(String, Result<plugin_ops::CatalogUpdate, String>),
+    Added {
+        name: String,
+        give: Option<Role>,
+        result: Result<plugin_ops::Added, String>,
+    },
+    UpdateReady(String, Result<Option<plugin_ops::Prepared>, String>),
 }
 
 /// A skill file, or a plugin folder, waiting to be opened in the editor.
@@ -302,6 +327,10 @@ struct App {
     signer: McpSigner,
     /// The end of a sign-in in the browser: the server and how it went.
     signing: Option<(String, mpsc::Receiver<Result<(), String>>)>,
+    /// A plugin or catalog download, while it runs.
+    plugin_job: Option<mpsc::Receiver<PluginJob>>,
+    /// The catalog added by itself when there is none.
+    official_catalog: String,
     /// `q` was pressed once with unsaved changes.
     quit_warned: bool,
     quit: bool,
@@ -337,6 +366,8 @@ impl App {
             searching: None,
             signer: sign_in,
             signing: None,
+            plugin_job: None,
+            official_catalog: plugin_catalog::OFFICIAL.to_string(),
             quit_warned: false,
             quit: false,
         };
@@ -396,6 +427,21 @@ impl App {
 
     /// Takes what the background work sent.
     fn tick(&mut self) {
+        let job = self.plugin_job.as_ref().and_then(|rx| match rx.try_recv() {
+            Ok(done) => Some(Some(done)),
+            Err(mpsc::TryRecvError::Empty) => None,
+            Err(mpsc::TryRecvError::Disconnected) => Some(None),
+        });
+        if let Some(done) = job {
+            self.plugin_job = None;
+            if let Some(plugins) = &mut self.plugins {
+                plugins.busy = None;
+            }
+            match done {
+                Some(done) => self.plugin_job_done(done),
+                None => self.message = Some(("the download stopped".into(), true)),
+            }
+        }
         let answers = self.asking.as_ref().and_then(|rx| match rx.try_recv() {
             Ok(answers) => Some(Some(answers)),
             Err(mpsc::TryRecvError::Empty) => None,
@@ -481,7 +527,7 @@ impl App {
         }
         if let Some((_, form)) = &mut self.form {
             match key.code {
-                KeyCode::Esc => self.form = None,
+                KeyCode::Esc => self.close_form(),
                 KeyCode::Enter => self.submit(),
                 KeyCode::Tab | KeyCode::Down => form.next_field(),
                 KeyCode::Backspace => form.backspace(),
@@ -539,6 +585,14 @@ impl App {
                     mcp.catalog = None;
                 }
             }
+            KeyCode::Esc
+                if self.tab == Tab::Plugins
+                    && self.plugins.as_ref().is_some_and(PluginsTab::in_catalog) =>
+            {
+                if let Some(plugins) = &mut self.plugins {
+                    plugins.catalog_key(KeyCode::Esc);
+                }
+            }
             KeyCode::Char('q') | KeyCode::Esc if unsaved && !quit_warned => {
                 self.quit_warned = true;
                 self.message = Some((self.tr.t("roles.unsaved_quit").to_string(), true));
@@ -570,6 +624,7 @@ impl App {
                 if let (Some(plugins), Some(roles)) = (&mut self.plugins, &self.roles) {
                     plugins.reload(roles);
                 }
+                self.reload_catalog_views();
                 self.projects.reload();
             }
             code => match self.tab {
@@ -612,6 +667,12 @@ impl App {
                         }
                     }
                 },
+                Tab::Plugins if self.plugins.as_ref().is_some_and(PluginsTab::in_catalog) => {
+                    if let Some(plugins) = &mut self.plugins {
+                        let action = plugins.catalog_key(code);
+                        self.plugin_action(action);
+                    }
+                }
                 Tab::Plugins => match code {
                     KeyCode::Char('s') => self.press(ButtonId::Save),
                     KeyCode::Char('u') => self.press(ButtonId::Undo),
@@ -708,8 +769,15 @@ impl App {
                         }
                     }
                     (Tab::Plugins, _) => {
+                        let delta = if down { 1 } else { -1 };
                         if let (Some(plugins), Some(roles)) = (&mut self.plugins, &self.roles) {
-                            plugins.move_by(if down { 1 } else { -1 }, roles);
+                            if let Some(view) = &mut plugins.catalogs {
+                                view.move_by(delta);
+                            } else if let Some(view) = &mut plugins.catalog {
+                                view.move_by(delta);
+                            } else {
+                                plugins.move_by(delta, roles);
+                            }
                         }
                     }
                     _ => {}
@@ -769,11 +837,11 @@ impl App {
         if let Some((_, form)) = &mut self.form {
             match hit {
                 Some((Target::Button(ButtonId::Ok), _)) => self.submit(),
-                Some((Target::Button(ButtonId::Cancel), _)) => self.form = None,
+                Some((Target::Button(ButtonId::Cancel), _)) => self.close_form(),
                 Some((Target::Field(i), _)) if i < form.fields.len() => form.focus = i,
                 Some((Target::Field(_), _)) => {}
                 // A click outside the window closes it.
-                _ => self.form = None,
+                _ => self.close_form(),
             }
             return;
         }
@@ -819,6 +887,19 @@ impl App {
                     }
                     if double {
                         self.press(ButtonId::PluginToggle);
+                    }
+                }
+                Some((ListId::PluginCatalog, index)) => {
+                    if let Some(view) = self.plugins.as_mut().and_then(|p| p.catalog.as_mut()) {
+                        view.select(index);
+                    }
+                    if double {
+                        self.press(ButtonId::PluginAdd);
+                    }
+                }
+                Some((ListId::PluginCatalogs, index)) => {
+                    if let Some(view) = self.plugins.as_mut().and_then(|p| p.catalogs.as_mut()) {
+                        view.select(index);
                     }
                 }
                 Some((ListId::McpCatalog, index)) => {
@@ -1151,6 +1232,325 @@ impl App {
         Ok(())
     }
 
+    /// Closes the open form without its OK; a new plugin version that was
+    /// waiting for it is dropped.
+    fn close_form(&mut self) {
+        if let Some((Purpose::ApplyUpdate(prepared), _)) = self.form.take() {
+            plugin_ops::discard(&prepared);
+            self.message = Some((self.tr.t("plugins.update_dropped").to_string(), false));
+        }
+    }
+
+    /// Runs `work` in the background; its result comes in `tick`.
+    fn start_plugin_job(
+        &mut self,
+        label: String,
+        work: impl FnOnce() -> PluginJob + Send + 'static,
+    ) {
+        if self.plugin_job.is_some() {
+            return;
+        }
+        let (tx, rx) = mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = tx.send(work());
+        });
+        self.plugin_job = Some(rx);
+        if let Some(plugins) = &mut self.plugins {
+            plugins.busy = Some(label.clone());
+        }
+        self.message = Some((label, false));
+    }
+
+    /// Plugins change harness.toml: unsaved changes of the roles would be
+    /// lost, so they are saved or undone first.
+    fn roles_unsaved(&mut self) -> bool {
+        let unsaved = self.roles.as_ref().is_some_and(RolesTab::changed);
+        if unsaved {
+            self.message = Some((self.tr.t("mcp.save_first").to_string(), true));
+        }
+        unsaved
+    }
+
+    /// «From catalog»; with no catalog at all, the official one is added
+    /// by itself.
+    fn open_plugin_catalog(&mut self) {
+        let agent = match (&self.plugins, &self.roles) {
+            (Some(plugins), Some(roles)) => roles
+                .settings(plugins.role())
+                .map(|s| harness_core::plugins::family(&s.agent).to_string())
+                .unwrap_or_default(),
+            _ => return,
+        };
+        let view = plugin_catalog::CatalogView::load(self.home.as_deref(), &agent);
+        let none = self
+            .home
+            .as_deref()
+            .is_some_and(|home| plugin_ops::catalogs(home).is_ok_and(|c| c.is_empty()));
+        if let Some(plugins) = &mut self.plugins {
+            plugins.catalog = Some(view);
+        }
+        if none {
+            self.start_catalog_add(self.official_catalog.clone());
+        }
+    }
+
+    fn start_catalog_add(&mut self, source: String) {
+        let Some(home) = self.home.clone() else {
+            return;
+        };
+        let label = self
+            .tr
+            .f("plugins.downloading_catalog", &[("source", &source)]);
+        let added = self.tr.t("plugins.catalog_added").to_string();
+        self.start_plugin_job(label, move || {
+            let result = plugin_ops::add_catalog(&home, &source, None)
+                .map(|catalog| {
+                    added
+                        .replace("{name}", &catalog.name)
+                        .replace("{count}", &catalog.entries.len().to_string())
+                })
+                .map_err(|e| e.to_string());
+            PluginJob::CatalogAdded(result)
+        });
+    }
+
+    /// «Add»: the plugin is downloaded and copied in the background.
+    fn add_plugin(&mut self, entry: harness_core::catalog::Entry, give: bool) {
+        if self.roles_unsaved() {
+            return;
+        }
+        let (Some(root), Some(home), Some(plugins)) =
+            (self.project.clone(), self.home.clone(), &self.plugins)
+        else {
+            return;
+        };
+        let give = give.then(|| plugins.role());
+        let name = entry.name.clone();
+        let label = self.tr.f("plugins.adding", &[("name", &name)]);
+        self.start_plugin_job(label, move || {
+            let result = Repo::open(&root)
+                .map_err(|e| e.to_string())
+                .and_then(|repo| {
+                    plugin_ops::add(&repo, &home, &entry, None, false, false)
+                        .map_err(|e| e.to_string())
+                });
+            PluginJob::Added { name, give, result }
+        });
+    }
+
+    /// «Update»: the newest version is downloaded in the background, then
+    /// shown before it is taken.
+    fn prepare_plugin_update(&mut self, name: String) {
+        if self.roles_unsaved() {
+            return;
+        }
+        let (Some(root), Some(home)) = (self.project.clone(), self.home.clone()) else {
+            return;
+        };
+        let label = self.tr.f("plugins.checking_update", &[("name", &name)]);
+        self.start_plugin_job(label, move || {
+            let result = Repo::open(&root)
+                .map_err(|e| e.to_string())
+                .and_then(|repo| {
+                    plugin_ops::prepare_update(&repo, &home, &name).map_err(|e| e.to_string())
+                });
+            PluginJob::UpdateReady(name, result)
+        });
+    }
+
+    fn apply_plugin_update(&mut self, prepared: &plugin_ops::Prepared) {
+        let result = self
+            .project
+            .as_deref()
+            .ok_or_else(String::new)
+            .and_then(|root| Repo::open(root).map_err(|e| e.to_string()))
+            .and_then(|repo| plugin_ops::apply_update(&repo, prepared).map_err(|e| e.to_string()));
+        self.message = Some(match result {
+            Ok(()) => (
+                self.tr.f("plugins.updated", &[("name", &prepared.name)]),
+                false,
+            ),
+            Err(error) => {
+                plugin_ops::discard(prepared);
+                (
+                    self.tr.f(
+                        "plugins.update_failed",
+                        &[("name", &prepared.name), ("error", &error)],
+                    ),
+                    true,
+                )
+            }
+        });
+        self.reload_plugins();
+    }
+
+    /// The roles and plugins are read again after harness.toml changed.
+    fn reload_plugins(&mut self) {
+        if let Some(roles) = &mut self.roles {
+            roles.reload();
+            if let Some(plugins) = &mut self.plugins {
+                plugins.reload(roles);
+            }
+        }
+        if let Some(tasks) = &mut self.tasks {
+            tasks.reload();
+        }
+    }
+
+    fn reload_catalog_views(&mut self) {
+        let home = self.home.clone();
+        if let Some(plugins) = &mut self.plugins {
+            if let Some(view) = &mut plugins.catalog {
+                view.reload(home.as_deref());
+            }
+            if let Some(view) = &mut plugins.catalogs {
+                view.reload(home.as_deref());
+            }
+        }
+    }
+
+    /// Gives the plugin to the role and saves it at once.
+    fn give_plugin(&mut self, name: &str, role: Role) {
+        let Some(mut settings) = self.roles.as_ref().and_then(|r| r.settings(role)).cloned() else {
+            return;
+        };
+        if !settings.plugins.iter().any(|n| n == name) {
+            settings.plugins.push(name.to_string());
+        }
+        let result = self.save_settings(|text| {
+            config_edit::set_role(text, role, &settings).map_err(|e| e.to_string())
+        });
+        let role = skills_tab::role_name(role);
+        self.message = Some(match result {
+            Ok(()) => (
+                self.tr
+                    .f("plugins.given", &[("name", &name), ("role", &role)]),
+                false,
+            ),
+            Err(error) => (error, true),
+        });
+    }
+
+    /// A download in the background finished.
+    fn plugin_job_done(&mut self, done: PluginJob) {
+        match done {
+            PluginJob::CatalogAdded(result) => {
+                self.message = Some(match result {
+                    Ok(text) => (text, false),
+                    Err(error) => (
+                        self.tr.f("plugins.catalog_failed", &[("error", &error)]),
+                        true,
+                    ),
+                });
+                self.reload_catalog_views();
+            }
+            PluginJob::CatalogUpdated(name, result) => {
+                let tr = &self.tr;
+                self.message = Some(match result {
+                    Ok(plugin_ops::CatalogUpdate::Local) => {
+                        (tr.f("plugins.catalog_local", &[("name", &name)]), false)
+                    }
+                    Ok(plugin_ops::CatalogUpdate::Same(_)) => {
+                        (tr.f("plugins.catalog_same", &[("name", &name)]), false)
+                    }
+                    Ok(plugin_ops::CatalogUpdate::Updated(_)) => {
+                        (tr.f("plugins.catalog_updated", &[("name", &name)]), false)
+                    }
+                    Err(error) => (error, true),
+                });
+                self.reload_catalog_views();
+            }
+            PluginJob::Added { name, give, result } => {
+                let added = match result {
+                    Ok(added) => added,
+                    Err(error) => {
+                        let text = self
+                            .tr
+                            .f("plugins.add_failed", &[("name", &name), ("error", &error)]);
+                        self.message = Some((text, true));
+                        return;
+                    }
+                };
+                self.reload_plugins();
+                if let (Some(plugins), Some(roles)) = (&mut self.plugins, &self.roles) {
+                    plugins.catalog = None;
+                    plugins.catalogs = None;
+                    plugins.select_named(&name, roles);
+                }
+                self.message = Some((self.tr.f("plugins.added", &[("name", &name)]), false));
+                let contents = added.contents;
+                if contents.hooks || contents.servers {
+                    let tr = &self.tr;
+                    let key = if contents.hooks {
+                        "plugins.allow_hooks_text"
+                    } else {
+                        "plugins.allow_servers_text"
+                    };
+                    let text = format!(
+                        "{}\n{}",
+                        tr.f("plugins.added", &[("name", &name)]),
+                        tr.f(key, &[("name", &name)])
+                    );
+                    self.form = Some((
+                        Purpose::AllowPlugin {
+                            name,
+                            hooks: contents.hooks,
+                            servers: contents.servers,
+                            give,
+                        },
+                        Form::new(tr.t("plugins.allow_title"), &text, tr.t("plugins.allow")),
+                    ));
+                } else if let Some(role) = give {
+                    self.give_plugin(&name, role);
+                }
+            }
+            PluginJob::UpdateReady(name, result) => match result {
+                Ok(None) => {
+                    let text = self.tr.f("plugins.up_to_date", &[("name", &name)]);
+                    self.message = Some((text, false));
+                }
+                Ok(Some(prepared)) => {
+                    let tr = &self.tr;
+                    let mut text = tr.f("plugins.update_text", &[("name", &name)]);
+                    let changes = &prepared.changes;
+                    let lines: Vec<String> = [
+                        ("+", &changes.added),
+                        ("~", &changes.changed),
+                        ("-", &changes.removed),
+                    ]
+                    .iter()
+                    .flat_map(|(sign, files)| files.iter().map(move |f| format!("{sign} {f}")))
+                    .collect();
+                    for line in lines.iter().take(12) {
+                        text.push('\n');
+                        text.push_str(line);
+                    }
+                    if lines.len() > 12 {
+                        text.push('\n');
+                        text.push_str(
+                            &tr.f("plugins.more_files", &[("count", &(lines.len() - 12))]),
+                        );
+                    }
+                    if prepared.contents.hooks || prepared.contents.servers {
+                        text.push('\n');
+                        text.push_str(tr.t("plugins.update_runs"));
+                    }
+                    self.form = Some((
+                        Purpose::ApplyUpdate(Box::new(prepared)),
+                        Form::new(tr.t("plugins.update_title"), &text, tr.t("plugins.update")),
+                    ));
+                }
+                Err(error) => {
+                    let text = self.tr.f(
+                        "plugins.update_failed",
+                        &[("name", &name), ("error", &error)],
+                    );
+                    self.message = Some((text, true));
+                }
+            },
+        }
+    }
+
     /// What the Plugins tab asks for.
     fn plugin_action(&mut self, action: plugins_tab::Action) {
         use plugins_tab::Action as A;
@@ -1192,8 +1592,65 @@ impl App {
                         name,
                         hooks,
                         servers,
+                        give: None,
                     },
                     Form::new(tr.t("plugins.allow_title"), &text, tr.t("plugins.allow")),
+                ));
+            }
+            A::OpenCatalog => self.open_plugin_catalog(),
+            A::Search(query) => {
+                self.form = Some((
+                    Purpose::PluginSearch,
+                    Form::new(
+                        tr.t("plugins.search_title"),
+                        tr.t("plugins.search_text"),
+                        tr.t("plugins.search"),
+                    )
+                    .field(tr.t("plugins.search_field"), &query),
+                ));
+            }
+            A::Unusable(why) => {
+                self.message = Some((tr.f("plugins.cannot_add", &[("why", &why)]), true));
+            }
+            A::Add { entry, give } => self.add_plugin(entry, give),
+            A::Update(name) => self.prepare_plugin_update(name),
+            A::OpenCatalogs => {
+                let view = plugin_catalog::CatalogsView::load(self.home.as_deref());
+                if let Some(plugins) = &mut self.plugins {
+                    plugins.catalogs = Some(view);
+                }
+            }
+            A::AddCatalog(offered) => {
+                self.form = Some((
+                    Purpose::AddCatalog,
+                    Form::new(
+                        tr.t("plugins.add_catalog_title"),
+                        tr.t("plugins.add_catalog_text"),
+                        tr.t("plugins.add"),
+                    )
+                    .field(tr.t("plugins.catalog_field"), &offered),
+                ));
+            }
+            A::UpdateCatalog(name) => {
+                let Some(home) = self.home.clone() else {
+                    return;
+                };
+                let label = tr.f("plugins.updating_catalog", &[("name", &name)]);
+                self.start_plugin_job(label, move || {
+                    let result =
+                        plugin_ops::update_catalog(&home, &name).map_err(|e| e.to_string());
+                    PluginJob::CatalogUpdated(name, result)
+                });
+            }
+            A::RemoveCatalog(name) => {
+                let text = tr.f("plugins.remove_catalog_text", &[("name", &name)]);
+                self.form = Some((
+                    Purpose::RemoveCatalog(name),
+                    Form::new(
+                        tr.t("plugins.remove_catalog_title"),
+                        &text,
+                        tr.t("plugins.remove"),
+                    ),
                 ));
             }
             A::Open(name) => {
@@ -1544,8 +2001,24 @@ impl App {
                     }
                 }
             }
+            ButtonId::PluginCatalog => self.plugin_action(plugins_tab::Action::OpenCatalog),
+            ButtonId::PluginFilter(_)
+            | ButtonId::PluginSearch
+            | ButtonId::PluginAdd
+            | ButtonId::PluginAddGive
+            | ButtonId::PluginCatalogs
+            | ButtonId::PluginBack
+            | ButtonId::CatalogAdd
+            | ButtonId::CatalogUpdate
+            | ButtonId::CatalogRemove => {
+                if let Some(plugins) = &mut self.plugins {
+                    let action = plugins.catalog_press(id);
+                    self.plugin_action(action);
+                }
+            }
             ButtonId::PluginHooks
             | ButtonId::PluginServers
+            | ButtonId::PluginUpdate
             | ButtonId::PluginRemove
             | ButtonId::PluginOpen => {
                 if let (Some(plugins), Some(roles)) = (&self.plugins, &self.roles) {
@@ -1703,7 +2176,51 @@ impl App {
                 name,
                 hooks,
                 servers,
-            } => self.allow_plugin(&name.clone(), *hooks, *servers),
+                give,
+            } => {
+                let (name, give) = (name.clone(), *give);
+                self.allow_plugin(&name, *hooks, *servers).map(|()| {
+                    if let Some(role) = give {
+                        self.give_plugin(&name, role);
+                    }
+                })
+            }
+            Purpose::PluginSearch => {
+                if let Some(view) = self.plugins.as_mut().and_then(|p| p.catalog.as_mut()) {
+                    view.query = form.value(0).trim().to_string();
+                    view.row = 0;
+                }
+                Ok(())
+            }
+            Purpose::AddCatalog => {
+                let source = form.value(0).trim().to_string();
+                if source.is_empty() {
+                    Err(self.tr.t("plugins.catalog_empty_field").to_string())
+                } else {
+                    self.start_catalog_add(source);
+                    Ok(())
+                }
+            }
+            Purpose::RemoveCatalog(name) => {
+                let name = name.clone();
+                self.home
+                    .clone()
+                    .ok_or_else(|| "HOME is not set".to_string())
+                    .and_then(|home| {
+                        plugin_ops::remove_catalog(&home, &name).map_err(|e| e.to_string())
+                    })
+                    .map(|()| {
+                        self.reload_catalog_views();
+                        self.message = Some((
+                            self.tr.f("plugins.catalog_removed", &[("name", &name)]),
+                            false,
+                        ));
+                    })
+            }
+            Purpose::ApplyUpdate(prepared) => {
+                self.apply_plugin_update(prepared);
+                Ok(())
+            }
             Purpose::Remove(path) => {
                 let path = path.clone();
                 let result = self.projects.update(|list| list.remove(&path));
