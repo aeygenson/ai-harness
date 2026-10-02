@@ -672,7 +672,9 @@ impl TasksTab {
             | ListId::McpCatalog
             | ListId::Plugins
             | ListId::PluginCatalog
-            | ListId::PluginCatalogs => {}
+            | ListId::PluginCatalogs
+            | ListId::Retros
+            | ListId::RetroProposals => {}
         }
     }
 

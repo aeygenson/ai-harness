@@ -31,6 +31,8 @@ pub enum MockStep {
     WriteGarbage,
     /// Pretend the subscription limit was hit.
     UsageLimit,
+    /// Write these files into the output folder only, like the retrospective.
+    WriteOutput(Vec<(String, String)>),
 }
 
 impl MockStep {
@@ -130,6 +132,12 @@ impl AgentRunner for MockAgent {
                     message: String::new(),
                 }
             }
+            MockStep::WriteOutput(files) => AgentOutcome {
+                success: write_files(&job.output_dir, &files).is_ok(),
+                usage_limit_reached: false,
+                log,
+                message: String::new(),
+            },
             MockStep::WriteFilesOnly(files) => AgentOutcome {
                 success: write_files(&job.project_dir, &files).is_ok(),
                 usage_limit_reached: false,

@@ -43,7 +43,7 @@ use harness_core::mcp;
 use harness_core::orchestrator::{self, StopReason};
 use harness_core::projects;
 use harness_core::proposals::FileChange;
-use harness_core::retro::{Stats, TaskHistory, RETROS_DIR};
+use harness_core::retro_ops;
 use harness_core::skills::Skills;
 use harness_core::store::TaskStore;
 use harness_core::suggest::{self, Applied};
@@ -776,17 +776,6 @@ fn status(project: &Path, task_id: &str) -> Result<()> {
 /// the `[retro]` agent then reads the history and proposes skill changes.
 async fn retro(project: &Path, task_id: Option<&str>, suggest: bool) -> Result<()> {
     let repo = open_repo(project)?;
-    let runs = repo.runs_dir();
-    let (scope, tasks) = match task_id {
-        Some(id) => (
-            id,
-            vec![TaskHistory::load(&runs, id).with_context(|| format!("cannot open task {id}"))?],
-        ),
-        None => ("all", TaskHistory::load_all(&runs)?),
-    };
-    if tasks.is_empty() {
-        bail!("there are no tasks yet; create one with `harness task new`");
-    }
     let harness_dir = repo.root().join(HARNESS_DIR);
     let config = match Config::load(&harness_dir) {
         Ok(config) => Some(config),
@@ -799,34 +788,26 @@ async fn retro(project: &Path, task_id: Option<&str>, suggest: bool) -> Result<(
     // Check everything the agent needs before saving anything.
     let agent = match (&config, suggest) {
         (Some(config), true) => {
-            let dirty = repo.changed_files()?;
-            if !dirty.is_empty() {
-                bail!(
-                    "the project has uncommitted changes; commit or remove them first: {}",
-                    dirty.join(", ")
-                );
-            }
+            retro_ops::check_clean(&repo)?;
             Some(retro_agent(config)?)
         }
         _ => None,
     };
 
-    let stats = Stats::collect(scope, &tasks, config.as_ref());
+    let (dir, stats) = retro_ops::save_stats(&repo, task_id, config.as_ref())?;
     print!("{}", stats.to_markdown());
-    let dir = stats.save(&harness_dir)?;
     let number = dir
         .file_name()
         .unwrap_or_default()
         .to_string_lossy()
         .into_owned();
-    repo.commit_paths(&[&dir], &format!("harness: retro {number} ({scope})"))?;
     println!("\nSaved to {}.", dir.display());
 
     let (Some(agent), Some(config)) = (agent, config) else {
         return Ok(());
     };
     println!("\nThe retro agent is reading the history...");
-    let found = suggest::suggest(&repo, &dir, &stats, &config, &agent)
+    let found = suggest::suggest(&repo, &dir, &stats, &config, &agent, suggest::ENGLISH)
         .await
         .with_context(|| {
             format!(
@@ -852,18 +833,7 @@ async fn retro(project: &Path, task_id: Option<&str>, suggest: bool) -> Result<(
 
 /// `.harness/retros/<NNN>` for `4`, `04` or `004`; it must exist.
 fn retro_dir(repo: &Repo, number: &str) -> Result<PathBuf> {
-    let n: u32 = number
-        .parse()
-        .map_err(|_| anyhow::anyhow!("{number:?} is not a retrospective number, such as 004"))?;
-    let dir = repo
-        .root()
-        .join(HARNESS_DIR)
-        .join(RETROS_DIR)
-        .join(format!("{n:03}"));
-    if !dir.is_dir() {
-        bail!("there is no retrospective {n:03}");
-    }
-    Ok(dir)
+    Ok(retro_ops::dir(repo, number)?)
 }
 
 fn retro_show(project: &Path, number: &str) -> Result<()> {
@@ -901,38 +871,13 @@ fn retro_apply(project: &Path, number: &str, ids: &[u32]) -> Result<()> {
     let repo = open_repo(project)?;
     let dir = retro_dir(&repo, number)?;
     let harness_dir = repo.root().join(HARNESS_DIR);
-    // Only the harness's own changes may go into the commit.
-    let dirty: Vec<String> = repo
-        .changed_files()?
-        .into_iter()
-        .filter(|path| {
-            path == ".harness/harness.toml"
-                || path.starts_with(".harness/skills/")
-                || path.starts_with(&format!(".harness/{RETROS_DIR}/"))
-        })
-        .collect();
-    if !dirty.is_empty() {
-        bail!(
-            "these files have uncommitted changes; commit or remove them first: {}",
-            dirty.join(", ")
-        );
-    }
     let found = suggest::load(&dir)?;
     let applied = Applied::load(&dir);
-    let mut chosen: Vec<u32> = Vec::new();
-    for &id in ids {
-        if applied.applied.contains(&id) {
-            println!("Proposal {id} is already applied.");
-        } else if !chosen.contains(&id) {
-            chosen.push(id);
-        }
-    }
-    if chosen.is_empty() {
-        return Ok(());
-    }
     // Say what will happen before it happens.
-    for id in &chosen {
-        if let Some(proposal) = found.proposals.get(*id) {
+    for id in ids {
+        if applied.applied.contains(id) {
+            println!("Proposal {id} is already applied.");
+        } else if let Some(proposal) = found.proposals.get(*id) {
             let file = match proposal.file_change(&harness_dir) {
                 FileChange::New => " (new skill file)",
                 FileChange::Changed { .. } => " (skill file changed)",
@@ -941,16 +886,9 @@ fn retro_apply(project: &Path, number: &str, ids: &[u32]) -> Result<()> {
             println!("{id}. {}{file}", proposal.summary);
         }
     }
-    let mut paths = suggest::apply(&harness_dir, &found.proposals, &chosen)?;
-    paths.push(Applied::add(&dir, &chosen)?);
-    let refs: Vec<&Path> = paths.iter().map(PathBuf::as_path).collect();
-    let list: Vec<String> = chosen.iter().map(u32::to_string).collect();
-    let number = dir.file_name().unwrap_or_default().to_string_lossy();
-    repo.commit_paths(
-        &refs,
-        &format!("harness: retro {number}, apply {}", list.join(", ")),
-    )?;
-    println!("Applied and committed.");
+    if !retro_ops::apply(&repo, &dir, ids)?.is_empty() {
+        println!("Applied and committed.");
+    }
     Ok(())
 }
 

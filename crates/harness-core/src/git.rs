@@ -89,6 +89,16 @@ impl Repo {
         self.git(&["show", &format!("{commit}:{file}")]).ok()
     }
 
+    /// The day of the last commit that changed `path` (relative to the
+    /// project), as `2026-10-02`; `None` if it was never committed.
+    pub fn last_change_date(&self, path: &str) -> Option<String> {
+        let day = self
+            .git_literal(&["log", "-1", "--format=%cs", "--", path])
+            .ok()?;
+        let day = day.trim();
+        (!day.is_empty()).then(|| day.to_string())
+    }
+
     /// Where task folders live: `<project>/.harness/runs`.
     pub fn runs_dir(&self) -> PathBuf {
         self.root.join(HARNESS_DIR).join("runs")
