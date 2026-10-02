@@ -45,6 +45,10 @@ pub enum ListId {
     PluginCatalog,
     /// The added catalogs, in «Catalogs».
     PluginCatalogs,
+    /// The saved retrospectives of the Retro tab.
+    Retros,
+    /// The proposals of the selected retrospective.
+    RetroProposals,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -122,6 +126,14 @@ pub enum ButtonId {
     CatalogAdd,
     CatalogUpdate,
     CatalogRemove,
+    /// The Retro tab: a new retrospective of the whole project.
+    RetroGenerate,
+    /// Open the retrospective's text in the editor.
+    RetroOpen,
+    /// Choose the selected proposal, or take it out.
+    RetroToggle,
+    /// Apply the chosen proposals.
+    RetroApply,
 }
 
 /// Where the clickable things were drawn in the last frame. Drawing fills it,

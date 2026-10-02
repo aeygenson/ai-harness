@@ -19,6 +19,7 @@ pub mod projects;
 pub mod prompt;
 pub mod proposals;
 pub mod retro;
+pub mod retro_ops;
 pub mod routes;
 pub mod secret;
 pub mod settings;

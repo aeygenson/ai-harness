@@ -30,6 +30,8 @@ pub const PROPOSALS_JSON: &str = "proposals.json";
 pub const APPLIED_JSON: &str = "applied.json";
 pub const AGENT_LOG: &str = "agent.log";
 const INBOX_DIR: &str = "inbox";
+/// The language the CLI asks for.
+pub const ENGLISH: &str = "English";
 
 /// The agent runs with the rules of this role: read everything, write only
 /// its own output folder.
@@ -131,6 +133,7 @@ pub fn prompt(
     config: &Config,
     past: &[PastSettings],
     output_dir: &Path,
+    language: &str,
 ) -> String {
     let tasks: Vec<&str> = stats.tasks.iter().map(|t| t.task_id.as_str()).collect();
     let mut text = format!(
@@ -208,6 +211,8 @@ pub fn prompt(
          the whole new text of the skill file; leave it out to keep the file as it \
          is), roles (optional: roles that get the skill, list \"skills\" or \
          \"always_skills\"). Use {{\"proposals\": []}} if you propose nothing.\n\
+         Write retro.md, and the summary and reason of each proposal, in \
+         {language}; skill files stay in English.\n\
          Do not commit to git; the harness does that.\n",
         out = output_dir.display(),
         example = EXAMPLE,
@@ -236,6 +241,7 @@ pub async fn suggest<A: AgentRunner>(
     stats: &Stats,
     config: &Config,
     agent: &A,
+    language: &str,
 ) -> Result<Suggestions, SuggestError> {
     repo.ensure_harness_ignores()?;
     let dirty = repo.changed_files()?;
@@ -265,7 +271,15 @@ pub async fn suggest<A: AgentRunner>(
         prompt: {
             let current = fs::read_to_string(harness_dir.join(CONFIG_FILE)).unwrap_or_default();
             let past = past_settings(repo, stats, &current);
-            prompt(stats, &repo.runs_dir(), &harness_dir, config, &past, &inbox)
+            prompt(
+                stats,
+                &repo.runs_dir(),
+                &harness_dir,
+                config,
+                &past,
+                &inbox,
+                language,
+            )
         },
         output_dir: inbox.clone(),
     };
@@ -599,7 +613,15 @@ mod tests {
         let harness = repo.root().join(".harness");
         let current = fs::read_to_string(harness.join(CONFIG_FILE)).unwrap();
         assert!(past_settings(&repo, &stats, &current).is_empty());
-        let text = prompt(&stats, &repo.runs_dir(), &harness, &config, &[], &retro_dir);
+        let text = prompt(
+            &stats,
+            &repo.runs_dir(),
+            &harness,
+            &config,
+            &[],
+            &retro_dir,
+            "Russian",
+        );
         assert!(
             text.contains("The tasks ran with these same settings."),
             "{text}"
@@ -611,6 +633,7 @@ mod tests {
             "Skill files: style.",
             "You cannot propose changes to role prompts, permissions",
             "\"list\": \"skills\"",
+            "in Russian; skill files stay in English",
         ] {
             assert!(text.contains(part), "missing {part:?} in:\n{text}");
         }
@@ -640,6 +663,7 @@ mod tests {
             &config,
             &past,
             &retro_dir,
+            ENGLISH,
         );
         assert!(
             text.contains("judge each task by the settings it ran with"),
@@ -658,7 +682,7 @@ mod tests {
     fn suggestions_are_checked_saved_and_committed() {
         let (_dir, repo, retro_dir, stats, config) = project();
         let agent = FakeAgent::writing("Went well.", &proposals_json());
-        let found = block_on(suggest(&repo, &retro_dir, &stats, &config, &agent)).unwrap();
+        let found = block_on(suggest(&repo, &retro_dir, &stats, &config, &agent, ENGLISH)).unwrap();
         assert_eq!(found.retro, "Went well.");
         assert_eq!(found.proposals.proposals.len(), 2);
         assert!(!retro_dir.join("inbox").exists());
@@ -673,7 +697,9 @@ mod tests {
     #[test]
     fn a_failed_or_wrong_agent_changes_nothing_else() {
         let (_dir, repo, retro_dir, stats, config) = project();
-        let run = |agent: FakeAgent| block_on(suggest(&repo, &retro_dir, &stats, &config, &agent));
+        let run = |agent: FakeAgent| {
+            block_on(suggest(&repo, &retro_dir, &stats, &config, &agent, ENGLISH))
+        };
 
         let mut failing = FakeAgent::writing("x", "{\"proposals\": []}");
         failing.success = false;
@@ -716,7 +742,7 @@ mod tests {
         let (_dir, repo, retro_dir, stats, config) = project();
         let harness = repo.root().join(".harness");
         let agent = FakeAgent::writing("x", &proposals_json());
-        let found = block_on(suggest(&repo, &retro_dir, &stats, &config, &agent)).unwrap();
+        let found = block_on(suggest(&repo, &retro_dir, &stats, &config, &agent, ENGLISH)).unwrap();
 
         assert!(matches!(
             apply(&harness, &found.proposals, &[7]),

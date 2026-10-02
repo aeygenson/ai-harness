@@ -53,6 +53,7 @@ mod picker;
 mod plugin_catalog;
 mod plugins_tab;
 mod projects_tab;
+mod retro_tab;
 mod roles_tab;
 mod runner;
 mod skills_tab;
@@ -64,6 +65,7 @@ use mcp_tab::McpTab;
 use picker::{Browser, Native};
 use plugins_tab::PluginsTab;
 use projects_tab::{has_config, ProjectsTab};
+use retro_tab::{RetroBuilder, RetroTab};
 use roles_tab::{Action, RolesTab};
 use runner::Builder;
 use skills_tab::SkillsTab;
@@ -86,16 +88,15 @@ enum Tab {
     Projects,
 }
 
-/// The tabs in order: the key of the label, and the step of the plan that
-/// brings each one.
-const TABS: [(Tab, &str, u8); 7] = [
-    (Tab::Tasks, "tabs.tasks", 5),
-    (Tab::Roles, "tabs.roles", 2),
-    (Tab::Skills, "tabs.skills", 3),
-    (Tab::Mcp, "tabs.mcp", 3),
-    (Tab::Plugins, "tabs.plugins", 4),
-    (Tab::Retro, "tabs.retro", 6),
-    (Tab::Projects, "tabs.projects", 1),
+/// The tabs in order, with the key of the label.
+const TABS: [(Tab, &str); 7] = [
+    (Tab::Tasks, "tabs.tasks"),
+    (Tab::Roles, "tabs.roles"),
+    (Tab::Skills, "tabs.skills"),
+    (Tab::Mcp, "tabs.mcp"),
+    (Tab::Plugins, "tabs.plugins"),
+    (Tab::Retro, "tabs.retro"),
+    (Tab::Projects, "tabs.projects"),
 ];
 
 /// What the open form is for.
@@ -139,6 +140,8 @@ enum Purpose {
     RemoveCatalog(String),
     /// Take the new version of a plugin, after seeing what changes.
     ApplyUpdate(Box<plugin_ops::Prepared>),
+    /// Apply these proposals of the retrospective in this folder.
+    ApplyProposals(PathBuf, Vec<u32>),
 }
 
 /// What a download in the background brought.
@@ -154,7 +157,7 @@ enum PluginJob {
     UpdateReady(String, Result<Option<plugin_ops::Prepared>, String>),
 }
 
-/// A skill file, or a plugin folder, waiting to be opened in the editor.
+/// A skill file, a plugin folder or a retrospective, waiting to be opened in the editor.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct EditJob {
     name: String,
@@ -162,8 +165,17 @@ struct EditJob {
     /// The file is a fresh copy of the built-in skill: if Lisa changes
     /// nothing, it is deleted again.
     copied: bool,
-    /// The folder of the plugin `name`, not a skill.
-    plugin: bool,
+    /// What is edited: a skill, a plugin folder, a retrospective.
+    kind: EditKind,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum EditKind {
+    Skill,
+    /// The folder of the plugin `name`.
+    Plugin,
+    /// The text of the retrospective `name` (its number).
+    Retro,
 }
 
 /// What a folder is being chosen for.
@@ -299,6 +311,7 @@ struct App {
     skills: Option<SkillsTab>,
     mcp: Option<McpTab>,
     plugins: Option<PluginsTab>,
+    retro: Option<RetroTab>,
     /// A skill to open in the editor after this event.
     edit: Option<EditJob>,
     projects: ProjectsTab,
@@ -315,6 +328,8 @@ struct App {
     last_click: Option<(Instant, Target, u16)>,
     /// Builds the agents that run the roles.
     builder: Builder,
+    /// Builds the agent of the retrospective.
+    retro_builder: RetroBuilder,
     asker: ModelAsker,
     /// The answers of «Refresh models», while the agents are being asked.
     asking: Option<mpsc::Receiver<Answers>>,
@@ -348,6 +363,7 @@ impl App {
             skills: None,
             mcp: None,
             plugins: None,
+            retro: None,
             edit: None,
             projects: ProjectsTab::load(home),
             form: None,
@@ -358,6 +374,7 @@ impl App {
             hits: Hits::default(),
             last_click: None,
             builder: harness_agents::build::build_team,
+            retro_builder: harness_agents::build::retro_agent,
             asker: ask_agents,
             asking: None,
             checker: harness_agents::mcp_check::list_tools,
@@ -398,6 +415,7 @@ impl App {
         self.plugins = Some(PluginsTab::load(root, &roles));
         self.roles = Some(roles);
         self.skills = Some(SkillsTab::load(root));
+        self.retro = Some(RetroTab::load(root));
         self.mcp = Some(McpTab::load(self.home.as_deref()));
         self.project = Some(root.to_path_buf());
         self.tab = Tab::Tasks;
@@ -421,8 +439,16 @@ impl App {
         let running = self.tasks.as_ref().is_some_and(TasksTab::is_running);
         if running {
             self.message = Some((self.tr.t("tasks.busy").to_string(), true));
+        } else if self.generating() {
+            self.message = Some((self.tr.t("retro.busy").to_string(), true));
+            return true;
         }
         running
+    }
+
+    /// The retrospective's agent is working.
+    fn generating(&self) -> bool {
+        self.retro.as_ref().is_some_and(RetroTab::is_generating)
     }
 
     /// Takes what the background work sent.
@@ -499,6 +525,13 @@ impl App {
                 self.message = Some(message);
             }
         }
+        if let Some(retro) = &mut self.retro {
+            if let Some(message) = retro.tick(&self.tr) {
+                self.message = Some(message);
+                // A failed attempt is committed too; the agent may have used skills.
+                self.reload_skills(None);
+            }
+        }
     }
 
     fn on_paste(&mut self, text: &str) {
@@ -555,7 +588,7 @@ impl App {
         // Hot keys work with a Russian keyboard layout too: «й» is q.
         let code = keys::latin(key.code);
         let unsaved = self.roles.as_ref().is_some_and(RolesTab::changed);
-        let running = self.tasks.as_ref().is_some_and(TasksTab::is_running);
+        let running = self.tasks.as_ref().is_some_and(TasksTab::is_running) || self.generating();
         // A message written but not sent is not thrown away by one key.
         let unsent = self
             .tasks
@@ -617,6 +650,9 @@ impl App {
                 }
                 if let Some(skills) = &mut self.skills {
                     skills.reload();
+                }
+                if let Some(retro) = self.retro.as_mut().filter(|r| !r.is_generating()) {
+                    retro.reload();
                 }
                 if let Some(mcp) = &mut self.mcp {
                     mcp.reload();
@@ -684,6 +720,12 @@ impl App {
                         }
                     }
                 },
+                Tab::Retro => {
+                    if let Some(retro) = &mut self.retro {
+                        let action = retro.on_key(code);
+                        self.retro_action(action);
+                    }
+                }
                 Tab::Projects => match code {
                     KeyCode::Enter => self.press(ButtonId::UseProject),
                     KeyCode::Char('n') => self.press(ButtonId::NewProject),
@@ -691,7 +733,6 @@ impl App {
                     KeyCode::Delete => self.press(ButtonId::RemoveProject),
                     code => self.projects.on_key(code),
                 },
-                _ => {}
             },
         }
     }
@@ -768,6 +809,21 @@ impl App {
                             }
                         }
                     }
+                    (Tab::Retro, Some((list @ (ListId::Retros | ListId::RetroProposals), _))) => {
+                        if let Some(retro) = &mut self.retro {
+                            retro.focus = if list == ListId::Retros {
+                                retro_tab::Focus::Retros
+                            } else {
+                                retro_tab::Focus::Proposals
+                            };
+                            retro.move_by(if down { 1 } else { -1 });
+                        }
+                    }
+                    (Tab::Retro, _) => {
+                        if let Some(retro) = &mut self.retro {
+                            retro.on_wheel(down);
+                        }
+                    }
                     (Tab::Plugins, _) => {
                         let delta = if down { 1 } else { -1 };
                         if let (Some(plugins), Some(roles)) = (&mut self.plugins, &self.roles) {
@@ -780,7 +836,6 @@ impl App {
                             }
                         }
                     }
-                    _ => {}
                 }
             }
             _ => {}
@@ -900,6 +955,19 @@ impl App {
                 Some((ListId::PluginCatalogs, index)) => {
                     if let Some(view) = self.plugins.as_mut().and_then(|p| p.catalogs.as_mut()) {
                         view.select(index);
+                    }
+                }
+                Some((ListId::Retros, index)) => {
+                    if let Some(retro) = &mut self.retro {
+                        retro.select(index);
+                    }
+                }
+                Some((ListId::RetroProposals, index)) => {
+                    if let Some(retro) = &mut self.retro {
+                        retro.select_proposal(index);
+                    }
+                    if double {
+                        self.press(ButtonId::RetroToggle);
                     }
                 }
                 Some((ListId::McpCatalog, index)) => {
@@ -1664,7 +1732,7 @@ impl App {
                             name,
                             path,
                             copied: false,
-                            plugin: true,
+                            kind: EditKind::Plugin,
                         });
                     }
                     Some(path) => {
@@ -1740,7 +1808,7 @@ impl App {
                     name,
                     path,
                     copied,
-                    plugin: false,
+                    kind: EditKind::Skill,
                 });
             }
             A::New => {
@@ -1768,9 +1836,10 @@ impl App {
     /// The editor was closed: keep the change in git, or drop a copy of a
     /// built-in skill that was not changed.
     fn finish_edit(&mut self, job: &EditJob, result: Result<(), String>) {
-        if job.plugin {
-            self.finish_plugin_edit(job, result);
-            return;
+        match job.kind {
+            EditKind::Skill => {}
+            EditKind::Plugin => return self.finish_plugin_edit(job, result),
+            EditKind::Retro => return self.finish_retro_edit(job, result),
         }
         let tr = &self.tr;
         let mut message = result
@@ -1804,6 +1873,123 @@ impl App {
         }
         self.message = message;
         self.reload_skills(Some(&job.name));
+    }
+
+    /// The retrospective was open in the editor: keep what changed in git.
+    fn finish_retro_edit(&mut self, job: &EditJob, result: Result<(), String>) {
+        let tr = &self.tr;
+        let saved = self
+            .project
+            .as_deref()
+            .ok_or_else(String::new)
+            .and_then(|root| Repo::open(root).map_err(|e| e.to_string()))
+            .and_then(|repo| {
+                repo.commit_paths(&[&job.path], &format!("harness: retro {} edited", job.name))
+                    .map_err(|e| e.to_string())
+            });
+        self.message = Some(match (result, saved) {
+            (Err(error), _) => (tr.f("skills.editor_failed", &[("error", &error)]), true),
+            (_, Err(error)) => (error, true),
+            (_, Ok(true)) => (tr.f("retro.edited", &[("number", &job.name)]), false),
+            (_, Ok(false)) => (tr.t("retro.unchanged").to_string(), false),
+        });
+        if let Some(retro) = &mut self.retro {
+            retro.reload();
+        }
+    }
+
+    /// What the Retro tab asks for.
+    fn retro_action(&mut self, action: retro_tab::Action) {
+        use retro_tab::Action as A;
+        match action {
+            A::None => {}
+            A::Say(key) => self.message = Some((self.tr.t(key).to_string(), true)),
+            A::Generate => {
+                if self.tasks.as_ref().is_some_and(TasksTab::is_running) {
+                    self.message = Some((self.tr.t("retro.tasks_running").to_string(), true));
+                    return;
+                }
+                let language = self.tr.t("retro.language").to_string();
+                if let Some(retro) = &mut self.retro {
+                    retro.generate(self.retro_builder, &language);
+                    self.message = Some((self.tr.t("retro.started").to_string(), false));
+                }
+            }
+            A::Open(number, path) => {
+                self.edit = Some(EditJob {
+                    name: number,
+                    path,
+                    copied: false,
+                    kind: EditKind::Retro,
+                });
+            }
+            A::Apply(dir, ids) => {
+                if self.roles_unsaved() {
+                    return;
+                }
+                let Some(root) = self.project.clone() else {
+                    return;
+                };
+                let harness_dir = root.join(HARNESS_DIR);
+                let config = harness_core::config::Config::load(&harness_dir).ok();
+                let found = harness_core::suggest::load(&dir).ok();
+                let tr = &self.tr;
+                let mut text = tr.t("retro.apply_text").to_string();
+                for id in &ids {
+                    let Some(proposal) = found.as_ref().and_then(|f| f.proposals.get(*id)) else {
+                        continue;
+                    };
+                    text.push_str(&format!("\n{id}. {}", proposal.summary));
+                    use harness_core::proposals::FileChange;
+                    let file = match (proposal.file_change(&harness_dir), &proposal.content) {
+                        (FileChange::New, Some(_)) => Some("retro.new_skill"),
+                        (FileChange::Changed { .. }, Some(_)) => Some("retro.changed_skill"),
+                        _ => None,
+                    };
+                    if let Some(key) = file {
+                        text.push_str(&format!("\n   {}", tr.f(key, &[("name", &proposal.skill)])));
+                    }
+                    let roles: Vec<&str> = config
+                        .as_ref()
+                        .map(|c| proposal.missing_roles(c))
+                        .unwrap_or_default()
+                        .iter()
+                        .map(|given| skills_tab::role_name(given.role))
+                        .collect();
+                    if !roles.is_empty() {
+                        text.push_str(&format!(
+                            "\n   {}",
+                            tr.f(
+                                "retro.given_to",
+                                &[("name", &proposal.skill), ("roles", &roles.join(", "))]
+                            )
+                        ));
+                    }
+                }
+                self.form = Some((
+                    Purpose::ApplyProposals(dir, ids),
+                    Form::new(tr.t("retro.apply_title"), &text, tr.t("retro.apply_ok")),
+                ));
+            }
+        }
+    }
+
+    /// OK in «Apply proposals»: skills and harness.toml change, one commit.
+    fn apply_proposals(&mut self, dir: &Path, ids: &[u32]) -> Result<(), String> {
+        let root = self.project.clone().ok_or_else(String::new)?;
+        let repo = Repo::open(&root).map_err(|e| e.to_string())?;
+        let applied = harness_core::retro_ops::apply(&repo, dir, ids).map_err(|e| e.to_string())?;
+        let list: Vec<String> = applied.iter().map(u32::to_string).collect();
+        self.message = Some((
+            self.tr.f("retro.applied", &[("ids", &list.join(", "))]),
+            false,
+        ));
+        if let Some(retro) = &mut self.retro {
+            retro.chosen.clear();
+            retro.reload();
+        }
+        self.reload_skills(None);
+        Ok(())
     }
 
     /// The plugin's folder was open in the editor: keep what changed in git.
@@ -1864,7 +2050,7 @@ impl App {
             name: name.to_string(),
             path,
             copied: false,
-            plugin: false,
+            kind: EditKind::Skill,
         });
         Ok(())
     }
@@ -2026,6 +2212,15 @@ impl App {
                     self.plugin_action(action);
                 }
             }
+            ButtonId::RetroGenerate
+            | ButtonId::RetroOpen
+            | ButtonId::RetroToggle
+            | ButtonId::RetroApply => {
+                if let Some(retro) = &mut self.retro {
+                    let action = retro.press(id);
+                    self.retro_action(action);
+                }
+            }
             ButtonId::SkillRole(_)
             | ButtonId::SkillEdit
             | ButtonId::SkillNew
@@ -2048,6 +2243,9 @@ impl App {
                         _ => Menu::To,
                     });
                 }
+            }
+            ButtonId::Send if self.generating() => {
+                self.message = Some((self.tr.t("retro.busy").to_string(), true));
             }
             ButtonId::Send => {
                 if let Some(tasks) = &mut self.tasks {
@@ -2221,6 +2419,7 @@ impl App {
                 self.apply_plugin_update(prepared);
                 Ok(())
             }
+            Purpose::ApplyProposals(dir, ids) => self.apply_proposals(dir, ids),
             Purpose::Remove(path) => {
                 let path = path.clone();
                 let result = self.projects.update(|list| list.remove(&path));
@@ -2231,6 +2430,7 @@ impl App {
                     self.skills = None;
                     self.mcp = None;
                     self.plugins = None;
+                    self.retro = None;
                 }
                 result.map(|()| {
                     self.message = Some((self.tr.t("projects.removed").to_string(), false));
@@ -2405,6 +2605,15 @@ impl App {
                     self.tr.t("tabs.no_open_project"),
                 ),
             },
+            Tab::Retro => match &self.retro {
+                Some(retro) => retro.draw(frame, main, &mut self.hits, &self.tr),
+                None => placeholder(
+                    frame,
+                    main,
+                    &format!(" {} ", self.tr.t("tabs.retro")),
+                    self.tr.t("tabs.no_open_project"),
+                ),
+            },
             Tab::Projects => {
                 self.projects.draw(
                     frame,
@@ -2412,19 +2621,6 @@ impl App {
                     &mut self.hits,
                     self.project.as_deref(),
                     &self.tr,
-                );
-            }
-            tab => {
-                let (_, label, step) = TABS
-                    .iter()
-                    .find(|(t, _, _)| *t == tab)
-                    .copied()
-                    .unwrap_or(TABS[0]);
-                placeholder(
-                    frame,
-                    main,
-                    &format!(" {} ", self.tr.t(label)),
-                    &self.tr.f("tabs.coming", &[("step", &step)]),
                 );
             }
         }
@@ -2485,7 +2681,7 @@ impl App {
             format!(" {name} "),
             Style::new().add_modifier(Modifier::BOLD),
         );
-        for (index, (tab, label, _)) in TABS.iter().enumerate() {
+        for (index, (tab, label)) in TABS.iter().enumerate() {
             put(frame, "│".into(), Style::new().fg(Color::DarkGray));
             let style = if *tab == self.tab {
                 Style::new().fg(Color::Black).bg(Color::Cyan)
