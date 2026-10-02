@@ -39,6 +39,8 @@ pub enum ListId {
     Mcp,
     /// The servers found in the MCP registry.
     McpCatalog,
+    /// The plugins of the Plugins tab.
+    Plugins,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -90,6 +92,16 @@ pub enum ButtonId {
     McpSearch,
     McpUse,
     McpBack,
+    /// A role of the Plugins tab's selector, an index into its `ROLES`.
+    PluginRole(usize),
+    /// Give the selected plugin to the role, or take it away.
+    PluginToggle,
+    /// Allow or forbid the plugin's hooks, its own servers.
+    PluginHooks,
+    PluginServers,
+    PluginRemove,
+    /// Open the plugin's folder in the editor.
+    PluginOpen,
 }
 
 /// Where the clickable things were drawn in the last frame. Drawing fills it,

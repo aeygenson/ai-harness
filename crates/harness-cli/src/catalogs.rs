@@ -17,6 +17,7 @@ use harness_core::git::{self, Repo, HARNESS_DIR};
 use harness_core::handoff::Role;
 use harness_core::mcp::is_simple_name;
 use harness_core::plugin_install::{self, Changes};
+use harness_core::plugin_ops;
 use harness_core::plugins::{self, Contents, Plugins, PLUGINS_DIR};
 
 /// A catalog being added is downloaded here first, before its name is known.
@@ -421,22 +422,7 @@ pub fn plugin_update(project: &Path, name: &str) -> Result<()> {
 
 pub fn plugin_remove(project: &Path, name: &str) -> Result<()> {
     let repo = open_repo(project)?;
-    let config_path = repo.root().join(HARNESS_DIR).join(CONFIG_FILE);
-    let text = fs::read_to_string(&config_path)?;
-    let config = Config::parse(&text)?;
-    let Some(plugin) = config.plugins.get(name) else {
-        bail!("harness.toml has no [plugins.{name}]");
-    };
-    let folder = repo.root().join(plugins::relative_path(name, plugin));
-    let new_text = config_edit::remove_plugin(&text, name)?;
-    fs::write(&config_path, new_text)?;
-    if folder.starts_with(repo.root().join(PLUGINS_DIR)) {
-        let _ = fs::remove_dir_all(&folder);
-    }
-    repo.commit_paths(
-        &[&folder, &config_path],
-        &format!("harness: remove plugin {name}"),
-    )?;
+    plugin_ops::remove(&repo, name)?;
     println!("Removed plugin {name} from the project and from every role.");
     Ok(())
 }

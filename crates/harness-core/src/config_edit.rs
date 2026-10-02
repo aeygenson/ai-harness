@@ -92,6 +92,29 @@ pub fn set_plugin_commit(text: &str, name: &str, commit: &str) -> Result<String,
     finish(doc)
 }
 
+/// Sets `allow_hooks` and `allow_mcp` of an existing `[plugins.<name>]`; a
+/// `false` is written by leaving the key out, as `harness plugin add` does.
+pub fn set_plugin_allow(
+    text: &str,
+    name: &str,
+    allow_hooks: bool,
+    allow_mcp: bool,
+) -> Result<String, EditError> {
+    let mut doc: DocumentMut = text.parse()?;
+    let entry = table(&mut doc, "plugins")?
+        .get_mut(name)
+        .and_then(Item::as_table_mut)
+        .ok_or_else(|| EditError::NoPlugin(name.to_string()))?;
+    for (key, on) in [("allow_hooks", allow_hooks), ("allow_mcp", allow_mcp)] {
+        if on {
+            entry.insert(key, value(true));
+        } else {
+            entry.remove(key);
+        }
+    }
+    finish(doc)
+}
+
 /// Adds `skill` to a role's `skills` list, or to `always_skills` if `always`.
 /// A skill already in that list is not added twice.
 pub fn add_role_skill(
@@ -355,6 +378,19 @@ mod tests {
             allow_hooks: false,
             allow_mcp: false,
         }
+    }
+
+    #[test]
+    fn plugins_are_allowed_hooks_and_servers_and_back() {
+        let text = set_plugin_allow(TOML, "old", true, false).unwrap();
+        assert!(text.contains("[plugins.old]\nagent = \"codex\"\nallow_hooks = true\n"));
+        let config = Config::parse(&text).unwrap();
+        assert!(config.plugins["old"].allow_hooks && !config.plugins["old"].allow_mcp);
+        assert_eq!(set_plugin_allow(&text, "old", false, false).unwrap(), TOML);
+        assert!(matches!(
+            set_plugin_allow(TOML, "nope", true, true),
+            Err(EditError::NoPlugin(_))
+        ));
     }
 
     #[test]

@@ -13,6 +13,7 @@ pub mod models;
 pub mod orchestrator;
 pub mod permissions;
 pub mod plugin_install;
+pub mod plugin_ops;
 pub mod plugins;
 pub mod projects;
 pub mod prompt;
