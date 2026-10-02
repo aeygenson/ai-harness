@@ -25,13 +25,14 @@ use harness_core::settings;
 use harness_core::skills;
 use ratatui::crossterm::event::KeyCode;
 use ratatui::layout::{Constraint, Layout, Rect};
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{ListItem, Paragraph};
 use ratatui::Frame;
 
 use crate::i18n::I18n;
 use crate::tasks::draw_list;
+use crate::theme;
 use crate::ui::{buttons, panel, selected, ButtonId, Hits, ListId, Target};
 
 /// The roles in the list, `None` is `[retro]`.
@@ -590,7 +591,7 @@ impl RolesTab {
             let width = u16::try_from(note.chars().count()).unwrap_or(0);
             let x = bar.right().saturating_sub(width);
             frame.render_widget(
-                Span::styled(note.to_string(), Style::new().fg(Color::Yellow)),
+                Span::styled(note.to_string(), theme::warn()),
                 Rect::new(x.max(bar.x), bar.y, width.min(bar.width), 1),
             );
         }
@@ -662,7 +663,7 @@ impl RolesTab {
     /// The lines of the details; clickable ones carry their row index.
     fn detail_lines(&self, tr: &I18n) -> Vec<(Option<usize>, Line<'static>)> {
         let bold = Style::new().add_modifier(Modifier::BOLD);
-        let dim = Style::new().fg(Color::DarkGray);
+        let dim = theme::dim();
         let mut lines = Vec::new();
         if self.problem.is_some() {
             return lines;
@@ -685,17 +686,14 @@ impl RolesTab {
                 Row::Agent(name) => {
                     let mark = if agent == Some(name) { "(•)" } else { "( )" };
                     let login = if self.logins.get(name).copied().unwrap_or(false) {
-                        Span::styled(
-                            tr.t("roles.login_saved").to_string(),
-                            Style::new().fg(Color::Green),
-                        )
+                        Span::styled(tr.t("roles.login_saved").to_string(), theme::ok())
                     } else {
                         Span::styled(
                             tr.f(
                                 "roles.no_login",
                                 &[("command", &credentials::login_command(name))],
                             ),
-                            Style::new().fg(Color::Yellow),
+                            theme::warn(),
                         )
                     };
                     Line::from(vec![Span::raw(format!("  {mark} {name:<16}")), login])
@@ -795,16 +793,10 @@ impl RolesTab {
                         "[ ]"
                     };
                     let about = match self.skills.iter().find(|s| s.name == name) {
-                        None => Span::styled(
-                            tr.t("roles.no_file").to_string(),
-                            Style::new().fg(Color::Red),
-                        ),
+                        None => Span::styled(tr.t("roles.no_file").to_string(), theme::bad()),
                         Some(SkillFile {
                             description: None, ..
-                        }) => Span::styled(
-                            tr.t("roles.no_description").to_string(),
-                            Style::new().fg(Color::Red),
-                        ),
+                        }) => Span::styled(tr.t("roles.no_description").to_string(), theme::bad()),
                         Some(SkillFile {
                             description: Some(d),
                             ..
@@ -821,10 +813,7 @@ impl RolesTab {
                     let on = settings.is_some_and(|s| s.mcp.contains(&name));
                     let about = match self.saved.mcp.get(&name) {
                         Some(server) => Span::styled(server.command.clone(), dim),
-                        None => Span::styled(
-                            tr.t("roles.not_described").to_string(),
-                            Style::new().fg(Color::Red),
-                        ),
+                        None => Span::styled(tr.t("roles.not_described").to_string(), theme::bad()),
                     };
                     Line::from(vec![
                         Span::raw(format!("  {} {name:<24} ", check(on))),
@@ -843,10 +832,7 @@ impl RolesTab {
                         Some(plugin) => {
                             Span::styled(plugin.source.clone().unwrap_or_default(), dim)
                         }
-                        None => Span::styled(
-                            tr.t("roles.not_described").to_string(),
-                            Style::new().fg(Color::Red),
-                        ),
+                        None => Span::styled(tr.t("roles.not_described").to_string(), theme::bad()),
                     };
                     Line::from(vec![
                         Span::raw(format!("  {} {name:<24} ", check(on))),

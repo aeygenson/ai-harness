@@ -7,13 +7,13 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use ratatui::layout::{Constraint, Flex, Layout};
-use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Clear, ListItem};
+use ratatui::widgets::ListItem;
 use ratatui::Frame;
 
 use crate::i18n::I18n;
 use crate::tasks::draw_list;
+use crate::theme;
 use crate::ui::{self, buttons, panel, ButtonId, Hits, ListId, Target};
 
 /// What the system dialog answered.
@@ -226,7 +226,7 @@ impl Browser {
         let [area] = Layout::horizontal([Constraint::Max(90)])
             .flex(Flex::Center)
             .areas(area);
-        frame.render_widget(Clear, area);
+        crate::ui::clear(frame, area);
         let block = panel(&format!(" {} ", self.title), true);
         let inner = block.inner(area);
         frame.render_widget(block, area);
@@ -248,7 +248,7 @@ impl Browser {
                 Span::raw(label.to_string()),
                 Span::styled(
                     keep_end(&self.chosen().display().to_string(), room),
-                    Style::new().fg(Color::Cyan),
+                    theme::accent(),
                 ),
             ]),
             path,
@@ -277,14 +277,13 @@ impl Browser {
             (Some(name), _) => frame.render_widget(
                 Line::from(vec![
                     Span::raw(tr.t("picker.new_name").to_string()),
-                    Span::styled(format!(" {name}▏"), ui::INPUT),
+                    Span::styled(format!(" {name}▏"), ui::input()),
                 ]),
                 message,
             ),
-            (None, Some(error)) => frame.render_widget(
-                Span::styled(error.clone(), Style::new().fg(Color::Red)),
-                message,
-            ),
+            (None, Some(error)) => {
+                frame.render_widget(Span::styled(error.clone(), theme::bad()), message)
+            }
             (None, None) => {}
         }
         let hint_text = if self.naming.is_some() {
@@ -292,10 +291,7 @@ impl Browser {
         } else {
             tr.t("picker.hint")
         };
-        frame.render_widget(
-            Span::styled(hint_text.to_string(), Style::new().fg(Color::DarkGray)),
-            hint,
-        );
+        frame.render_widget(Span::styled(hint_text.to_string(), theme::dim()), hint);
         let hidden = if self.hidden {
             tr.t("picker.hide_hidden")
         } else {

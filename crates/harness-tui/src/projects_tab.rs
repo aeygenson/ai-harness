@@ -7,13 +7,13 @@ use harness_core::git::HARNESS_DIR;
 use harness_core::projects::{Project, Projects};
 use ratatui::crossterm::event::KeyCode;
 use ratatui::layout::{Constraint, Layout, Rect};
-use ratatui::style::{Color, Style};
 use ratatui::text::Line;
 use ratatui::widgets::{ListItem, Paragraph, Wrap};
 use ratatui::Frame;
 
 use crate::i18n::I18n;
 use crate::tasks::draw_list;
+use crate::theme;
 use crate::ui::{buttons, panel, ButtonId, Hits, ListId};
 
 #[derive(Debug)]
@@ -143,20 +143,11 @@ impl ProjectsTab {
                 .collect(),
             Some(project) => {
                 let state = if !project.path.is_dir() {
-                    Line::styled(
-                        tr.t("projects.missing").to_string(),
-                        Style::new().fg(Color::Red),
-                    )
+                    Line::styled(tr.t("projects.missing").to_string(), theme::bad())
                 } else if has_config(&project.path) {
-                    Line::styled(
-                        tr.t("projects.ready").to_string(),
-                        Style::new().fg(Color::Green),
-                    )
+                    Line::styled(tr.t("projects.ready").to_string(), theme::ok())
                 } else {
-                    Line::styled(
-                        tr.t("projects.no_config").to_string(),
-                        Style::new().fg(Color::Yellow),
-                    )
+                    Line::styled(tr.t("projects.no_config").to_string(), theme::warn())
                 };
                 vec![
                     Line::from(project.name.clone()),

@@ -29,7 +29,7 @@ use harness_core::handoff::Role;
 use harness_core::plugins::{self, family, Details};
 use ratatui::crossterm::event::KeyCode;
 use ratatui::layout::{Constraint, Layout, Rect};
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{ListItem, Paragraph, Wrap};
 use ratatui::Frame;
@@ -43,6 +43,7 @@ use crate::plugin_catalog::{
 use crate::roles_tab::RolesTab;
 use crate::skills_tab::{role_name, ROLES};
 use crate::tasks::draw_list;
+use crate::theme;
 use crate::ui::{buttons, panel, selector, ButtonId, Hits, ListId};
 
 /// What the tab asks the App to do.
@@ -432,7 +433,7 @@ impl PluginsTab {
             let x = top.right().saturating_sub(width);
             if x > top.x + 60 {
                 frame.render_widget(
-                    Span::styled(text, Style::new().fg(Color::DarkGray)),
+                    Span::styled(text, theme::dim()),
                     Rect::new(x, top.y, width, 1),
                 );
             }
@@ -441,8 +442,8 @@ impl PluginsTab {
         let [left, right] =
             Layout::horizontal([Constraint::Percentage(35), Constraint::Percentage(65)])
                 .areas(main);
-        let dim = Style::new().fg(Color::DarkGray);
-        let red = Style::new().fg(Color::LightRed);
+        let dim = theme::dim();
+        let red = theme::bad();
         let list = self.names(roles);
         let items: Vec<ListItem> = list
             .iter()
@@ -527,7 +528,7 @@ impl PluginsTab {
             let width = u16::try_from(note.chars().count()).unwrap_or(0);
             let x = bottom.right().saturating_sub(width);
             frame.render_widget(
-                Span::styled(note.to_string(), Style::new().fg(Color::Yellow)),
+                Span::styled(note.to_string(), theme::warn()),
                 Rect::new(x.max(bottom.x), bottom.y, width.min(bottom.width), 1),
             );
         }
@@ -581,9 +582,9 @@ impl PluginsTab {
 
     /// What the details show about the plugin `name`.
     fn details(&self, roles: &RolesTab, name: &str, tr: &I18n) -> Vec<Line<'static>> {
-        let dim = Style::new().fg(Color::DarkGray);
-        let red = Style::new().fg(Color::LightRed);
-        let green = Style::new().fg(Color::Green);
+        let dim = theme::dim();
+        let red = theme::bad();
+        let green = theme::ok();
         let bold = Style::new().add_modifier(Modifier::BOLD);
         let label = |key: &str| Span::styled(format!("{} ", tr.t(key)), bold);
         let mut lines = Vec::new();

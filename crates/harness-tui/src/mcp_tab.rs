@@ -32,7 +32,7 @@ use harness_core::mcp_registry::{Entry, Offer};
 use harness_core::mcp_tools;
 use ratatui::crossterm::event::KeyCode;
 use ratatui::layout::{Constraint, Layout, Rect};
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{ListItem, Paragraph, Wrap};
 use ratatui::Frame;
@@ -41,6 +41,7 @@ use crate::i18n::I18n;
 use crate::roles_tab::RolesTab;
 use crate::skills_tab::{role_name, ROLES};
 use crate::tasks::draw_list;
+use crate::theme;
 use crate::ui::{buttons, panel, selector, ButtonId, Hits, ListId};
 
 /// What the tab asks the App to do.
@@ -412,7 +413,7 @@ impl McpTab {
             let x = top.right().saturating_sub(width);
             if x > top.x + 60 {
                 frame.render_widget(
-                    Span::styled(text, Style::new().fg(Color::DarkGray)),
+                    Span::styled(text, theme::dim()),
                     Rect::new(x, top.y, width, 1),
                 );
             }
@@ -421,8 +422,8 @@ impl McpTab {
         let [left, right] =
             Layout::horizontal([Constraint::Percentage(35), Constraint::Percentage(65)])
                 .areas(main);
-        let dim = Style::new().fg(Color::DarkGray);
-        let red = Style::new().fg(Color::LightRed);
+        let dim = theme::dim();
+        let red = theme::bad();
         let servers = Self::names(roles);
         let items: Vec<ListItem> = servers
             .iter()
@@ -501,7 +502,7 @@ impl McpTab {
             let width = u16::try_from(note.chars().count()).unwrap_or(0);
             let x = bottom.right().saturating_sub(width);
             frame.render_widget(
-                Span::styled(note.to_string(), Style::new().fg(Color::Yellow)),
+                Span::styled(note.to_string(), theme::warn()),
                 Rect::new(x.max(bottom.x), bottom.y, width.min(bottom.width), 1),
             );
         }
@@ -551,9 +552,9 @@ impl McpTab {
         tr: &I18n,
         lines: &mut Vec<Line<'static>>,
     ) {
-        let dim = Style::new().fg(Color::DarkGray);
-        let red = Style::new().fg(Color::LightRed);
-        let green = Style::new().fg(Color::Green);
+        let dim = theme::dim();
+        let red = theme::bad();
+        let green = theme::ok();
         let bold = Style::new().add_modifier(Modifier::BOLD);
         lines.push(Line::from(vec![
             Span::styled(format!("{} ", tr.t("mcp.address")), bold),
@@ -600,9 +601,9 @@ impl McpTab {
 
     /// What the details show about the server `name`.
     fn details(&self, roles: &RolesTab, name: &str, tr: &I18n) -> Vec<Line<'static>> {
-        let dim = Style::new().fg(Color::DarkGray);
-        let red = Style::new().fg(Color::LightRed);
-        let green = Style::new().fg(Color::Green);
+        let dim = theme::dim();
+        let red = theme::bad();
+        let green = theme::ok();
         let bold = Style::new().add_modifier(Modifier::BOLD);
         let mut lines = Vec::new();
         let Some(server) = roles.servers().get(name) else {
@@ -743,8 +744,8 @@ fn draw_catalog(
         Constraint::Length(1),
     ])
     .areas(area);
-    let dim = Style::new().fg(Color::DarkGray);
-    let red = Style::new().fg(Color::LightRed);
+    let dim = theme::dim();
+    let red = theme::bad();
     let bold = Style::new().add_modifier(Modifier::BOLD);
     let status = if catalog.searching {
         Span::styled(tr.f("mcp.searching", &[("query", &catalog.query)]), dim)
@@ -845,8 +846,8 @@ fn draw_catalog(
 
 /// What the catalog shows about one registry server.
 fn entry_details(entry: &Entry, tr: &I18n) -> Vec<Line<'static>> {
-    let dim = Style::new().fg(Color::DarkGray);
-    let red = Style::new().fg(Color::LightRed);
+    let dim = theme::dim();
+    let red = theme::bad();
     let bold = Style::new().add_modifier(Modifier::BOLD);
     let mut lines = Vec::new();
     if let Some(title) = &entry.title {

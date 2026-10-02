@@ -23,7 +23,7 @@ use harness_core::catalog::{Entry, Source};
 use harness_core::plugin_ops::{self, CatalogInfo};
 use harness_core::plugins;
 use ratatui::layout::{Constraint, Layout, Rect};
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{ListItem, Paragraph, Wrap};
 use ratatui::Frame;
@@ -31,6 +31,7 @@ use ratatui::Frame;
 use crate::i18n::I18n;
 use crate::roles_tab::RolesTab;
 use crate::tasks::draw_list;
+use crate::theme;
 use crate::ui::{buttons, panel, selector, ButtonId, Hits, ListId};
 
 /// The catalog anyone starts with: Anthropic's plugins for Claude Code.
@@ -207,8 +208,8 @@ pub fn draw_catalog(
         Constraint::Length(1),
     ])
     .areas(area);
-    let dim = Style::new().fg(Color::DarkGray);
-    let red = Style::new().fg(Color::LightRed);
+    let dim = theme::dim();
+    let red = theme::bad();
     let bold = Style::new().add_modifier(Modifier::BOLD);
     let [title_area, filter_area] =
         Layout::horizontal([Constraint::Min(0), Constraint::Length(44)]).areas(top);
@@ -323,8 +324,8 @@ pub fn draw_catalog(
 
 /// What the catalog shows about one plugin.
 fn entry_details(entry: &Entry, roles: &RolesTab, tr: &I18n) -> Vec<Line<'static>> {
-    let dim = Style::new().fg(Color::DarkGray);
-    let red = Style::new().fg(Color::LightRed);
+    let dim = theme::dim();
+    let red = theme::bad();
     let bold = Style::new().add_modifier(Modifier::BOLD);
     let mut lines = Vec::new();
     if !entry.description.is_empty() {
@@ -390,8 +391,8 @@ pub fn draw_catalogs(
         Constraint::Length(1),
     ])
     .areas(area);
-    let dim = Style::new().fg(Color::DarkGray);
-    let red = Style::new().fg(Color::LightRed);
+    let dim = theme::dim();
+    let red = theme::bad();
     let bold = Style::new().add_modifier(Modifier::BOLD);
     frame.render_widget(
         Line::from(vec![

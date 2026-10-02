@@ -1,10 +1,12 @@
 //! Pieces every tab uses: clickable areas, panels, buttons and a text form.
 
 use ratatui::layout::{Constraint, Flex, Layout, Rect};
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::Style;
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Clear, Paragraph, Wrap};
+use ratatui::widgets::{Block, BorderType, Clear, Paragraph, Wrap};
 use ratatui::Frame;
+
+use crate::theme;
 
 /// Something on the screen that reacts to a click.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -60,6 +62,8 @@ pub enum ButtonId {
     Ok,
     Cancel,
     Language,
+    /// The next colour theme.
+    Theme,
     Save,
     Undo,
     /// «Refresh models» on the Roles tab.
@@ -171,35 +175,62 @@ impl Hits {
     }
 }
 
+/// A panel with rounded corners; the one with the focus is in the accent colour.
 pub fn panel(title: &str, focused: bool) -> Block<'static> {
-    let style = if focused {
-        Style::new().fg(Color::Cyan)
-    } else {
-        Style::new()
-    };
     Block::bordered()
-        .title(title.to_string())
-        .border_style(style)
+        .border_type(BorderType::Rounded)
+        .title(Span::styled(title.to_string(), theme::title(focused)))
+        .border_style(theme::border(focused))
 }
 
 pub fn selected() -> Style {
-    Style::new().add_modifier(Modifier::REVERSED)
+    theme::selected()
 }
 
-/// Draws buttons `[ label ]` in a row starting at `area`, and makes them clickable.
+/// Clears `area` for a window drawn over the screen, in the theme's colours.
+pub fn clear(frame: &mut Frame, area: Rect) {
+    frame.render_widget(Clear, area);
+    frame.render_widget(Block::new().style(theme::base()), area);
+}
+
+/// The main button of a tab: filled with the accent colour.
+fn is_primary(id: ButtonId) -> bool {
+    matches!(
+        id,
+        ButtonId::Ok
+            | ButtonId::Send
+            | ButtonId::Save
+            | ButtonId::UseProject
+            | ButtonId::Choose
+            | ButtonId::RetroGenerate
+            | ButtonId::RetroApply
+            | ButtonId::PluginCatalog
+            | ButtonId::PluginAdd
+            | ButtonId::McpCatalog
+            | ButtonId::McpUse
+            | ButtonId::SkillEdit
+    )
+}
+
+/// How wide the button `label` is drawn.
+pub fn button_width(label: &str) -> u16 {
+    u16::try_from(label.chars().count() + 2).unwrap_or(u16::MAX)
+}
+
+/// Draws buttons ` label ` in a row starting at `area`, and makes them clickable.
 pub fn buttons(frame: &mut Frame, area: Rect, hits: &mut Hits, items: &[(&str, ButtonId, bool)]) {
     let mut x = area.x;
     for (label, id, enabled) in items {
-        let text = format!("[ {label} ]");
-        let width = u16::try_from(text.chars().count()).unwrap_or(u16::MAX);
+        let text = format!(" {label} ");
+        let width = button_width(label);
         if x + width > area.right() {
             break;
         }
         let rect = Rect::new(x, area.y, width, 1);
-        let style = if *enabled {
-            Style::new().fg(Color::Cyan).add_modifier(Modifier::BOLD)
-        } else {
-            Style::new().fg(Color::DarkGray)
+        let style = match (*enabled, is_primary(*id)) {
+            (false, _) => theme::dim(),
+            (true, true) => theme::primary(),
+            (true, false) => theme::chip(),
         };
         frame.render_widget(Span::styled(text, style), rect);
         if *enabled {
@@ -225,16 +256,16 @@ pub fn selector(
     frame.render_widget(Span::raw(label), area);
     let mut x = area.x + width;
     for (index, name) in names.iter().enumerate() {
-        let text = format!("[ {name} ]");
-        let w = u16::try_from(text.chars().count()).unwrap_or(0);
+        let text = format!(" {name} ");
+        let w = button_width(name);
         if x + w > area.right() {
             break;
         }
         let rect = Rect::new(x, area.y, w, 1);
         let style = if index == chosen {
-            Style::new().fg(Color::Black).bg(Color::Cyan)
+            theme::primary()
         } else {
-            Style::new().fg(Color::Cyan).add_modifier(Modifier::BOLD)
+            theme::chip()
         };
         frame.render_widget(Span::styled(text, style), rect);
         hits.add(rect, Target::Button(id(index)));
@@ -244,7 +275,9 @@ pub fn selector(
 
 /// The field being typed in. Its text colour is set too: with only a
 /// background, a light terminal theme draws dark text on dark gray.
-pub const INPUT: Style = Style::new().fg(Color::White).bg(Color::Blue);
+pub fn input() -> Style {
+    theme::input()
+}
 
 /// A small window over the screen with text fields and OK / Cancel.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -350,7 +383,7 @@ impl Form {
         let [area] = Layout::horizontal([Constraint::Length(width)])
             .flex(Flex::Center)
             .areas(area);
-        frame.render_widget(Clear, area);
+        clear(frame, area);
         let block = panel(&format!(" {} ", self.title), true);
         let inner = block.inner(area);
         frame.render_widget(block, area);
@@ -374,7 +407,7 @@ impl Form {
             let rect = Rect::new(inner.x, y + 1, inner.width, 1);
             let focused = i == self.focus;
             let cursor = if focused { "▏" } else { "" };
-            let style = if focused { INPUT } else { Style::new() };
+            let style = if focused { input() } else { theme::chip() };
             let shown = if field.hidden {
                 "•".repeat(field.value.chars().count())
             } else {
@@ -386,7 +419,7 @@ impl Form {
         }
         if let Some(error) = &self.error {
             frame.render_widget(
-                Span::styled(error.clone(), Style::new().fg(Color::Red)),
+                Span::styled(error.clone(), theme::bad()),
                 Rect::new(inner.x, y, inner.width, 1),
             );
         }
@@ -468,21 +501,30 @@ mod tests {
         let mut form = Form::new("New", "", "OK").field("a", "").field("b", "old");
         form.type_char('q');
         let mut terminal = Terminal::new(TestBackend::new(60, 20)).unwrap();
-        terminal
-            .draw(|frame| form.draw(frame, &mut Hits::default(), "Cancel"))
-            .unwrap();
-        let buffer = terminal.backend().buffer();
-        let cell = |text: &str| {
-            let (x, y) = (0..20u16)
-                .flat_map(|y| (0..60u16).map(move |x| (x, y)))
-                .find(|&(x, y)| buffer[(x, y)].symbol() == text)
+        for code in ["night", "day", "terminal"] {
+            assert!(theme::select(code));
+            terminal
+                .draw(|frame| form.draw(frame, &mut Hits::default(), "Cancel"))
                 .unwrap();
-            buffer[(x, y)].clone()
-        };
-        let typed = cell("q");
-        assert_eq!((typed.fg, typed.bg), (Color::White, Color::Blue));
-        // Other fields keep the terminal's own text colour.
-        assert_eq!(cell("o").fg, Color::Reset);
+            let buffer = terminal.backend().buffer().clone();
+            let cell = |text: &str| {
+                let (x, y) = (0..20u16)
+                    .flat_map(|y| (0..60u16).map(move |x| (x, y)))
+                    .find(|&(x, y)| buffer[(x, y)].symbol() == text)
+                    .unwrap();
+                buffer[(x, y)].clone()
+            };
+            let theme = theme::current();
+            let typed = cell("q");
+            assert_eq!(
+                (typed.fg, typed.bg),
+                (theme.on_input, theme.input),
+                "{code}"
+            );
+            // Other fields are drawn as fields too, with their own colours.
+            let other = cell("o");
+            assert_eq!((other.fg, other.bg), (theme.on_chip, theme.chip), "{code}");
+        }
     }
 
     #[test]
