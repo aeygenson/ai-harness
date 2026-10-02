@@ -31,7 +31,7 @@ use harness_core::retro_ops::{self, RetroInfo};
 use harness_core::suggest::{self, RETRO_MD};
 use ratatui::crossterm::event::KeyCode;
 use ratatui::layout::{Constraint, Layout, Rect};
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{ListItem, Paragraph, Wrap};
 use ratatui::Frame;
@@ -39,6 +39,7 @@ use ratatui::Frame;
 use crate::i18n::I18n;
 use crate::runner::{push_line, readable};
 use crate::tasks::draw_list;
+use crate::theme;
 use crate::ui::{buttons, panel, ButtonId, Hits, ListId};
 
 /// Builds the agent of `[retro]`: `retro_agent`, or a mock in tests.
@@ -335,8 +336,8 @@ impl RetroTab {
         let proposals = self.proposals();
         let [retros_area, proposals_area] =
             Layout::vertical([Constraint::Percentage(40), Constraint::Percentage(60)]).areas(left);
-        let dim = Style::new().fg(Color::DarkGray);
-        let green = Style::new().fg(Color::Green);
+        let dim = theme::dim();
+        let green = theme::ok();
 
         let items: Vec<ListItem> = self
             .list
@@ -449,7 +450,7 @@ impl RetroTab {
     /// The right side: the live log while generating, a proposal with what
     /// it changes, or the retrospective with its statistics.
     fn text(&self, tr: &I18n) -> (String, Vec<Line<'static>>) {
-        let dim = Style::new().fg(Color::DarkGray);
+        let dim = theme::dim();
         let bold = Style::new().add_modifier(Modifier::BOLD);
         if self.generating.is_some() || (self.list.is_empty() && !self.log.is_empty()) {
             let mut lines = vec![Line::styled(tr.t("retro.generating").to_string(), dim)];
@@ -483,9 +484,9 @@ impl RetroTab {
                     .lines()
                     .map(|line| {
                         let style = if line.starts_with("+ ") {
-                            Style::new().fg(Color::Green)
+                            theme::ok()
                         } else if line.starts_with("- ") {
-                            Style::new().fg(Color::LightRed)
+                            theme::bad()
                         } else {
                             Style::new()
                         };

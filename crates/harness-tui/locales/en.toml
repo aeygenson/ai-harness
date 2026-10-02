@@ -22,7 +22,7 @@ new_project = "+ New project"
 no_open_project = "No project is open. Open or create one on the «Projects» tab (7)."
 
 [footer]
-hint = "click or 1–7 tabs · ↑↓ select · wheel scroll · Shift+mouse select text · L language · q quit"
+hint = "1–7 tabs · ↑↓ select · wheel scroll · Shift+mouse copy · L language · T theme · q quit"
 
 [tasks]
 title = " Tasks "
@@ -149,6 +149,7 @@ restore_text = "Delete this project's copy of {name}? The role gets the built-in
 restored = "Skill {name} is built-in again"
 
 [projects]
+open = "Open"
 new = "New project"
 open_folder = "Open folder…"
 remove = "Remove from list"
@@ -427,3 +428,10 @@ changed_skill = "new text of the skill {name}"
 given_to = "{name} is given to: {roles}"
 apply_ok = "Apply"
 applied = "Applied and committed: {ids}. The skills are on the «Skills» tab."
+
+[theme]
+night = "Night"
+day = "Day"
+arctic = "Arctic"
+contrast = "Contrast"
+terminal = "Terminal"

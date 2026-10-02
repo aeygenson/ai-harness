@@ -164,14 +164,14 @@ fn starts_with_a_project_folder_and_shows_its_tasks() {
     assert_eq!(app.project.as_deref(), Some(root.as_path()));
     let text = screen(&mut app);
     for part in [
-        " test │ 1 Tasks │ 2 Roles",
+        " ◆ test   1 Tasks │ 2 Roles",
         "7 Projects",
-        "[ + New project ] [ EN ]",
-        "> task-001  working",
-        "task-002  working",
+        " + New project   EN ",
+        "▶ task-001  ● working",
+        "task-002  ● working",
         "architect  claude",
         "r1 architect  approved → human",
-        "> r1 tester",
+        "▶ r1 tester",
         "high     src/parser.rs:42  Panics on empty input",
         "Tester notes here.",
         "q quit",
@@ -214,7 +214,7 @@ fn a_new_project_is_created_in_a_folder_chosen_in_the_browser() {
     let env = Env::new();
     fs::create_dir(env.path("work")).unwrap();
     let mut app = env.app(env.code.path());
-    click(&mut app, "[ New project ]");
+    click(&mut app, " New project ");
     let text = screen(&mut app);
     assert!(text.contains("Folder for the new project"), "{text}");
     assert!(text.contains("work/"), "{text}");
@@ -223,12 +223,12 @@ fn a_new_project_is_created_in_a_folder_chosen_in_the_browser() {
     click(&mut app, "work/");
     click(&mut app, "work/");
     assert!(screen(&mut app).contains("No folders inside"));
-    click(&mut app, "[ New folder ]");
+    click(&mut app, " New folder ");
     type_text(&mut app, "fresh");
     key(&mut app, KeyCode::Enter);
     let root = env.path("work/fresh");
     assert!(root.is_dir());
-    click(&mut app, "[ Choose this folder ]");
+    click(&mut app, " Choose this folder ");
 
     // The form shows the folder and asks for the name.
     let text = screen(&mut app);
@@ -236,7 +236,7 @@ fn a_new_project_is_created_in_a_folder_chosen_in_the_browser() {
     let (_, form) = app.form.as_ref().unwrap();
     assert_eq!(form.value(0), "fresh");
     fill(&mut app, "Fresh one");
-    click(&mut app, "[ Create ]");
+    click(&mut app, " Create ");
 
     assert!(app.form.is_none());
     assert_eq!(app.project.as_deref(), Some(root.as_path()));
@@ -280,13 +280,13 @@ fn a_plain_folder_is_prepared_before_it_opens() {
     key(&mut app, KeyCode::Char('c'));
     assert!(matches!(app.form, Some((Purpose::InitFolder(_), _))));
     // Cancel leaves the folder alone.
-    click(&mut app, "[ Cancel ]");
+    click(&mut app, " Cancel ");
     assert!(app.form.is_none());
     assert!(!has_config(&folder));
 
     key(&mut app, KeyCode::Char('o'));
     click(&mut app, "plain/");
-    click(&mut app, "[ Choose this folder ]");
+    click(&mut app, " Choose this folder ");
     key(&mut app, KeyCode::Enter);
     assert!(has_config(&folder));
     assert_eq!(app.project.as_deref(), Some(folder.as_path()));
@@ -320,9 +320,9 @@ fn projects_are_chosen_with_the_mouse_and_removed_from_the_list() {
     assert!(screen(&mut app).contains("● beta"));
 
     // Removing asks first and never deletes the folder.
-    click(&mut app, "Remove from list ]");
+    click(&mut app, "Remove from list ");
     assert!(screen(&mut app).contains("leaves the list"));
-    click(&mut app, "[ Remove ]");
+    click(&mut app, " Remove   Cancel");
     assert_eq!(env.saved().projects.len(), 1);
     assert_eq!(env.saved().last, None);
     assert_eq!(app.project, None);
@@ -376,11 +376,11 @@ fn the_language_switches_and_is_remembered() {
     let mut app = env.app(&root);
     assert!(screen(&mut app).contains("1 Tasks"));
 
-    click(&mut app, "[ EN ]");
+    click(&mut app, " EN ");
     let text = screen(&mut app);
     for part in [
         "1 Задачи │ 2 Роли",
-        "[ + Новый проект ] [ RU ]",
+        " + Новый проект   RU ",
         "q выход",
         "раунд 1 · tester",
     ] {
@@ -394,7 +394,7 @@ fn the_language_switches_and_is_remembered() {
     click(&mut again, "+ Новый проект");
     let text = screen(&mut again);
     assert!(text.contains("Папка для нового проекта"), "{text}");
-    assert!(text.contains("[ Выбрать эту папку ]"), "{text}");
+    assert!(text.contains(" Выбрать эту папку "), "{text}");
     key(&mut again, KeyCode::Esc);
 
     key(&mut again, KeyCode::Char('L'));
@@ -458,7 +458,7 @@ fn roles_get_agents_models_and_skills_and_are_saved() {
     click(&mut app, "retro      claude");
     click(&mut app, "( ) antigravity");
 
-    click(&mut app, "[ Save ]");
+    click(&mut app, " Save ");
     let text = screen(&mut app);
     assert!(text.contains("Settings saved and committed"), "{text}");
     let saved = config(&root);
@@ -489,7 +489,7 @@ fn settings_that_fail_the_checks_are_not_saved() {
     let mut app = env.app(&root);
     key(&mut app, KeyCode::Char('2'));
     click(&mut app, "[ ] broken");
-    click(&mut app, "[ Save ]");
+    click(&mut app, " Save ");
     let (text, error) = app.message.clone().unwrap();
     assert!(error, "{text}");
     assert_eq!(
@@ -509,7 +509,7 @@ fn settings_that_fail_the_checks_are_not_saved() {
     let mut app = env.app(&root);
     key(&mut app, KeyCode::Char('2'));
     click(&mut app, "[ ] broken");
-    click(&mut app, "[ Undo changes ]");
+    click(&mut app, " Undo changes ");
     assert!(screen(&mut app).contains("[ ] broken"));
     key(&mut app, KeyCode::Char('q'));
     assert!(app.quit);
@@ -591,12 +591,12 @@ fn a_new_task_runs_the_architect_then_the_answer_goes_to_the_developer() {
         "{text}"
     );
     assert!(
-        text.contains("[ To: architect · new task ▾ ] [ Model: default ▾ ]"),
+        text.contains(" To: architect · new task ▾   Model: default ▾ "),
         "{text}"
     );
 
     // Sending nothing is refused.
-    click(&mut app, "[ Send ]");
+    click(&mut app, " Send ");
     assert_eq!(app.message.as_ref().unwrap().0, "Write the task first");
 
     click(&mut app, "Write here");
@@ -621,7 +621,7 @@ fn a_new_task_runs_the_architect_then_the_answer_goes_to_the_developer() {
     assert!(text.contains("│ Second line▏"), "{text}");
     send(&mut app);
     assert!(app.tasks.as_ref().unwrap().is_running());
-    assert!(screen(&mut app).contains("[ Working… ]"));
+    assert!(screen(&mut app).contains(" Working… "));
     wait(&mut app);
 
     let store_dir = root.join(".harness/runs/task-001");
@@ -638,7 +638,7 @@ fn a_new_task_runs_the_architect_then_the_answer_goes_to_the_developer() {
     assert!(!problem);
     // The answer goes to the developer unless Lisa chooses otherwise.
     let text = screen(&mut app);
-    assert!(text.contains("[ To: developer ▾ ]"), "{text}");
+    assert!(text.contains(" To: developer ▾ "), "{text}");
     assert!(text.contains(" Agent log "), "{text}");
 
     key(&mut app, KeyCode::Enter);
@@ -666,7 +666,7 @@ fn a_new_task_runs_the_architect_then_the_answer_goes_to_the_developer() {
     assert_eq!(steps[1].handoff.verdict, Verdict::Approved);
     assert!(app.message.as_ref().unwrap().0.contains("done"));
     // A finished task offers only a new one.
-    assert!(screen(&mut app).contains("[ To: architect · new task ▾ ]"));
+    assert!(screen(&mut app).contains(" To: architect · new task ▾ "));
 }
 
 #[test]
@@ -676,7 +676,7 @@ fn the_to_list_offers_the_roles_and_finishing() {
     let (root, mut app) = empty_project(&env);
     // Before there is a task, only a new one can be sent: the roles are
     // listed, but grey.
-    click(&mut app, "[ To: architect · new task ▾ ]");
+    click(&mut app, " To: architect · new task ▾ ");
     let text = screen(&mut app);
     assert!(text.contains("Approve and finish"), "{text}");
     // The list is drawn over the tab: «security» in it, not in «Roles».
@@ -696,14 +696,14 @@ fn the_to_list_offers_the_roles_and_finishing() {
     send(&mut app);
     wait(&mut app);
 
-    click(&mut app, "[ To: developer ▾ ]");
+    click(&mut app, " To: developer ▾ ");
     let text = screen(&mut app);
     for option in ["Approve and finish", "architect · new task", "security"] {
         assert!(text.contains(option), "missing {option:?} in:\n{text}");
     }
     click(&mut app, "Approve and finish");
     assert!(app.tasks.as_ref().unwrap().menu.is_none());
-    assert!(screen(&mut app).contains("[ To: Approve and finish ▾ ]"));
+    assert!(screen(&mut app).contains(" To: Approve and finish ▾ "));
 
     // ↑↓ in the field change whom it goes to.
     click(&mut app, "Write here");
@@ -765,12 +765,12 @@ fn a_click_on_a_role_shows_only_the_tasks_waiting_on_it() {
     click(&mut app, "developer  claude");
     let text = screen(&mut app);
     assert!(text.contains(" Tasks of developer "), "{text}");
-    assert!(text.contains("> task-001"), "{text}");
+    assert!(text.contains("▶ task-001"), "{text}");
     assert!(!text.contains("task-002"), "{text}");
 
     click(&mut app, "architect  claude");
     let text = screen(&mut app);
-    assert!(text.contains("> task-002"), "{text}");
+    assert!(text.contains("▶ task-002"), "{text}");
     assert!(!text.contains("task-001"), "{text}");
     assert!(text.contains("Second task"), "{text}");
 
@@ -813,7 +813,7 @@ fn the_skills_tab_shows_each_roles_base_and_the_skills_to_choose() {
     click(&mut app, "3 Skills");
     let text = screen(&mut app);
     for part in [
-        "[ architect ]",
+        " architect ",
         "Skills of the architect",
         "Always in the prompt",
         "common",
@@ -824,17 +824,17 @@ fn the_skills_tab_shows_each_roles_base_and_the_skills_to_choose() {
         "[ ] crash-recovery",
         "built-in",
         "common · built-in",
-        "[ Edit in Zed ]",
+        " Edit in Zed ",
     ] {
         assert!(text.contains(part), "missing {part:?} in:\n{text}");
     }
     // Another role shows its own skill; the selected skill stays.
-    click(&mut app, "[ tester ]");
+    click(&mut app, " tester ");
     let text = screen(&mut app);
     assert!(text.contains("Skills of the tester"), "{text}");
     assert!(text.contains("│  tester "), "{text}");
     assert!(!text.contains("│  architect "), "{text}");
-    assert!(text.contains("> common"), "{text}");
+    assert!(text.contains("▶ common"), "{text}");
     // Paragraphs are joined and wrapped at the panel's width.
     assert!(
         text.contains("redesign what the design already decided"),
@@ -858,7 +858,7 @@ fn a_built_in_skill_is_copied_edited_committed_and_restored() {
     let file = root.join(".harness/skills/developer.md");
     let mut app = env.app(&root);
     key(&mut app, KeyCode::Char('3'));
-    click(&mut app, "[ developer ]");
+    click(&mut app, " developer ");
     click(&mut app, "│  developer ");
 
     // Nothing changed in the editor: the copy goes away again.
@@ -892,7 +892,7 @@ fn a_built_in_skill_is_copied_edited_committed_and_restored() {
         .any(|s| s.body.contains("Also run cargo fmt.")));
 
     // Restore asks first, then deletes the copy.
-    click(&mut app, "[ Restore built-in ]");
+    click(&mut app, " Restore built-in ");
     let text = screen(&mut app);
     assert!(
         text.contains("Delete this project's copy of developer?"),
@@ -916,7 +916,7 @@ fn a_new_skill_gets_a_file_and_can_be_chosen_on_roles() {
     project(&root);
     let mut app = env.app(&root);
     key(&mut app, KeyCode::Char('3'));
-    click(&mut app, "[ New skill ]");
+    click(&mut app, " New skill ");
     fill(&mut app, "Bad Name");
     key(&mut app, KeyCode::Tab);
     fill(&mut app, "Errors with thiserror.");
@@ -987,7 +987,7 @@ fn models_and_levels_come_from_the_agents_lists() {
     let mut app = env.app(&root);
     app.asker = |_| codex_models();
     click(&mut app, "2 Roles");
-    click(&mut app, "[ Refresh models ]");
+    click(&mut app, " Refresh models ");
     for _ in 0..100 {
         app.tick();
         if app.asking.is_none() {
@@ -1016,7 +1016,7 @@ fn models_and_levels_come_from_the_agents_lists() {
     click(&mut app, "Effort");
     assert!(screen(&mut app).contains("[agent's default]"));
     click(&mut app, "Effort");
-    click(&mut app, "[ Save ]");
+    click(&mut app, " Save ");
     let developer = &config(&root).roles[&Role::Developer];
     assert_eq!(developer.model.as_deref(), Some("gpt-5.5"));
     assert_eq!(developer.effort.as_deref(), Some("medium"));
@@ -1068,23 +1068,23 @@ fn a_model_and_level_can_be_chosen_for_one_run() {
     app.builder = recording_team;
     // The architect starts a new task, with what harness.toml says.
     let text = screen(&mut app);
-    assert!(text.contains("[ Model: default ▾ ]"), "{text}");
-    assert!(text.contains("[ Level: default ▾ ]"), "{text}");
+    assert!(text.contains(" Model: default ▾ "), "{text}");
+    assert!(text.contains(" Level: default ▾ "), "{text}");
 
-    click(&mut app, "[ Model: default ▾ ]");
+    click(&mut app, " Model: default ▾ ");
     let text = screen(&mut app);
     assert!(text.contains("│  haiku"), "{text}");
     click(&mut app, "│  opus");
-    click(&mut app, "[ Level: default ▾ ]");
+    click(&mut app, " Level: default ▾ ");
     click(&mut app, "│  max");
     let text = screen(&mut app);
-    assert!(text.contains("[ Model: opus ▾ ]"), "{text}");
-    assert!(text.contains("[ Level: max ▾ ]"), "{text}");
+    assert!(text.contains(" Model: opus ▾ "), "{text}");
+    assert!(text.contains(" Level: max ▾ "), "{text}");
     // A model without that level gets its own default; haiku takes none.
-    click(&mut app, "[ Model: opus ▾ ]");
+    click(&mut app, " Model: opus ▾ ");
     click(&mut app, "│  sonnet");
-    assert!(screen(&mut app).contains("[ Level: high ▾ ]"));
-    click(&mut app, "[ Model: sonnet ▾ ]");
+    assert!(screen(&mut app).contains(" Level: high ▾ "));
+    click(&mut app, " Model: sonnet ▾ ");
     click(&mut app, "│  opus");
 
     app.tasks.as_mut().unwrap().paste("Build a parser");
@@ -1103,19 +1103,19 @@ fn a_model_and_level_can_be_chosen_for_one_run() {
     // who gets the answer now, has its own settings.
     let architect = &config(&root).roles[&Role::Architect];
     assert_eq!((&architect.model, &architect.effort), (&None, &None));
-    assert!(text.contains("[ Model: default ▾ ]"), "{text}");
+    assert!(text.contains(" Model: default ▾ "), "{text}");
 
     // A choice made for one role is dropped when the message goes to another.
-    click(&mut app, "[ Model: default ▾ ]");
+    click(&mut app, " Model: default ▾ ");
     click(&mut app, "│  haiku");
     let text = screen(&mut app);
-    assert!(text.contains("[ Model: haiku ▾ ]"), "{text}");
-    assert!(text.contains("[ Level: default ▾ ]"), "{text}");
-    click(&mut app, "[ To: developer ▾ ]");
+    assert!(text.contains(" Model: haiku ▾ "), "{text}");
+    assert!(text.contains(" Level: default ▾ "), "{text}");
+    click(&mut app, " To: developer ▾ ");
     click(&mut app, "│  security");
-    assert!(screen(&mut app).contains("[ Model: default ▾ ]"));
+    assert!(screen(&mut app).contains(" Model: default ▾ "));
     // Finishing runs no role: no model to choose.
-    click(&mut app, "[ To: security ▾ ]");
+    click(&mut app, " To: security ▾ ");
     click(&mut app, "Approve and finish");
     assert!(!screen(&mut app).contains("[ Model:"));
 }
@@ -1144,7 +1144,7 @@ fn the_mcp_tab_gives_servers_to_roles() {
     let text = screen(&mut app);
     for part in [
         " MCP servers of the architect ",
-        "> [ ] context7",
+        "▶ [ ] context7",
         "✗ secret",
         "[ ] fetch",
         "[ ] ghost",
@@ -1154,7 +1154,7 @@ fn the_mcp_tab_gives_servers_to_roles() {
         "claude ✓",
         "antigravity ✓",
         "Roles: developer",
-        "[ Give to the architect ]",
+        " Give to the architect ",
     ] {
         assert!(text.contains(part), "missing {part:?} in:\n{text}");
     }
@@ -1173,14 +1173,14 @@ fn the_mcp_tab_gives_servers_to_roles() {
     assert!(!text.contains("✗ secret"), "{text}");
 
     // The developer has context7; fetch is given with a double click.
-    click(&mut app, "[ developer ]");
+    click(&mut app, " developer ");
     let text = screen(&mut app);
-    assert!(text.contains("> [x] context7"), "{text}");
-    assert!(text.contains("[ Take from the developer ]"), "{text}");
+    assert!(text.contains("▶ [x] context7"), "{text}");
+    assert!(text.contains(" Take from the developer "), "{text}");
     click(&mut app, "[ ] fetch");
     click(&mut app, "[ ] fetch");
     let text = screen(&mut app);
-    assert!(text.contains("> [x] fetch"), "{text}");
+    assert!(text.contains("▶ [x] fetch"), "{text}");
     assert!(text.contains("Changes not saved"), "{text}");
     // The Roles tab shows the same change.
     click(&mut app, "2 Roles");
@@ -1189,12 +1189,12 @@ fn the_mcp_tab_gives_servers_to_roles() {
     click(&mut app, "4 MCP");
     // Saving checks everything as before a run: the tester's unknown server
     // stops it.
-    click(&mut app, "[ Save ]");
+    click(&mut app, " Save ");
     let (message, problem) = app.message.clone().unwrap();
     assert!(problem && message.contains("ghost"), "{message}");
 
     // A server harness.toml does not describe cannot be given ...
-    click(&mut app, "[ architect ]");
+    click(&mut app, " architect ");
     click(&mut app, "[ ] ghost");
     let text = screen(&mut app);
     assert!(text.contains("harness.toml has no [mcp.ghost]"), "{text}");
@@ -1206,7 +1206,7 @@ fn the_mcp_tab_gives_servers_to_roles() {
         .0
         .contains("take it from the role"));
     // ... only taken away; then no role lists it and it leaves the list.
-    click(&mut app, "[ tester ]");
+    click(&mut app, " tester ");
     click(&mut app, "[x] ghost");
     key(&mut app, KeyCode::Char(' '));
     assert!(!screen(&mut app).contains("ghost"));
@@ -1225,7 +1225,7 @@ fn mcp_servers_are_added_changed_and_removed_and_secrets_saved() {
     click(&mut app, "4 MCP");
     assert!(screen(&mut app).contains("No MCP servers yet."));
 
-    click(&mut app, "[ New server ]");
+    click(&mut app, " New server ");
     fill(&mut app, "docs");
     key(&mut app, KeyCode::Tab);
     fill(&mut app, "npx -y docs-mcp");
@@ -1240,7 +1240,7 @@ fn mcp_servers_are_added_changed_and_removed_and_secrets_saved() {
     );
     assert_eq!(docs.env["API_KEY"], "secret:docs");
     let text = screen(&mut app);
-    assert!(text.contains("> [ ] docs"), "{text}");
+    assert!(text.contains("▶ [ ] docs"), "{text}");
     assert!(text.contains("MCP server docs saved"), "{text}");
 
     // A wrong variable name is refused in the form, nothing is written.
@@ -1256,7 +1256,7 @@ fn mcp_servers_are_added_changed_and_removed_and_secrets_saved() {
     assert!(!config(&root).mcp.contains_key("bad"));
 
     // The developer gets it; a rename follows in its list.
-    click(&mut app, "[ developer ]");
+    click(&mut app, " developer ");
     key(&mut app, KeyCode::Char(' '));
     // Servers change only when the roles have no unsaved changes.
     key(&mut app, KeyCode::Char('e'));
@@ -1279,11 +1279,11 @@ fn mcp_servers_are_added_changed_and_removed_and_secrets_saved() {
     let saved = config(&root);
     assert!(!saved.mcp.contains_key("docs"));
     assert_eq!(saved.roles[&Role::Developer].mcp, ["manuals"]);
-    assert!(screen(&mut app).contains("> [x] manuals"));
+    assert!(screen(&mut app).contains("▶ [x] manuals"));
 
     // The secret: typed in a hidden field, saved in a private file only.
     assert!(screen(&mut app).contains("✗ secret"));
-    click(&mut app, "[ Set secret ]");
+    click(&mut app, " Set secret ");
     assert_eq!(app.form.as_ref().unwrap().1.value(0), "docs");
     type_text(&mut app, "s3cr3t-value");
     let text = screen(&mut app);
@@ -1366,7 +1366,7 @@ fn check_asks_a_server_for_its_tools() {
 
     // A server whose secret is not saved is not started.
     click(&mut app, "[ ] other");
-    click(&mut app, "[ Check ]");
+    click(&mut app, " Check ");
     assert!(app.checking.is_none());
     let (message, problem) = app.message.clone().unwrap();
     assert!(
@@ -1415,7 +1415,7 @@ fn a_server_from_the_catalog_opens_in_the_form_before_it_is_saved() {
     click(&mut app, "4 MCP");
 
     // A failed search says why.
-    click(&mut app, "[ From catalog ]");
+    click(&mut app, " From catalog ");
     fill(&mut app, "anything");
     key(&mut app, KeyCode::Enter);
     wait_search(&mut app);
@@ -1455,7 +1455,7 @@ fn a_server_from_the_catalog_opens_in_the_form_before_it_is_saved() {
     assert!(app.form.is_none(), "{:?}", app.form);
     assert_eq!(config(&root).mcp["docs"].args, ["-y", "docs-mcp@1.2.0"]);
     let text = screen(&mut app);
-    assert!(text.contains("> [ ] docs"), "{text}");
+    assert!(text.contains("▶ [ ] docs"), "{text}");
     assert!(text.contains("✗ secret"), "{text}");
 
     // Added again, it gets a name of its own; Esc goes back to the list.
@@ -1492,7 +1492,7 @@ fn a_server_from_the_catalog_opens_in_the_form_before_it_is_saved() {
     assert_eq!(web.headers["Authorization"], "Bearer secret:web-docs");
     assert!(!app.quit);
     let text = screen(&mut app);
-    assert!(text.contains("> [ ] web-docs"), "{text}");
+    assert!(text.contains("▶ [ ] web-docs"), "{text}");
     assert!(text.contains("Address: https://example.com/web"), "{text}");
 }
 
@@ -1503,7 +1503,7 @@ fn a_web_server_is_written_and_changed_in_the_form() {
     project(&root);
     let mut app = env.app(&root);
     click(&mut app, "4 MCP");
-    click(&mut app, "[ New server ]");
+    click(&mut app, " New server ");
     fill(&mut app, "notion");
     key(&mut app, KeyCode::Tab);
     // The fields of a new server start empty: typing alone is enough.
@@ -1517,7 +1517,7 @@ fn a_web_server_is_written_and_changed_in_the_form() {
     let notion = &config(&root).mcp["notion"];
     assert_eq!(notion.url.as_deref(), Some("https://mcp.notion.com/mcp"));
     assert_eq!(notion.auth.as_deref(), Some("oauth"));
-    assert!(screen(&mut app).contains("[ Sign in ]"));
+    assert!(screen(&mut app).contains(" Sign in "));
 
     // Changed back to a key in a header, in the same form.
     key(&mut app, KeyCode::Char('e'));
@@ -1712,7 +1712,7 @@ fn the_plugins_tab_gives_allows_and_removes_plugins() {
     let text = screen(&mut app);
     for part in [
         " Plugins of the architect ",
-        "> [ ] review",
+        "▶ [ ] review",
         "✗ not allowed",
         "[ ] lint",
         "Agent: claude",
@@ -1720,36 +1720,36 @@ fn the_plugins_tab_gives_allows_and_removes_plugins() {
         "Inside: 1 skills, 1 commands, 0 subagents",
         "Hooks: yes, not allowed",
         "The review plugin",
-        "[ Give to the architect ]",
-        "[ Allow hooks ]",
+        " Give to the architect ",
+        " Allow hooks ",
     ] {
         assert!(text.contains(part), "missing {part:?} in:\n{text}");
     }
 
     // Saving checks the plugin as a run would: its hooks are not allowed.
     key(&mut app, KeyCode::Char(' '));
-    assert!(screen(&mut app).contains("> [x] review"));
+    assert!(screen(&mut app).contains("▶ [x] review"));
     key(&mut app, KeyCode::Char('s'));
     let (message, problem) = app.message.clone().unwrap();
     assert!(problem && message.contains("hooks"), "{message}");
     key(&mut app, KeyCode::Char('u'));
 
     // Allowing hooks asks first, then writes and commits.
-    click(&mut app, "[ Allow hooks ]");
+    click(&mut app, " Allow hooks ");
     assert!(screen(&mut app).contains("Allow the plugin to run programs"));
     key(&mut app, KeyCode::Enter);
     assert!(app.form.is_none(), "{:?}", app.form);
     assert!(config(&root).plugins["review"].allow_hooks);
     let text = screen(&mut app);
     assert!(text.contains("Hooks: yes, allowed"), "{text}");
-    assert!(text.contains("[ Forbid hooks ]"), "{text}");
+    assert!(text.contains(" Forbid hooks "), "{text}");
     key(&mut app, KeyCode::Char(' '));
     key(&mut app, KeyCode::Char('s'));
     assert_eq!(config(&root).roles[&Role::Architect].plugins, ["review"]);
     assert!(repo.changed_files().unwrap().is_empty());
 
     // Forbidding hooks the architect needs is refused, and nothing changes.
-    click(&mut app, "[ Forbid hooks ]");
+    click(&mut app, " Forbid hooks ");
     let (message, problem) = app.message.clone().unwrap();
     assert!(
         problem && message.contains("Take review from its roles first"),
@@ -1758,9 +1758,9 @@ fn the_plugins_tab_gives_allows_and_removes_plugins() {
     assert!(config(&root).plugins["review"].allow_hooks);
 
     // A Codex role gets Codex plugins only.
-    click(&mut app, "[ developer ]");
+    click(&mut app, " developer ");
     let text = screen(&mut app);
-    assert!(text.contains("> [ ] lint"), "{text}");
+    assert!(text.contains("▶ [ ] lint"), "{text}");
     click(&mut app, "[ ] review");
     assert!(screen(&mut app).contains("The developer runs on codex"));
     key(&mut app, KeyCode::Char(' '));
@@ -1769,7 +1769,7 @@ fn the_plugins_tab_gives_allows_and_removes_plugins() {
         "This plugin is for another agent"
     );
     // Antigravity has none at all.
-    click(&mut app, "[ security ]");
+    click(&mut app, " security ");
     key(&mut app, KeyCode::Char(' '));
     assert_eq!(
         app.message.as_ref().unwrap().0,
@@ -1777,7 +1777,7 @@ fn the_plugins_tab_gives_allows_and_removes_plugins() {
     );
 
     // «Open in Zed» opens the folder; what was changed there is committed.
-    click(&mut app, "[ architect ]");
+    click(&mut app, " architect ");
     key(&mut app, KeyCode::Char('e'));
     let job = app.edit.take().unwrap();
     assert!(job.kind == EditKind::Plugin && job.path.ends_with(".harness/plugins/review"));
@@ -1798,7 +1798,7 @@ fn the_plugins_tab_gives_allows_and_removes_plugins() {
     assert!(screen(&mut app).contains("2 commands"));
 
     // Removing asks first; the folder and the settings go in one commit.
-    click(&mut app, "[ developer ]");
+    click(&mut app, " developer ");
     key(&mut app, KeyCode::Delete);
     assert!(screen(&mut app).contains("Remove plugin lint from the project?"));
     key(&mut app, KeyCode::Enter);
@@ -1862,18 +1862,18 @@ fn plugins_come_from_the_catalog_and_are_updated() {
     app.official_catalog = catalog.path().display().to_string();
     click(&mut app, "5 Plugins");
     // With no catalog, the official one is added by itself.
-    click(&mut app, "[ From catalog ]");
+    click(&mut app, " From catalog ");
     wait_job(&mut app);
     let text = screen(&mut app);
     for part in [
         "Plugins in the catalogs",
         "Found 3",
-        "> review",
+        "▶ review",
         "notes",
         "pkg",
         "cannot be added",
         "Reviews code for bugs",
-        "[ Add and give to the architect ]",
+        " Add and give to the architect ",
     ] {
         assert!(text.contains(part), "missing {part:?} in:\n{text}");
     }
@@ -1890,12 +1890,12 @@ fn plugins_come_from_the_catalog_and_are_updated() {
     key(&mut app, KeyCode::Enter);
     let text = screen(&mut app);
     assert!(
-        text.contains("Found 1") && text.contains("> review"),
+        text.contains("Found 1") && text.contains("▶ review"),
         "{text}"
     );
 
     // A plugin with hooks: added, then asked about its hooks, then given.
-    click(&mut app, "[ Add and give to the architect ]");
+    click(&mut app, " Add and give to the architect ");
     wait_job(&mut app);
     let text = screen(&mut app);
     assert!(text.contains("Allow the plugin to run programs"), "{text}");
@@ -1909,7 +1909,7 @@ fn plugins_come_from_the_catalog_and_are_updated() {
     assert_eq!(saved.roles[&Role::Architect].plugins, ["review"]);
     assert!(repo.changed_files().unwrap().is_empty());
     let text = screen(&mut app);
-    assert!(text.contains("> [x] review"), "{text}");
+    assert!(text.contains("▶ [x] review"), "{text}");
 
     // A newer version in the catalog: «Update» shows the files, then takes it.
     write("plugins/review/commands/fix.md", "# fix");
@@ -1998,10 +1998,10 @@ fn a_retrospective_is_generated_edited_and_its_proposals_applied() {
     key(&mut app, KeyCode::Char('6'));
     let text = screen(&mut app);
     assert!(text.contains("No retrospectives yet."), "{text}");
-    assert!(text.contains("[ Generate ]"), "{text}");
+    assert!(text.contains(" Generate "), "{text}");
 
     // Without tasks there is nothing to learn from.
-    click(&mut app, "[ Generate ]");
+    click(&mut app, " Generate ");
     wait_retro(&mut app);
     let (message, problem) = app.message.clone().unwrap();
     assert!(
@@ -2010,7 +2010,7 @@ fn a_retrospective_is_generated_edited_and_its_proposals_applied() {
     );
 
     orchestrator::create_task(&repo, "task-001", "Build a parser", 5).unwrap();
-    click(&mut app, "[ Generate ]");
+    click(&mut app, " Generate ");
     assert!(app.retro.as_ref().unwrap().is_generating());
     key(&mut app, KeyCode::Char('q'));
     assert!(!app.quit);
@@ -2053,7 +2053,7 @@ fn a_retrospective_is_generated_edited_and_its_proposals_applied() {
     assert!(text.contains("+ Check it first."), "{text}");
     key(&mut app, KeyCode::Char(' '));
     assert!(screen(&mut app).contains("[x] 1 Teach"));
-    click(&mut app, "[ Apply chosen (1) ]");
+    click(&mut app, " Apply chosen (1) ");
     let text = screen(&mut app);
     assert!(text.contains("new skill empty-input"), "{text}");
     assert!(

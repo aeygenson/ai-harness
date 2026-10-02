@@ -35,13 +35,14 @@ use harness_core::store::{self, Step, TaskStore};
 use harness_core::task::{Stage, TaskState, WaitReason};
 use ratatui::crossterm::event::KeyCode;
 use ratatui::layout::{Constraint, Layout, Rect};
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span, Text};
-use ratatui::widgets::{Clear, List, ListItem, ListState, Paragraph, Wrap};
+use ratatui::widgets::{List, ListItem, ListState, Paragraph, Wrap};
 use ratatui::Frame;
 
 use crate::i18n::I18n;
 use crate::runner::{push_line, Builder, Outcome, Request, RunChoice, Running};
+use crate::theme;
 use crate::ui::{buttons, panel, selected, ButtonId, Hits, ListId, Target};
 
 /// Whom the message goes to.
@@ -735,7 +736,17 @@ impl TasksTab {
         let items: Vec<ListItem> = self
             .tasks
             .iter()
-            .map(|t| ListItem::new(format!("{}  {}", t.id, short_stage(&t.state))))
+            .map(|t| {
+                let (mark, style) = match t.state.stage {
+                    Stage::Done => ("✓", theme::ok()),
+                    Stage::Working(_) => ("●", theme::running()),
+                    Stage::WaitingForHuman(_) => ("◆", theme::warn()),
+                };
+                ListItem::new(Line::from(vec![
+                    Span::raw(format!("{}  ", t.id)),
+                    Span::styled(format!("{mark} {}", short_stage(&t.state)), style),
+                ]))
+            })
             .collect();
         let title = match self.filter {
             Some(role) => tr.f("tasks.title_filtered", &[("role", &role_name(role))]),
@@ -831,7 +842,12 @@ impl TasksTab {
                 } else {
                     Style::new()
                 };
-                ListItem::new(Line::styled(line.clone(), style))
+                let mark = role.map_or_else(theme::retro, theme::role);
+                ListItem::new(Line::from(vec![
+                    Span::styled("■ ", mark),
+                    Span::raw(line.clone()),
+                ]))
+                .style(style)
             })
             .collect();
         frame.render_widget(List::new(items).block(block), area);
@@ -890,7 +906,7 @@ impl TasksTab {
             ));
         }
         items.push((send.to_string(), ButtonId::Send, self.running.is_none()));
-        let width = |label: &str| u16::try_from(label.chars().count() + 4).unwrap_or(u16::MAX);
+        let width = |label: &str| crate::ui::button_width(label);
         let total = |items: &[(String, ButtonId, bool)]| {
             items
                 .iter()
@@ -922,7 +938,7 @@ impl TasksTab {
         let lines: Vec<Line> = if self.input.is_empty() && !typing {
             vec![Line::styled(
                 format!(" {}", tr.t("tasks.input_hint")),
-                Style::new().fg(Color::DarkGray),
+                theme::dim(),
             )]
         } else {
             let cursor = if typing { "▏" } else { "" };
@@ -1017,15 +1033,11 @@ impl TasksTab {
         let height = u16::try_from(items.len() + 2).unwrap_or(u16::MAX).min(top);
         let x = x.min(frame.area().right().saturating_sub(width));
         let area = Rect::new(x, top.saturating_sub(height), width, height);
-        frame.render_widget(Clear, area);
+        crate::ui::clear(frame, area);
         let list = items
             .into_iter()
             .map(|(label, enabled)| {
-                let style = if enabled {
-                    Style::new()
-                } else {
-                    Style::new().fg(Color::DarkGray)
-                };
+                let style = if enabled { Style::new() } else { theme::dim() };
                 ListItem::new(Line::styled(label, style))
             })
             .collect();
@@ -1188,7 +1200,7 @@ pub fn draw_list(
         List::new(items)
             .block(block)
             .highlight_style(selected())
-            .highlight_symbol("> "),
+            .highlight_symbol("▶ "),
         area,
         &mut state,
     );
@@ -1230,10 +1242,17 @@ fn short_stage(state: &TaskState) -> String {
 
 fn step_item(step: &Step) -> ListItem<'static> {
     let h = &step.handoff;
+    let next = match h.next_role {
+        NextStep::To(role) => theme::role(role),
+        NextStep::Done => theme::ok(),
+    };
     ListItem::new(Line::from(vec![
-        Span::raw(format!("r{} {:<10} ", h.round, role_name(h.role))),
+        Span::raw(format!("r{} ", h.round)),
+        Span::styled(format!("{:<10} ", role_name(h.role)), theme::role(h.role)),
         verdict_span(h.verdict),
-        Span::raw(format!(" → {:<10} {}", next_name(h.next_role), h.summary)),
+        Span::styled(" → ", theme::dim()),
+        Span::styled(format!("{:<10}", next_name(h.next_role)), next),
+        Span::raw(format!(" {}", h.summary)),
     ]))
 }
 
@@ -1252,11 +1271,12 @@ fn step_text(step: &Step, tr: &I18n) -> Text<'static> {
         lines.push(Line::default());
         lines.push(Line::styled(tr.t("tasks.issues").to_string(), bold));
         for issue in &h.issues {
+            let theme = theme::current();
             let (name, color) = match issue.severity {
-                Severity::Low => ("low", Color::Gray),
-                Severity::Medium => ("medium", Color::Yellow),
-                Severity::High => ("high", Color::LightRed),
-                Severity::Critical => ("critical", Color::Red),
+                Severity::Low => ("low", theme.dim),
+                Severity::Medium => ("medium", theme.warn),
+                Severity::High => ("high", theme.bad),
+                Severity::Critical => ("critical", theme.bad),
             };
             let location = issue
                 .location
@@ -1264,7 +1284,10 @@ fn step_text(step: &Step, tr: &I18n) -> Text<'static> {
                 .map(|l| format!("{l}  "))
                 .unwrap_or_default();
             lines.push(Line::from(vec![
-                Span::styled(format!("  {name:<8} "), Style::new().fg(color)),
+                Span::styled(
+                    format!("  {name:<8} "),
+                    Style::new().fg(color).add_modifier(Modifier::BOLD),
+                ),
                 Span::raw(format!("{location}{}", issue.description)),
             ]));
         }
@@ -1297,9 +1320,9 @@ fn step_text(step: &Step, tr: &I18n) -> Text<'static> {
 
 fn verdict_span(verdict: Verdict) -> Span<'static> {
     match verdict {
-        Verdict::Approved => Span::styled("approved", Style::new().fg(Color::Green)),
-        Verdict::Rejected => Span::styled("rejected", Style::new().fg(Color::Red)),
-        Verdict::NeedsHuman => Span::styled("needs_human", Style::new().fg(Color::Yellow)),
+        Verdict::Approved => Span::styled("approved", theme::ok()),
+        Verdict::Rejected => Span::styled("rejected", theme::bad()),
+        Verdict::NeedsHuman => Span::styled("needs_human", theme::warn()),
     }
 }
 

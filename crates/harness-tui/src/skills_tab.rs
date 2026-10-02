@@ -30,12 +30,13 @@ use harness_core::handoff::Role;
 use harness_core::skills::{self, LibrarySkill, Source};
 use ratatui::crossterm::event::KeyCode;
 use ratatui::layout::{Constraint, Layout, Rect};
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{List, ListItem, ListState, Paragraph, Wrap};
 use ratatui::Frame;
 
 use crate::i18n::I18n;
+use crate::theme;
 use crate::ui::{buttons, panel, selected, selector, ButtonId, Hits, ListId, Target};
 
 /// The roles the selector offers, in the order of the flow.
@@ -261,15 +262,13 @@ impl SkillsTab {
     fn status(skill: &LibrarySkill, tr: &I18n) -> (String, Style) {
         match skill.source {
             Source::BuiltIn => (tr.t("skills.built_in").to_string(), Style::new()),
-            Source::Changed { outdated: false } => (
-                tr.t("skills.changed").to_string(),
-                Style::new().fg(Color::Yellow),
-            ),
-            Source::Changed { outdated: true } => (
-                tr.t("skills.outdated").to_string(),
-                Style::new().fg(Color::LightRed),
-            ),
-            Source::Own => (tr.t("skills.own").to_string(), Style::new().fg(Color::Cyan)),
+            Source::Changed { outdated: false } => {
+                (tr.t("skills.changed").to_string(), theme::warn())
+            }
+            Source::Changed { outdated: true } => {
+                (tr.t("skills.outdated").to_string(), theme::bad())
+            }
+            Source::Own => (tr.t("skills.own").to_string(), theme::accent()),
         }
     }
 
@@ -304,7 +303,7 @@ impl SkillsTab {
         let [left, right] =
             Layout::horizontal([Constraint::Percentage(40), Constraint::Percentage(60)])
                 .areas(main);
-        let dim = Style::new().fg(Color::DarkGray);
+        let dim = theme::dim();
         let rows = self.rows();
         let items: Vec<ListItem> = rows
             .iter()
@@ -317,7 +316,7 @@ impl SkillsTab {
                     let Some(skill) = self.library.iter().find(|s| s.name == *name) else {
                         return ListItem::new(Line::styled(
                             format!("{name:<22} {}", tr.t("skills.missing")),
-                            Style::new().fg(Color::Red),
+                            theme::bad(),
                         ));
                     };
                     let (status, style) = Self::status(skill, tr);
@@ -354,7 +353,7 @@ impl SkillsTab {
             List::new(items)
                 .block(block)
                 .highlight_style(selected())
-                .highlight_symbol("> "),
+                .highlight_symbol("▶ "),
             left,
             &mut state,
         );
@@ -374,7 +373,7 @@ impl SkillsTab {
                 if skill.description.is_none() {
                     lines.push(Line::styled(
                         tr.t("skills.no_description").to_string(),
-                        Style::new().fg(Color::Red),
+                        theme::bad(),
                     ));
                 }
                 if skill.name.starts_with(AGENT_NOTE) {

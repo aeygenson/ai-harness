@@ -40,7 +40,7 @@ use ratatui::crossterm::execute;
 use ratatui::crossterm::terminal::{enable_raw_mode, Clear, ClearType, EnterAlternateScreen};
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::prelude::CrosstermBackend;
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Paragraph, Wrap};
 use ratatui::{DefaultTerminal, Frame, Terminal};
@@ -58,6 +58,7 @@ mod roles_tab;
 mod runner;
 mod skills_tab;
 mod tasks;
+mod theme;
 mod ui;
 
 use i18n::I18n;
@@ -388,6 +389,11 @@ impl App {
             quit_warned: false,
             quit: false,
         };
+        let saved = app
+            .home
+            .as_deref()
+            .and_then(|home| i18n::saved_setting(home, "theme"));
+        theme::select(saved.as_deref().unwrap_or(theme::THEMES[0].code));
         let start = start.canonicalize().unwrap_or_else(|_| start.to_path_buf());
         let last = app.projects.list.last.clone();
         if has_config(&start) {
@@ -641,6 +647,7 @@ impl App {
             }
             KeyCode::Char('q') | KeyCode::Esc => self.quit = true,
             KeyCode::Char('L') | KeyCode::F(2) => self.press(ButtonId::Language),
+            KeyCode::Char('T') | KeyCode::F(3) => self.press(ButtonId::Theme),
             KeyCode::Char(c @ '1'..='7') => {
                 let index = usize::from(c as u8 - b'1');
                 self.tab = TABS[index].0;
@@ -2295,6 +2302,14 @@ impl App {
                     browser.toggle_hidden();
                 }
             }
+            ButtonId::Theme => {
+                theme::next();
+                if let Some(home) = &self.home {
+                    if let Err(error) = i18n::save_setting(home, "theme", theme::current().code) {
+                        self.message = Some((error, true));
+                    }
+                }
+            }
             ButtonId::Language => {
                 self.tr.next();
                 // The last message was in the old language.
@@ -2554,6 +2569,10 @@ impl App {
 
     fn draw(&mut self, frame: &mut Frame) {
         self.hits.clear();
+        frame.render_widget(
+            ratatui::widgets::Block::new().style(theme::base()),
+            frame.area(),
+        );
         let [top, main, footer] = Layout::vertical([
             Constraint::Length(1),
             Constraint::Min(0),
@@ -2640,12 +2659,19 @@ impl App {
             .or_else(|| self.projects.problem.clone())
             .or_else(|| self.tr.problems.first().cloned());
         if let Some((text, error)) = &self.message {
-            let color = if *error { Color::Red } else { Color::Green };
-            spans.push(Span::styled(format!(" {text}  "), Style::new().fg(color)));
+            let (mark, style) = if *error {
+                ("✗", theme::bad())
+            } else {
+                ("✓", theme::ok())
+            };
+            spans.push(Span::styled(
+                format!(" {mark} {text}  "),
+                style.add_modifier(Modifier::BOLD),
+            ));
         } else if let Some(problem) = problem {
             spans.push(Span::styled(
-                format!(" {problem}  "),
-                Style::new().fg(Color::Red),
+                format!(" ✗ {problem}  "),
+                theme::bad().add_modifier(Modifier::BOLD),
             ));
         }
         let typing = self.tab == Tab::Tasks && self.tasks.as_ref().is_some_and(TasksTab::typing);
@@ -2654,10 +2680,7 @@ impl App {
         } else {
             "footer.hint"
         };
-        spans.push(Span::styled(
-            format!(" {}", self.tr.t(hint)),
-            Style::new().fg(Color::DarkGray),
-        ));
+        spans.push(Span::styled(format!(" {}", self.tr.t(hint)), theme::dim()));
         frame.render_widget(Line::from(spans), footer);
 
         if let Some((_, form)) = &self.form {
@@ -2681,17 +2704,16 @@ impl App {
             x = x.saturating_add(width);
             rect
         };
-        put(
-            frame,
-            format!(" {name} "),
-            Style::new().add_modifier(Modifier::BOLD),
-        );
+        put(frame, format!(" ◆ {name} "), theme::primary());
+        put(frame, " ".into(), Style::new());
         for (index, (tab, label)) in TABS.iter().enumerate() {
-            put(frame, "│".into(), Style::new().fg(Color::DarkGray));
+            if index > 0 {
+                put(frame, "│".into(), theme::dim());
+            }
             let style = if *tab == self.tab {
-                Style::new().fg(Color::Black).bg(Color::Cyan)
+                theme::selected().patch(theme::accent())
             } else {
-                Style::new()
+                theme::dim()
             };
             let rect = put(
                 frame,
@@ -2702,13 +2724,15 @@ impl App {
         }
         // On the right: always at hand, whichever tab is open.
         let right = Rect::new(x, area.y, area.right().saturating_sub(x), 1);
+        let theme_label = format!("◐ {}", self.tr.t(theme::current().name));
         let items = [
             (self.tr.t("tabs.new_project"), ButtonId::NewProject),
             (self.tr.label(), ButtonId::Language),
+            (theme_label.as_str(), ButtonId::Theme),
         ];
         let width: u16 = items
             .iter()
-            .map(|(label, _)| u16::try_from(label.chars().count()).unwrap_or(0) + 5)
+            .map(|(label, _)| ui::button_width(label) + 1)
             .sum();
         let start = right.right().saturating_sub(width);
         if start > right.x {

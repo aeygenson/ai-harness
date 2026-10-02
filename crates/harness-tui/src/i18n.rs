@@ -169,10 +169,7 @@ impl I18n {
 
     /// Remembers the language for the next start.
     pub fn save(&self, home: &Path) -> Result<(), String> {
-        let path = home.join(SETTINGS_FILE);
-        fs::create_dir_all(home)
-            .and_then(|()| fs::write(&path, format!("language = \"{}\"\n", self.code())))
-            .map_err(|e| format!("{}: {e}", path.display()))
+        save_setting(home, "language", self.code())
     }
 
     /// The text for `key`, in English if the language lacks it, else the key.
@@ -202,9 +199,28 @@ impl I18n {
 }
 
 fn saved_language(home: &Path) -> Option<String> {
+    saved_setting(home, "language")
+}
+
+/// A setting of the TUI kept in `tui.toml`, such as `language` or `theme`.
+pub fn saved_setting(home: &Path, key: &str) -> Option<String> {
     let text = fs::read_to_string(home.join(SETTINGS_FILE)).ok()?;
     let table: toml::Table = toml::from_str(&text).ok()?;
-    table.get("language")?.as_str().map(str::to_string)
+    table.get(key)?.as_str().map(str::to_string)
+}
+
+/// Saves one setting in `tui.toml`, keeping the others.
+pub fn save_setting(home: &Path, key: &str, value: &str) -> Result<(), String> {
+    let path = home.join(SETTINGS_FILE);
+    let mut table: toml::Table = fs::read_to_string(&path)
+        .ok()
+        .and_then(|text| toml::from_str(&text).ok())
+        .unwrap_or_default();
+    table.insert(key.to_string(), toml::Value::String(value.to_string()));
+    let text = toml::to_string(&table).map_err(|e| e.to_string())?;
+    fs::create_dir_all(home)
+        .and_then(|()| fs::write(&path, text))
+        .map_err(|e| format!("{}: {e}", path.display()))
 }
 
 #[cfg(test)]
