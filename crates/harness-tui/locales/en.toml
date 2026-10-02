@@ -112,13 +112,13 @@ no_plugins = "No plugins for this agent yet: add them on the «Plugins» tab («
 retro_hint = "The retrospective gets no skills, MCP servers or plugins."
 plugins_dropped = "Removed plugins {plugins}: they are not made for {agent}"
 saved = "Settings saved and committed"
-unsaved_quit = "Changes on the «Roles», «MCP» and «Plugins» tabs are not saved: press q again to quit without them"
+unsaved_quit = "Changes on the «Roles», «Skills», «MCP» and «Plugins» tabs are not saved: press q again to quit without them"
 
 [skills]
 role = "Role:"
 title = " Skills of the {role} "
 base = "Always in the prompt"
-optional = "Can be chosen on «Roles»"
+optional = "Optional · click [ ] → [x] → [■]"
 built_in = "built-in"
 changed = "changed"
 outdated = "changed, built-in is newer"

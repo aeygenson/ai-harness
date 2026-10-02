@@ -414,17 +414,8 @@ impl RolesTab {
                 Action::None
             }
             Row::Skill(name) => {
-                if let Some(settings) = who.and_then(|role| self.roles.get_mut(&role)) {
-                    // Not used -> read when needed -> always in the prompt -> not used.
-                    let on_demand = settings.skills.contains(&name);
-                    let always = settings.always_skills.contains(&name);
-                    settings.skills.retain(|s| *s != name);
-                    settings.always_skills.retain(|s| *s != name);
-                    match (on_demand, always) {
-                        (false, false) => settings.skills.push(name),
-                        (true, false) => settings.always_skills.push(name),
-                        _ => {}
-                    }
+                if let Some(role) = who {
+                    self.cycle_skill(role, &name);
                 }
                 Action::None
             }
@@ -520,6 +511,23 @@ impl RolesTab {
     /// A role's settings with the changes not saved yet.
     pub fn settings(&self, role: Role) -> Option<&RoleConfig> {
         self.roles.get(&role)
+    }
+
+    /// The next mark of skill `name` for `role`: not used -> read when
+    /// needed -> always in the prompt -> not used; saved with the rest of
+    /// the changes.
+    pub fn cycle_skill(&mut self, role: Role, name: &str) {
+        if let Some(settings) = self.roles.get_mut(&role) {
+            let on_demand = settings.skills.iter().any(|s| s == name);
+            let always = settings.always_skills.iter().any(|s| s == name);
+            settings.skills.retain(|s| s != name);
+            settings.always_skills.retain(|s| s != name);
+            match (on_demand, always) {
+                (false, false) => settings.skills.push(name.to_string()),
+                (true, false) => settings.always_skills.push(name.to_string()),
+                _ => {}
+            }
+        }
     }
 
     /// Gives `role` the MCP server `name`, or takes it away; saved with
