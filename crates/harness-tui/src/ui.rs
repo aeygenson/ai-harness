@@ -85,6 +85,8 @@ pub enum ButtonId {
     SkillEdit,
     SkillNew,
     SkillRestore,
+    /// The `[ ]` mark of the skill on this row of the Skills tab's list.
+    SkillMark(usize),
     /// A role of the MCP tab's selector, an index into `skills_tab::ROLES`.
     McpRole(usize),
     /// Gives the selected MCP server to the role, or takes it away.

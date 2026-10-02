@@ -820,7 +820,7 @@ fn the_skills_tab_shows_each_roles_base_and_the_skills_to_choose() {
         "● agent-claude",
         "○ agent-codex",
         "○ agent-antigravity",
-        "Can be chosen on «Roles»",
+        "Optional · click [ ] → [x] → [■]",
         "[ ] crash-recovery",
         "built-in",
         "common · built-in",
@@ -848,6 +848,44 @@ fn the_skills_tab_shows_each_roles_base_and_the_skills_to_choose() {
     // A click on a skill shows its text.
     click(&mut app, "protocol-attacks");
     assert!(screen(&mut app).contains("protocol-attacks · built-in"));
+}
+
+#[test]
+fn a_click_on_the_mark_of_a_skill_chooses_it_for_the_role() {
+    let env = Env::new();
+    let root = env.path("test");
+    project(&root);
+    let mut app = env.app(&root);
+    click(&mut app, "3 Skills");
+    click(&mut app, " developer ");
+
+    // Not used -> read when needed -> always in the prompt.
+    click(&mut app, "[ ] crash-recovery");
+    let text = screen(&mut app);
+    assert!(text.contains("▶ [x] crash-recovery"), "{text}");
+    assert!(text.contains("Changes not saved"), "{text}");
+    click(&mut app, "[x] crash-recovery");
+    assert!(screen(&mut app).contains("[■] crash-recovery"));
+
+    // The Roles tab shows the same change, and «Save» keeps it.
+    click(&mut app, " Save ");
+    let developer = &config(&root).roles[&Role::Developer];
+    assert!(developer
+        .always_skills
+        .contains(&"crash-recovery".to_string()));
+    assert!(!developer.skills.contains(&"crash-recovery".to_string()));
+
+    // Space goes on round the marks; «Undo changes» brings back the saved one.
+    key(&mut app, KeyCode::Char(' '));
+    assert!(screen(&mut app).contains("▶ [ ] crash-recovery"));
+    key(&mut app, KeyCode::Char('u'));
+    assert!(screen(&mut app).contains("▶ [■] crash-recovery"));
+
+    // A click on the name only selects the skill.
+    click(&mut app, "protocol-attacks");
+    let text = screen(&mut app);
+    assert!(text.contains("▶ [ ] protocol-attacks"), "{text}");
+    assert!(text.contains("[■] crash-recovery"), "{text}");
 }
 
 #[test]

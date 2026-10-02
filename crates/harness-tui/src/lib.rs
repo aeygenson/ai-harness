@@ -691,12 +691,16 @@ impl App {
                         }
                     }
                 },
-                Tab::Skills => {
-                    if let Some(skills) = &mut self.skills {
-                        let action = skills.on_key(code);
-                        self.skill_action(action);
+                Tab::Skills => match code {
+                    KeyCode::Char('s') => self.press(ButtonId::Save),
+                    KeyCode::Char('u') => self.press(ButtonId::Undo),
+                    code => {
+                        if let Some(skills) = &mut self.skills {
+                            let action = skills.on_key(code);
+                            self.skill_action(action);
+                        }
                     }
-                }
+                },
                 Tab::Mcp if self.mcp.as_ref().is_some_and(McpTab::in_catalog) => {
                     if let Some(mcp) = &mut self.mcp {
                         let action = mcp.catalog_key(code);
@@ -1799,6 +1803,11 @@ impl App {
         let tr = &self.tr;
         match action {
             A::None => {}
+            A::Cycle(role, name) => {
+                if let Some(roles) = &mut self.roles {
+                    roles.cycle_skill(role, &name);
+                }
+            }
             A::Edit(name) => {
                 let path = skill_path(&root, &name);
                 let mut copied = false;
@@ -2236,7 +2245,8 @@ impl App {
             ButtonId::SkillRole(_)
             | ButtonId::SkillEdit
             | ButtonId::SkillNew
-            | ButtonId::SkillRestore => {
+            | ButtonId::SkillRestore
+            | ButtonId::SkillMark(_) => {
                 if let Some(skills) = &mut self.skills {
                     let action = skills.press(id);
                     self.skill_action(action);
@@ -2600,9 +2610,11 @@ impl App {
                     self.tr.t("tabs.no_open_project"),
                 ),
             },
-            Tab::Skills => match &self.skills {
-                Some(skills) => skills.draw(frame, main, &mut self.hits, &self.tr),
-                None => placeholder(
+            Tab::Skills => match (&self.skills, &self.roles) {
+                (Some(skills), Some(roles)) => {
+                    skills.draw(frame, main, &mut self.hits, &self.tr, roles);
+                }
+                _ => placeholder(
                     frame,
                     main,
                     &format!(" {} ", self.tr.t("tabs.skills")),

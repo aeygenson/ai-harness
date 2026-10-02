@@ -9,17 +9,19 @@
 //! │ Agent notes (● in the prompt)     ││ # Developer                              │
 //! │  ● agent-claude  built-in         ││ ...                                      │
 //! │  ○ agent-codex   built-in         ││                                          │
-//! │ Can be chosen on «Roles»          ││                                          │
+//! │ Optional: click the mark          ││                                          │
 //! │  [x] crash-recovery  built-in     ││                                          │
-//! │  [ ] rust-errors     own          ││                                          │
+//! │  [■] rust-errors     own          ││                                          │
 //! └───────────────────────────────────┘└──────────────────────────────────────────┘
-//!  [ Edit in Zed ] [ New skill ] [ Restore built-in ]
+//!  Edit in Zed   New skill   Restore built-in   Save   Undo changes
 //! ```
 //!
-//! The tab only shows skills; they are edited in Zed (see `editor`). Editing
-//! a built-in skill makes a copy in `.harness/skills/`, which replaces it in
-//! this project; «Restore built-in» deletes the copy. Which skills a role
-//! chooses is set on the Roles tab.
+//! Skills are edited in Zed (see `editor`). Editing a built-in skill makes a
+//! copy in `.harness/skills/`, which replaces it in this project; «Restore
+//! built-in» deletes the copy. A click on the mark of an optional skill (or
+//! Space) changes it for the chosen role: `[ ]` not used, `[x]` read when
+//! needed, `[■]` always in the prompt. Like on the Roles tab, the marks are
+//! kept in harness.toml by «Save».
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -36,6 +38,7 @@ use ratatui::widgets::{List, ListItem, ListState, Paragraph, Wrap};
 use ratatui::Frame;
 
 use crate::i18n::I18n;
+use crate::roles_tab::RolesTab;
 use crate::theme;
 use crate::ui::{buttons, panel, selected, selector, ButtonId, Hits, ListId, Target};
 
@@ -59,6 +62,8 @@ pub enum Action {
     New,
     /// Ask before deleting the project's copy of this built-in skill.
     Restore(String),
+    /// The next mark of this optional skill for the role.
+    Cycle(Role, String),
 }
 
 /// A line of the list: a heading, or a skill by name.
@@ -74,8 +79,8 @@ pub struct SkillsTab {
     /// The role chosen at the top, an index into `ROLES`.
     pub(crate) role: usize,
     library: Vec<LibrarySkill>,
-    /// Each role's agent and chosen skills (`skills`, `always_skills`).
-    roles: BTreeMap<Role, (String, Vec<String>, Vec<String>)>,
+    /// Each role's agent.
+    roles: BTreeMap<Role, String>,
     /// The selected line of the list.
     pub(crate) row: usize,
     pub(crate) scroll: u16,
@@ -107,10 +112,7 @@ impl SkillsTab {
         match Config::load(&harness_dir) {
             Ok(config) => {
                 for (role, settings) in config.roles {
-                    self.roles.insert(
-                        role,
-                        (settings.agent, settings.skills, settings.always_skills),
-                    );
+                    self.roles.insert(role, settings.agent);
                 }
             }
             Err(error) => self.problem = Some(error.to_string()),
@@ -126,7 +128,7 @@ impl SkillsTab {
     fn agent(&self) -> &str {
         self.roles
             .get(&self.role())
-            .map_or("claude", |(agent, _, _)| agent.as_str())
+            .map_or("claude", String::as_str)
     }
 
     fn rows(&self) -> Vec<Row> {
@@ -183,6 +185,16 @@ impl SkillsTab {
         }
     }
 
+    /// The optional skill on row `index`: the one a mark can be set for.
+    fn optional_at(&self, index: usize) -> Option<String> {
+        match self.rows().get(index) {
+            Some(Row::Skill(name)) if !skills::is_base(name) && !name.starts_with(AGENT_NOTE) => {
+                Some(name.clone())
+            }
+            _ => None,
+        }
+    }
+
     /// A click on a line of the list.
     pub fn select(&mut self, index: usize) {
         if matches!(self.rows().get(index), Some(Row::Skill(_))) {
@@ -225,6 +237,7 @@ impl SkillsTab {
             KeyCode::PageDown => self.scroll = self.scroll.saturating_add(10),
             KeyCode::PageUp => self.scroll = self.scroll.saturating_sub(10),
             KeyCode::Enter | KeyCode::Char('e') => return self.press(ButtonId::SkillEdit),
+            KeyCode::Char(' ') => return self.press(ButtonId::SkillMark(self.row)),
             KeyCode::Char('n') => return self.press(ButtonId::SkillNew),
             KeyCode::Delete => return self.press(ButtonId::SkillRestore),
             _ => {}
@@ -242,6 +255,12 @@ impl SkillsTab {
                 }
             }
             ButtonId::SkillNew => return Action::New,
+            ButtonId::SkillMark(index) => {
+                if let Some(name) = self.optional_at(index) {
+                    self.select(index);
+                    return Action::Cycle(self.role(), name);
+                }
+            }
             ButtonId::SkillRestore => {
                 if let Some(skill) = self.current() {
                     if matches!(skill.source, Source::Changed { .. }) {
@@ -273,15 +292,23 @@ impl SkillsTab {
     }
 
     /// `[■]` always in the prompt, `[x]` read when needed, `[ ]` not chosen.
-    fn mark(&self, name: &str) -> &'static str {
-        match self.roles.get(&self.role()) {
-            Some((_, _, always)) if always.iter().any(|s| s == name) => "[■]",
-            Some((_, chosen, _)) if chosen.iter().any(|s| s == name) => "[x]",
+    /// The marks come from the Roles tab, with its changes not saved yet.
+    fn mark(&self, name: &str, roles: &RolesTab) -> &'static str {
+        match roles.settings(self.role()) {
+            Some(s) if s.always_skills.iter().any(|n| n == name) => "[■]",
+            Some(s) if s.skills.iter().any(|n| n == name) => "[x]",
             _ => "[ ]",
         }
     }
 
-    pub fn draw(&self, frame: &mut Frame, area: Rect, hits: &mut Hits, tr: &I18n) {
+    pub fn draw(
+        &self,
+        frame: &mut Frame,
+        area: Rect,
+        hits: &mut Hits,
+        tr: &I18n,
+        roles: &RolesTab,
+    ) {
         let [top, main, bottom] = Layout::vertical([
             Constraint::Length(1),
             Constraint::Min(0),
@@ -336,7 +363,7 @@ impl SkillsTab {
                     let mark = if skills::is_base(name) {
                         String::new()
                     } else {
-                        format!("{} ", self.mark(name))
+                        format!("{} ", self.mark(name, roles))
                     };
                     ListItem::new(Line::from(vec![
                         Span::raw(format!("{mark}{name:<22} ")),
@@ -364,6 +391,16 @@ impl SkillsTab {
                 first: state.offset(),
             },
         );
+        // The marks are buttons; they come after «▶ ».
+        for line in 0..inner.height {
+            let index = state.offset() + usize::from(line);
+            if self.optional_at(index).is_some() && inner.width > 5 {
+                hits.add(
+                    Rect::new(inner.x + 2, inner.y + line, 3, 1),
+                    Target::Button(ButtonId::SkillMark(index)),
+                );
+            }
+        }
 
         match self.current() {
             Some(skill) => {
@@ -390,6 +427,9 @@ impl SkillsTab {
                     lines.push(Line::default());
                 } else if skills::is_base(&skill.name) {
                     lines.push(Line::styled(tr.t("skills.base_hint").to_string(), dim));
+                    lines.push(Line::default());
+                } else {
+                    lines.push(Line::styled(tr.t("roles.skills_hint").to_string(), dim));
                     lines.push(Line::default());
                 }
                 lines.extend(reflow(&skill.text).into_iter().map(Line::from));
@@ -419,8 +459,19 @@ impl SkillsTab {
                 ),
                 (tr.t("skills.new"), ButtonId::SkillNew, true),
                 (tr.t("skills.restore"), ButtonId::SkillRestore, restore),
+                (tr.t("roles.save"), ButtonId::Save, roles.changed()),
+                (tr.t("roles.undo"), ButtonId::Undo, roles.changed()),
             ],
         );
+        if roles.changed() {
+            let note = tr.t("roles.unsaved");
+            let width = u16::try_from(note.chars().count()).unwrap_or(0);
+            let x = bottom.right().saturating_sub(width);
+            frame.render_widget(
+                Span::styled(note.to_string(), theme::warn()),
+                Rect::new(x.max(bottom.x), bottom.y, width.min(bottom.width), 1),
+            );
+        }
     }
 }
 
