@@ -2012,6 +2012,14 @@ fn a_retrospective_is_generated_edited_and_its_proposals_applied() {
     orchestrator::create_task(&repo, "task-001", "Build a parser", 5).unwrap();
     click(&mut app, "[ Generate ]");
     assert!(app.retro.as_ref().unwrap().is_generating());
+    key(&mut app, KeyCode::Char('q'));
+    assert!(!app.quit);
+    assert!(app
+        .message
+        .as_ref()
+        .unwrap()
+        .0
+        .contains("agent is still working"));
     // The roles wait for the retrospective.
     app.tab = Tab::Tasks;
     app.press(ButtonId::Send);
@@ -2064,7 +2072,9 @@ fn a_retrospective_is_generated_edited_and_its_proposals_applied() {
         .skills
         .contains(&"empty-input".to_string()));
     assert!(repo.changed_files().unwrap().is_empty());
-    assert!(screen(&mut app).contains("✓   1 Teach"));
+    let text = screen(&mut app);
+    assert!(text.contains("✓   1 Teach"), "{text}");
+    assert!(text.contains("✓ Applied: the skill empty-input"), "{text}");
     key(&mut app, KeyCode::Char(' '));
     assert_eq!(
         app.message.as_ref().unwrap().0,

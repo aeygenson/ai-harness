@@ -601,7 +601,12 @@ impl App {
                 }
             }
             KeyCode::Char('q') | KeyCode::Esc if running => {
-                self.message = Some((self.tr.t("tasks.quit_running").to_string(), true));
+                let key = if self.generating() {
+                    "retro.quit_running"
+                } else {
+                    "tasks.quit_running"
+                };
+                self.message = Some((self.tr.t(key).to_string(), true));
             }
             KeyCode::Esc
                 if self.tab == Tab::Roles

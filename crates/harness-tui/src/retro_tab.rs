@@ -330,7 +330,7 @@ impl RetroTab {
         let [main, bottom] =
             Layout::vertical([Constraint::Min(0), Constraint::Length(1)]).areas(area);
         let [left, right] =
-            Layout::horizontal([Constraint::Percentage(35), Constraint::Percentage(65)])
+            Layout::horizontal([Constraint::Percentage(40), Constraint::Percentage(60)])
                 .areas(main);
         let proposals = self.proposals();
         let [retros_area, proposals_area] =
@@ -467,7 +467,15 @@ impl RetroTab {
         if self.focus == Focus::Proposals {
             if let Some(proposal) = self.current_proposal() {
                 let harness_dir = self.root.join(HARNESS_DIR);
+                // After applying, the files already look like the proposal:
+                // a diff would only say "already like this".
                 let text = match &self.config {
+                    _ if self.applied(proposal.id) => format!(
+                        "{}\n{}\n\n✓ {}\n",
+                        proposal.summary,
+                        proposal.reason,
+                        tr.f("retro.was_applied", &[("name", &proposal.skill)])
+                    ),
                     Some(config) => proposal.describe(&harness_dir, config),
                     None => format!("{}\n{}\n", proposal.summary, proposal.reason),
                 };
