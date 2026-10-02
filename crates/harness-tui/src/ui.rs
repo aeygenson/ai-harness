@@ -41,6 +41,10 @@ pub enum ListId {
     McpCatalog,
     /// The plugins of the Plugins tab.
     Plugins,
+    /// The plugins of all catalogs, in «From catalog».
+    PluginCatalog,
+    /// The added catalogs, in «Catalogs».
+    PluginCatalogs,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -102,6 +106,22 @@ pub enum ButtonId {
     PluginRemove,
     /// Open the plugin's folder in the editor.
     PluginOpen,
+    /// Download the plugin's newest version from its catalog.
+    PluginUpdate,
+    /// Open «From catalog».
+    PluginCatalog,
+    /// In «From catalog»: the agent filter, an index into its `FILTERS`.
+    PluginFilter(usize),
+    PluginSearch,
+    PluginAdd,
+    /// Add and give to the role chosen on the tab.
+    PluginAddGive,
+    /// Open «Catalogs».
+    PluginCatalogs,
+    PluginBack,
+    CatalogAdd,
+    CatalogUpdate,
+    CatalogRemove,
 }
 
 /// Where the clickable things were drawn in the last frame. Drawing fills it,
