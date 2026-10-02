@@ -468,6 +468,155 @@ mod tests {
     use crate::projects;
 
     #[test]
+    fn catalog_sources_become_clone_addresses() {
+        assert_eq!(
+            clone_url("anthropics/claude-plugins-official").unwrap(),
+            "https://github.com/anthropics/claude-plugins-official.git"
+        );
+        for url in [
+            "https://example.com/c.git",
+            "git@github.com:o/r.git",
+            "file:///tmp/c",
+        ] {
+            assert_eq!(clone_url(url).unwrap(), url);
+        }
+        for bad in ["just-a-word", "a/b/c", "../x/y z"] {
+            assert!(clone_url(bad).is_err(), "{bad}");
+        }
+    }
+
+    fn write(path: &Path, text: &str) {
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, text).unwrap();
+    }
+
+    /// A local catalog folder with Claude plugins `review` (with hooks) and `notes`.
+    fn local_catalog(dir: &Path) {
+        write(
+            &dir.join(".claude-plugin/marketplace.json"),
+            r#"{"name": "mine", "plugins": [
+                {"name": "review", "description": "Reviews code", "source": "./plugins/review"},
+                {"name": "notes", "source": "./plugins/notes"}
+            ]}"#,
+        );
+        write(
+            &dir.join("plugins/review/.claude-plugin/plugin.json"),
+            r#"{"name": "review"}"#,
+        );
+        write(&dir.join("plugins/review/hooks/hooks.json"), "{}");
+        write(
+            &dir.join("plugins/notes/.claude-plugin/plugin.json"),
+            r#"{"name": "notes"}"#,
+        );
+        write(&dir.join("plugins/notes/commands/note.md"), "# note");
+    }
+
+    #[test]
+    fn plugins_come_from_a_catalog_and_are_updated_from_it() {
+        let home = tempfile::tempdir().unwrap();
+        let source = tempfile::tempdir().unwrap();
+        local_catalog(source.path());
+        let project = tempfile::tempdir().unwrap();
+        projects::init(project.path()).unwrap();
+        let repo = Repo::open(project.path()).unwrap();
+
+        // A local folder is added as it is, and listed.
+        let catalog = add_catalog(home.path(), &source.path().display().to_string(), None).unwrap();
+        assert_eq!((catalog.name.as_str(), catalog.entries.len()), ("mine", 2));
+        assert!(matches!(
+            add_catalog(home.path(), &source.path().display().to_string(), None),
+            Err(OpsError::CatalogExists(_))
+        ));
+        let listed = catalogs(home.path()).unwrap();
+        assert_eq!(listed[0].entries.as_ref().unwrap().len(), 2);
+        assert_eq!(
+            update_catalog(home.path(), "mine").unwrap(),
+            CatalogUpdate::Local
+        );
+        let entry = |name: &str| {
+            listed[0]
+                .entries
+                .as_ref()
+                .unwrap()
+                .iter()
+                .find(|e| e.name == name)
+                .unwrap()
+                .clone()
+        };
+
+        // A plugin with hooks cannot go to a role before they are allowed:
+        // nothing stays.
+        let err = add(
+            &repo,
+            home.path(),
+            &entry("review"),
+            Some(Role::Architect),
+            false,
+            false,
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("hooks"), "{err}");
+        assert!(!project.path().join(PLUGINS_DIR).join("review").exists());
+        assert!(repo.changed_files().unwrap().is_empty());
+        // Without a role it is added, and says what it brings.
+        let added = add(&repo, home.path(), &entry("review"), None, false, false).unwrap();
+        assert!(added.contents.hooks);
+        let added = add(
+            &repo,
+            home.path(),
+            &entry("notes"),
+            Some(Role::Tester),
+            false,
+            false,
+        )
+        .unwrap();
+        assert!(!added.contents.hooks);
+        let config = Config::load(&project.path().join(HARNESS_DIR)).unwrap();
+        assert_eq!(
+            config.plugins["notes"].source.as_deref(),
+            Some("mine/notes")
+        );
+        assert_eq!(config.roles[&Role::Tester].plugins, ["notes"]);
+        assert!(repo.changed_files().unwrap().is_empty());
+        assert!(matches!(
+            add(&repo, home.path(), &entry("notes"), None, false, false),
+            Err(OpsError::Exists(_))
+        ));
+
+        // Nothing new: no update.
+        assert!(prepare_update(&repo, home.path(), "notes")
+            .unwrap()
+            .is_none());
+        // A new version waits until it is taken or dropped.
+        write(
+            &source.path().join("plugins/notes/commands/more.md"),
+            "# more",
+        );
+        let prepared = prepare_update(&repo, home.path(), "notes")
+            .unwrap()
+            .unwrap();
+        assert_eq!(prepared.changes.added, ["commands/more.md"]);
+        discard(&prepared);
+        assert!(repo.changed_files().unwrap().is_empty());
+        let prepared = prepare_update(&repo, home.path(), "notes")
+            .unwrap()
+            .unwrap();
+        apply_update(&repo, &prepared).unwrap();
+        let folder = project.path().join(PLUGINS_DIR).join("notes");
+        assert!(folder.join("commands/more.md").is_file());
+        assert!(repo.changed_files().unwrap().is_empty());
+
+        // Removing the catalog keeps the plugins in the project.
+        remove_catalog(home.path(), "mine").unwrap();
+        assert!(catalogs(home.path()).unwrap().is_empty());
+        assert!(folder.is_dir());
+        assert!(matches!(
+            prepare_update(&repo, home.path(), "notes"),
+            Err(OpsError::CatalogGone { .. })
+        ));
+    }
+
+    #[test]
     fn a_removed_plugin_leaves_the_roles_the_settings_and_git() {
         let dir = tempfile::tempdir().unwrap();
         projects::init(dir.path()).unwrap();
