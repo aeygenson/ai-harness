@@ -1,6 +1,8 @@
 //! The Tasks tab: tasks, the steps of the selected task, and one step in full.
 //! In the step, «Files» are links: what the step created or changed (from
 //! its git commit), its notes and its log; a click opens one in Zed.
+//! A click on the title of the steps, the step or the agent log (⤢) shows
+//! that window over the whole tab; another click or Esc puts it back (⤡).
 //! At the bottom a box to act: a text of several lines, whom it goes to,
 //! and «Send».
 //!
@@ -92,6 +94,14 @@ pub struct Artifact {
     pub path: PathBuf,
 }
 
+/// A window of the right side shown over the whole tab.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Zoom {
+    Steps,
+    Step,
+    Log,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Focus {
     Tasks,
@@ -139,6 +149,8 @@ pub struct TasksTab {
     pub(crate) log: VecDeque<String>,
     /// A file to open in Zed, taken by the app.
     pub(crate) open: Option<PathBuf>,
+    /// The window shown over the whole tab, if any.
+    pub(crate) zoom: Option<Zoom>,
     /// The files of each step's commit, by step folder; a step is only kept
     /// here once its commit is there.
     commits: RefCell<HashMap<PathBuf, Vec<(char, String)>>>,
@@ -168,6 +180,7 @@ impl TasksTab {
             running: None,
             log: VecDeque::new(),
             open: None,
+            zoom: None,
             commits: RefCell::default(),
         };
         tab.reload();
@@ -695,6 +708,21 @@ impl TasksTab {
         }
     }
 
+    /// A click on a window's title: over the whole tab, or back.
+    pub fn toggle_zoom(&mut self, zoom: Zoom) {
+        self.zoom = if self.zoom == Some(zoom) {
+            None
+        } else {
+            Some(zoom)
+        };
+    }
+
+    /// The window shown over the whole tab; the log only while there is one.
+    fn zoomed(&self) -> Option<Zoom> {
+        let log = self.running.is_some() || !self.log.is_empty();
+        self.zoom.filter(|z| *z != Zoom::Log || log)
+    }
+
     pub fn on_key(&mut self, key: KeyCode) {
         if self.focus == Focus::Input {
             match key {
@@ -824,7 +852,24 @@ impl TasksTab {
         };
         let [steps_area, detail_area] =
             Layout::vertical([Constraint::Percentage(40), Constraint::Percentage(60)]).areas(right);
-        self.draw_log(frame, log_area, tr);
+        // One window over the whole tab: the others are not drawn.
+        let zoomed = self.zoomed();
+        let only = |zoom: Zoom, normal: Rect| match zoomed {
+            None => normal,
+            Some(z) if z == zoom => area,
+            Some(_) => Rect::default(),
+        };
+        let (steps_area, detail_area, log_area) = (
+            only(Zoom::Steps, steps_area),
+            only(Zoom::Step, detail_area),
+            only(Zoom::Log, log_area),
+        );
+        let (roles_area, tasks_area) = if zoomed.is_some() {
+            (Rect::default(), Rect::default())
+        } else {
+            (roles_area, tasks_area)
+        };
+        self.draw_log(frame, log_area, hits, tr);
 
         let items: Vec<ListItem> = self
             .tasks
@@ -865,7 +910,7 @@ impl TasksTab {
             let empty = Paragraph::new(empty)
                 .block(panel(tr.t("tasks.title"), false))
                 .wrap(Wrap { trim: false });
-            frame.render_widget(empty, right);
+            frame.render_widget(empty, if zoomed.is_some() { area } else { right });
             self.draw_input(frame, input_area, hits, tr);
             return;
         };
@@ -884,6 +929,7 @@ impl TasksTab {
                 ("failures", &failures),
             ],
         );
+        let title = self.zoom_title(Zoom::Steps, &title, steps_area, hits);
         let items: Vec<ListItem> = task.steps.iter().map(step_item).collect();
         draw_list(
             frame,
@@ -914,6 +960,7 @@ impl TasksTab {
                 Vec::new(),
             ),
         };
+        let title = self.zoom_title(Zoom::Step, &title, detail_area, hits);
         let block = panel(&title, false);
         let inner = block.inner(detail_area);
         // Where each link is on the screen, after wrapping and scrolling.
@@ -1167,7 +1214,31 @@ impl TasksTab {
     }
 
     /// What the agent prints, the latest lines at the bottom.
-    fn draw_log(&self, frame: &mut Frame, area: Rect, tr: &I18n) {
+    /// `title` with ⤢ (or ⤡ when shown over the whole tab); a click on it
+    /// toggles that.
+    fn zoom_title(&self, zoom: Zoom, title: &str, area: Rect, hits: &mut Hits) -> String {
+        let mark = if self.zoomed() == Some(zoom) {
+            '⤡'
+        } else {
+            '⤢'
+        };
+        let title = format!(" {mark} {} ", title.trim());
+        if area.height > 0 {
+            let width = u16::try_from(title.chars().count()).unwrap_or(u16::MAX);
+            hits.add(
+                Rect::new(
+                    area.x + 1,
+                    area.y,
+                    width.min(area.width.saturating_sub(2)),
+                    1,
+                ),
+                Target::Button(ButtonId::TaskZoom(zoom)),
+            );
+        }
+        title
+    }
+
+    fn draw_log(&self, frame: &mut Frame, area: Rect, hits: &mut Hits, tr: &I18n) {
         if area.height == 0 {
             return;
         }
@@ -1179,6 +1250,7 @@ impl TasksTab {
             (Some(_), None) => tr.f("tasks.log_running", &[("task", &"…")]),
             (None, _) => tr.t("tasks.log_title").to_string(),
         };
+        let title = self.zoom_title(Zoom::Log, &title, area, hits);
         let rows = usize::from(area.height.saturating_sub(2));
         let lines: Vec<Line> = self
             .log

@@ -612,6 +612,14 @@ impl App {
                     tasks.menu = None;
                 }
             }
+            KeyCode::Esc
+                if self.tab == Tab::Tasks
+                    && self.tasks.as_ref().is_some_and(|t| t.zoom.is_some()) =>
+            {
+                if let Some(tasks) = &mut self.tasks {
+                    tasks.zoom = None;
+                }
+            }
             KeyCode::Char('q') | KeyCode::Esc if running => {
                 let key = if self.generating() {
                     "retro.quit_running"
@@ -2303,6 +2311,11 @@ impl App {
                 if let Some(skills) = &mut self.skills {
                     let action = skills.press(id);
                     self.skill_action(action);
+                }
+            }
+            ButtonId::TaskZoom(zoom) => {
+                if let Some(tasks) = &mut self.tasks {
+                    tasks.toggle_zoom(zoom);
                 }
             }
             ButtonId::TaskFile(index) => {

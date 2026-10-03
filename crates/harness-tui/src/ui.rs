@@ -89,6 +89,8 @@ pub enum ButtonId {
     SkillMark(usize),
     /// A link in «Files» of the step on the Tasks tab.
     TaskFile(usize),
+    /// The title of a window of the Tasks tab: over the whole tab, or back.
+    TaskZoom(crate::tasks::Zoom),
     /// A role of the MCP tab's selector, an index into `skills_tab::ROLES`.
     McpRole(usize),
     /// Gives the selected MCP server to the role, or takes it away.
