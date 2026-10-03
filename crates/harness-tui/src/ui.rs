@@ -30,6 +30,8 @@ pub enum ListId {
     Steps,
     /// «Files» of the selected step on the Tasks tab.
     Files,
+    /// The files the last run wrote, under the live log.
+    Results,
     Projects,
     Roles,
     Folders,

@@ -2214,3 +2214,65 @@ fn files_of_a_step_open_in_zed_with_a_click() {
     assert_eq!(app.message, None);
     assert!(app.tasks.as_ref().unwrap().open.is_none());
 }
+
+/// The architect writes a design; the developer then approves.
+fn design_team(
+    _: &harness_core::config::Config,
+    _: &Path,
+) -> Result<harness_agents::Team, harness_agents::build::BuildError> {
+    use harness_agents::{AnyAgent, MockAgent, MockStep, Team};
+    let design = MockStep::finish_writing(
+        Verdict::Approved,
+        NextStep::To(Role::Human),
+        &[("docs/design.md", "# Design\n")],
+    );
+    Ok(Team::new().with(
+        Role::Architect,
+        AnyAgent::Mock(MockAgent::new().then(Role::Architect, design)),
+    ))
+}
+
+#[test]
+fn after_a_run_the_files_it_wrote_open_from_the_log() {
+    let env = Env::new();
+    let (root, mut app) = empty_project(&env);
+    app.builder = design_team;
+    app.viewer = |_| Some(std::process::Command::new("true"));
+    click(&mut app, "Write here");
+    type_text(&mut app, "Design a parser");
+    send(&mut app);
+    wait(&mut app);
+
+    let text = screen(&mut app);
+    assert!(
+        text.contains("Result · click a file to open it in Zed:"),
+        "{text}"
+    );
+    let results: Vec<String> = app
+        .tasks
+        .as_ref()
+        .unwrap()
+        .results
+        .iter()
+        .map(|r| r.shown.clone())
+        .collect();
+    assert_eq!(results, ["docs/design.md", "notes.md (architect)"]);
+
+    // The line in the log is a link: a click opens the design.
+    let (x, y) = find(&text, "↗ created");
+    app.on_mouse(MouseEvent {
+        kind: MouseEventKind::Down(MouseButton::Left),
+        column: x + 14,
+        row: y,
+        modifiers: KeyModifiers::NONE,
+    });
+    assert_eq!(
+        app.tasks.as_ref().unwrap().open,
+        Some(root.join("docs/design.md"))
+    );
+    app.open_task_file();
+    assert_eq!(
+        app.message,
+        Some(("Opened in Zed: docs/design.md".to_string(), false))
+    );
+}

@@ -8,7 +8,9 @@ use std::process::Command;
 use std::sync::Mutex;
 
 use harness_core::agent::{AgentOutcome, AgentRunner, RoleJob};
-use harness_core::handoff::{Handoff, Issue, NextStep, Role, Severity, Verdict};
+use harness_core::handoff::{
+    FileAction, FileChange, Handoff, Issue, NextStep, Role, Severity, Verdict,
+};
 
 /// What the mock does the next time a given role runs.
 #[derive(Debug, Clone)]
@@ -164,7 +166,7 @@ impl AgentRunner for MockAgent {
                 files,
             } => {
                 let written = write_files(&job.project_dir, &files)
-                    .and_then(|()| write_result(job, verdict, next, &summary));
+                    .and_then(|()| write_result(job, verdict, next, &summary, &files));
                 AgentOutcome {
                     success: written.is_ok(),
                     usage_limit_reached: false,
@@ -192,6 +194,7 @@ fn write_result(
     verdict: Verdict,
     next: NextStep,
     summary: &str,
+    files: &[(String, String)],
 ) -> std::io::Result<()> {
     let issues = if verdict == Verdict::Rejected {
         vec![Issue {
@@ -211,7 +214,13 @@ fn write_result(
         next_role: next,
         summary: summary.to_string(),
         skills_used: vec![],
-        files: vec![],
+        files: files
+            .iter()
+            .map(|(path, _)| FileChange {
+                path: path.clone(),
+                action: FileAction::Created,
+            })
+            .collect(),
         issues,
     };
     let json = serde_json::to_string_pretty(&handoff)?;

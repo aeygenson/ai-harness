@@ -35,6 +35,7 @@ artifacts = " Файлы · клик: открыть в Zed "
 artifacts_empty = "Этот шаг не создал и не изменил файлов"
 file_opened = "Открыто в Zed: {path}"
 file_missing = "{path} больше нет"
+results = "Результат · щёлкните файл, чтобы открыть в Zed:"
 
 input_title = " Сообщение "
 input_hint = "Пишите здесь (клик, Enter или Tab), выберите, кому, и нажмите «Отправить»"

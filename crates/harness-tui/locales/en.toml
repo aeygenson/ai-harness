@@ -42,6 +42,7 @@ artifacts = " Files · click: open in Zed "
 artifacts_empty = "This step created or changed no files"
 file_opened = "Opened in Zed: {path}"
 file_missing = "{path} is not there any more"
+results = "Result · click a file to open it in Zed:"
 
 input_title = " Message "
 input_hint = "Write here (click, Enter or Tab), choose whom it goes to, press «Send»"

@@ -1,6 +1,8 @@
 //! The Tasks tab: tasks, the steps of the selected task, and one step in full.
 //! Next to the step, «Files»: what it created or changed, its notes and its
-//! log; a click opens one in Zed. At the bottom a box to act: a text of several lines, whom it goes to,
+//! log; a click opens one in Zed. When the roles finish, the files they
+//! wrote are listed under the live log the same way. At the bottom a box to
+//! act: a text of several lines, whom it goes to,
 //! and «Send».
 //!
 //! ```text
@@ -141,6 +143,11 @@ pub struct TasksTab {
     pub(crate) running: Option<Running>,
     /// What the agent printed in the last run.
     pub(crate) log: VecDeque<String>,
+    /// The files the last run wrote, under the log; a click opens one.
+    pub(crate) results: Vec<Artifact>,
+    /// The task and its number of steps when the run started: the steps
+    /// after these are the run's.
+    run_from: Option<(String, usize)>,
 }
 
 impl TasksTab {
@@ -168,6 +175,8 @@ impl TasksTab {
             run: None,
             running: None,
             log: VecDeque::new(),
+            results: Vec::new(),
+            run_from: None,
         };
         tab.reload();
         tab.step = tab.last_step();
@@ -558,6 +567,11 @@ impl TasksTab {
             (Choice::Continue(_), Some((task, _))) => Request::Continue(task),
         };
         self.log.clear();
+        self.results.clear();
+        self.run_from = match self.choice {
+            Choice::NewTask => None,
+            _ => self.current().map(|t| (t.id.clone(), t.steps.len())),
+        };
         if let (Some(role), Some((agent, model, effort))) = (self.target(), self.run_choice()) {
             let default = tr.t("tasks.default");
             let line = tr.f(
@@ -597,6 +611,7 @@ impl TasksTab {
         let (text, problem) = match result {
             Ok(outcome) => {
                 self.show_task(&outcome.task);
+                self.collect_results();
                 outcome_text(&outcome, tr)
             }
             Err(error) => {
@@ -648,19 +663,7 @@ impl TasksTab {
                 .join("task.md");
             return vec![artifact("task", task_md)];
         };
-        let mut files: Vec<Artifact> = Vec::new();
-        for file in &step.handoff.files {
-            let kind = match file.action {
-                FileAction::Created => "created",
-                FileAction::Modified => "modified",
-                FileAction::Deleted => "deleted",
-                FileAction::Read => continue,
-            };
-            let path = self.root.join(&file.path);
-            if !files.iter().any(|f| f.path == path) {
-                files.push(artifact(kind, path));
-            }
-        }
+        let mut files = written(&self.root, step);
         // The step's own files: their name is enough, the folder is long.
         for (kind, name) in [("notes", "notes.md"), ("log", "agent.log")] {
             let path = step.dir.join(name);
@@ -673,6 +676,39 @@ impl TasksTab {
             }
         }
         files
+    }
+
+    /// The files the steps of the finished run created or changed, and the
+    /// notes of its last step: what Lisa wants to look at next.
+    fn collect_results(&mut self) {
+        self.results.clear();
+        let Some(task) = self.current() else {
+            return;
+        };
+        let from = match &self.run_from {
+            Some((id, steps)) if *id == task.id => *steps,
+            _ => 0,
+        };
+        let mut results: Vec<Artifact> = Vec::new();
+        let new_steps = task.steps.get(from..).unwrap_or_default();
+        for step in new_steps {
+            for file in written(&self.root, step) {
+                if file.kind != "deleted" && !results.iter().any(|r| r.path == file.path) {
+                    results.push(file);
+                }
+            }
+        }
+        if let Some(step) = new_steps.last() {
+            let notes = step.dir.join("notes.md");
+            if notes.is_file() {
+                results.push(Artifact {
+                    kind: "notes",
+                    shown: format!("notes.md ({})", role_name(step.handoff.role)),
+                    path: notes,
+                });
+            }
+        }
+        self.results = results;
     }
 
     /// Asks the app to open the file at `index` of «Files».
@@ -736,6 +772,12 @@ impl TasksTab {
     /// A click on a row of the task or step list; a click on a file opens it.
     pub fn on_click(&mut self, list: ListId, index: usize) {
         match list {
+            ListId::Results => {
+                if let Some(file) = self.results.get(index) {
+                    self.open = Some(file.path.clone());
+                }
+                return;
+            }
             ListId::Files => {
                 self.focus = Focus::Files;
                 self.open_file(index);
@@ -767,7 +809,8 @@ impl TasksTab {
             ListId::Tasks => self.focus = Focus::Tasks,
             ListId::Steps => self.focus = Focus::Steps,
             ListId::Files => self.focus = Focus::Files,
-            ListId::Projects
+            ListId::Results
+            | ListId::Projects
             | ListId::Roles
             | ListId::Folders
             | ListId::Choices
@@ -847,7 +890,7 @@ impl TasksTab {
         let [detail_area, files_area] =
             Layout::horizontal([Constraint::Percentage(62), Constraint::Percentage(38)])
                 .areas(detail_area);
-        self.draw_log(frame, log_area, tr);
+        self.draw_log(frame, log_area, hits, tr);
 
         let items: Vec<ListItem> = self
             .tasks
@@ -1203,8 +1246,9 @@ impl TasksTab {
         );
     }
 
-    /// What the agent prints, the latest lines at the bottom.
-    fn draw_log(&self, frame: &mut Frame, area: Rect, tr: &I18n) {
+    /// What the agent prints, the latest lines at the bottom; after the run
+    /// the files it wrote, a click opens one in Zed.
+    fn draw_log(&self, frame: &mut Frame, area: Rect, hits: &mut Hits, tr: &I18n) {
         if area.height == 0 {
             return;
         }
@@ -1216,18 +1260,71 @@ impl TasksTab {
             (Some(_), None) => tr.f("tasks.log_running", &[("task", &"…")]),
             (None, _) => tr.t("tasks.log_title").to_string(),
         };
-        let rows = usize::from(area.height.saturating_sub(2));
-        let lines: Vec<Line> = self
+        let block = panel(&title, self.running.is_some());
+        let inner = block.inner(area);
+        let rows = usize::from(inner.height);
+        // The files keep at least two rows for the log above them.
+        let shown_results = if self.results.is_empty() {
+            0
+        } else {
+            self.results.len().min(rows.saturating_sub(3))
+        };
+        let header = usize::from(shown_results > 0);
+        let log_rows = rows - shown_results - header;
+        let mut lines: Vec<Line> = self
             .log
             .iter()
-            .skip(self.log.len().saturating_sub(rows))
+            .skip(self.log.len().saturating_sub(log_rows))
             .map(|l| Line::from(l.clone()))
             .collect();
-        frame.render_widget(
-            Paragraph::new(lines).block(panel(&title, self.running.is_some())),
-            area,
-        );
+        if shown_results > 0 {
+            lines.push(Line::styled(
+                format!("── {}", tr.t("tasks.results")),
+                theme::bold(),
+            ));
+            let top = inner.y + u16::try_from(lines.len()).unwrap_or(u16::MAX);
+            for file in self.results.iter().take(shown_results) {
+                lines.push(Line::from(vec![
+                    Span::styled(format!("  ↗ {:<9}", file.kind), theme::dim()),
+                    Span::styled(
+                        file.shown.clone(),
+                        theme::accent().add_modifier(Modifier::UNDERLINED),
+                    ),
+                ]));
+            }
+            let height = u16::try_from(shown_results).unwrap_or(u16::MAX);
+            hits.add(
+                Rect::new(inner.x, top, inner.width, height),
+                Target::List {
+                    list: ListId::Results,
+                    first: 0,
+                },
+            );
+        }
+        frame.render_widget(Paragraph::new(lines).block(block), area);
     }
+}
+
+/// What `step` created, changed or deleted; files it only read are left out.
+fn written(root: &Path, step: &Step) -> Vec<Artifact> {
+    let mut files: Vec<Artifact> = Vec::new();
+    for file in &step.handoff.files {
+        let kind = match file.action {
+            FileAction::Created => "created",
+            FileAction::Modified => "modified",
+            FileAction::Deleted => "deleted",
+            FileAction::Read => continue,
+        };
+        let path = root.join(&file.path);
+        if !files.iter().any(|f| f.path == path) {
+            files.push(Artifact {
+                kind,
+                shown: file.path.clone(),
+                path,
+            });
+        }
+    }
+    files
 }
 
 /// Is it `role`'s turn in the task, or is Lisa's answer for `role` awaited?
