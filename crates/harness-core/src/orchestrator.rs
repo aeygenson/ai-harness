@@ -16,7 +16,7 @@ use crate::handoff::{Handoff, NextStep, Role, Verdict};
 use crate::permissions;
 use crate::prompt;
 use crate::skills::Skills;
-use crate::store::{StoreError, TaskStore};
+use crate::store::{self, StoreError, TaskStore};
 use crate::task::{Stage, TaskState, WaitReason};
 
 /// How many times one role may try before the harness gives up and asks Lisa.
@@ -57,10 +57,33 @@ pub enum RunError {
     Store(#[from] StoreError),
     #[error(transparent)]
     Git(#[from] GitError),
+    /// An unfinished task already has this text: a second one is not created.
+    #[error(
+        "{task} already has this text and is not done ({stage}); continue it or change the text"
+    )]
+    SameTask { task: String, stage: String },
 }
 
-/// Creates a new task in `<project>/.harness/runs/` and commits it.
+/// Creates a new task in `<project>/.harness/runs/` and commits it. If an
+/// unfinished task already has the same text (a message sent twice), nothing
+/// is created and the error names that task.
 pub fn create_task(
+    repo: &Repo,
+    task_id: &str,
+    description: &str,
+    max_rounds: u32,
+) -> Result<(TaskStore, TaskState), RunError> {
+    if let Some((task, stage)) = same_task(&repo.runs_dir(), description)? {
+        return Err(RunError::SameTask {
+            task,
+            stage: crate::retro::stage_text(stage),
+        });
+    }
+    create_task_anyway(repo, task_id, description, max_rounds)
+}
+
+/// Like [`create_task`], but also when an unfinished task has the same text.
+pub fn create_task_anyway(
     repo: &Repo,
     task_id: &str,
     description: &str,
@@ -75,6 +98,27 @@ pub fn create_task(
     let (store, state) = TaskStore::create(&runs, task_id, description, max_rounds)?;
     repo.commit_paths(&[store.dir()], &format!("{task_id}: new task"))?;
     Ok((store, state))
+}
+
+/// The unfinished task whose text is `description`, and its stage. Spaces
+/// and line breaks do not count: a pasted copy of the same text matches.
+pub fn same_task(runs: &Path, description: &str) -> Result<Option<(String, Stage)>, StoreError> {
+    if !runs.is_dir() {
+        return Ok(None);
+    }
+    let wanted = words(description);
+    for id in store::task_ids(runs)? {
+        let (task, state) = TaskStore::open(runs, &id)?;
+        if state.stage != Stage::Done && words(&task.description()?) == wanted {
+            return Ok(Some((id, state.stage)));
+        }
+    }
+    Ok(None)
+}
+
+/// The words of `text`, so that only spaces and line breaks may differ.
+pub fn words(text: &str) -> Vec<&str> {
+    text.split_whitespace().collect()
 }
 
 /// Runs roles until the task is done or someone has to look at it.
@@ -302,4 +346,47 @@ fn commit_message(handoff: &Handoff) -> String {
         handoff.round,
         format!("{:?}", handoff.role).to_lowercase(),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_same_text_does_not_make_a_second_unfinished_task() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = Repo::init(dir.path()).unwrap();
+        create_task(&repo, "task-001", "Fix the demo:\n  two defects.", 5).unwrap();
+
+        // A copy that differs only in spaces and line breaks is the same task.
+        let error = create_task(&repo, "task-002", "Fix the demo: two defects.\n", 5).unwrap_err();
+        assert!(
+            matches!(&error, RunError::SameTask { task, .. } if task == "task-001"),
+            "{error:?}"
+        );
+        assert!(
+            error.to_string().contains("task-001 already has this text"),
+            "{error}"
+        );
+        assert!(!repo.runs_dir().join("task-002").exists());
+
+        // Another text is a new task; on purpose, the same text too.
+        create_task(&repo, "task-002", "Fix the demo: one defect.", 5).unwrap();
+        create_task_anyway(&repo, "task-003", "Fix the demo: two defects.", 5).unwrap();
+
+        // A finished task may be given again.
+        let runs = repo.runs_dir();
+        for id in ["task-001", "task-003"] {
+            std::fs::write(
+                runs.join(id).join("state.json"),
+                format!(r#"{{"task_id":"{id}","round":1,"max_rounds":5,"stage":"done"}}"#),
+            )
+            .unwrap();
+        }
+        assert_eq!(
+            same_task(&runs, "Fix the demo: two defects.").unwrap(),
+            None
+        );
+        create_task(&repo, "task-004", "Fix the demo: two defects.", 5).unwrap();
+    }
 }

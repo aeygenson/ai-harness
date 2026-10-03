@@ -239,6 +239,9 @@ enum TaskCommand {
         description: Option<String>,
         #[arg(long, conflicts_with = "description")]
         file: Option<PathBuf>,
+        /// Create it even if an unfinished task has the same text.
+        #[arg(long)]
+        allow_duplicate: bool,
     },
 }
 
@@ -315,6 +318,7 @@ async fn main() -> Result<()> {
                     task_id,
                     description,
                     file,
+                    allow_duplicate,
                 },
         } => {
             let description = match (description, file) {
@@ -323,7 +327,7 @@ async fn main() -> Result<()> {
                     .with_context(|| format!("cannot read {}", file.display()))?,
                 (None, None) => bail!("give a description or --file"),
             };
-            new_task(project, &task_id, &description)
+            new_task(project, &task_id, &description, allow_duplicate)
         }
         Command::Run { task_id } => run(project, &task_id).await,
         Command::Approve { task_id, to, notes } => {
@@ -673,10 +677,15 @@ fn login_antigravity(dir: &Path) -> Result<()> {
     Ok(())
 }
 
-fn new_task(project: &Path, task_id: &str, description: &str) -> Result<()> {
+fn new_task(project: &Path, task_id: &str, description: &str, allow_duplicate: bool) -> Result<()> {
     let repo = open_repo(project)?;
     let config = Config::load(&repo.root().join(HARNESS_DIR))?;
-    let (store, _) = orchestrator::create_task(&repo, task_id, description, config.max_rounds)?;
+    let create = if allow_duplicate {
+        orchestrator::create_task_anyway
+    } else {
+        orchestrator::create_task
+    };
+    let (store, _) = create(&repo, task_id, description, config.max_rounds)?;
     println!(
         "Created {}. Next: harness run {task_id}",
         store.dir().display()
@@ -934,7 +943,7 @@ mod tests {
         let repo = Repo::init(dir.path()).unwrap();
         init(dir.path()).unwrap();
         init(dir.path()).unwrap(); // a second time changes nothing
-        new_task(dir.path(), "task-001", "Build a parser").unwrap();
+        new_task(dir.path(), "task-001", "Build a parser", false).unwrap();
 
         assert!(repo.changed_files().unwrap().is_empty());
         let (_, state) = open_task(&repo, "task-001").unwrap();
@@ -947,7 +956,7 @@ mod tests {
         let repo = Repo::init(dir.path()).unwrap();
         assert!(retro(dir.path(), None, false).await.is_err()); // no tasks yet
         init(dir.path()).unwrap();
-        new_task(dir.path(), "task-001", "Build a parser").unwrap();
+        new_task(dir.path(), "task-001", "Build a parser", false).unwrap();
 
         retro(dir.path(), Some("task-001"), false).await.unwrap();
         retro(dir.path(), None, false).await.unwrap();
@@ -965,7 +974,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let repo = Repo::init(dir.path()).unwrap();
         init(dir.path()).unwrap();
-        new_task(dir.path(), "task-001", "Build a parser").unwrap();
+        new_task(dir.path(), "task-001", "Build a parser", false).unwrap();
         retro(dir.path(), Some("task-001"), false).await.unwrap();
         assert!(retro_show(dir.path(), "1").is_err(), "no proposals yet");
 

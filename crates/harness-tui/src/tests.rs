@@ -2267,3 +2267,31 @@ fn a_click_on_a_title_shows_the_window_over_the_whole_tab() {
     assert!(text.contains("cargo test: ok"), "{text}");
     assert!(!text.contains("╭ Roles "), "{text}");
 }
+
+#[test]
+fn the_same_task_sent_twice_is_not_started_again() {
+    let env = Env::new();
+    let (root, mut app) = empty_project(&env);
+    click(&mut app, "Write here");
+    type_text(&mut app, "Fix the demo");
+    send(&mut app);
+    wait(&mut app);
+    assert!(root.join(".harness/runs/task-001").is_dir());
+
+    // The same text again as a new task: refused, the text stays in the box.
+    let tasks = app.tasks.as_mut().unwrap();
+    tasks.choice = tasks::Choice::NewTask;
+    tasks.focus_input();
+    type_text(&mut app, "Fix  the\ndemo ");
+    send(&mut app);
+    let (text, problem) = app.message.clone().unwrap();
+    assert!(problem, "{text}");
+    assert!(
+        text.starts_with("task-001 already has this text and is not done (waiting"),
+        "{text}"
+    );
+    let tasks = app.tasks.as_ref().unwrap();
+    assert_eq!(tasks.input, "Fix  the\ndemo ");
+    assert!(!tasks.is_running());
+    assert!(!root.join(".harness/runs/task-002").exists());
+}
