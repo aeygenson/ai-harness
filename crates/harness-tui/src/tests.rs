@@ -2135,3 +2135,82 @@ fn a_retrospective_is_generated_edited_and_its_proposals_applied() {
     click(&mut app, "001  ");
     assert!(screen(&mut app).contains("Lesson: write tests first."));
 }
+
+#[test]
+fn files_of_a_step_open_in_zed_with_a_click() {
+    let env = Env::new();
+    let root = env.path("test");
+    project(&root);
+    // The developer's step created one file and changed another.
+    let (store, mut state) = TaskStore::open(&root.join(".harness/runs"), "task-001").unwrap();
+    let mut developer = handoff(
+        Role::Developer,
+        Verdict::Approved,
+        NextStep::To(Role::Tester),
+        "Empty input fixed",
+    );
+    developer.round = 2;
+    developer.files = vec![
+        harness_core::handoff::FileChange {
+            path: "src/parser.rs".into(),
+            action: harness_core::handoff::FileAction::Modified,
+        },
+        harness_core::handoff::FileChange {
+            path: "docs/parser.md".into(),
+            action: harness_core::handoff::FileAction::Created,
+        },
+        harness_core::handoff::FileChange {
+            path: "Cargo.toml".into(),
+            action: harness_core::handoff::FileAction::Read,
+        },
+    ];
+    store.record(&mut state, &developer, "Fixed.").unwrap();
+    fs::create_dir_all(root.join("docs")).unwrap();
+    fs::write(root.join("docs/parser.md"), "# Parser\n").unwrap();
+
+    let mut app = env.app(&root);
+    // Zed is not started in the tests: a command that does nothing.
+    app.viewer = |_| Some(std::process::Command::new("true"));
+    let screen_now = screen(&mut app);
+    assert!(
+        screen_now.contains("Files · click: open in Zed"),
+        "{screen_now}"
+    );
+    assert!(screen_now.contains("docs/parser.md"), "{screen_now}");
+    // Files that were only read are not listed.
+    assert!(!screen_now.contains("read     Cargo.toml"), "{screen_now}");
+    let tasks = app.tasks.as_ref().unwrap();
+    let kinds: Vec<&str> = tasks.artifacts().iter().map(|a| a.kind).collect();
+    assert_eq!(kinds, ["modified", "created", "notes"]);
+
+    click(&mut app, "docs/parser.md");
+    app.open_task_file();
+    assert_eq!(
+        app.message,
+        Some(("Opened in Zed: docs/parser.md".to_string(), false))
+    );
+    assert_eq!(app.tasks.as_ref().unwrap().file, 1);
+
+    // A file that is not there any more is not opened.
+    click(&mut app, "src/parser.rs");
+    app.open_task_file();
+    assert_eq!(
+        app.message,
+        Some(("src/parser.rs is not there any more".to_string(), true))
+    );
+
+    // From the keyboard: Tab from the steps to «Files», ↓ to the notes,
+    // Enter. Without Zed the file goes to the editor in the terminal.
+    app.viewer = |_| None;
+    click(&mut app, "Empty input fixed");
+    key(&mut app, KeyCode::Tab);
+    key(&mut app, KeyCode::Down);
+    key(&mut app, KeyCode::Down);
+    key(&mut app, KeyCode::Enter);
+    app.open_task_file();
+    let job = app.edit.take().expect("the notes in the editor");
+    assert!(job.path.ends_with("notes.md"), "{job:?}");
+    app.finish_edit(&job, Ok(()));
+    assert_eq!(app.message, None);
+    assert!(app.tasks.as_ref().unwrap().open.is_none());
+}

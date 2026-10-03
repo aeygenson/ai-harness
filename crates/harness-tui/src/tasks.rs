@@ -1,5 +1,6 @@
 //! The Tasks tab: tasks, the steps of the selected task, and one step in full.
-//! At the bottom a box to act: a text of several lines, whom it goes to,
+//! Next to the step, «Files»: what it created or changed, its notes and its
+//! log; a click opens one in Zed. At the bottom a box to act: a text of several lines, whom it goes to,
 //! and «Send».
 //!
 //! ```text
@@ -27,7 +28,7 @@ use std::path::{Path, PathBuf};
 use anyhow::Result;
 use harness_core::config::{Config, RoleConfig, AGENTS};
 use harness_core::git::HARNESS_DIR;
-use harness_core::handoff::{NextStep, Role, Severity, Verdict};
+use harness_core::handoff::{FileAction, NextStep, Role, Severity, Verdict};
 use harness_core::models::{self, ModelList};
 use harness_core::orchestrator::StopReason;
 use harness_core::retro::stage_text;
@@ -79,10 +80,22 @@ struct TaskView {
     failures: usize,
 }
 
+/// A file the selected step left, as «Files» lists it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Artifact {
+    /// `created`, `modified`, `deleted`; `notes` and `log` of the step itself.
+    pub kind: &'static str,
+    /// The path as shown: from the project folder.
+    pub shown: String,
+    pub path: PathBuf,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Focus {
     Tasks,
     Steps,
+    /// «Files» of the selected step.
+    Files,
     /// Typing the message.
     Input,
 }
@@ -107,6 +120,10 @@ pub struct TasksTab {
     pub problem: Option<String>,
     pub(crate) task: usize,
     pub(crate) step: usize,
+    /// The selected row of «Files».
+    pub(crate) file: usize,
+    /// A file to open in Zed, taken by the app.
+    pub(crate) open: Option<PathBuf>,
     focus: Focus,
     pub(crate) scroll: u16,
     /// The message being written.
@@ -140,6 +157,8 @@ impl TasksTab {
             problem: None,
             task: 0,
             step: 0,
+            file: 0,
+            open: None,
             focus: Focus::Tasks,
             scroll: 0,
             input: String::new(),
@@ -218,6 +237,7 @@ impl TasksTab {
             // Another task is shown now: at its latest step.
             self.step = usize::MAX;
             self.scroll = 0;
+            self.file = 0;
         }
         self.task = at.unwrap_or(0);
         self.step = self.step.min(self.last_step());
@@ -251,6 +271,7 @@ impl TasksTab {
             self.task = index;
             self.step = self.last_step();
             self.scroll = 0;
+            self.file = 0;
             self.sync_choice();
         }
     }
@@ -602,6 +623,66 @@ impl TasksTab {
             .map_or(0, |task| task.steps.len().saturating_sub(1))
     }
 
+    /// What «Files» lists for the selected step: the files it created,
+    /// changed or deleted, then its notes and log. A task without steps yet
+    /// shows its `task.md`.
+    pub fn artifacts(&self) -> Vec<Artifact> {
+        let Some(task) = self.current() else {
+            return Vec::new();
+        };
+        let artifact = |kind, path: PathBuf| Artifact {
+            kind,
+            shown: path
+                .strip_prefix(&self.root)
+                .unwrap_or(&path)
+                .display()
+                .to_string(),
+            path,
+        };
+        let Some(step) = task.steps.get(self.step) else {
+            let task_md = self
+                .root
+                .join(HARNESS_DIR)
+                .join("runs")
+                .join(&task.id)
+                .join("task.md");
+            return vec![artifact("task", task_md)];
+        };
+        let mut files: Vec<Artifact> = Vec::new();
+        for file in &step.handoff.files {
+            let kind = match file.action {
+                FileAction::Created => "created",
+                FileAction::Modified => "modified",
+                FileAction::Deleted => "deleted",
+                FileAction::Read => continue,
+            };
+            let path = self.root.join(&file.path);
+            if !files.iter().any(|f| f.path == path) {
+                files.push(artifact(kind, path));
+            }
+        }
+        // The step's own files: their name is enough, the folder is long.
+        for (kind, name) in [("notes", "notes.md"), ("log", "agent.log")] {
+            let path = step.dir.join(name);
+            if path.is_file() {
+                files.push(Artifact {
+                    kind,
+                    shown: name.to_string(),
+                    path,
+                });
+            }
+        }
+        files
+    }
+
+    /// Asks the app to open the file at `index` of «Files».
+    fn open_file(&mut self, index: usize) {
+        if let Some(file) = self.artifacts().into_iter().nth(index) {
+            self.file = index;
+            self.open = Some(file.path);
+        }
+    }
+
     pub fn on_key(&mut self, key: KeyCode) {
         if self.focus == Focus::Input {
             match key {
@@ -624,12 +705,26 @@ impl TasksTab {
             KeyCode::Tab => {
                 self.focus = match self.focus {
                     Focus::Tasks => Focus::Steps,
-                    Focus::Steps | Focus::Input => Focus::Input,
+                    Focus::Steps => Focus::Files,
+                    Focus::Files | Focus::Input => Focus::Input,
                 }
             }
+            KeyCode::Enter | KeyCode::Char('o') if self.focus == Focus::Files => {
+                self.open_file(self.file)
+            }
             KeyCode::Enter => self.focus = Focus::Input,
-            KeyCode::Left | KeyCode::Char('h') => self.focus = Focus::Tasks,
-            KeyCode::Right | KeyCode::Char('l') => self.focus = Focus::Steps,
+            KeyCode::Left | KeyCode::Char('h') => {
+                self.focus = match self.focus {
+                    Focus::Files => Focus::Steps,
+                    _ => Focus::Tasks,
+                }
+            }
+            KeyCode::Right | KeyCode::Char('l') => {
+                self.focus = match self.focus {
+                    Focus::Tasks => Focus::Steps,
+                    _ => Focus::Files,
+                }
+            }
             KeyCode::Up | KeyCode::Char('k') => self.move_by(-1),
             KeyCode::Down | KeyCode::Char('j') => self.move_by(1),
             KeyCode::PageDown => self.scroll = self.scroll.saturating_add(10),
@@ -638,9 +733,14 @@ impl TasksTab {
         }
     }
 
-    /// A click on a row of the task or step list.
+    /// A click on a row of the task or step list; a click on a file opens it.
     pub fn on_click(&mut self, list: ListId, index: usize) {
         match list {
+            ListId::Files => {
+                self.focus = Focus::Files;
+                self.open_file(index);
+                return;
+            }
             ListId::Tasks if index < self.tasks.len() => {
                 self.focus = Focus::Tasks;
                 if index != self.task {
@@ -651,6 +751,9 @@ impl TasksTab {
             }
             ListId::Steps if index < self.current().map_or(0, |t| t.steps.len()) => {
                 self.focus = Focus::Steps;
+                if index != self.step {
+                    self.file = 0;
+                }
                 self.step = index;
             }
             _ => return,
@@ -663,6 +766,7 @@ impl TasksTab {
         match list {
             ListId::Tasks => self.focus = Focus::Tasks,
             ListId::Steps => self.focus = Focus::Steps,
+            ListId::Files => self.focus = Focus::Files,
             ListId::Projects
             | ListId::Roles
             | ListId::Folders
@@ -698,13 +802,22 @@ impl TasksTab {
                     self.task = task;
                     // A new task opens at its latest step.
                     self.step = self.last_step();
+                    self.file = 0;
                     self.sync_choice();
                 }
             }
             Focus::Input => {}
             Focus::Steps => {
                 let len = self.current().map_or(0, |t| t.steps.len());
-                self.step = moved(self.step, len);
+                let step = moved(self.step, len);
+                if step != self.step {
+                    self.step = step;
+                    self.file = 0;
+                }
+            }
+            Focus::Files => {
+                self.file = moved(self.file, self.artifacts().len());
+                return;
             }
         }
         self.scroll = 0;
@@ -731,6 +844,9 @@ impl TasksTab {
         };
         let [steps_area, detail_area] =
             Layout::vertical([Constraint::Percentage(40), Constraint::Percentage(60)]).areas(right);
+        let [detail_area, files_area] =
+            Layout::horizontal([Constraint::Percentage(62), Constraint::Percentage(38)])
+                .areas(detail_area);
         self.draw_log(frame, log_area, tr);
 
         let items: Vec<ListItem> = self
@@ -826,7 +942,41 @@ impl TasksTab {
                 .scroll((self.scroll, 0)),
             detail_area,
         );
+        self.draw_files(frame, files_area, hits, tr);
         self.draw_input(frame, input_area, hits, tr);
+    }
+
+    /// «Files» of the selected step; a click on one opens it in Zed.
+    fn draw_files(&self, frame: &mut Frame, area: Rect, hits: &mut Hits, tr: &I18n) {
+        let files = self.artifacts();
+        let items: Vec<ListItem> = if files.is_empty() {
+            vec![ListItem::new(Line::styled(
+                tr.t("tasks.artifacts_empty").to_string(),
+                theme::dim(),
+            ))]
+        } else {
+            files
+                .iter()
+                .map(|file| {
+                    let there = file.path.is_file();
+                    let style = if there { Style::new() } else { theme::dim() };
+                    ListItem::new(Line::from(vec![
+                        Span::styled(format!("{:<9}", file.kind), theme::dim()),
+                        Span::styled(file.shown.clone(), style),
+                    ]))
+                })
+                .collect()
+        };
+        draw_list(
+            frame,
+            hits,
+            area,
+            ListId::Files,
+            tr.t("tasks.artifacts"),
+            items,
+            self.file.min(files.len().saturating_sub(1)),
+            self.focus == Focus::Files,
+        );
     }
 
     /// The agents of the roles; a click on a role filters the tasks.
