@@ -28,6 +28,8 @@ pub enum Target {
 pub enum ListId {
     Tasks,
     Steps,
+    /// «Files» of the selected step on the Tasks tab.
+    Files,
     Projects,
     Roles,
     Folders,

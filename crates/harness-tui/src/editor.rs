@@ -6,7 +6,7 @@
 
 use std::env;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
 
 /// The command that edits `file` and returns when the editor is closed.
 pub fn command(file: &Path) -> Result<Command, String> {
@@ -21,16 +21,7 @@ fn command_with(
     home: Option<&Path>,
     var: &dyn Fn(&str) -> Option<String>,
 ) -> Result<Command, String> {
-    let find = |program: &str| {
-        env::split_paths(path)
-            .map(|dir| dir.join(program))
-            .find(|p| p.is_file())
-    };
-    let zed = find("zed").or_else(|| {
-        home.map(|h| h.join(".local/bin/zed"))
-            .filter(|p| p.is_file())
-    });
-    if let Some(zed) = zed {
+    if let Some(zed) = find_zed(path, home) {
         let mut command = Command::new(zed);
         command.arg("--wait").arg(file);
         return Ok(command);
@@ -44,12 +35,52 @@ fn command_with(
             return Ok(command);
         }
     }
-    if let Some(kate) = find("kate") {
+    if let Some(kate) = find(path, "kate") {
         let mut command = Command::new(kate);
         command.arg("--block").arg(file);
         return Ok(command);
     }
     Err("no editor found: install Zed, or set $EDITOR".to_string())
+}
+
+/// `program` in one of the folders of `path`.
+fn find(path: &std::ffi::OsStr, program: &str) -> Option<PathBuf> {
+    env::split_paths(path)
+        .map(|dir| dir.join(program))
+        .find(|p| p.is_file())
+}
+
+/// Zed, from `path` or `~/.local/bin`.
+fn find_zed(path: &std::ffi::OsStr, home: Option<&Path>) -> Option<PathBuf> {
+    find(path, "zed").or_else(|| {
+        home.map(|h| h.join(".local/bin/zed"))
+            .filter(|p| p.is_file())
+    })
+}
+
+/// The command that opens `file` in Zed and returns at once; `None` without Zed.
+pub fn viewer(file: &Path) -> Option<Command> {
+    let home = env::var_os("HOME").map(PathBuf::from);
+    let path = env::var_os("PATH").unwrap_or_default();
+    viewer_with(file, &path, home.as_deref())
+}
+
+fn viewer_with(file: &Path, path: &std::ffi::OsStr, home: Option<&Path>) -> Option<Command> {
+    let mut command = Command::new(find_zed(path, home)?);
+    command.arg(file);
+    Some(command)
+}
+
+/// Opens `file` in Zed without waiting. `Err` says why it did not work.
+pub fn view(mut command: Command) -> Result<(), String> {
+    let program = command.get_program().to_string_lossy().into_owned();
+    command
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .map(drop)
+        .map_err(|e| format!("cannot start {program}: {e}"))
 }
 
 /// Edits `file` and waits. `Err` says why it did not work.
@@ -96,5 +127,20 @@ mod tests {
         let command = command_with(file, empty, Some(home.path()), &vim).unwrap();
         let zed = bin.join("zed").display().to_string();
         assert_eq!(args(&command), [zed.as_str(), "--wait", "/p/skill.md"]);
+    }
+
+    #[test]
+    fn zed_views_without_waiting() {
+        let home = tempfile::tempdir().unwrap();
+        let file = Path::new("/p/docs/design.md");
+        let empty = std::ffi::OsStr::new("");
+        assert!(viewer_with(file, empty, Some(home.path())).is_none());
+
+        let bin = home.path().join(".local/bin");
+        fs::create_dir_all(&bin).unwrap();
+        fs::write(bin.join("zed"), "").unwrap();
+        let command = viewer_with(file, empty, Some(home.path())).unwrap();
+        let zed = bin.join("zed").display().to_string();
+        assert_eq!(args(&command), [zed.as_str(), "/p/docs/design.md"]);
     }
 }
