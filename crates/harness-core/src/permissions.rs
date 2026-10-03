@@ -49,7 +49,8 @@ pub fn rule_for(role: Role) -> WriteRule {
 
 /// Can `role` change the file at `path` (relative to the project, with `/`)?
 pub fn may_write(role: Role, path: &str) -> bool {
-    let parts: Vec<&str> = path.split('/').filter(|p| !p.is_empty()).collect();
+    // Git always writes `/`; an agent on Windows may write `\` too.
+    let parts: Vec<&str> = path.split(['/', '\\']).filter(|p| !p.is_empty()).collect();
     if parts.contains(&"..") {
         return false;
     }
@@ -123,6 +124,7 @@ mod tests {
     fn tricky_paths_are_refused() {
         assert!(!may_write(Role::Developer, "../outside.txt"));
         assert!(!may_write(Role::Tester, "tests/../src/main.rs"));
+        assert!(!may_write(Role::Tester, "tests\\..\\src\\main.rs"));
     }
 
     #[test]

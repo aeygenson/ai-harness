@@ -36,10 +36,5 @@ jobs:
         run: cargo fmt --all -- --check
       - name: Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
-      # On Windows the harness builds but does not work yet: agents and curl
-      # need Windows variables the clean environment still drops (SystemRoot
-      # and others). The Windows step of designs/cross-platform-design.md
-      # fixes that and turns the tests on here.
       - name: Test
-        if: matrix.os != 'windows-latest'
         run: cargo test --workspace --no-fail-fast

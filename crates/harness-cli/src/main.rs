@@ -523,6 +523,14 @@ fn masked(key: &str) -> String {
 fn read_hidden(prompt: &str) -> Result<Secret> {
     print!("{prompt}");
     io::stdout().flush()?;
+    let line = read_line_hidden()?;
+    Ok(Secret::new(line.trim()))
+}
+
+/// One line from the keyboard, not shown on the screen: `stty -echo` turns
+/// the echo off while it is typed.
+#[cfg(not(windows))]
+fn read_line_hidden() -> io::Result<String> {
     let stty = |arg: &str| {
         std::process::Command::new("stty")
             .arg(arg)
@@ -538,8 +546,46 @@ fn read_hidden(prompt: &str) -> Result<Secret> {
         stty("echo");
         println!();
     }
-    read?;
-    Ok(Secret::new(line.trim()))
+    read.map(|_| line)
+}
+
+/// One line from the keyboard, not shown on the screen. Windows has no
+/// `stty`, so the keys are read one by one with the console's echo off.
+/// Only presses count: Windows also reports each key's release, and a
+/// pasted key would otherwise be taken twice.
+#[cfg(windows)]
+fn read_line_hidden() -> io::Result<String> {
+    use crossterm::event::{read, Event, KeyCode, KeyEventKind, KeyModifiers};
+    use std::io::IsTerminal;
+
+    if !io::stdin().is_terminal() {
+        let mut line = String::new();
+        io::stdin().lock().read_line(&mut line)?;
+        return Ok(line);
+    }
+    crossterm::terminal::enable_raw_mode()?;
+    let mut line = String::new();
+    let result = loop {
+        match read() {
+            Ok(Event::Key(key)) if key.kind == KeyEventKind::Press => match key.code {
+                KeyCode::Enter => break Ok(()),
+                KeyCode::Backspace => {
+                    line.pop();
+                }
+                KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    break Err(io::Error::new(io::ErrorKind::Interrupted, "cancelled"));
+                }
+                KeyCode::Char(c) => line.push(c),
+                _ => {}
+            },
+            Ok(Event::Paste(text)) => line.push_str(&text),
+            Ok(_) => {}
+            Err(e) => break Err(e),
+        }
+    };
+    let _ = crossterm::terminal::disable_raw_mode();
+    println!();
+    result.map(|()| line)
 }
 
 /// Saves a secret for MCP servers in `~/.harness/credentials/secrets/<name>`,
@@ -610,7 +656,7 @@ fn login_codex(dir: &Path) -> Result<()> {
     let home = dir.join("codex");
     fs::create_dir_all(&home)?;
     println!("Starting `codex login`; finish the login in your browser.");
-    let status = std::process::Command::new("codex")
+    let status = std::process::Command::new(harness_platform::program::resolve("codex"))
         .arg("login")
         .env("CODEX_HOME", &home)
         .status()
@@ -639,11 +685,11 @@ fn login_antigravity(dir: &Path) -> Result<()> {
     fs::create_dir_all(&home)?;
     harness_platform::private::restrict_dir(&home)?;
     println!("Starting `agy`. Sign in with Google, then type /quit to come back here.");
-    let mut command = std::process::Command::new("agy");
+    let mut command = std::process::Command::new(harness_platform::program::resolve("agy"));
     command
         .env_clear()
-        .envs(harness_platform::env::inherited_values())
-        .env("HOME", &home);
+        .envs(harness_platform::env::inherited_values());
+    harness_platform::home::set_for(&mut command, &home);
     let status = command
         .status()
         .context("cannot start `agy`; is Antigravity CLI installed?")?;

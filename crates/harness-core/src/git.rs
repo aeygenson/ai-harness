@@ -61,6 +61,8 @@ impl Repo {
             root: root.to_path_buf(),
         };
         repo.git(&["init", "-q"])?;
+        // Lisa's own git in this folder keeps the files as they are too.
+        repo.git(&["config", "core.autocrlf", "false"])?;
         Ok(repo)
     }
 
@@ -271,6 +273,9 @@ impl Repo {
             .args(["-c", &format!("user.email={AUTHOR_EMAIL}")])
             // Do not ask for a signing key or passphrase in the middle of a run.
             .args(["-c", "commit.gpgsign=false"])
+            // Files stay byte for byte as the agents wrote them: Git for
+            // Windows would otherwise turn `\n` into `\r\n` on checkout.
+            .args(["-c", "core.autocrlf=false"])
             // Never run hooks: an agent could have written one to run its own code
             // outside its sandbox when the harness commits.
             .args(["-c", "core.hooksPath=/dev/null"])
@@ -330,6 +335,7 @@ fn outside_git(dir: &Path, args: &[&str]) -> Result<String, GitError> {
         .env("GIT_TERMINAL_PROMPT", "0")
         .args(["-c", "core.hooksPath=/dev/null"])
         .args(["-c", "advice.detachedHead=false"])
+        .args(["-c", "core.autocrlf=false"])
         .args(args)
         .output()
         .map_err(GitError::CannotRun)?;

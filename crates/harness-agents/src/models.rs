@@ -132,8 +132,8 @@ pub fn ask(agent: &str, credentials_dir: &Path, programs: &Programs) -> Result<M
             crate::antigravity::copy_dir(&credentials_dir.join("antigravity"), &home)
                 .map_err(|_| "no Antigravity login saved".to_string())?;
             let mut command = command(&programs.agy, tmp);
+            harness_platform::home::set_for(&mut command, &home);
             command
-                .env("HOME", &home)
                 .env("AGY_CLI_DISABLE_AUTO_UPDATE", "true")
                 .arg("models");
             parse_agy(&run(command, "", &[])?)
@@ -155,7 +155,7 @@ pub fn ask(agent: &str, credentials_dir: &Path, programs: &Programs) -> Result<M
 
 /// `program` in `dir` with only the whitelisted environment.
 pub(crate) fn command(program: &Path, dir: &Path) -> Command {
-    let mut command = Command::new(program);
+    let mut command = Command::new(harness_platform::program::resolve(program));
     command
         .current_dir(dir)
         .env_clear()
