@@ -1,0 +1,45 @@
+# Builds and tests the harness on Linux, macOS and Windows for every pull
+# request and every push to main, so a change that breaks one system shows
+# up at once.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    name: ${{ matrix.os }}
+    strategy:
+      # Finish all three systems even when one fails: we want the whole picture.
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+      # The tests make real git commits in temporary repositories.
+      - name: Set a git identity
+        run: |
+          git config --global user.name "CI"
+          git config --global user.email "ci@example.com"
+      - name: Format
+        if: matrix.os == 'ubuntu-latest'
+        run: cargo fmt --all -- --check
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      # On Windows the harness builds but does not work yet: agents and curl
+      # need Windows variables the clean environment still drops (SystemRoot
+      # and others). The Windows step of designs/cross-platform-design.md
+      # fixes that and turns the tests on here.
+      - name: Test
+        if: matrix.os != 'windows-latest'
+        run: cargo test --workspace --no-fail-fast

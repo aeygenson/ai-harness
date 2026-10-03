@@ -7,9 +7,10 @@
 //! removed from it; its secrets never appear in an error.
 
 use std::io::{BufRead, BufReader, Read, Write};
+#[cfg(unix)]
 use std::os::unix::process::CommandExt;
 use std::path::Path;
-use std::process::{Child, ChildStdin, Command, Stdio};
+use std::process::{Child, ChildStdin, Stdio};
 use std::sync::mpsc::{channel, Receiver, RecvTimeoutError};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -54,8 +55,9 @@ pub fn list_tools_within(
     let mut command = base_command(Path::new(&server.command), project_dir);
     // Its own process group: `npx` starts the real server as a child, and
     // both are stopped together.
+    #[cfg(unix)]
+    command.process_group(0);
     command
-        .process_group(0)
         .args(&server.args)
         .envs(server.env.iter().map(|(k, v)| (k, v.expose())))
         .stdin(Stdio::piped())
@@ -99,14 +101,24 @@ fn stop(child: &mut Child) {
         }
         thread::sleep(Duration::from_millis(20));
     }
-    let _ = Command::new("kill")
+    kill_group(child);
+    let _ = child.kill();
+    let _ = child.wait();
+}
+
+/// Ends the whole process group the server leads (see `list_tools`).
+#[cfg(unix)]
+fn kill_group(child: &Child) {
+    let _ = std::process::Command::new("kill")
         .args(["-KILL", "--", &format!("-{}", child.id())])
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .status();
-    let _ = child.kill();
-    let _ = child.wait();
 }
+
+/// Windows has no process groups; only the server itself is stopped.
+#[cfg(not(unix))]
+fn kill_group(_child: &Child) {}
 
 /// The questions and answers on the server's standard input and output.
 struct Session {
@@ -234,9 +246,8 @@ fn clean(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use harness_core::secret::Secret;
-    use std::fs;
-    use std::os::unix::fs::PermissionsExt;
+    #[cfg(unix)]
+    use {harness_core::secret::Secret, std::fs, std::os::unix::fs::PermissionsExt};
 
     #[test]
     fn tools_are_read_without_control_characters() {
@@ -254,6 +265,7 @@ mod tests {
 
     /// A tiny MCP server in shell: answers initialize and two pages of
     /// tools/list; prints its secret to stderr when asked for a third.
+    #[cfg(unix)] // a shell script stands in for the program
     fn fake_server(dir: &Path, fail: bool) -> McpServer {
         let script = dir.join("server.sh");
         let last = if fail {
@@ -287,6 +299,7 @@ read line
         }
     }
 
+    #[cfg(unix)] // a shell script stands in for the program
     #[test]
     fn a_server_is_asked_for_all_pages_of_its_tools() {
         let dir = tempfile::tempdir().unwrap();
@@ -295,6 +308,7 @@ read line
         assert_eq!(names, ["first", "second", "third"]);
     }
 
+    #[cfg(unix)] // a shell script stands in for the program
     #[test]
     fn a_failing_server_says_why_without_its_secrets() {
         let dir = tempfile::tempdir().unwrap();
@@ -314,6 +328,7 @@ read line
             .contains("cannot start"));
     }
 
+    #[cfg(unix)] // `sleep` is a Unix program
     #[test]
     fn a_silent_server_runs_out_of_time() {
         let dir = tempfile::tempdir().unwrap();

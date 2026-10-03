@@ -242,6 +242,7 @@ mod tests {
         assert!(!looks_like_usage_limit("All tests pass."));
     }
 
+    #[cfg(unix)] // `sh` stands in for an agent
     #[tokio::test]
     async fn lines_reach_the_live_log_with_secrets_hidden() {
         let (sink, lines) = std::sync::mpsc::channel();
@@ -273,6 +274,7 @@ mod tests {
         assert_eq!(ours, ["live-test err", "live-test hello ***"]);
     }
 
+    #[cfg(unix)] // `sh` stands in for an agent
     #[tokio::test]
     async fn a_slow_agent_is_stopped() {
         let mut command = Command::new("sh");
