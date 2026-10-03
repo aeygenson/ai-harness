@@ -193,6 +193,20 @@ pub fn current() -> &'static Theme {
     &THEMES[CURRENT.with(Cell::get).min(THEMES.len() - 1)]
 }
 
+/// The theme before Lisa picks one: «Night», except in macOS's own
+/// Terminal, which cannot show 24-bit colours (the RGB themes would come out
+/// wrong there), so it starts with the terminal's own palette.
+pub fn default_code() -> &'static str {
+    default_for(std::env::var("TERM_PROGRAM").ok().as_deref())
+}
+
+fn default_for(term_program: Option<&str>) -> &'static str {
+    match term_program {
+        Some("Apple_Terminal") => "terminal",
+        _ => THEMES[0].code,
+    }
+}
+
 /// Switches to the theme `code`; an unknown code changes nothing.
 pub fn select(code: &str) -> bool {
     match THEMES.iter().position(|t| t.code == code) {
@@ -315,6 +329,14 @@ pub fn title(focused: bool) -> Style {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn macos_terminal_starts_with_its_own_colours() {
+        assert_eq!(default_for(Some("Apple_Terminal")), "terminal");
+        assert_eq!(default_for(Some("iTerm.app")), "night");
+        assert_eq!(default_for(None), "night");
+        assert!(THEMES.iter().any(|t| t.code == "terminal"));
+    }
 
     #[test]
     fn themes_switch_round_the_list() {
