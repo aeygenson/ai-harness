@@ -1,5 +1,6 @@
 //! Choosing a folder. On a desktop the system's own dialog opens (on Linux
-//! KDE's `kdialog` or `zenity`, on macOS the Finder's «Choose folder»);
+//! KDE's `kdialog` or `zenity`, on macOS the Finder's «Choose folder», on
+//! Windows the «Browse for folder» window);
 //! without one (over SSH, or neither installed) a folder browser inside the
 //! TUI does the same job.
 
@@ -38,6 +39,8 @@ fn native_command(
         None
     } else if cfg!(target_os = "macos") {
         Some(mac_command(title, start))
+    } else if cfg!(windows) {
+        Some(windows_command(title, start))
     } else {
         linux_command(title, start, installed)
     }
@@ -59,6 +62,30 @@ fn mac_command(title: &str, start: &Path) -> Command {
         .args(["-e", "end run"])
         .arg(title)
         .arg(start);
+    command
+}
+
+/// The PowerShell script for Windows' folder window: it prints the chosen
+/// folder, or ends with 1 on Cancel.
+const WINDOWS_SCRIPT: &str = "\
+Add-Type -AssemblyName System.Windows.Forms
+[Console]::OutputEncoding = [Text.Encoding]::UTF8
+$dialog = New-Object System.Windows.Forms.FolderBrowserDialog
+$dialog.Description = $env:HARNESS_PICK_TITLE
+$dialog.SelectedPath = $env:HARNESS_PICK_START
+if ($dialog.ShowDialog() -eq 'OK') { $dialog.SelectedPath } else { exit 1 }
+";
+
+/// Windows: the folder window of Windows Forms, run by PowerShell, which
+/// comes with every Windows. The title and the folder are passed in
+/// variables, never written into the script, so quotes cannot change it.
+fn windows_command(title: &str, start: &Path) -> Command {
+    let mut command = Command::new(harness_platform::program::resolve("powershell"));
+    command
+        .args(["-NoProfile", "-NonInteractive", "-STA", "-Command"])
+        .arg(WINDOWS_SCRIPT)
+        .env("HARNESS_PICK_TITLE", title)
+        .env("HARNESS_PICK_START", start);
     command
 }
 
@@ -87,8 +114,8 @@ fn linux_command(title: &str, start: &Path, installed: impl Fn(&str) -> bool) ->
 
 /// Opens the system's folder dialog and waits for it.
 pub fn native_folder(title: &str, start: &Path) -> Native {
-    let desktop = if cfg!(target_os = "macos") {
-        // A Mac always has its desktop, unless the TUI runs over SSH.
+    let desktop = if cfg!(any(target_os = "macos", windows)) {
+        // A Mac or Windows always has its desktop, unless the TUI runs over SSH.
         std::env::var_os("SSH_CONNECTION").is_none()
     } else {
         std::env::var_os("WAYLAND_DISPLAY").is_some() || std::env::var_os("DISPLAY").is_some()
@@ -400,10 +427,23 @@ mod tests {
         let on_this_system = args(native_command("Pick", start, true, |_| true)).unwrap();
         let expected = if cfg!(target_os = "macos") {
             "osascript"
+        } else if cfg!(windows) {
+            "powershell"
         } else {
             "kdialog"
         };
-        assert_eq!(on_this_system[0], expected);
+        assert!(on_this_system[0].contains(expected), "{on_this_system:?}");
+
+        // On Windows: the title and the folder are variables, not script text.
+        let windows = windows_command("Pick \"x\"", start);
+        let vars: Vec<_> = windows.get_envs().collect();
+        assert!(vars.contains(&(
+            std::ffi::OsStr::new("HARNESS_PICK_TITLE"),
+            Some(std::ffi::OsStr::new("Pick \"x\""))
+        )));
+        assert!(windows
+            .get_args()
+            .all(|a| !a.to_string_lossy().contains("Pick")));
 
         // `sh` and `false` stand in for a dialog that answers or is cancelled.
         #[cfg(unix)]

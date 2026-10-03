@@ -1879,9 +1879,8 @@ impl App {
             .project
             .as_deref()
             .and_then(|root| path.strip_prefix(root).ok())
-            .unwrap_or(&path)
-            .display()
-            .to_string();
+            .map(harness_platform::path::slashed)
+            .unwrap_or_else(|| path.display().to_string());
         if !path.is_file() {
             self.message = Some((self.tr.f("tasks.file_missing", &[("path", &shown)]), true));
             return;

@@ -13,7 +13,7 @@ use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWriteExt, BufReader};
 /// `program`, started in the project folder with an empty environment plus
 /// the whitelist. Each adapter adds its own variables and flags.
 pub fn base_command(program: &Path, project_dir: &Path) -> Command {
-    let mut command = Command::new(program);
+    let mut command = Command::new(harness_platform::program::resolve(program));
     // The whitelist (`harness_platform::env`): nothing that holds a secret.
     command
         .current_dir(project_dir)

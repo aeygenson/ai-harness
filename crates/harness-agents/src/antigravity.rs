@@ -111,8 +111,8 @@ impl Antigravity {
                 command.env(name, path);
             }
         }
+        harness_platform::home::set_for(&mut command, home);
         command
-            .env("HOME", home)
             .env("AGY_CLI_DISABLE_AUTO_UPDATE", "true")
             .args(["-p", &job.prompt])
             .args(["--output-format", "stream-json"])

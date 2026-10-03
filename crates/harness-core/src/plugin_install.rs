@@ -199,7 +199,7 @@ fn collect(root: &Path, dir: &Path, found: &mut BTreeMap<String, Vec<u8>>) -> io
             collect(root, &path, found)?;
         } else {
             let relative = path.strip_prefix(root).unwrap_or(&path);
-            found.insert(relative.to_string_lossy().into_owned(), fs::read(&path)?);
+            found.insert(harness_platform::path::slashed(relative), fs::read(&path)?);
         }
     }
     Ok(())
@@ -226,7 +226,7 @@ mod tests {
                 {{"name": "review", "source": "./plugins/review"}},
                 {{"name": "lsp", "source": "./plugins/lsp", "strict": false,
                   "description": "LSP", "category": "dev", "lspServers": {{"x": {{}}}}}},
-                {{"name": "far", "source": {{"source": "git-subdir", "url": "{remote_url}",
+                {{"name": "far", "source": {{"source": "git-subdir", "url": {remote_url:?},
                   "path": "plugins/far"}}}},
                 {{"name": "escape", "source": "../outside"}},
                 {{"name": "npm", "source": {{"source": "npm", "package": "x"}}}}

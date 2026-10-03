@@ -71,7 +71,7 @@ pub fn server_command(spec_file: &Path) -> io::Result<Command> {
         .as_str()
         .filter(|c| !c.is_empty())
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "no command"))?;
-    let mut command = Command::new(program);
+    let mut command = Command::new(harness_platform::program::resolve(program));
     for arg in spec["args"].as_array().into_iter().flatten() {
         command.arg(arg.as_str().unwrap_or_default());
     }

@@ -3,15 +3,17 @@
 //!
 //! Zed first (`zed --wait`), then `$VISUAL`, `$EDITOR`, and last the
 //! system's own editor: KDE's `kate --block` on Linux, TextEdit on macOS
-//! (`open -W -t`, which waits until it is closed). The TUI gives the
+//! (`open -W -t`, which waits until it is closed), Notepad on Windows. The TUI gives the
 //! terminal back while the editor is open, so a terminal editor such as vim
 //! works too.
 //!
 //! Zed is found in `PATH`, in `~/.local/bin` (its Linux install), or on
 //! macOS in the Zed app itself (`/Applications` or `~/Applications`), whose
-//! `cli` is the same `zed` command.
+//! `cli` is the same `zed` command, or on Windows in its install folder
+//! (`%LOCALAPPDATA%\Programs\Zed`).
 
 use std::env;
+use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
@@ -21,24 +23,45 @@ const MAC_APPS: &str = "/Applications";
 /// Inside an app folder: Zed's command-line tool.
 const ZED_APP_CLI: &str = "Zed.app/Contents/MacOS/cli";
 
-/// The places this system can look in: `PATH`, the home folder, and the
-/// system's own apps folder.
+/// Inside `%LOCALAPPDATA%\Programs`: Zed's command-line tool on Windows.
+const ZED_WINDOWS_CLI: &str = "Zed/bin/zed.exe";
+
+/// The places this system can look in: `PATH` (with Windows' `PATHEXT`),
+/// the home folder, and the system's own apps folder.
 struct Places<'a> {
-    path: &'a std::ffi::OsStr,
+    path: &'a OsStr,
+    exts: &'a OsStr,
     home: Option<&'a Path>,
     apps: &'a Path,
 }
 
-/// The command that edits `file` and returns when the editor is closed.
-pub fn command(file: &Path) -> Result<Command, String> {
+/// Runs `work` with this system's places.
+fn with_places<T>(work: impl FnOnce(&Places) -> T) -> T {
     let home = harness_platform::home::home_dir();
     let path = env::var_os("PATH").unwrap_or_default();
-    let places = Places {
-        path: &path,
-        home: home.as_deref(),
-        apps: Path::new(MAC_APPS),
+    let exts = if cfg!(windows) {
+        env::var_os("PATHEXT").unwrap_or_else(|| OsString::from(".COM;.EXE;.BAT;.CMD"))
+    } else {
+        OsString::new()
     };
-    command_with(file, &places, &|name| env::var(name).ok())
+    let apps = if cfg!(windows) {
+        env::var_os("LOCALAPPDATA")
+            .map(|local| PathBuf::from(local).join("Programs"))
+            .unwrap_or_default()
+    } else {
+        PathBuf::from(MAC_APPS)
+    };
+    work(&Places {
+        path: &path,
+        exts: &exts,
+        home: home.as_deref(),
+        apps: &apps,
+    })
+}
+
+/// The command that edits `file` and returns when the editor is closed.
+pub fn command(file: &Path) -> Result<Command, String> {
+    with_places(|places| command_with(file, places, &|name| env::var(name).ok()))
 }
 
 fn command_with(
@@ -71,29 +94,33 @@ fn system_editor(file: &Path, places: &Places) -> Option<Command> {
         let mut command = Command::new("open");
         command.args(["-W", "-t"]).arg(file);
         Some(command)
+    } else if cfg!(windows) {
+        // Notepad comes with every Windows and stays until it is closed.
+        let mut command = Command::new("notepad");
+        command.arg(file);
+        Some(command)
     } else {
-        let kate = find(places.path, "kate")?;
+        let kate = find(places, "kate")?;
         let mut command = Command::new(kate);
         command.arg("--block").arg(file);
         Some(command)
     }
 }
 
-/// `program` in one of the folders of `path`.
-fn find(path: &std::ffi::OsStr, program: &str) -> Option<PathBuf> {
-    env::split_paths(path)
-        .map(|dir| dir.join(program))
-        .find(|p| p.is_file())
+/// `program` in one of the folders of `PATH`.
+fn find(places: &Places, program: &str) -> Option<PathBuf> {
+    harness_platform::program::find_in(program, places.path, places.exts)
 }
 
-/// Zed, from `PATH`, `~/.local/bin`, or (on macOS) the Zed app.
+/// Zed, from `PATH`, `~/.local/bin`, the Zed app (macOS) or its install
+/// folder (Windows).
 fn find_zed(places: &Places) -> Option<PathBuf> {
-    if let Some(zed) = find(places.path, "zed") {
+    if let Some(zed) = find(places, "zed") {
         return Some(zed);
     }
     let mut candidates: Vec<PathBuf> = Vec::new();
     if let Some(home) = places.home {
-        candidates.push(home.join(".local/bin/zed"));
+        candidates.push(home.join(".local/bin").join("zed"));
     }
     if cfg!(target_os = "macos") {
         candidates.push(places.apps.join(ZED_APP_CLI));
@@ -101,19 +128,15 @@ fn find_zed(places: &Places) -> Option<PathBuf> {
             candidates.push(home.join("Applications").join(ZED_APP_CLI));
         }
     }
+    if cfg!(windows) {
+        candidates.push(places.apps.join(ZED_WINDOWS_CLI));
+    }
     candidates.into_iter().find(|p| p.is_file())
 }
 
 /// The command that opens `file` in Zed and returns at once; `None` without Zed.
 pub fn viewer(file: &Path) -> Option<Command> {
-    let home = harness_platform::home::home_dir();
-    let path = env::var_os("PATH").unwrap_or_default();
-    let places = Places {
-        path: &path,
-        home: home.as_deref(),
-        apps: Path::new(MAC_APPS),
-    };
-    viewer_with(file, &places)
+    with_places(|places| viewer_with(file, places))
 }
 
 fn viewer_with(file: &Path, places: &Places) -> Option<Command> {
@@ -166,7 +189,8 @@ mod tests {
     /// Places with nothing in `PATH` and an empty apps folder.
     fn places<'a>(home: &'a Path, apps: &'a Path) -> Places<'a> {
         Places {
-            path: std::ffi::OsStr::new(""),
+            path: OsStr::new(""),
+            exts: OsStr::new(""),
             home: Some(home),
             apps,
         }
@@ -191,6 +215,8 @@ mod tests {
                 args(&fallback.unwrap()),
                 ["open", "-W", "-t", "/p/skill.md"]
             );
+        } else if cfg!(windows) {
+            assert_eq!(args(&fallback.unwrap()), ["notepad", "/p/skill.md"]);
         } else {
             assert!(fallback.is_err());
         }
@@ -228,6 +254,21 @@ mod tests {
         fs::write(&cli, "").unwrap();
         let found = find_zed(&places(home.path(), apps.path()));
         if cfg!(target_os = "macos") {
+            assert_eq!(found, Some(cli));
+        } else {
+            assert_eq!(found, None);
+        }
+    }
+
+    #[test]
+    fn on_windows_zed_is_found_in_its_install_folder() {
+        let home = tempfile::tempdir().unwrap();
+        let apps = tempfile::tempdir().unwrap();
+        let cli = apps.path().join(ZED_WINDOWS_CLI);
+        fs::create_dir_all(cli.parent().unwrap()).unwrap();
+        fs::write(&cli, "").unwrap();
+        let found = find_zed(&places(home.path(), apps.path()));
+        if cfg!(windows) {
             assert_eq!(found, Some(cli));
         } else {
             assert_eq!(found, None);

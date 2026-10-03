@@ -1,0 +1,3 @@
+# Text files keep LF on every system: the built-in skills are compiled
+# into the binary and must read the same on Windows.
+* text=auto eol=lf
