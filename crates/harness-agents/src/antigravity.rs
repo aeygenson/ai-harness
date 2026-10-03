@@ -106,8 +106,8 @@ impl Antigravity {
         let mut command = process::base_command(&self.program, &job.project_dir);
         // `rustup` and `cargo` look for Rust under `$HOME`, which is replaced
         // below, so point them at the real folders first.
-        if let Some(real_home) = std::env::var_os("HOME") {
-            for (name, path) in rust_env(Path::new(&real_home)) {
+        if let Some(real_home) = harness_platform::home::home_dir() {
+            for (name, path) in rust_env(&real_home) {
                 command.env(name, path);
             }
         }
@@ -437,8 +437,7 @@ mod tests {
         for (name, _) in command.get_envs() {
             let name = name.to_string_lossy();
             assert!(
-                process::INHERITED_ENV.contains(&name.as_ref())
-                    || name == "AGY_CLI_DISABLE_AUTO_UPDATE",
+                harness_platform::env::is_inherited(&name) || name == "AGY_CLI_DISABLE_AUTO_UPDATE",
                 "{name} should not be passed"
             );
         }

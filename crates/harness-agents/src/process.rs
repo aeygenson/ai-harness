@@ -10,32 +10,15 @@ use std::time::Duration;
 use harness_core::agent::AgentOutcome;
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWriteExt, BufReader};
 
-/// Environment variables an agent may inherit from Lisa's terminal. Everything
-/// else, including every `*_API_KEY`, is removed.
-pub const INHERITED_ENV: &[&str] = &[
-    "PATH",
-    "HOME",
-    "USER",
-    "LANG",
-    "LC_ALL",
-    "TERM",
-    "TMPDIR",
-    "CARGO_HOME",
-    "RUSTUP_HOME",
-    "HTTP_PROXY",
-    "HTTPS_PROXY",
-    "NO_PROXY",
-];
-
 /// `program`, started in the project folder with an empty environment plus
 /// the whitelist. Each adapter adds its own variables and flags.
 pub fn base_command(program: &Path, project_dir: &Path) -> Command {
     let mut command = Command::new(program);
-    command.current_dir(project_dir).env_clear().envs(
-        INHERITED_ENV
-            .iter()
-            .filter_map(|name| std::env::var_os(name).map(|value| (*name, value))),
-    );
+    // The whitelist (`harness_platform::env`): nothing that holds a secret.
+    command
+        .current_dir(project_dir)
+        .env_clear()
+        .envs(harness_platform::env::inherited_values());
     command
 }
 

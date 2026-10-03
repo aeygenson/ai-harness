@@ -331,7 +331,7 @@ impl Codex {
                 "no Codex login saved; run `harness login codex` first",
             )
         })?;
-        write_private(&dir.join(AUTH_FILE), &saved)
+        harness_platform::private::write(&dir.join(AUTH_FILE), &saved)
     }
 
     /// Codex may refresh its login during the run. Keep the newest one, then
@@ -342,7 +342,7 @@ impl Codex {
             let still_json = serde_json::from_slice::<serde_json::Value>(&bytes).is_ok();
             let saved = fs::read(self.auth_dir.join(AUTH_FILE)).ok();
             if still_json && saved.as_deref() != Some(bytes.as_slice()) {
-                let _ = write_private(&self.auth_dir.join(AUTH_FILE), &bytes);
+                let _ = harness_platform::private::write(&self.auth_dir.join(AUTH_FILE), &bytes);
             }
         }
         let _ = fs::remove_file(copy);
@@ -482,25 +482,6 @@ impl TurnEnd {
 }
 
 /// `auth.json` is a password too: readable only by its owner.
-#[cfg(unix)]
-fn write_private(path: &Path, bytes: &[u8]) -> io::Result<()> {
-    use std::io::Write;
-    use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
-    let mut file = fs::OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(true)
-        .mode(0o600)
-        .open(path)?;
-    file.set_permissions(fs::Permissions::from_mode(0o600))?;
-    file.write_all(bytes)
-}
-
-#[cfg(not(unix))]
-fn write_private(path: &Path, bytes: &[u8]) -> io::Result<()> {
-    fs::write(path, bytes)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -704,7 +685,7 @@ mod tests {
         for (name, _) in command.get_envs() {
             let name = name.to_string_lossy();
             assert!(
-                process::INHERITED_ENV.contains(&name.as_ref()) || name == "CODEX_HOME",
+                harness_platform::env::is_inherited(&name) || name == "CODEX_HOME",
                 "{name} should not be passed"
             );
         }

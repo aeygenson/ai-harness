@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+harness-platform = { path = "../harness-platform" }
 harness-core = { path = "../harness-core" }
 harness-agents = { path = "../harness-agents" }
 anyhow = "1"

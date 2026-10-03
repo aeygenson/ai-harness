@@ -20,8 +20,7 @@ use harness_core::plugins::{self, Contents, PLUGINS_DIR};
 
 /// `~/.harness`.
 pub fn harness_home() -> Result<PathBuf> {
-    let home = std::env::var_os("HOME").context("HOME is not set")?;
-    Ok(PathBuf::from(home).join(".harness"))
+    harness_platform::home::harness_dir().context("no home folder found")
 }
 
 pub fn marketplace_add(source: &str, name: Option<&str>) -> Result<()> {

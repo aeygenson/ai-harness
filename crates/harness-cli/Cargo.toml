@@ -8,6 +8,7 @@ name = "harness"
 path = "src/main.rs"
 
 [dependencies]
+harness-platform = { path = "../harness-platform" }
 harness-core = { path = "../harness-core" }
 harness-agents = { path = "../harness-agents" }
 anyhow = "1"

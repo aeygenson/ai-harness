@@ -11,7 +11,7 @@ use std::process::{Command, Stdio};
 
 /// The command that edits `file` and returns when the editor is closed.
 pub fn command(file: &Path) -> Result<Command, String> {
-    let home = env::var_os("HOME").map(PathBuf::from);
+    let home = harness_platform::home::home_dir();
     let path = env::var_os("PATH").unwrap_or_default();
     command_with(file, &path, home.as_deref(), &|name| env::var(name).ok())
 }
@@ -61,7 +61,7 @@ fn find_zed(path: &std::ffi::OsStr, home: Option<&Path>) -> Option<PathBuf> {
 
 /// The command that opens `file` in Zed and returns at once; `None` without Zed.
 pub fn viewer(file: &Path) -> Option<Command> {
-    let home = env::var_os("HOME").map(PathBuf::from);
+    let home = harness_platform::home::home_dir();
     let path = env::var_os("PATH").unwrap_or_default();
     viewer_with(file, &path, home.as_deref())
 }

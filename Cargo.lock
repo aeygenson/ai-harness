@@ -330,6 +330,7 @@ version = "0.1.0"
 dependencies = [
  "getrandom",
  "harness-core",
+ "harness-platform",
  "serde",
  "serde_json",
  "tempfile",
@@ -344,6 +345,7 @@ dependencies = [
  "clap",
  "harness-agents",
  "harness-core",
+ "harness-platform",
  "harness-tui",
  "serde_json",
  "tempfile",
@@ -354,6 +356,7 @@ dependencies = [
 name = "harness-core"
 version = "0.1.0"
 dependencies = [
+ "harness-platform",
  "serde",
  "serde_json",
  "tempfile",
@@ -364,12 +367,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "harness-platform"
+version = "0.1.0"
+dependencies = [
+ "tempfile",
+]
+
+[[package]]
 name = "harness-tui"
 version = "0.1.0"
 dependencies = [
  "anyhow",
  "harness-agents",
  "harness-core",
+ "harness-platform",
  "ratatui",
  "serde_json",
  "tempfile",

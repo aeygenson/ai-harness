@@ -2844,7 +2844,7 @@ fn skill_path(root: &Path, name: &str) -> PathBuf {
 
 /// `~/code` if it exists, otherwise the home folder.
 fn default_start_dir() -> PathBuf {
-    let home = std::env::var_os("HOME").map_or_else(|| PathBuf::from("/"), PathBuf::from);
+    let home = harness_platform::home::home_dir().unwrap_or_else(|| PathBuf::from("/"));
     let code = home.join("code");
     if code.is_dir() {
         code

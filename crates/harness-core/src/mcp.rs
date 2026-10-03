@@ -125,22 +125,9 @@ pub enum McpError {
     MissingSecret { server: String, name: String },
 }
 
-/// Variables an MCP server may not set: the agents read them themselves, so a
-/// server setting could change the agent or leak into it.
-const RESERVED_VARIABLES: &[&str] = &[
-    "PATH",
-    "HOME",
-    "USER",
-    "LANG",
-    "LC_ALL",
-    "TERM",
-    "TMPDIR",
-    "CARGO_HOME",
-    "RUSTUP_HOME",
-    "HTTP_PROXY",
-    "HTTPS_PROXY",
-    "NO_PROXY",
-];
+/// Variables an MCP server may not set (`harness_platform::env::is_reserved`,
+/// the agents read them themselves), and these prefixes: a server setting
+/// could change the agent or leak into it.
 const RESERVED_PREFIXES: &[&str] = &[
     "CLAUDE_",
     "ANTHROPIC_",
@@ -429,7 +416,9 @@ fn check_variable(server: &str, name: &str) -> Result<(), McpError> {
             name: name.to_string(),
         });
     }
-    if RESERVED_VARIABLES.contains(&name) || RESERVED_PREFIXES.iter().any(|p| name.starts_with(p)) {
+    if harness_platform::env::is_reserved(name)
+        || RESERVED_PREFIXES.iter().any(|p| name.starts_with(p))
+    {
         return Err(McpError::ReservedVariable {
             server: server.to_string(),
             name: name.to_string(),
