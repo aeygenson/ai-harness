@@ -131,7 +131,11 @@ mod tests {
         }
 
         let command = server_command(&path).unwrap();
-        assert_eq!(command.get_program(), "npx");
+        // On Windows the program is found first: `npx` is `npx.cmd` there.
+        assert_eq!(
+            command.get_program(),
+            harness_platform::program::resolve("npx")
+        );
         let args: Vec<_> = command.get_args().collect();
         assert_eq!(args, ["-y", "server"]);
         let env: Vec<_> = command.get_envs().collect();

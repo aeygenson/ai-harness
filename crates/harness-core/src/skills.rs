@@ -539,7 +539,8 @@ mod tests {
         );
         let error = Skills::load(dir.path(), &config).unwrap_err().to_string();
         assert!(error.contains("Tester"), "{error}");
-        assert!(error.contains("skills/write-tests.md"), "{error}");
+        let file = Path::new("skills").join("write-tests.md");
+        assert!(error.contains(&file.display().to_string()), "{error}");
     }
 
     #[test]
