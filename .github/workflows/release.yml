@@ -1,4 +1,5 @@
-# Builds the ready-to-run `harness` program for Windows, macOS and Linux and
+# Builds the ready-to-run `harness` program for Windows, macOS (Apple silicon
+# and Intel) and Linux (x86_64 and ARM) and
 # puts it on the Releases page. The install scripts (install/) download it
 # from there, so nobody has to install Rust to use the harness.
 #
@@ -35,15 +36,25 @@ jobs:
           - target: aarch64-apple-darwin
             os: macos-latest
             archive: harness-aarch64-apple-darwin.tar.gz
-          - target: x86_64-unknown-linux-gnu
+          - target: x86_64-apple-darwin
+            os: macos-latest
+            archive: harness-x86_64-apple-darwin.tar.gz
+          # musl: one program that runs on every Linux, old or new.
+          - target: x86_64-unknown-linux-musl
             os: ubuntu-latest
-            archive: harness-x86_64-unknown-linux-gnu.tar.gz
+            archive: harness-x86_64-unknown-linux-musl.tar.gz
+          - target: aarch64-unknown-linux-musl
+            os: ubuntu-24.04-arm
+            archive: harness-aarch64-unknown-linux-musl.tar.gz
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
+      - name: musl tools
+        if: contains(matrix.target, 'musl')
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
       - name: Build
         shell: bash
         run: |
@@ -92,7 +103,8 @@ jobs:
           gh release create "$tag" dist/* \
             --target "$GITHUB_SHA" \
             --title "harness $tag" \
-            --notes "Install on Windows (PowerShell): irm https://raw.githubusercontent.com/${GH_REPO}/main/install/install.ps1 | iex"
+            --notes "Windows (PowerShell): irm https://raw.githubusercontent.com/${GH_REPO}/main/install/install.ps1 | iex
+          macOS and Linux (Terminal): curl -fsSL https://raw.githubusercontent.com/${GH_REPO}/main/install/install.sh | bash"
 
   # The install script itself, on a real Windows, against the release just
   # published (only the harness part: winget's packages are too slow here).
@@ -111,3 +123,17 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "harness.exe does not run" }
           $link = Join-Path ([Environment]::GetFolderPath("Desktop")) "AI Harness.lnk"
           if (-not (Test-Path $link)) { throw "no desktop shortcut" }
+
+  check-unix:
+    needs: release
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install with the script
+        run: |
+          HARNESS_ONLY=harness bash install/install.sh
+          "$HOME/.local/bin/harness" --version

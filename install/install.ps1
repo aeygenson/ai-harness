@@ -108,7 +108,7 @@ function Install-AiHarness {
         # Codex: npm puts it in %APPDATA%\npm.
         Say "Codex CLI: installing the newest"
         Add-UserPath (Join-Path $env:APPDATA "npm")
-        & npm install -g "@openai/codex@latest"
+        & npm install -g --loglevel=error "@openai/codex@latest"
         if ($LASTEXITCODE -ne 0) { throw "npm could not install Codex CLI" }
 
         # Antigravity: its installer always brings the newest version.
