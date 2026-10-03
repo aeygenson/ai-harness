@@ -584,6 +584,7 @@ mod tests {
         assert!(!text.contains("wrong-key"), "{text}");
     }
 
+    #[cfg(unix)] // a shell script stands in for the program
     #[test]
     fn the_key_is_never_on_curls_command_line() {
         let dir = tempfile::tempdir().unwrap();

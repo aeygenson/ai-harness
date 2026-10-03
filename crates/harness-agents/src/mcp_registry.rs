@@ -43,10 +43,11 @@ pub fn search_with(curl: &Path, query: &str) -> Result<Vec<Entry>, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::fs;
-    use std::os::unix::fs::PermissionsExt;
+    #[cfg(unix)]
+    use {std::fs, std::os::unix::fs::PermissionsExt};
 
     /// A fake curl that writes its arguments to a file and prints `answer`.
+    #[cfg(unix)] // a shell script stands in for the program
     fn fake_curl(dir: &Path, answer: &str) -> std::path::PathBuf {
         let path = dir.join("curl");
         let log = dir.join("args");
@@ -64,6 +65,7 @@ mod tests {
         path
     }
 
+    #[cfg(unix)] // a shell script stands in for the program
     #[test]
     fn the_search_is_one_encoded_argument() {
         let dir = tempfile::tempdir().unwrap();
@@ -84,6 +86,7 @@ mod tests {
         assert!(!args.contains("search="), "{args}");
     }
 
+    #[cfg(unix)] // a shell script stands in for the program
     #[test]
     fn a_failing_curl_says_why() {
         let dir = tempfile::tempdir().unwrap();

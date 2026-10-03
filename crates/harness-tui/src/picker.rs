@@ -353,13 +353,17 @@ mod tests {
         assert!(native_command("Pick", start, true, |_| false).is_none());
         assert!(native_command("Pick", start, false, |_| true).is_none());
 
-        let mut chosen = Command::new("sh");
-        chosen.args(["-c", "echo /home/me/code/app"]);
-        assert_eq!(
-            run_dialog(chosen),
-            Native::Chosen("/home/me/code/app".into())
-        );
-        assert_eq!(run_dialog(Command::new("false")), Native::Cancelled);
+        // `sh` and `false` stand in for a dialog that answers or is cancelled.
+        #[cfg(unix)]
+        {
+            let mut chosen = Command::new("sh");
+            chosen.args(["-c", "echo /home/me/code/app"]);
+            assert_eq!(
+                run_dialog(chosen),
+                Native::Chosen("/home/me/code/app".into())
+            );
+            assert_eq!(run_dialog(Command::new("false")), Native::Cancelled);
+        }
         assert_eq!(
             run_dialog(Command::new("/no/such/dialog")),
             Native::Unavailable

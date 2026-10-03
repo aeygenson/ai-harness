@@ -154,6 +154,8 @@ mod tests {
             let mode = fs::metadata(path).unwrap().permissions().mode();
             assert_eq!(mode & 0o777, 0o600);
         }
+        #[cfg(not(unix))]
+        assert!(path.is_file());
     }
 
     #[test]
@@ -175,6 +177,8 @@ mod tests {
             let mode = fs::metadata(path).unwrap().permissions().mode();
             assert_eq!(mode & 0o777, 0o600);
         }
+        #[cfg(not(unix))]
+        assert!(path.is_file());
     }
 
     #[test]
