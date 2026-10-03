@@ -28,8 +28,6 @@ pub enum Target {
 pub enum ListId {
     Tasks,
     Steps,
-    /// «Files» of the selected step on the Tasks tab.
-    Files,
     Projects,
     Roles,
     Folders,
@@ -89,6 +87,8 @@ pub enum ButtonId {
     SkillRestore,
     /// The `[ ]` mark of the skill on this row of the Skills tab's list.
     SkillMark(usize),
+    /// A link in «Files» of the step on the Tasks tab.
+    TaskFile(usize),
     /// A role of the MCP tab's selector, an index into `skills_tab::ROLES`.
     McpRole(usize),
     /// Gives the selected MCP server to the role, or takes it away.

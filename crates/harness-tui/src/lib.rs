@@ -1860,8 +1860,6 @@ impl App {
         }
     }
 
-    /// The editor was closed: keep the change in git, or drop a copy of a
-    /// built-in skill that was not changed.
     /// A file chosen in «Files» of the Tasks tab: Zed opens it and the TUI
     /// goes on; without Zed the editor gets the terminal.
     fn open_task_file(&mut self) {
@@ -1900,6 +1898,8 @@ impl App {
         }
     }
 
+    /// The editor was closed: keep the change in git, or drop a copy of a
+    /// built-in skill that was not changed.
     fn finish_edit(&mut self, job: &EditJob, result: Result<(), String>) {
         match job.kind {
             EditKind::Skill => {}
@@ -2303,6 +2303,11 @@ impl App {
                 if let Some(skills) = &mut self.skills {
                     let action = skills.press(id);
                     self.skill_action(action);
+                }
+            }
+            ButtonId::TaskFile(index) => {
+                if let Some(tasks) = &mut self.tasks {
+                    tasks.open_file(index);
                 }
             }
             ButtonId::Input => {
