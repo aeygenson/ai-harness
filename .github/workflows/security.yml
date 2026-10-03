@@ -1,0 +1,24 @@
+# Checks every Rust library in Cargo.lock against the RustSec database of
+# known vulnerabilities, malicious crates and abandoned crates (settings in
+# deny.toml). It runs on every pull request, and also once a day: new
+# advisories appear for libraries we already use, without any change of ours.
+# A failed daily run sends GitHub's usual e-mail about a failed workflow.
+name: Security
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "0 6 * * *"
+  workflow_dispatch:
+
+jobs:
+  dependencies:
+    name: Rust libraries
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check advisories sources bans

@@ -1,0 +1,23 @@
+# `cargo deny check`: checks every Rust library the harness uses (the whole
+# Cargo.lock). CI runs it on every pull request and once a day, so a library
+# that turns out to be dangerous after we chose it is found too.
+
+[advisories]
+# The RustSec database: known vulnerabilities, malicious crates, and crates
+# whose authors gave them up. Any of these fails the check.
+unmaintained = "all"
+unsound = "all"
+# A version its author took back (yanked) usually had a serious bug.
+yanked = "deny"
+# A finding we have read and decided to live with goes here, with the reason:
+# ignore = [{ id = "RUSTSEC-0000-0000", reason = "..." }]
+ignore = []
+
+[sources]
+# Libraries only from crates.io: no unknown registries or git repositories.
+unknown-registry = "deny"
+unknown-git = "deny"
+
+[bans]
+# Two versions of one library are normal (they come with other libraries).
+multiple-versions = "allow"

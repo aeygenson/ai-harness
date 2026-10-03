@@ -1,0 +1,16 @@
+# Dependabot opens a pull request when a Rust library or a GitHub Action has a
+# new version, so updates (security fixes too) arrive as ordinary PRs that CI
+# checks before anything is merged.
+version: 2
+updates:
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      rust-libraries:
+        patterns: ["*"]
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
