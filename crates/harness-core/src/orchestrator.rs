@@ -108,8 +108,14 @@ pub fn same_task(runs: &Path, description: &str) -> Result<Option<(String, Stage
     }
     let wanted = words(description);
     for id in store::task_ids(runs)? {
-        let (task, state) = TaskStore::open(runs, &id)?;
-        if state.stage != Stage::Done && words(&task.description()?) == wanted {
+        // A task that cannot be read is no reason to refuse a new one.
+        let Ok((task, state)) = TaskStore::open(runs, &id) else {
+            continue;
+        };
+        let Ok(text) = task.description() else {
+            continue;
+        };
+        if state.stage != Stage::Done && words(&text) == wanted {
             return Ok(Some((id, state.stage)));
         }
     }
