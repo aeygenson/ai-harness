@@ -22,7 +22,7 @@ new_project = "+ New project"
 no_open_project = "No project is open. Open or create one on the «Projects» tab (7)."
 
 [footer]
-hint = "1–7 tabs · ↑↓ select · wheel scroll · Shift+mouse copy · L language · T theme · q quit"
+hint = "1–7 tabs · ↑↓ select · wheel scroll · {copy}+mouse copy · L language · T theme · q quit"
 
 [tasks]
 title = " Tasks "

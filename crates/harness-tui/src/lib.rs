@@ -9,7 +9,8 @@
 //! ```
 //!
 //! Everything works with the mouse (click, double click, wheel) and with the
-//! keyboard. The terminal's own text selection works with Shift held down.
+//! keyboard. The terminal's own text selection works with Shift held down
+//! (on a Mac: Option in iTerm2, fn in Terminal).
 //! Every change goes through the same core functions as the CLI. The texts
 //! come from translation files (see `i18n`); English is the default.
 
@@ -399,7 +400,7 @@ impl App {
             .home
             .as_deref()
             .and_then(|home| i18n::saved_setting(home, "theme"));
-        theme::select(saved.as_deref().unwrap_or(theme::THEMES[0].code));
+        theme::select(saved.as_deref().unwrap_or(theme::default_code()));
         let start = start.canonicalize().unwrap_or_else(|_| start.to_path_buf());
         let last = app.projects.list.last.clone();
         if has_config(&start) {
@@ -2763,7 +2764,16 @@ impl App {
         } else {
             "footer.hint"
         };
-        spans.push(Span::styled(format!(" {}", self.tr.t(hint)), theme::dim()));
+        // The key that lets the terminal select text while the TUI has the mouse.
+        let copy = if cfg!(target_os = "macos") {
+            "⌥/fn"
+        } else {
+            "Shift"
+        };
+        spans.push(Span::styled(
+            format!(" {}", self.tr.f(hint, &[("copy", &copy)])),
+            theme::dim(),
+        ));
         frame.render_widget(Line::from(spans), footer);
 
         if let Some((_, form)) = &self.form {

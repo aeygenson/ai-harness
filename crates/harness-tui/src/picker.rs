@@ -1,6 +1,7 @@
-//! Choosing a folder. On a desktop the system's own dialog opens (KDE's
-//! `kdialog`, or `zenity`); without one (over SSH, or neither installed) a
-//! folder browser inside the TUI does the same job.
+//! Choosing a folder. On a desktop the system's own dialog opens (on Linux
+//! KDE's `kdialog` or `zenity`, on macOS the Finder's «Choose folder»);
+//! without one (over SSH, or neither installed) a folder browser inside the
+//! TUI does the same job.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -34,8 +35,35 @@ fn native_command(
     installed: impl Fn(&str) -> bool,
 ) -> Option<Command> {
     if !desktop {
-        return None;
+        None
+    } else if cfg!(target_os = "macos") {
+        Some(mac_command(title, start))
+    } else {
+        linux_command(title, start, installed)
     }
+}
+
+/// macOS: AppleScript's «choose folder», run by `osascript`, which comes
+/// with every Mac. The title and the folder are passed as arguments, never
+/// written into the script, so quotes in them cannot change it. Cancel ends
+/// it with an error (exit code 1).
+fn mac_command(title: &str, start: &Path) -> Command {
+    let mut command = Command::new("osascript");
+    command
+        .args(["-e", "on run argv"])
+        .args([
+            "-e",
+            "POSIX path of (choose folder with prompt (item 1 of argv) \
+             default location (POSIX file (item 2 of argv)))",
+        ])
+        .args(["-e", "end run"])
+        .arg(title)
+        .arg(start);
+    command
+}
+
+/// Linux: KDE's dialog, or GNOME's `zenity`.
+fn linux_command(title: &str, start: &Path, installed: impl Fn(&str) -> bool) -> Option<Command> {
     if installed("kdialog") {
         let mut command = Command::new("kdialog");
         command
@@ -59,8 +87,12 @@ fn native_command(
 
 /// Opens the system's folder dialog and waits for it.
 pub fn native_folder(title: &str, start: &Path) -> Native {
-    let desktop =
-        std::env::var_os("WAYLAND_DISPLAY").is_some() || std::env::var_os("DISPLAY").is_some();
+    let desktop = if cfg!(target_os = "macos") {
+        // A Mac always has its desktop, unless the TUI runs over SSH.
+        std::env::var_os("SSH_CONNECTION").is_none()
+    } else {
+        std::env::var_os("WAYLAND_DISPLAY").is_some() || std::env::var_os("DISPLAY").is_some()
+    };
     let installed = |name: &str| {
         std::env::var_os("PATH")
             .is_some_and(|paths| std::env::split_paths(&paths).any(|dir| dir.join(name).is_file()))
@@ -76,6 +108,11 @@ fn run_dialog(mut command: Command) -> Native {
     match command.output() {
         Ok(out) if out.status.success() => {
             let path = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            // macOS ends a folder with `/`; the root folder keeps it.
+            let path = match path.strip_suffix('/') {
+                Some(inner) if !inner.is_empty() => inner.to_string(),
+                _ => path,
+            };
             if path.is_empty() {
                 Native::Cancelled
             } else {
@@ -337,7 +374,7 @@ mod tests {
             })
         };
         assert_eq!(
-            args(native_command("Pick", start, true, |_| true)).unwrap(),
+            args(linux_command("Pick", start, |_| true)).unwrap(),
             [
                 "kdialog",
                 "--title",
@@ -347,11 +384,26 @@ mod tests {
             ]
         );
         assert_eq!(
-            args(native_command("Pick", start, true, |n| n == "zenity")).unwrap()[0],
+            args(linux_command("Pick", start, |n| n == "zenity")).unwrap()[0],
             "zenity"
         );
-        assert!(native_command("Pick", start, true, |_| false).is_none());
+        assert!(linux_command("Pick", start, |_| false).is_none());
         assert!(native_command("Pick", start, false, |_| true).is_none());
+
+        // On a Mac: the title and the folder are arguments, not script text.
+        let mac = args(Some(mac_command("Pick \"x\"", start))).unwrap();
+        assert_eq!(mac[0], "osascript");
+        assert_eq!(mac[mac.len() - 2..], ["Pick \"x\"", "/home/me/code"]);
+        assert!(mac
+            .iter()
+            .all(|a| !a.contains("/home/me") || a == "/home/me/code"));
+        let on_this_system = args(native_command("Pick", start, true, |_| true)).unwrap();
+        let expected = if cfg!(target_os = "macos") {
+            "osascript"
+        } else {
+            "kdialog"
+        };
+        assert_eq!(on_this_system[0], expected);
 
         // `sh` and `false` stand in for a dialog that answers or is cancelled.
         #[cfg(unix)]
@@ -361,6 +413,13 @@ mod tests {
             assert_eq!(
                 run_dialog(chosen),
                 Native::Chosen("/home/me/code/app".into())
+            );
+            // As macOS prints it: with a `/` at the end.
+            let mut chosen = Command::new("sh");
+            chosen.args(["-c", "echo /Users/me/code/app/"]);
+            assert_eq!(
+                run_dialog(chosen),
+                Native::Chosen("/Users/me/code/app".into())
             );
             assert_eq!(run_dialog(Command::new("false")), Native::Cancelled);
         }
