@@ -516,6 +516,12 @@ mod tests {
         }
     }
 
+    /// `name` in the `/secrets` folder as a TOML string, joined by the
+    /// system's own separator (`\\` on Windows).
+    fn in_secrets(name: &str) -> String {
+        toml_value(Path::new("/secrets").join(name).display().to_string())
+    }
+
     fn args(command: &Command) -> Vec<String> {
         command
             .get_args()
@@ -547,7 +553,7 @@ mod tests {
             .find(|(k, _)| *k == "CODEX_HOME")
             .and_then(|(_, v)| v)
             .unwrap();
-        assert_eq!(home, "/work/app/.harness/agents/codex");
+        assert_eq!(home, Path::new("/work/app").join(".harness/agents/codex"));
     }
 
     #[test]
@@ -568,7 +574,10 @@ mod tests {
         let args = args(&command);
         for setting in [
             r#"mcp_servers.context7.command="/bin/harness""#,
-            r#"mcp_servers.context7.args=["mcp-exec","/secrets/context7.json"]"#,
+            &format!(
+                r#"mcp_servers.context7.args=["mcp-exec",{}]"#,
+                in_secrets("context7.json")
+            ),
         ] {
             assert!(
                 args.contains(&setting.to_string()),
@@ -734,7 +743,10 @@ mod tests {
         for setting in [
             "model_provider=\"deepseek\"",
             "model_providers.deepseek.wire_api=\"responses\"",
-            r#"model_providers.deepseek.auth={command="/bin/harness",args=["print-secret","/secrets/deepseek-key"]}"#,
+            &format!(
+                r#"model_providers.deepseek.auth={{command="/bin/harness",args=["print-secret",{}]}}"#,
+                in_secrets("deepseek-key")
+            ),
             DEEPSEEK_DEFAULT_MODEL,
         ] {
             assert!(

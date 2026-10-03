@@ -524,9 +524,11 @@ mod tests {
             })
             .collect();
 
+        // Joined by the system's own separator (`\\` on Windows).
+        let config_dir = Path::new("/work/app").join(".harness/agents/claude");
         assert_eq!(
             envs["CLAUDE_CONFIG_DIR"].as_deref(),
-            Some("/work/app/.harness/agents/claude")
+            Some(config_dir.to_string_lossy().as_ref())
         );
         assert_eq!(envs["CLAUDE_CODE_OAUTH_TOKEN"].as_deref(), Some("my-token"));
         for name in envs.keys() {

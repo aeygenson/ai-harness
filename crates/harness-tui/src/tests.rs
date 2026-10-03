@@ -103,7 +103,13 @@ impl Env {
 }
 
 fn screen(app: &mut App) -> String {
-    let mut terminal = Terminal::new(TestBackend::new(120, 30)).unwrap();
+    screen_of_width(app, 120)
+}
+
+/// The screen drawn `width` columns wide: wide enough for a temporary folder
+/// path, which on macOS is long (`/private/var/folders/…/T/…`).
+fn screen_of_width(app: &mut App, width: u16) -> String {
+    let mut terminal = Terminal::new(TestBackend::new(width, 30)).unwrap();
     terminal.draw(|frame| app.draw(frame)).unwrap();
     let buffer = terminal.backend().buffer();
     let width = usize::from(buffer.area.width);
@@ -307,7 +313,7 @@ fn projects_are_chosen_with_the_mouse_and_removed_from_the_list() {
     assert_eq!(app.tab, Tab::Projects);
     click(&mut app, "  beta  ");
     assert_eq!(app.projects.selected, 1);
-    assert!(screen(&mut app).contains(&b.display().to_string()));
+    assert!(screen_of_width(&mut app, 400).contains(&b.display().to_string()));
 
     // A double click opens it.
     click(&mut app, "  beta  ");

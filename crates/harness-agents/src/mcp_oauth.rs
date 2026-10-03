@@ -176,9 +176,9 @@ pub fn login(credentials_dir: &Path, server: &str, url: &str, tools: &Tools) -> 
     let redirect = format!("http://127.0.0.1:{port}/callback");
     let (client_id, client_secret) = register(curl, &found, &redirect)?;
 
-    let verifier = random_text(64);
+    let verifier = random_text(64)?;
     let challenge = base64_url(&sha256(verifier.as_bytes()));
-    let state = random_text(32);
+    let state = random_text(32)?;
     let mut query = vec![
         ("response_type", "code".to_string()),
         ("client_id", client_id.clone()),
@@ -702,17 +702,16 @@ fn parse_query(query: &str) -> Vec<(String, String)> {
 }
 
 /// Text of `length` random letters and digits (from the system's random
-/// source), for the PKCE verifier and the state.
-fn random_text(length: usize) -> String {
+/// source, on every system), for the PKCE verifier and the state. Without a
+/// random source the sign-in stops: a guessable verifier is worse than none.
+fn random_text(length: usize) -> Result<String, String> {
     const LETTERS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
     let mut bytes = vec![0u8; length];
-    if let Ok(mut source) = fs::File::open("/dev/urandom") {
-        let _ = source.read_exact(&mut bytes);
-    }
-    bytes
+    getrandom::fill(&mut bytes).map_err(|e| format!("no random numbers on this computer: {e}"))?;
+    Ok(bytes
         .iter()
         .map(|b| char::from(LETTERS[usize::from(*b) % LETTERS.len()]))
-        .collect()
+        .collect())
 }
 
 /// Base64 for addresses: `-` and `_` instead of `+` and `/`, no `=`.
@@ -821,8 +820,8 @@ mod tests {
         );
         assert_eq!(sha256(&[b'a'; 1000])[..4], [0x41, 0xed, 0xec, 0xe4]);
         assert_eq!(base64_url(b"ab"), "YWI");
-        assert_eq!(random_text(40).len(), 40);
-        assert_ne!(random_text(40), random_text(40));
+        assert_eq!(random_text(40).unwrap().len(), 40);
+        assert_ne!(random_text(40).unwrap(), random_text(40).unwrap());
     }
 
     #[test]
