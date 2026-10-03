@@ -1,4 +1,6 @@
 //! The Tasks tab: tasks, the steps of the selected task, and one step in full.
+//! In the step, «Files» are links: what the step created or changed (from
+//! its git commit), its notes and its log; a click opens one in Zed.
 //! At the bottom a box to act: a text of several lines, whom it goes to,
 //! and «Send».
 //!
@@ -21,13 +23,14 @@
 //! `.harness/` is read again every few seconds, so a `harness run` in another
 //! terminal shows up here too.
 
-use std::collections::{BTreeMap, VecDeque};
+use std::cell::RefCell;
+use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 use harness_core::config::{Config, RoleConfig, AGENTS};
-use harness_core::git::HARNESS_DIR;
-use harness_core::handoff::{NextStep, Role, Severity, Verdict};
+use harness_core::git::{Repo, HARNESS_DIR};
+use harness_core::handoff::{FileAction, NextStep, Role, Severity, Verdict};
 use harness_core::models::{self, ModelList};
 use harness_core::orchestrator::StopReason;
 use harness_core::retro::stage_text;
@@ -79,6 +82,16 @@ struct TaskView {
     failures: usize,
 }
 
+/// A file of the selected step, as a link in its «Files».
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Artifact {
+    /// `+` created, `~` changed, `−` deleted; `·` the step's own notes and log.
+    pub mark: char,
+    /// The path as shown: from the project folder, or the name of the step's file.
+    pub shown: String,
+    pub path: PathBuf,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Focus {
     Tasks,
@@ -124,6 +137,11 @@ pub struct TasksTab {
     pub(crate) running: Option<Running>,
     /// What the agent printed in the last run.
     pub(crate) log: VecDeque<String>,
+    /// A file to open in Zed, taken by the app.
+    pub(crate) open: Option<PathBuf>,
+    /// The files of each step's commit, by step folder; a step is only kept
+    /// here once its commit is there.
+    commits: RefCell<HashMap<PathBuf, Vec<(char, String)>>>,
 }
 
 impl TasksTab {
@@ -149,6 +167,8 @@ impl TasksTab {
             run: None,
             running: None,
             log: VecDeque::new(),
+            open: None,
+            commits: RefCell::default(),
         };
         tab.reload();
         tab.step = tab.last_step();
@@ -602,6 +622,79 @@ impl TasksTab {
             .map_or(0, |task| task.steps.len().saturating_sub(1))
     }
 
+    /// The files of `step`, as links in its «Files»: what its commit
+    /// created, changed or deleted (outside the run records), then its notes
+    /// and log. Before the commit is there, what its handoff lists.
+    pub fn artifacts(&self, step: &Step) -> Vec<Artifact> {
+        let runs = format!("{HARNESS_DIR}/runs/");
+        let dir = self.root.join(&step.dir);
+        let known = self.commits.borrow().get(&dir).cloned();
+        let commit = known.or_else(|| {
+            let handoff = dir.join("handoff.json");
+            let relative = handoff.strip_prefix(&self.root).ok()?.to_str()?.to_string();
+            let files = Repo::open(&self.root)
+                .ok()?
+                .files_of_commit_adding(&relative)?;
+            self.commits.borrow_mut().insert(dir.clone(), files.clone());
+            Some(files)
+        });
+        let changed: Vec<(char, String)> = match commit {
+            Some(files) => files
+                .into_iter()
+                .filter(|(_, path)| !path.starts_with(&runs))
+                .map(|(status, path)| {
+                    let mark = match status {
+                        'A' => '+',
+                        'D' => '−',
+                        _ => '~',
+                    };
+                    (mark, path)
+                })
+                .collect(),
+            None => step
+                .handoff
+                .files
+                .iter()
+                .filter_map(|file| {
+                    let mark = match file.action {
+                        FileAction::Created => '+',
+                        FileAction::Modified => '~',
+                        FileAction::Deleted => '−',
+                        FileAction::Read => return None,
+                    };
+                    Some((mark, file.path.clone()))
+                })
+                .collect(),
+        };
+        let mut files: Vec<Artifact> = Vec::new();
+        for (mark, shown) in changed {
+            let path = self.root.join(&shown);
+            if !files.iter().any(|f| f.path == path) {
+                files.push(Artifact { mark, shown, path });
+            }
+        }
+        // The step's own files: their name is enough, the folder is long.
+        for name in ["notes.md", "agent.log"] {
+            let path = dir.join(name);
+            if path.is_file() {
+                files.push(Artifact {
+                    mark: '·',
+                    shown: name.to_string(),
+                    path,
+                });
+            }
+        }
+        files
+    }
+
+    /// A click on link `index` of the selected step's «Files»: the app opens it.
+    pub fn open_file(&mut self, index: usize) {
+        let step = self.current().and_then(|t| t.steps.get(self.step)).cloned();
+        if let Some(file) = step.and_then(|s| self.artifacts(&s).into_iter().nth(index)) {
+            self.open = Some(file.path);
+        }
+    }
+
     pub fn on_key(&mut self, key: KeyCode) {
         if self.focus == Focus::Input {
             match key {
@@ -803,25 +896,45 @@ impl TasksTab {
             self.focus == Focus::Steps,
         );
 
-        let (title, text) = match task.steps.get(self.step) {
-            Some(step) => (
-                tr.f(
+        let (title, text, links) = match task.steps.get(self.step) {
+            Some(step) => {
+                let (text, links) = step_text(step, &self.artifacts(step), tr);
+                let title = tr.f(
                     "tasks.step",
                     &[
                         ("round", &step.handoff.round),
                         ("role", &role_name(step.handoff.role)),
                     ],
-                ),
-                step_text(step, tr),
-            ),
+                );
+                (title, text, links)
+            }
             None => (
                 " task.md ".to_string(),
                 Text::from(task.description.clone()),
+                Vec::new(),
             ),
         };
+        let block = panel(&title, false);
+        let inner = block.inner(detail_area);
+        // Where each link is on the screen, after wrapping and scrolling.
+        for (index, &line) in links.iter().enumerate() {
+            let before = Paragraph::new(Text::from(text.lines[..line].to_vec()))
+                .wrap(Wrap { trim: false })
+                .line_count(inner.width);
+            let row = u16::try_from(before)
+                .unwrap_or(u16::MAX)
+                .checked_sub(self.scroll);
+            if let Some(row) = row.filter(|r| *r < inner.height) {
+                let width = u16::try_from(text.lines[line].width()).unwrap_or(u16::MAX);
+                hits.add(
+                    Rect::new(inner.x, inner.y + row, width.min(inner.width), 1),
+                    Target::Button(ButtonId::TaskFile(index)),
+                );
+            }
+        }
         frame.render_widget(
             Paragraph::new(text)
-                .block(panel(&title, false))
+                .block(block)
                 .wrap(Wrap { trim: false })
                 .scroll((self.scroll, 0)),
             detail_area,
@@ -1256,7 +1369,8 @@ fn step_item(step: &Step) -> ListItem<'static> {
     ]))
 }
 
-fn step_text(step: &Step, tr: &I18n) -> Text<'static> {
+/// The step in full; `files` become links. Also the line of each link.
+fn step_text(step: &Step, files: &[Artifact], tr: &I18n) -> (Text<'static>, Vec<usize>) {
     let h = &step.handoff;
     let bold = Style::new().add_modifier(Modifier::BOLD);
     let mut lines = vec![
@@ -1292,15 +1406,22 @@ fn step_text(step: &Step, tr: &I18n) -> Text<'static> {
             ]));
         }
     }
-    if !h.files.is_empty() {
+    let mut links = Vec::new();
+    if !files.is_empty() {
         lines.push(Line::default());
         lines.push(Line::styled(tr.t("tasks.files").to_string(), bold));
-        for file in &h.files {
-            let action = serde_json::to_value(file.action)
-                .ok()
-                .and_then(|v| v.as_str().map(str::to_string))
-                .unwrap_or_default();
-            lines.push(Line::from(format!("  {action:<9} {}", file.path)));
+        for file in files {
+            // A deleted file cannot be opened: grey, not a link.
+            let look = if file.mark == '−' || !file.path.is_file() {
+                theme::dim()
+            } else {
+                theme::accent().add_modifier(Modifier::UNDERLINED)
+            };
+            links.push(lines.len());
+            lines.push(Line::from(vec![
+                Span::styled(format!("  {} ", file.mark), theme::dim()),
+                Span::styled(file.shown.clone(), look),
+            ]));
         }
     }
     if !h.skills_used.is_empty() {
@@ -1315,7 +1436,7 @@ fn step_text(step: &Step, tr: &I18n) -> Text<'static> {
         lines.push(Line::styled(tr.t("tasks.notes").to_string(), bold));
         lines.extend(step.notes.lines().map(|l| Line::from(l.to_string())));
     }
-    Text::from(lines)
+    (Text::from(lines), links)
 }
 
 fn verdict_span(verdict: Verdict) -> Span<'static> {

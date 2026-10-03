@@ -173,7 +173,7 @@ fn starts_with_a_project_folder_and_shows_its_tasks() {
         "r1 architect  approved → human",
         "▶ r1 tester",
         "high     src/parser.rs:42  Panics on empty input",
-        "Tester notes here.",
+        "· notes.md",
         "q quit",
     ] {
         assert!(text.contains(part), "missing {part:?} in:\n{text}");
@@ -2134,4 +2134,92 @@ fn a_retrospective_is_generated_edited_and_its_proposals_applied() {
     assert!(repo.changed_files().unwrap().is_empty());
     click(&mut app, "001  ");
     assert!(screen(&mut app).contains("Lesson: write tests first."));
+}
+
+#[test]
+fn files_of_a_step_open_in_zed_with_a_click() {
+    let env = Env::new();
+    let root = env.path("test");
+    project(&root);
+    // The developer's step created one file and changed another.
+    let (store, mut state) = TaskStore::open(&root.join(".harness/runs"), "task-001").unwrap();
+    let mut developer = handoff(
+        Role::Developer,
+        Verdict::Approved,
+        NextStep::To(Role::Tester),
+        "Empty input fixed",
+    );
+    developer.round = 2;
+    developer.files = vec![
+        harness_core::handoff::FileChange {
+            path: "src/parser.rs".into(),
+            action: harness_core::handoff::FileAction::Modified,
+        },
+        harness_core::handoff::FileChange {
+            path: "docs/parser.md".into(),
+            action: harness_core::handoff::FileAction::Created,
+        },
+        harness_core::handoff::FileChange {
+            path: "Cargo.toml".into(),
+            action: harness_core::handoff::FileAction::Read,
+        },
+    ];
+    store.record(&mut state, &developer, "Fixed.").unwrap();
+    fs::create_dir_all(root.join("docs")).unwrap();
+    fs::write(root.join("docs/parser.md"), "# Parser\n").unwrap();
+
+    // Before the step's commit: the files its handoff lists are links.
+    let mut app = env.app(&root);
+    // Zed is not started in the tests: a command that does nothing.
+    app.viewer = |_| Some(std::process::Command::new("true"));
+    let text = screen(&mut app);
+    for part in [
+        "Files (click: open in Zed):",
+        "~ src/parser.rs",
+        "+ docs/parser.md",
+        "· notes.md",
+    ] {
+        assert!(text.contains(part), "missing {part:?} in:\n{text}");
+    }
+    // Files that were only read are not listed.
+    assert!(!text.contains("Cargo.toml"), "{text}");
+
+    click(&mut app, "docs/parser.md");
+    app.open_task_file();
+    assert_eq!(
+        app.message,
+        Some(("Opened in Zed: docs/parser.md".to_string(), false))
+    );
+    // A file that is not there any more is not opened.
+    click(&mut app, "src/parser.rs");
+    app.open_task_file();
+    assert_eq!(
+        app.message,
+        Some(("src/parser.rs is not there any more".to_string(), true))
+    );
+
+    // After the commit the list comes from git: also what the handoff forgot,
+    // and nothing of the run records.
+    fs::write(root.join("docs/forgotten.md"), "x").unwrap();
+    Repo::open(&root)
+        .unwrap()
+        .commit_all("task-001 round 2")
+        .unwrap();
+    let mut app = env.app(&root);
+    app.viewer = |_| None;
+    let text = screen(&mut app);
+    assert!(text.contains("+ docs/forgotten.md"), "{text}");
+    assert!(text.contains("+ docs/parser.md"), "{text}");
+    assert!(!text.contains("~ src/parser.rs"), "{text}");
+    assert!(!text.contains("handoff.json"), "{text}");
+
+    // Without Zed the file goes to the editor in the terminal, and nothing
+    // is committed after.
+    click(&mut app, "notes.md");
+    app.open_task_file();
+    let job = app.edit.take().expect("the notes in the editor");
+    assert!(job.path.ends_with("notes.md"), "{job:?}");
+    app.finish_edit(&job, Ok(()));
+    assert_eq!(app.message, None);
+    assert!(app.tasks.as_ref().unwrap().open.is_none());
 }

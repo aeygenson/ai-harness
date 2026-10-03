@@ -177,6 +177,8 @@ enum EditKind {
     Plugin,
     /// The text of the retrospective `name` (its number).
     Retro,
+    /// A file of a task step, only looked at: without Zed, in `$EDITOR`.
+    View,
 }
 
 /// What a folder is being chosen for.
@@ -219,6 +221,7 @@ fn event_loop(terminal: &mut DefaultTerminal, app: &mut App) -> Result<()> {
             }
         }
         app.tick();
+        app.open_task_file();
         if let Some(job) = app.edit.take() {
             let result = edit_outside(terminal, &job.path, &app.tr);
             app.finish_edit(&job, result);
@@ -332,6 +335,8 @@ struct App {
     /// Builds the agent of the retrospective.
     retro_builder: RetroBuilder,
     asker: ModelAsker,
+    /// The command that opens a file in Zed without waiting; `None` without Zed.
+    viewer: fn(&Path) -> Option<std::process::Command>,
     /// The answers of «Refresh models», while the agents are being asked.
     asking: Option<mpsc::Receiver<Answers>>,
     checker: McpChecker,
@@ -377,6 +382,7 @@ impl App {
             builder: harness_agents::build::build_team,
             retro_builder: harness_agents::build::retro_agent,
             asker: ask_agents,
+            viewer: editor::viewer,
             asking: None,
             checker: harness_agents::mcp_check::list_tools,
             checking: None,
@@ -1854,6 +1860,44 @@ impl App {
         }
     }
 
+    /// A file chosen in «Files» of the Tasks tab: Zed opens it and the TUI
+    /// goes on; without Zed the editor gets the terminal.
+    fn open_task_file(&mut self) {
+        let Some(path) = self.tasks.as_mut().and_then(|t| t.open.take()) else {
+            return;
+        };
+        let shown = self
+            .project
+            .as_deref()
+            .and_then(|root| path.strip_prefix(root).ok())
+            .unwrap_or(&path)
+            .display()
+            .to_string();
+        if !path.is_file() {
+            self.message = Some((self.tr.f("tasks.file_missing", &[("path", &shown)]), true));
+            return;
+        }
+        match (self.viewer)(&path) {
+            Some(command) => {
+                self.message = Some(match editor::view(command) {
+                    Ok(()) => (self.tr.f("tasks.file_opened", &[("path", &shown)]), false),
+                    Err(error) => (
+                        self.tr.f("skills.editor_failed", &[("error", &error)]),
+                        true,
+                    ),
+                });
+            }
+            None => {
+                self.edit = Some(EditJob {
+                    name: shown,
+                    path,
+                    copied: false,
+                    kind: EditKind::View,
+                });
+            }
+        }
+    }
+
     /// The editor was closed: keep the change in git, or drop a copy of a
     /// built-in skill that was not changed.
     fn finish_edit(&mut self, job: &EditJob, result: Result<(), String>) {
@@ -1861,6 +1905,15 @@ impl App {
             EditKind::Skill => {}
             EditKind::Plugin => return self.finish_plugin_edit(job, result),
             EditKind::Retro => return self.finish_retro_edit(job, result),
+            EditKind::View => {
+                self.message = result.err().map(|error| {
+                    (
+                        self.tr.f("skills.editor_failed", &[("error", &error)]),
+                        true,
+                    )
+                });
+                return;
+            }
         }
         let tr = &self.tr;
         let mut message = result
@@ -2250,6 +2303,11 @@ impl App {
                 if let Some(skills) = &mut self.skills {
                     let action = skills.press(id);
                     self.skill_action(action);
+                }
+            }
+            ButtonId::TaskFile(index) => {
+                if let Some(tasks) = &mut self.tasks {
+                    tasks.open_file(index);
                 }
             }
             ButtonId::Input => {

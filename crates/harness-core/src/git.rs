@@ -89,6 +89,40 @@ impl Repo {
         self.git(&["show", &format!("{commit}:{file}")]).ok()
     }
 
+    /// The files of the commit that added `added` (relative to the project,
+    /// with `/`), each with how it changed: `A` added, `M` changed, `D`
+    /// deleted. `None` if no commit added it. Renames count as a deleted
+    /// and an added file.
+    pub fn files_of_commit_adding(&self, added: &str) -> Option<Vec<(char, String)>> {
+        let commit = self
+            .git_literal(&["log", "-1", "--diff-filter=A", "--format=%H", "--", added])
+            .ok()?;
+        let commit = commit.trim();
+        if commit.is_empty() {
+            return None;
+        }
+        let out = self
+            .git(&[
+                "show",
+                "--no-renames",
+                "--name-status",
+                "-z",
+                "--format=",
+                commit,
+            ])
+            .ok()?;
+        // `-z` gives "status\0path\0" pairs and never quotes paths.
+        let mut parts = out
+            .split('\0')
+            .map(str::trim_start)
+            .filter(|p| !p.is_empty());
+        let mut files = Vec::new();
+        while let (Some(status), Some(path)) = (parts.next(), parts.next()) {
+            files.push((status.chars().next().unwrap_or('M'), path.to_string()));
+        }
+        Some(files)
+    }
+
     /// The day of the last commit that changed `path` (relative to the
     /// project), as `2026-10-02`; `None` if it was never committed.
     pub fn last_change_date(&self, path: &str) -> Option<String> {
@@ -394,6 +428,26 @@ mod tests {
         repo.commit_all("more").unwrap();
         fs::remove_file(repo.root().join("README.md")).unwrap();
         assert_eq!(repo.changed_files().unwrap(), ["README.md"]);
+    }
+
+    #[test]
+    fn the_files_of_the_commit_that_added_a_file() {
+        let (_dir, repo) = new_repo();
+        assert_eq!(repo.files_of_commit_adding("runs/1/handoff.json"), None);
+        write(&repo, "runs/1/handoff.json", "{}");
+        write(&repo, "docs/my design.md", "d");
+        write(&repo, "README.md", "changed");
+        repo.commit_all("step 1").unwrap();
+        write(&repo, "docs/my design.md", "later");
+        repo.commit_all("step 2").unwrap();
+        assert_eq!(
+            repo.files_of_commit_adding("runs/1/handoff.json").unwrap(),
+            [
+                ('M', "README.md".to_string()),
+                ('A', "docs/my design.md".to_string()),
+                ('A', "runs/1/handoff.json".to_string()),
+            ]
+        );
     }
 
     #[test]
