@@ -2223,3 +2223,47 @@ fn files_of_a_step_open_in_zed_with_a_click() {
     assert_eq!(app.message, None);
     assert!(app.tasks.as_ref().unwrap().open.is_none());
 }
+
+#[test]
+fn a_click_on_a_title_shows_the_window_over_the_whole_tab() {
+    let env = Env::new();
+    let root = env.path("test");
+    project(&root);
+    let mut app = env.app(&root);
+    let text = screen(&mut app);
+    assert!(text.contains("╭ ⤢ round 1 · tester "), "{text}");
+    assert!(text.contains("╭ Roles "), "{text}");
+
+    // The step over the whole tab; the message box stays.
+    click(&mut app, "⤢ round 1 · tester");
+    let text = screen(&mut app);
+    assert!(text.contains("╭ ⤡ round 1 · tester "), "{text}");
+    assert!(!text.contains("╭ Roles "), "{text}");
+    assert!(!text.contains("r1 architect  approved"), "{text}");
+    assert!(text.contains("Tester notes here."), "{text}");
+    assert!(text.contains("╭ Message "), "{text}");
+    // Another click puts it back.
+    click(&mut app, "⤡ round 1 · tester");
+    assert!(screen(&mut app).contains("╭ Roles "));
+
+    // The steps, then Esc puts them back.
+    click(&mut app, "⤢ task-001 · round 2");
+    let text = screen(&mut app);
+    assert!(text.contains("⤡ task-001 · round 2"), "{text}");
+    assert!(!text.contains("round 1 · tester "), "{text}");
+    key(&mut app, KeyCode::Esc);
+    assert!(!app.quit);
+    assert!(screen(&mut app).contains("╭ Roles "));
+
+    // The agent log, while there is one.
+    app.tasks
+        .as_mut()
+        .unwrap()
+        .log
+        .push_back("cargo test: ok".to_string());
+    click(&mut app, "⤢ Agent log");
+    let text = screen(&mut app);
+    assert!(text.contains("⤡ Agent log"), "{text}");
+    assert!(text.contains("cargo test: ok"), "{text}");
+    assert!(!text.contains("╭ Roles "), "{text}");
+}
