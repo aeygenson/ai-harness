@@ -56,6 +56,7 @@ choice_unavailable = "Roles get a message when the task waits for your answer: a
 choice_finish = "Approve and finish"
 typing_hint = "Enter new line · Ctrl+S or Alt+Enter send · ↑↓ whom · Tab or Esc leave the box · paste works"
 need_text = "Write the task first"
+duplicate = "{task} already has this text and is not done ({stage}): choose it in «Tasks» and continue it, or change the text"
 no_task = "Choose a task first"
 busy = "Roles are working; wait until they finish"
 quit_running = "Roles are still working: wait for them (Ctrl+C quits anyway and leaves the work unfinished)"

@@ -34,7 +34,7 @@ use harness_core::config::{Config, RoleConfig, AGENTS};
 use harness_core::git::{Repo, HARNESS_DIR};
 use harness_core::handoff::{FileAction, NextStep, Role, Severity, Verdict};
 use harness_core::models::{self, ModelList};
-use harness_core::orchestrator::StopReason;
+use harness_core::orchestrator::{self, StopReason};
 use harness_core::retro::stage_text;
 use harness_core::store::{self, Step, TaskStore};
 use harness_core::task::{Stage, TaskState, WaitReason};
@@ -544,6 +544,11 @@ impl TasksTab {
             (Choice::NewTask, _) if notes.is_empty() => {
                 return Err(tr.t("tasks.need_text").to_string())
             }
+            // The same text sent twice does not start a second task.
+            (Choice::NewTask, _) if self.same_task(&notes).is_some() => {
+                let (task, stage) = self.same_task(&notes).unwrap_or_default();
+                return Err(tr.f("tasks.duplicate", &[("task", &task), ("stage", &stage)]));
+            }
             (Choice::NewTask, _) => Request::New(notes),
             (_, None) => return Err(tr.t("tasks.no_task").to_string()),
             (Choice::Role(role), Some((task, stage))) => {
@@ -618,6 +623,16 @@ impl TasksTab {
         };
         push_line(&mut self.log, format!("── {text}"));
         Some((text, problem))
+    }
+
+    /// The unfinished task whose text is `text` (spaces and line breaks do
+    /// not count), and its stage.
+    fn same_task(&self, text: &str) -> Option<(String, String)> {
+        let wanted = orchestrator::words(text);
+        self.all
+            .iter()
+            .find(|t| t.state.stage != Stage::Done && orchestrator::words(&t.description) == wanted)
+            .map(|t| (t.id.clone(), stage_text(t.state.stage)))
     }
 
     /// The stage of the task at `index`.
