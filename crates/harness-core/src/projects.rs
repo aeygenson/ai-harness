@@ -64,7 +64,7 @@ pub struct Project {
 
 /// `~/.harness`, where the project list and plugin catalogs live.
 pub fn harness_home() -> Option<PathBuf> {
-    std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".harness"))
+    harness_platform::home::harness_dir()
 }
 
 impl Projects {

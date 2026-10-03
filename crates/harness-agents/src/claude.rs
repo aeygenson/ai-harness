@@ -538,7 +538,7 @@ mod tests {
                 "DISABLE_AUTOUPDATER",
             ];
             assert!(
-                process::INHERITED_ENV.contains(&name.as_str()) || ours.contains(&name.as_str()),
+                harness_platform::env::is_inherited(name) || ours.contains(&name.as_str()),
                 "{name} should not be passed"
             );
         }

@@ -13,7 +13,7 @@ pub use harness_core::secret::Secret;
 
 /// `~/.harness/credentials`.
 pub fn default_dir() -> Option<PathBuf> {
-    std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".harness/credentials"))
+    harness_platform::home::harness_dir().map(|dir| dir.join("credentials"))
 }
 
 /// Saves the token of `agent` (for example `claude`), readable only by Lisa.
@@ -95,26 +95,9 @@ fn clean(token: &str) -> String {
     token.chars().filter(|c| !c.is_whitespace()).collect()
 }
 
-/// Creates the file with permissions 600 (owner reads and writes, nobody else),
-/// before any secret is written into it.
-#[cfg(unix)]
+/// Writes `text` into `path`, readable only by Lisa (see `harness_platform::private`).
 pub(crate) fn write_private(path: &Path, text: &str) -> io::Result<()> {
-    use std::io::Write;
-    use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
-    let mut file = fs::OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(true)
-        .mode(0o600)
-        .open(path)?;
-    // `mode` only applies to a new file; an old one might be readable by others.
-    file.set_permissions(fs::Permissions::from_mode(0o600))?;
-    file.write_all(text.as_bytes())
-}
-
-#[cfg(not(unix))]
-pub(crate) fn write_private(path: &Path, text: &str) -> io::Result<()> {
-    fs::write(path, text)
+    harness_platform::private::write(path, text.as_bytes())
 }
 
 #[cfg(test)]
@@ -148,14 +131,7 @@ mod tests {
             "token-1"
         );
 
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let mode = fs::metadata(path).unwrap().permissions().mode();
-            assert_eq!(mode & 0o777, 0o600);
-        }
-        #[cfg(not(unix))]
-        assert!(path.is_file());
+        assert!(harness_platform::private::is_private(&path).unwrap());
     }
 
     #[test]
@@ -171,14 +147,7 @@ mod tests {
         assert_eq!(secret_names(dir.path()).unwrap(), ["context7", "github"]);
         assert!(load_secret(dir.path(), "nope").is_err());
 
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let mode = fs::metadata(path).unwrap().permissions().mode();
-            assert_eq!(mode & 0o777, 0o600);
-        }
-        #[cfg(not(unix))]
-        assert!(path.is_file());
+        assert!(harness_platform::private::is_private(&path).unwrap());
     }
 
     #[test]

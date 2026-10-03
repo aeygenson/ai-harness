@@ -23,7 +23,6 @@ use serde_json::Value;
 
 use crate::codex::{DEEPSEEK_DEFAULT_MODEL, DEEPSEEK_KEY_ENV};
 use crate::credentials::{self, Secret};
-use crate::process::INHERITED_ENV;
 
 /// How long one agent may take to answer.
 const TIME_LIMIT: Duration = Duration::from_secs(90);
@@ -157,11 +156,10 @@ pub fn ask(agent: &str, credentials_dir: &Path, programs: &Programs) -> Result<M
 /// `program` in `dir` with only the whitelisted environment.
 pub(crate) fn command(program: &Path, dir: &Path) -> Command {
     let mut command = Command::new(program);
-    command.current_dir(dir).env_clear().envs(
-        INHERITED_ENV
-            .iter()
-            .filter_map(|name| std::env::var_os(name).map(|value| (*name, value))),
-    );
+    command
+        .current_dir(dir)
+        .env_clear()
+        .envs(harness_platform::env::inherited_values());
     command
 }
 

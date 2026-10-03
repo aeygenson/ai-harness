@@ -231,22 +231,9 @@ pub fn login(credentials_dir: &Path, server: &str, url: &str, tools: &Tools) -> 
     )
 }
 
-/// Opens `address` in Lisa's browser (`xdg-open`, or `open` on a Mac).
+/// Opens `address` in Lisa's browser (see `harness_platform::open`).
 pub fn open_in_browser(address: &str) -> Result<(), String> {
-    for program in ["xdg-open", "open"] {
-        let started = std::process::Command::new(program)
-            .arg(address)
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn();
-        if let Ok(mut child) = started {
-            // It ends at once; waiting keeps no process behind.
-            std::thread::spawn(move || child.wait());
-            return Ok(());
-        }
-    }
-    Err("no browser opener (xdg-open) found".into())
+    harness_platform::open::url(address)
 }
 
 /// The server `name` of the project, if it is one to sign in to: its address.

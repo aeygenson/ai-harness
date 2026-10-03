@@ -7,8 +7,6 @@
 //! removed from it; its secrets never appear in an error.
 
 use std::io::{BufRead, BufReader, Read, Write};
-#[cfg(unix)]
-use std::os::unix::process::CommandExt;
 use std::path::Path;
 use std::process::{Child, ChildStdin, Stdio};
 use std::sync::mpsc::{channel, Receiver, RecvTimeoutError};
@@ -53,10 +51,8 @@ pub fn list_tools_within(
             .fold(text, |text, secret| text.replace(secret, "***"))
     };
     let mut command = base_command(Path::new(&server.command), project_dir);
-    // Its own process group: `npx` starts the real server as a child, and
-    // both are stopped together.
-    #[cfg(unix)]
-    command.process_group(0);
+    // `npx` starts the real server as a child; both are stopped together.
+    harness_platform::process::own_group(&mut command);
     command
         .args(&server.args)
         .envs(server.env.iter().map(|(k, v)| (k, v.expose())))
@@ -92,7 +88,7 @@ pub fn list_tools_within(
     })
 }
 
-/// Gives the server a moment to end, then ends its whole process group.
+/// Gives the server a moment to end, then ends it and everything it started.
 fn stop(child: &mut Child) {
     let start = Instant::now();
     while start.elapsed() < Duration::from_millis(500) {
@@ -101,24 +97,8 @@ fn stop(child: &mut Child) {
         }
         thread::sleep(Duration::from_millis(20));
     }
-    kill_group(child);
-    let _ = child.kill();
-    let _ = child.wait();
+    harness_platform::process::kill_tree(child);
 }
-
-/// Ends the whole process group the server leads (see `list_tools`).
-#[cfg(unix)]
-fn kill_group(child: &Child) {
-    let _ = std::process::Command::new("kill")
-        .args(["-KILL", "--", &format!("-{}", child.id())])
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status();
-}
-
-/// Windows has no process groups; only the server itself is stopped.
-#[cfg(not(unix))]
-fn kill_group(_child: &Child) {}
 
 /// The questions and answers on the server's standard input and output.
 struct Session {

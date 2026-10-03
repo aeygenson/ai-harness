@@ -278,7 +278,7 @@ async fn main() -> Result<()> {
         Command::Mcp {
             command: McpCommand::Logout { name },
         } => {
-            let dir = credentials::default_dir().context("HOME is not set")?;
+            let dir = credentials::default_dir().context("no home folder found")?;
             harness_agents::mcp_oauth::logout(&dir, &name)?;
             println!("Forgot the sign-in of {name}.");
             Ok(())
@@ -393,9 +393,9 @@ fn init(project: &Path) -> Result<()> {
 /// `--refresh`.
 fn models(refresh: bool) -> Result<()> {
     use harness_core::models;
-    let home = projects::harness_home().context("HOME is not set")?;
+    let home = projects::harness_home().context("no home folder found")?;
     if refresh {
-        let dir = credentials::default_dir().context("HOME is not set")?;
+        let dir = credentials::default_dir().context("no home folder found")?;
         println!("Asking the agents with a saved login…");
         for (agent, result) in harness_agents::models::ask_all(&dir, &Default::default()) {
             match result {
@@ -447,7 +447,7 @@ fn models(refresh: bool) -> Result<()> {
 }
 
 fn login(agent: &str) -> Result<()> {
-    let dir = credentials::default_dir().context("HOME is not set")?;
+    let dir = credentials::default_dir().context("no home folder found")?;
     match agent {
         "claude" => login_claude(&dir),
         "codex" => login_codex(&dir),
@@ -548,7 +548,7 @@ fn set_secret(name: &str) -> Result<()> {
     if !mcp::is_simple_name(name) {
         bail!("use lowercase letters, digits, '-' and '_' for the name, for example `context7`");
     }
-    let dir = credentials::default_dir().context("HOME is not set")?;
+    let dir = credentials::default_dir().context("no home folder found")?;
     println!("Paste the secret for {name:?} and press Enter.");
     println!("It is not shown while you type: paste it once, then press Enter.");
     let value = read_hidden("Secret: ")?;
@@ -570,7 +570,7 @@ fn mcp_login(project: &Path, name: &str) -> Result<()> {
     let repo = open_repo(project)?;
     let config = Config::load(&repo.root().join(HARNESS_DIR))?;
     let url = mcp_oauth::oauth_url(&config, name).map_err(anyhow::Error::msg)?;
-    let dir = credentials::default_dir().context("HOME is not set")?;
+    let dir = credentials::default_dir().context("no home folder found")?;
     println!("Signing in to {name} ({url}).");
     let open = |address: &str| {
         println!("Opening the browser. If it does not open, visit:\n{address}");
@@ -593,7 +593,7 @@ fn mcp_login(project: &Path, name: &str) -> Result<()> {
 }
 
 fn list_secrets() -> Result<()> {
-    let dir = credentials::default_dir().context("HOME is not set")?;
+    let dir = credentials::default_dir().context("no home folder found")?;
     let names = credentials::secret_names(&dir)?;
     if names.is_empty() {
         println!("No secrets saved. Add one with `harness secret set <name>`.");
@@ -625,11 +625,7 @@ fn login_codex(dir: &Path) -> Result<()> {
             auth.display()
         );
     }
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(&auth, fs::Permissions::from_mode(0o600))?;
-    }
+    harness_platform::private::restrict_file(&auth)?;
     println!("Saved to {} (only you can read it).", auth.display());
     Ok(())
 }
@@ -641,26 +637,13 @@ fn login_codex(dir: &Path) -> Result<()> {
 fn login_antigravity(dir: &Path) -> Result<()> {
     let home = dir.join("antigravity");
     fs::create_dir_all(&home)?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(&home, fs::Permissions::from_mode(0o700))?;
-    }
+    harness_platform::private::restrict_dir(&home)?;
     println!("Starting `agy`. Sign in with Google, then type /quit to come back here.");
     let mut command = std::process::Command::new("agy");
-    command.env_clear().env("HOME", &home);
-    for name in [
-        "PATH",
-        "TERM",
-        "LANG",
-        "HTTP_PROXY",
-        "HTTPS_PROXY",
-        "NO_PROXY",
-    ] {
-        if let Some(value) = std::env::var_os(name) {
-            command.env(name, value);
-        }
-    }
+    command
+        .env_clear()
+        .envs(harness_platform::env::inherited_values())
+        .env("HOME", &home);
     let status = command
         .status()
         .context("cannot start `agy`; is Antigravity CLI installed?")?;
