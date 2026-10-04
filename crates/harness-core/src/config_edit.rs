@@ -430,7 +430,7 @@ mod tests {
     #[test]
     fn retro_is_created_or_changed() {
         let retro = RetroConfig {
-            agent: "codex+deepseek".into(),
+            agent: "dsh".into(),
             model: Some("deepseek-v4-pro".into()),
             effort: None,
         };

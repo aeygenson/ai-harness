@@ -70,7 +70,7 @@ pub struct Entry {
     pub vendor: &'static str,
     /// The program, by name; the first one found counts.
     pub programs: &'static [&'static str],
-    /// The agent is a model inside this other agent's program, as DeepSeek
+    /// The agent is a model inside this other agent's program, as GLM
     /// runs inside Codex: installing that program is all it needs.
     pub inside: Option<&'static str>,
     /// The subscription or payment it works with.
@@ -149,19 +149,6 @@ pub const CATALOG: &[Entry] = &[
         update: Commands::both(NPM_CODEX),
         remove: Commands::NONE,
         site: "https://developers.openai.com/codex/cli",
-    },
-    Entry {
-        id: "codex+deepseek",
-        name: "Codex + DeepSeek",
-        vendor: "DeepSeek",
-        programs: &["codex"],
-        inside: Some("Codex CLI"),
-        plan: "DeepSeek API key, pay per use",
-        min_version: Some("0.158.0"),
-        install: Commands::both(NPM_CODEX),
-        update: Commands::both(NPM_CODEX),
-        remove: Commands::NONE,
-        site: "https://platform.deepseek.com",
     },
     Entry {
         id: "antigravity",
@@ -383,8 +370,8 @@ impl Status {
     /// for what npm installed, otherwise deleting the program file that was
     /// found (Claude Code, Antigravity and Cursor install one command there).
     /// Its settings, saved logins and data stay. `None` when it is not
-    /// installed, or lives inside another agent's program: removing Codex
-    /// for «Codex + DeepSeek» would surprise.
+    /// installed, or lives inside another agent's program: removing Claude
+    /// Code for «Claude Code + GLM» would surprise.
     pub fn removal(&self) -> Option<String> {
         if !self.installed() || self.entry.inside.is_some() {
             return None;
@@ -715,8 +702,6 @@ mod tests {
         assert_eq!(codex.version.as_deref(), Some("0.157.1"));
         assert!(codex.old());
         assert_eq!(codex.login, Some(true));
-        // DeepSeek runs inside the same Codex.
-        assert!(get("codex+deepseek").installed());
 
         let agy = get("antigravity");
         assert!(agy.installed() && agy.version.is_none() && !agy.old());
@@ -763,14 +748,6 @@ mod tests {
         };
         assert!(!missing.host_only());
         assert_eq!(missing.action().unwrap().0, Action::Install);
-        // DeepSeek is run by the harness, so Codex is enough for it.
-        let deepseek = CATALOG.iter().find(|e| e.id == "codex+deepseek").unwrap();
-        let found = Status {
-            entry: *deepseek,
-            ..found
-        };
-        assert!(found.installed());
-        assert_eq!(found.action().unwrap().0, Action::Update);
     }
 
     #[test]
@@ -834,7 +811,7 @@ mod tests {
             assert_eq!(system.needs_sudo(Action::Update), None);
         }
         // Not for an agent inside another one, nor for one not installed.
-        assert_eq!(status("codex+deepseek", "/usr/bin/codex").removal(), None);
+        assert_eq!(status("claude+glm", "/usr/bin/claude").removal(), None);
         let missing = Status {
             path: None,
             ..status("claude", "/x")

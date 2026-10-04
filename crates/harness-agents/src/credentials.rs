@@ -36,21 +36,19 @@ pub fn has_login(dir: &Path, agent: &str) -> bool {
     match agent {
         "claude" => dir.join("claude").join(TOKEN_FILE).is_file(),
         "codex" => dir.join("codex").join("auth.json").is_file(),
-        "codex+deepseek" | "dsh" => {
+        "dsh" => {
             dir.join("deepseek").join(TOKEN_FILE).is_file()
-                || std::env::var(crate::codex::DEEPSEEK_KEY_ENV)
-                    .is_ok_and(|key| !key.trim().is_empty())
+                || std::env::var(crate::dsh::KEY_ENV).is_ok_and(|key| !key.trim().is_empty())
         }
         "antigravity" => dir.join("antigravity/.gemini/antigravity-cli").is_dir(),
         _ => false,
     }
 }
 
-/// Whose login `agent` needs: Codex with DeepSeek and DeepSeek Harness need
-/// the DeepSeek key.
+/// Whose login `agent` needs: DeepSeek Harness needs the DeepSeek key.
 pub fn login_name(agent: &str) -> &str {
     match agent {
-        "codex+deepseek" | "dsh" => "deepseek",
+        "dsh" => "deepseek",
         other => other,
     }
 }
@@ -116,10 +114,8 @@ mod tests {
         fs::create_dir_all(dir.join("antigravity/.gemini/antigravity-cli")).unwrap();
         assert!(has_login(dir, "antigravity"));
         save_token(dir, "deepseek", &Secret::new("k")).unwrap();
-        assert!(has_login(dir, "codex+deepseek"));
         assert!(has_login(dir, "dsh"));
         assert!(!has_login(dir, "gemini"));
-        assert_eq!(login_name("codex+deepseek"), "deepseek");
         assert_eq!(login_name("dsh"), "deepseek");
     }
 

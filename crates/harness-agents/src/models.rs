@@ -6,10 +6,8 @@
 //!
 //! - Claude Code: the `initialize` request of its stream-json mode;
 //! - Codex: `codex debug models`;
-//! - DeepSeek: `GET /models` of its API, with the saved key (Codex itself
-//!   only knows OpenAI's models);
 //! - Antigravity: `agy models`;
-//! - DeepSeek Harness: the same `GET /models` as for Codex with DeepSeek,
+//! - DeepSeek Harness: `GET /models` of DeepSeek's API with the saved key,
 //!   with dsh's effort levels.
 
 use std::fs;
@@ -23,8 +21,8 @@ use harness_core::config::AGENTS;
 use harness_core::models::{Model, ModelList};
 use serde_json::Value;
 
-use crate::codex::{DEEPSEEK_DEFAULT_MODEL, DEEPSEEK_KEY_ENV};
 use crate::credentials::{self, Secret};
+use crate::dsh::{DEFAULT_MODEL as DEEPSEEK_DEFAULT_MODEL, KEY_ENV as DEEPSEEK_KEY_ENV};
 
 /// How long one agent may take to answer.
 const TIME_LIMIT: Duration = Duration::from_secs(90);
@@ -109,7 +107,7 @@ pub fn ask(agent: &str, credentials_dir: &Path, programs: &Programs) -> Result<M
             command.env("CODEX_HOME", &home).args(["debug", "models"]);
             parse_codex(&run(command, "", &[])?)?
         }
-        "codex+deepseek" | "dsh" => {
+        "dsh" => {
             let key = match std::env::var(DEEPSEEK_KEY_ENV) {
                 Ok(key) if !key.trim().is_empty() => Secret::new(key.trim()),
                 _ => credentials::load_token(credentials_dir, "deepseek")
@@ -127,12 +125,7 @@ pub fn ask(agent: &str, credentials_dir: &Path, programs: &Programs) -> Result<M
                 .args(["-sS", "-m", "60", "-H"])
                 .arg(format!("@{}", header.display()))
                 .arg(DEEPSEEK_MODELS_URL);
-            let models = parse_deepseek(&run(command, "", &[key.expose()])?)?;
-            if agent == "dsh" {
-                with_dsh_efforts(models)
-            } else {
-                models
-            }
+            with_dsh_efforts(parse_deepseek(&run(command, "", &[key.expose()])?)?)
         }
         "antigravity" => {
             let home = tmp.join("home");
@@ -524,7 +517,7 @@ echo '{"models":[{"slug":"gpt-x","visibility":"list","supported_reasoning_levels
         let list = ask("codex", creds.path(), &programs).unwrap();
         assert_eq!(list.agent, "codex");
         assert_eq!(list.models[0].id, "gpt-x");
-        let error = ask("codex+deepseek", creds.path(), &programs).unwrap_err();
+        let error = ask("dsh", creds.path(), &programs).unwrap_err();
         assert!(!error.contains("sk-secret"), "{error}");
         assert!(error.contains("***"), "{error}");
         // Only agents with a saved login are asked.
@@ -532,6 +525,6 @@ echo '{"models":[{"slug":"gpt-x","visibility":"list","supported_reasoning_levels
             .into_iter()
             .map(|(agent, _)| agent)
             .collect();
-        assert_eq!(asked, ["codex", "codex+deepseek", "dsh"]);
+        assert_eq!(asked, ["codex", "dsh"]);
     }
 }

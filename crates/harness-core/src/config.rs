@@ -23,7 +23,7 @@ use crate::task::DEFAULT_MAX_ROUNDS;
 pub const CONFIG_FILE: &str = "harness.toml";
 
 /// The agents a role can run on.
-pub const AGENTS: [&str; 5] = ["claude", "codex", "codex+deepseek", "antigravity", "dsh"];
+pub const AGENTS: [&str; 4] = ["claude", "codex", "antigravity", "dsh"];
 
 /// What `harness init` writes into a new project.
 pub const DEFAULT_CONFIG: &str = r#"# Settings of the AI harness for this project.
@@ -32,11 +32,10 @@ max_rounds = 5
 agent_timeout_minutes = 30
 
 # Which agent works as each role: "claude" (Claude Code), "codex" (Codex CLI),
-# "codex+deepseek" (Codex CLI with DeepSeek models; the Agents tab («Sign in»)
-# saves the API key), "antigravity" (Antigravity CLI) or "dsh" (DeepSeek
-# Harness, DeepSeek's own agent, with the same API key).
+# "antigravity" (Antigravity CLI) or "dsh" (DeepSeek Harness, DeepSeek's own
+# agent; the Agents tab («Sign in») saves the API key).
 # Add `model = "..."` to pick a model, for example "opus" for claude or
-# "deepseek-v4-pro" for codex+deepseek (default "deepseek-flash"), and
+# "deepseek-v4-pro" for dsh (default "deepseek-flash"), and
 # `effort = "..."` for how hard it thinks, for example "high". `harness models`
 # lists what each agent offers.
 #
@@ -51,7 +50,7 @@ agent_timeout_minutes = 30
 # Plugins (Claude Code and Codex): a plugin folder is kept in the project,
 # by default in .harness/plugins/<name>/, and listed in the roles that need it.
 # `agent` says whose plugin it is: "claude" (.claude-plugin/plugin.json) or
-# "codex" (.codex-plugin/plugin.json, also for "codex+deepseek" roles).
+# "codex" (.codex-plugin/plugin.json).
 #   [plugins.rust-review]
 #   agent = "claude"
 #   [roles.security]

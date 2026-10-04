@@ -431,7 +431,7 @@ fn roles_get_agents_models_and_skills_and_are_saved() {
         "architect  claude",
         "retro      claude",
         "(•) claude",
-        "( ) codex+deepseek",
+        "( ) dsh",
         "(•) agent's default",
         "No list of claude's models yet",
         "[ ] rust-errors",
@@ -2327,11 +2327,14 @@ fn fake_agents(credentials: Option<&Path>) -> Vec<harness_agents::catalog::Statu
     let find = move |name: &str| match name {
         "claude" => Some(PathBuf::from("/bin/claude")),
         "codex" => Some(local.clone()),
+        "dsh" => Some(PathBuf::from("/bin/dsh")),
         _ => None,
     };
     let version = |path: &Path| {
         Ok(if path.ends_with("codex") {
             "codex-cli 0.150.0".to_string()
+        } else if path.ends_with("dsh") {
+            "0.2.0-rc.2".to_string()
         } else {
             "2.1.300 (Claude Code)".to_string()
         })
@@ -2380,7 +2383,7 @@ fn the_agents_tab_shows_the_catalog_with_what_is_installed() {
     assert!(text.contains("@openai/codex@latest"), "{text}");
 
     // Not installed: the install command for this system.
-    app.agents.select(3);
+    app.agents.select(2);
     let text = screen_of_width(&mut app, 160);
     assert!(text.contains("○ Not installed"), "{text}");
     assert!(text.contains("Install with the maker's command:"), "{text}");
@@ -2538,7 +2541,7 @@ fn an_installed_agent_is_removed_after_confirming() {
     assert!(screen_of_width(&mut app, 160).contains("Claude Code removed"));
 
     // Nothing to remove for an agent that is not installed.
-    app.agents.select(3);
+    app.agents.select(2);
     assert!(app.agents.next_step(true).is_none());
 }
 
@@ -2553,12 +2556,12 @@ fn sign_in_is_offered_for_installed_agents_the_harness_runs() {
     assert!(text.contains("No login: press «Sign in»."), "{text}");
     key(&mut app, KeyCode::Char('l'));
     assert_eq!(app.sign_in.take(), Some(("claude", "Claude Code")));
-    // Codex with DeepSeek signs in with the DeepSeek key.
+    // DeepSeek Harness signs in with the DeepSeek key.
     let deepseek = app
         .agents
         .statuses
         .iter()
-        .position(|s| s.entry.id == "codex+deepseek")
+        .position(|s| s.entry.id == "dsh")
         .unwrap();
     app.agents.select(deepseek);
     key(&mut app, KeyCode::Char('l'));
@@ -2592,7 +2595,7 @@ fn roles_offer_only_agents_ready_on_the_agents_tab() {
     // marked; Codex is installed without a login, Antigravity not at all.
     assert!(text.contains("(•) claude"), "{text}");
     assert!(text.contains("not ready"), "{text}");
-    for gone in ["( ) codex ", "( ) codex+deepseek", "( ) antigravity"] {
+    for gone in ["( ) codex ", "( ) dsh", "( ) antigravity"] {
         assert!(!text.contains(gone), "{gone:?} in:\n{text}");
     }
 

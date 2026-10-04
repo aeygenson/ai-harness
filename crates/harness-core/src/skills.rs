@@ -85,11 +85,11 @@ pub fn built_in_names() -> impl Iterator<Item = &'static str> {
     BUILT_IN.iter().map(|(name, _)| *name)
 }
 
-/// The note for the agent a role runs on: `codex+deepseek` is Codex too.
+/// The note for the agent a role runs on.
 pub fn agent_note(agent: &str) -> Option<&'static str> {
     match agent {
         "claude" => Some("agent-claude"),
-        "codex" | "codex+deepseek" => Some("agent-codex"),
+        "codex" => Some("agent-codex"),
         "antigravity" => Some("agent-antigravity"),
         "dsh" => Some("agent-dsh"),
         _ => None,
@@ -476,7 +476,7 @@ mod tests {
     fn every_role_gets_its_base_and_built_in_skills_need_no_file() {
         let (dir, config) = project(
             &[],
-            "[roles.architect]\nagent = \"codex+deepseek\"\n\
+            "[roles.architect]\nagent = \"codex\"\n\
              [roles.tester]\nagent = \"claude\"\nskills = [\"crash-recovery\"]\n",
         );
         let skills = Skills::load(dir.path(), &config).unwrap();
