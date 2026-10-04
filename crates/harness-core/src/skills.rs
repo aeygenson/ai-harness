@@ -26,7 +26,8 @@
 //!
 //! - every role always gets its *base*: `common` (rules for all roles), its own
 //!   (`architect`, `developer`, `tester`, `security`) and a short note on the
-//!   agent it runs on (`agent-claude`, `agent-codex`, `agent-antigravity`);
+//!   agent it runs on (`agent-claude`, `agent-codex`, `agent-antigravity`,
+//!   `agent-dsh`);
 //! - optional ones (`filesystem-attacks`, ...) are chosen like any skill.
 //!
 //! A project file with the same name replaces a built-in skill: that is how
@@ -44,7 +45,7 @@ use crate::handoff::Role;
 pub const SKILLS_DIR: &str = "skills";
 
 /// The built-in skills: name and text.
-const BUILT_IN: [(&str, &str); 11] = [
+const BUILT_IN: [(&str, &str); 12] = [
     ("common", include_str!("../skills/common.md")),
     ("architect", include_str!("../skills/architect.md")),
     ("developer", include_str!("../skills/developer.md")),
@@ -56,6 +57,7 @@ const BUILT_IN: [(&str, &str); 11] = [
         "agent-antigravity",
         include_str!("../skills/agent-antigravity.md"),
     ),
+    ("agent-dsh", include_str!("../skills/agent-dsh.md")),
     (
         "filesystem-attacks",
         include_str!("../skills/filesystem-attacks.md"),
@@ -89,6 +91,7 @@ pub fn agent_note(agent: &str) -> Option<&'static str> {
         "claude" => Some("agent-claude"),
         "codex" | "codex+deepseek" => Some("agent-codex"),
         "antigravity" => Some("agent-antigravity"),
+        "dsh" => Some("agent-dsh"),
         _ => None,
     }
 }

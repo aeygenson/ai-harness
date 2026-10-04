@@ -7,7 +7,7 @@ use harness_core::agent::{AgentOutcome, AgentRunner, RoleJob};
 use harness_core::handoff::Role;
 
 use crate::process::failed;
-use crate::{Antigravity, ClaudeCode, Codex, MockAgent};
+use crate::{Antigravity, ClaudeCode, Codex, Dsh, MockAgent};
 
 /// One of the agents the harness knows.
 ///
@@ -19,6 +19,7 @@ pub enum AnyAgent {
     Claude(ClaudeCode),
     Codex(Codex),
     Antigravity(Antigravity),
+    Dsh(Dsh),
     Mock(MockAgent),
 }
 
@@ -28,6 +29,7 @@ impl AgentRunner for AnyAgent {
             AnyAgent::Claude(agent) => agent.run(job).await,
             AnyAgent::Codex(agent) => agent.run(job).await,
             AnyAgent::Antigravity(agent) => agent.run(job).await,
+            AnyAgent::Dsh(agent) => agent.run(job).await,
             AnyAgent::Mock(agent) => agent.run(job).await,
         }
     }

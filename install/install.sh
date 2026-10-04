@@ -127,20 +127,25 @@ linux_packages() {
     fi
 }
 
-# Node.js 20 or newer. Many distributions ship an older one, so when the
-# system's is missing or old, the current Node 22 goes into ~/.local.
+# Node.js 22.19 or newer (DeepSeek Harness needs it). Many distributions
+# ship an older one, so when the system's is missing or old, the current
+# Node 22 goes into ~/.local.
 NODE_DIR="$HOME/.local/share/node"
 linux_node() {
-    local major=0 arch file
-    has node && major="$(node --version | sed 's/^v//; s/\..*//')"
-    if [ "$major" -ge 20 ] && [ ! -x "$NODE_DIR/bin/node" ]; then
+    local major=0 minor=0 arch file
+    if has node; then
+        major="$(node --version | sed 's/^v//; s/\..*//')"
+        minor="$(node --version | sed 's/^v[0-9]*\.//; s/\..*//')"
+    fi
+    if { [ "$major" -gt 22 ] || { [ "$major" -eq 22 ] && [ "$minor" -ge 19 ]; }; } &&
+        [ ! -x "$NODE_DIR/bin/node" ]; then
         note "Node.js $(node --version) is new enough"
         return
     fi
     case "$ARCH" in
         x86_64) arch=x64 ;;
         aarch64 | arm64) arch=arm64 ;;
-        *) fail "no Node.js for $ARCH; install Node.js 20 or newer yourself" ;;
+        *) fail "no Node.js for $ARCH; install Node.js 22.19 or newer yourself" ;;
     esac
     say "Node.js: installing the newest 22.x into $NODE_DIR"
     local base=https://nodejs.org/dist/latest-v22.x

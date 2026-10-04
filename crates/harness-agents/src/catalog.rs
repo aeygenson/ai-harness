@@ -99,6 +99,7 @@ impl Entry {
 }
 
 const NPM_CODEX: &str = "npm install -g @openai/codex@latest";
+const NPM_DSH: &str = "npm install -g @deepseek-ai/dsh@latest";
 const CLAUDE_INSTALL: Commands = Commands {
     unix: Some("curl -fsSL https://claude.ai/install.sh | bash"),
     windows: Some("irm https://claude.ai/install.ps1 | iex"),
@@ -175,6 +176,20 @@ pub const CATALOG: &[Entry] = &[
         update: AGY_INSTALL,
         remove: Commands::NONE,
         site: "https://antigravity.google/docs/cli/install",
+    },
+    Entry {
+        id: "dsh",
+        name: "DeepSeek Harness",
+        vendor: "DeepSeek",
+        programs: &["dsh"],
+        inside: None,
+        plan: "DeepSeek API key, pay per use",
+        // Checked with 0.2.0-rc.2; it needs Node.js 22.19 or newer.
+        min_version: None,
+        install: Commands::both(NPM_DSH),
+        update: Commands::both(NPM_DSH),
+        remove: Commands::NONE,
+        site: "https://github.com/deepseek-ai/deepseek-harness",
     },
     Entry {
         id: "claude+glm",

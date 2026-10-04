@@ -18,6 +18,8 @@ const ALWAYS_FORBIDDEN: &[&str] = &[
     ".gemini",
     // Antigravity CLI reads project skills, rules and MCP servers from here.
     ".agents",
+    // DeepSeek Harness reads project skills from here.
+    ".dsh",
     "CLAUDE.md",
     "AGENTS.md",
     // Antigravity CLI reads it as project instructions.
