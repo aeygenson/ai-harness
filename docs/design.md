@@ -181,8 +181,8 @@ always_skills = ["idiomatic-rust"]        # файл целиком вставл
 
 - `common` — правила для всех ролей;
 - навык самой роли: `architect`, `developer`, `tester` или `security`;
-- короткая приписка агента роли: `agent-claude`, `agent-codex` (и для
-  `codex+deepseek`) или `agent-antigravity`.
+- короткая приписка агента роли: `agent-claude`, `agent-codex`,
+  `agent-antigravity` или `agent-dsh`.
 
 Навыки ролей общие для всех агентов: что делает разработчик, не зависит от того, Claude
 он или Codex, а особенности агента собраны в его приписке. Ещё три встроенных навыка
@@ -208,7 +208,6 @@ MCP-серверы для каждой роли — раздел 5.5 (этап 6
 | `claude` | Claude Code | подписка Claude Pro/Max | |
 | `codex` | OpenAI Codex CLI | подписка ChatGPT | |
 | `antigravity` | Antigravity CLI (`agy`) | аккаунт Google / подписка Google AI Pro | |
-| `codex+deepseek` | Codex CLI с моделью DeepSeek | ключ API DeepSeek (дёшево) | сделано в этапе 5c, см. раздел 5.3 |
 | `dsh` | DeepSeek Harness, собственный агент DeepSeek | тот же ключ API DeepSeek | раздел 5.4a |
 | `mock` | заранее записанный «агент» | бесплатно | для тестов всего цикла без интернета |
 
@@ -266,7 +265,7 @@ MCP-серверы для каждой роли — раздел 5.5 (этап 6
 | Codex CLI | `auth.json` в папке настроек (`~/.codex/auth.json`) | скопировать `auth.json` в `CODEX_HOME` проекта |
 | Claude Code | на Linux `~/.claude/.credentials.json`, на macOS — в Keychain | долгоживущий токен из `claude setup-token` → переменная `CLAUDE_CODE_OAUTH_TOKEN` (или файл `.credentials.json` в `CLAUDE_CONFIG_DIR`) |
 | Antigravity CLI | несколько служебных файлов в `~/.gemini/antigravity-cli/` и `~/.gemini/config/` (одного файла с токеном нет; проверено на agy 1.2.12) | скопировать всю сохранённую папку входа (без логов и истории) во временный `HOME` |
-| DeepSeek (через Codex) | просто ключ API | `harness login deepseek` → `~/.harness/credentials/deepseek/`; Codex читает его командой `harness print-secret <файл>` из закрытой временной папки, только у ролей на DeepSeek |
+| DeepSeek Harness | просто ключ API | `harness login deepseek` → `~/.harness/credentials/deepseek/`; перед ролью ключ кладётся в `.credentials.yaml` временной `DSH_HOME` (права 600), не в окружение |
 
 Точные имена файлов и флаги проверим на практике при написании каждого адаптера.
 
@@ -353,20 +352,8 @@ agent = "claude"
 agent = "codex"
 ```
 
-**DeepSeek через Codex** (`agent = "codex+deepseek"`, этап 5c). Тот же Codex, но
-с DeepSeek вместо OpenAI. Codex 0.158 умеет только протокол Responses (`wire_api = "chat"`
-он отвергает, проверено), а DeepSeek его поддерживает
-([документация DeepSeek для Codex](https://api-docs.deepseek.com/quick_start/agent_integrations/codex/)).
-
-| Что | Как |
-|-----|-----|
-| Провайдер | флаги `-c model_provider="deepseek"`, `model_providers.deepseek.base_url="https://api.deepseek.com/"`, `wire_api="responses"`, `auth={command=<harness>, args=["print-secret", <файл>]}`, `forced_login_method="api"`, `web_search="disabled"` |
-| Модель | `model` в `harness.toml`: `deepseek-flash` (по умолчанию) или `deepseek-v4-pro` |
-| Ключ | `harness login deepseek` сохраняет его, как токен Claude: `~/.harness/credentials/deepseek/` с правами 600, вне проектов и git; ввод не виден на экране. Переменная `DEEPSEEK_API_KEY` в оболочке, если задана, важнее сохранённого. Харнесс передаёт ключ лишь ролям на DeepSeek: в закрытом временном файле вне проекта (права 600, удаляется после роли), Codex берёт его командой `harness print-secret`. В окружение Codex ключ не кладётся: живой тест показал, что `shell_environment_policy` не прячет переменные от команд агента. В аргументы и логи ключ не попадает |
-| Вход ChatGPT | не нужен и не копируется: `auth.json` для этих ролей не трогается |
-
-Codex предупреждает «Model metadata for `deepseek-flash` not found» и берёт общие
-настройки модели; каталог `models.json` из документации DeepSeek пока не подключаем.
+**DeepSeek через Codex** (`agent = "codex+deepseek"`, этап 5c) убран 04.10.2026:
+его заменил собственный агент DeepSeek, `dsh` (раздел 5.4a), с тем же ключом.
 
 ### 5.4. Адаптер Antigravity CLI ✅ (этап 5)
 
@@ -401,7 +388,7 @@ github.com/deepseek-ai/deepseek-harness, npm `@deepseek-ai/dsh`, нужен Node
 | Запуск | `dsh --profile headless --patch <файл> --json -`: одна задача без окна; промпт идёт на стандартный ввод (`-`) |
 | Окружение | `env_clear()` и короткий список, плюс `DSH_HOME`, `DSH_AGENTS_HOME`, `DSH_PERMISSION_MODE=workspace-write`, `DSH_TELEMETRY_MODE=DISABLED`. Ключа в окружении нет: его унаследовали бы команды агента |
 | Папка настроек | `DSH_HOME` — временная папка вне проекта, удаляется после роли. В ней ключ в собственном файле `dsh` `.credentials.yaml` (доступен только Лизе; `dsh` не кладёт его в окружение) и наш файл настроек. Настройки, навыки и MCP-серверы Лизы роль не видит |
-| Вход | тот же ключ DeepSeek, что у `codex+deepseek` (`harness login deepseek`, кнопка «Войти» на вкладке Agents) |
+| Вход | ключ API DeepSeek: `harness login deepseek` (кнопка «Войти» на вкладке Agents) сохраняет его в `~/.harness/credentials/deepseek/` с правами 600, ввод не виден на экране. Переменная `DEEPSEEK_API_KEY` в оболочке, если задана, важнее сохранённого |
 | Настройки роли | `--patch` (слой настроек `dsh`, JSON читается как YAML): модель и уровень (`agent-default-model`, уровни `off`, `low`, `high`, `max`), MCP-серверы роли (`dsh-mcp-client`), выключены выгрузка журнала сессии в DeepSeek (`session-log-deepseek`, по умолчанию включена), отзывы (`session-telemetry-otel`) и навыки из папок (`skill-filesystem`: навыки даёт промпт) |
 | Права | песочница самого `dsh` (на Linux bwrap или Landlock): писать можно только в проекте. Если команде нужно больше, `dsh` спрашивает, а без окна это отказ, работа идёт дальше. Папки ролей, как у Codex, проверяет `git status`; коммит агента ловит проверка из раздела 6 |
 | Настройки проекта | `dsh` читает навыки проекта из `.dsh/skills` и `.agents/skills`; `.dsh` добавлена в «никому нельзя» |
@@ -441,7 +428,7 @@ mcp = ["context7"]
 | Агент | Как передаются серверы | Где ключи |
 |-------|------------------------|-----------|
 | Claude Code | `--strict-mcp-config --mcp-config <файл>`; разрешения `mcp__<имя>` добавляются роли | во временном файле вне проекта (права 600), удаляется после роли |
-| Codex (и codex+deepseek) | `-c mcp_servers.<имя>.command=<harness>`, `args=["mcp-exec", <файл>]`: сервер запускает сама программа `harness` | в закрытом временном файле вне проекта (права 600), удаляется после роли. В окружении Codex ключей нет: его наследуют команды агента, а `shell_environment_policy` их не прячет (проверено живым тестом) |
+| Codex | `-c mcp_servers.<имя>.command=<harness>`, `args=["mcp-exec", <файл>]`: сервер запускает сама программа `harness` | в закрытом временном файле вне проекта (права 600), удаляется после роли. В окружении Codex ключей нет: его наследуют команды агента, а `shell_environment_policy` их не прячет (проверено живым тестом) |
 | Antigravity | `~/.gemini/config/mcp_config.json` во временном `HOME` (этот файл пишет `agy mcp add`, проверено на agy 1.2.12) | в том же файле, во временной папке, доступной только Лизе; удаляется после роли |
 
 **Ограничение.** Роль, которая сама запускает команды (Developer, Tester), при желании
@@ -456,8 +443,8 @@ Docker (позже).
 
 Плагин — готовый набор навыков, команд и субагентов. Плагины у агентов разные, поэтому
 каждый плагин говорит, для какого агента он: `agent = "claude"` (папка с
-`.claude-plugin/plugin.json`) или `agent = "codex"` (папка с `.codex-plugin/plugin.json`;
-подходит и ролям `codex+deepseek`). У Antigravity CLI плагинов нет.
+`.claude-plugin/plugin.json`) или `agent = "codex"` (папка с `.codex-plugin/plugin.json`).
+У Antigravity CLI и DeepSeek Harness плагинов нет.
 
 Плагин **лежит в самом проекте** (по умолчанию `.harness/plugins/<имя>/`) и коммитится
 вместе с ним. Из маркетплейсов и домашней папки Лизы ничего не подгружается.
@@ -667,7 +654,7 @@ model = "<модель>"            # необязательно: иначе м�
 agent = "codex"
 
 [roles.tester]
-agent = "codex+deepseek"
+agent = "dsh"
 
 [roles.security]
 agent = "antigravity"
@@ -833,9 +820,9 @@ MCP-серверы и плагины так же, как перед запуск
 **Модель и уровень роли.** У каждой роли (и у `[retro]`) в `harness.toml` есть
 `model` и `effort` — уровень, насколько модель «думает» (`low`, `medium`, `high`,
 …; пусто — по умолчанию у агента). Уровень доходит до агента так: Claude —
-`--effort`, Codex — `-c model_reasoning_effort="…"`, Antigravity — `--effort`;
-у codex+deepseek уровней нет (рассуждающая модель выбирается именем), и
-`effort` там — ошибка настройки.
+`--effort`, Codex — `-c model_reasoning_effort="…"`, Antigravity — `--effort`,
+DeepSeek Harness — `reasoningEffort` в его файле настроек (`off`, `low`, `high`, `max`;
+другое значение — ошибка настройки).
 
 Списки моделей не зашиты в программу: их называют сами агенты (модуль
 `harness_agents::models`). `harness models --refresh` или «Обновить модели» на
@@ -847,8 +834,8 @@ MCP-серверы и плагины так же, как перед запуск
   (`sonnet`, `opus`, …) и уровни каждой; запись `default` только указывает на
   модель по умолчанию;
 - Codex — `codex debug models`: модели, их уровни и уровень по умолчанию;
-- codex+deepseek — `GET https://api.deepseek.com/models` с сохранённым ключом
-  (ключ в закрытом файле, не в командной строке);
+- DeepSeek Harness — `GET https://api.deepseek.com/models` с сохранённым ключом
+  (ключ в закрытом файле, не в командной строке) и уровни `dsh`;
 - Antigravity — `agy models`; уровень у него часть имени модели
   (`gemini-3.8-flash-high`).
 

@@ -1,5 +1,5 @@
 ---
-description: Working notes for Codex CLI (also with DeepSeek models).
+description: Working notes for Codex CLI.
 ---
 # Working in Codex
 

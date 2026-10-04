@@ -12,16 +12,11 @@
 //!   the project. Codex has no per-folder rules like Claude Code, so the git
 //!   check after the role is what enforces "Architect writes only docs/".
 //!
-//! DeepSeek (`agent = "codex+deepseek"`): the same Codex, with DeepSeek as its
-//! model provider. DeepSeek speaks the Responses API that Codex uses. No
-//! ChatGPT login is copied in for these roles.
-//!
-//! Secrets (the DeepSeek key, MCP server keys) are never in Codex's own
+//! Secrets (MCP server keys) are never in Codex's own
 //! environment: commands the agent runs inherit it, and a live run showed that
 //! `shell_environment_policy` does not keep them out. They go into files in a
 //! private temporary folder outside the project, deleted after the role, and
-//! Codex reads them through `harness mcp-exec` / `harness print-secret` (see
-//! `launcher`).
+//! Codex starts the servers through `harness mcp-exec` (see `launcher`).
 //!
 //! Plugins (`[plugins.<name>] agent = "codex"`): before a role, only that
 //! role's plugin folders are copied into Codex's plugin cache
@@ -44,7 +39,6 @@ use harness_core::handoff::Role;
 use harness_core::mcp::McpServer;
 use harness_core::plugins::{copy_dir, Plugin};
 
-use crate::credentials::Secret;
 use crate::launcher;
 use crate::process::{self, failed};
 
@@ -80,28 +74,9 @@ const DISABLED_FEATURES: &[&str] = &[
     "unbounded_connection_retries",
 ];
 
-/// The variable in Lisa's shell that holds the DeepSeek API key.
-pub const DEEPSEEK_KEY_ENV: &str = "DEEPSEEK_API_KEY";
-/// The file with the DeepSeek key in the role's secrets folder.
-const DEEPSEEK_KEY_FILE: &str = "deepseek-key";
-/// DeepSeek's endpoint for Codex; Codex adds `responses` to it.
-const DEEPSEEK_URL: &str = "https://api.deepseek.com/";
-/// Used when harness.toml sets no model for the role.
-pub const DEEPSEEK_DEFAULT_MODEL: &str = "deepseek-flash";
-
-/// Who Codex talks to.
-#[derive(Debug, Clone)]
-enum Provider {
-    /// OpenAI, with the ChatGPT login saved by the Agents tab («Sign in»).
-    ChatGpt,
-    /// DeepSeek, with an API key.
-    DeepSeek(Secret),
-}
-
 #[derive(Debug, Clone)]
 pub struct Codex {
     program: PathBuf,
-    provider: Provider,
     /// `~/.harness/credentials/codex`: holds the saved `auth.json`.
     auth_dir: PathBuf,
     models: HashMap<Role, String>,
@@ -117,7 +92,6 @@ impl Codex {
     pub fn new(auth_dir: impl Into<PathBuf>) -> Self {
         Self {
             program: PathBuf::from("codex"),
-            provider: Provider::ChatGpt,
             auth_dir: auth_dir.into(),
             models: HashMap::new(),
             efforts: HashMap::new(),
@@ -125,14 +99,6 @@ impl Codex {
             plugins: HashMap::new(),
             launcher: PathBuf::from("harness"),
             timeout: Duration::from_secs(30 * 60),
-        }
-    }
-
-    /// Codex with DeepSeek models, paid by the API key.
-    pub fn deepseek(api_key: Secret) -> Self {
-        Self {
-            provider: Provider::DeepSeek(api_key),
-            ..Self::new(PathBuf::new())
         }
     }
 
@@ -169,7 +135,7 @@ impl Codex {
         self
     }
 
-    /// The `harness` program to use for `mcp-exec` and `print-secret`; the
+    /// The `harness` program to use for `mcp-exec`; the
     /// command line passes its own path.
     pub fn with_launcher(mut self, launcher: impl Into<PathBuf>) -> Self {
         self.launcher = launcher.into();
@@ -217,31 +183,8 @@ impl Codex {
                 .collect();
             command.args(["-c", &format!("plugins={{{}}}", enabled.join(","))]);
         }
-        if let Provider::DeepSeek(_) = &self.provider {
-            let key_file = secrets_dir.join(DEEPSEEK_KEY_FILE);
-            for setting in [
-                "model_provider=\"deepseek\"".to_string(),
-                "model_providers.deepseek.name=\"DeepSeek\"".to_string(),
-                format!("model_providers.deepseek.base_url=\"{DEEPSEEK_URL}\""),
-                "model_providers.deepseek.wire_api=\"responses\"".to_string(),
-                // Codex runs this command to get the key.
-                format!(
-                    "model_providers.deepseek.auth={{command={},args={}}}",
-                    toml_value(self.launcher.to_string_lossy().as_ref()),
-                    toml_value(vec![
-                        launcher::PRINT_SECRET.to_string(),
-                        key_file.to_string_lossy().into_owned(),
-                    ])
-                ),
-                "forced_login_method=\"api\"".to_string(),
-                // DeepSeek has no web search tool for Codex.
-                "web_search=\"disabled\"".to_string(),
-            ] {
-                command.args(["-c", &setting]);
-            }
-        }
         self.add_mcp_servers(&mut command, job.role, secrets_dir);
-        if let Some(model) = self.model(job.role) {
+        if let Some(model) = self.models.get(&job.role) {
             command.args(["--model", model]);
         }
         // A plain word (checked when harness.toml is read), so no quoting issue.
@@ -298,7 +241,7 @@ impl Codex {
     }
 
     /// A private temporary folder outside the project with the role's secrets:
-    /// one file per MCP server and the DeepSeek key. Deleted when dropped.
+    /// one file per MCP server. Deleted when dropped.
     fn write_secrets(&self, role: Role) -> io::Result<tempfile::TempDir> {
         let dir = tempfile::Builder::new()
             .prefix("harness-codex-")
@@ -306,19 +249,7 @@ impl Codex {
         for server in self.servers(role) {
             launcher::write_server(dir.path(), server)?;
         }
-        if let Provider::DeepSeek(key) = &self.provider {
-            launcher::write_secret(dir.path(), DEEPSEEK_KEY_FILE, key)?;
-        }
         Ok(dir)
-    }
-
-    /// The role's model from harness.toml; DeepSeek needs one, so it has a default.
-    fn model(&self, role: Role) -> Option<&str> {
-        match (self.models.get(&role), &self.provider) {
-            (Some(model), _) => Some(model),
-            (None, Provider::DeepSeek(_)) => Some(DEEPSEEK_DEFAULT_MODEL),
-            (None, Provider::ChatGpt) => None,
-        }
     }
 
     /// Copies the saved login into the project's config folder for this run.
@@ -353,13 +284,9 @@ impl Codex {
             .efforts
             .get(&job.role)
             .map_or("default", String::as_str);
-        let model = self.model(job.role).unwrap_or("default");
-        let agent = match self.provider {
-            Provider::ChatGpt => "codex",
-            Provider::DeepSeek(_) => "codex+deepseek",
-        };
+        let model = self.models.get(&job.role).map_or("default", String::as_str);
         format!(
-            "agent: {agent}, model: {model}, effort: {effort}, role: {:?}, round: {}\n",
+            "agent: codex, model: {model}, effort: {effort}, role: {:?}, round: {}\n",
             job.role, job.round
         )
     }
@@ -368,46 +295,29 @@ impl Codex {
 impl AgentRunner for Codex {
     async fn run(&self, job: &RoleJob) -> AgentOutcome {
         let mut log = self.header(job);
-        let chatgpt = matches!(self.provider, Provider::ChatGpt);
-        let prepared = if chatgpt {
-            self.put_auth(job)
-        } else {
-            fs::create_dir_all(job.project_dir.join(CONFIG_DIR))
-        };
-        let prepared = prepared.and_then(|()| self.put_plugins(job));
+        let prepared = self.put_auth(job).and_then(|()| self.put_plugins(job));
         if let Err(e) = prepared {
-            if chatgpt {
-                self.take_auth_back(job);
-            }
+            self.take_auth_back(job);
             remove_extras(job);
             return failed(log, format!("cannot prepare {CONFIG_DIR}: {e}"));
         }
         let secrets = match self.write_secrets(job.role) {
             Ok(dir) => dir,
             Err(e) => {
-                if chatgpt {
-                    self.take_auth_back(job);
-                }
+                self.take_auth_back(job);
                 remove_extras(job);
                 return failed(log, format!("cannot write the role's secrets: {e}"));
             }
         };
         let command = self.command(job, secrets.path());
-        let deepseek_key = match &self.provider {
-            Provider::DeepSeek(key) => Some(key.expose()),
-            Provider::ChatGpt => None,
-        };
         let hidden: Vec<&str> = self
             .servers(job.role)
             .iter()
             .flat_map(|server| server.env.values().map(|v| v.expose()))
-            .chain(deepseek_key)
             .collect();
         let result = process::run(command, &job.prompt, self.timeout, &hidden).await;
         drop(secrets);
-        if chatgpt {
-            self.take_auth_back(job);
-        }
+        self.take_auth_back(job);
         remove_extras(job);
         let result = process::hide_secrets(result, hidden);
         let finished = match result {
@@ -485,6 +395,7 @@ impl TurnEnd {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::credentials::Secret;
 
     fn job(role: Role) -> RoleJob {
         RoleJob {
@@ -713,44 +624,6 @@ mod tests {
         assert!(!architect
             .iter()
             .any(|a| a.contains("model_reasoning_effort")));
-    }
-
-    #[test]
-    fn deepseek_gets_its_key_and_provider_but_no_chatgpt_login() {
-        let codex =
-            Codex::deepseek(Secret::new("sk-test-0123456789")).with_launcher("/bin/harness");
-        let command = codex.command(&job(Role::Tester), Path::new("/secrets"));
-        let args = args(&command);
-        for setting in [
-            "model_provider=\"deepseek\"",
-            "model_providers.deepseek.wire_api=\"responses\"",
-            &format!(
-                r#"model_providers.deepseek.auth={{command="/bin/harness",args=["print-secret",{}]}}"#,
-                in_secrets("deepseek-key")
-            ),
-            DEEPSEEK_DEFAULT_MODEL,
-        ] {
-            assert!(
-                args.contains(&setting.to_string()),
-                "missing {setting}: {args:?}"
-            );
-        }
-        // The key is neither in the arguments nor in Codex's environment.
-        assert!(!args.iter().any(|a| a.contains("sk-test")));
-        assert!(!command.get_envs().any(|(k, _)| k == DEEPSEEK_KEY_ENV));
-        assert!(format!("{codex:?}").contains("Secret(***)"));
-        let dir = codex.write_secrets(Role::Tester).unwrap();
-        assert_eq!(
-            fs::read_to_string(dir.path().join("deepseek-key")).unwrap(),
-            "sk-test-0123456789"
-        );
-    }
-
-    #[test]
-    fn chatgpt_codex_gets_no_deepseek_key() {
-        let command = Codex::new("/creds").command(&job(Role::Tester), Path::new("/secrets"));
-        assert!(!command.get_envs().any(|(k, _)| k == DEEPSEEK_KEY_ENV));
-        assert!(!args(&command).contains(&"model_provider=\"deepseek\"".to_string()));
     }
 
     #[test]

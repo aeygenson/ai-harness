@@ -15,8 +15,7 @@
 //!
 //! Plugins differ between agents, so each one says which agent loads it:
 //! `"claude"` for Claude Code plugins (`.claude-plugin/plugin.json`) or
-//! `"codex"` for Codex plugins (`.codex-plugin/plugin.json`), which also work
-//! in `"codex+deepseek"` roles.
+//! `"codex"` for Codex plugins (`.codex-plugin/plugin.json`).
 //!
 //! Two parts of a plugin run programs by themselves: hooks (commands on
 //! events) and MCP or LSP servers. They could get around the harness's own
@@ -36,7 +35,7 @@ use crate::mcp::is_simple_name;
 pub const PLUGINS_DIR: &str = ".harness/plugins";
 /// Claude Code plugins.
 pub const CLAUDE: &str = "claude";
-/// Codex plugins, for roles on `"codex"` and `"codex+deepseek"`.
+/// Codex plugins.
 pub const CODEX: &str = "codex";
 /// The agents with plugin support.
 const AGENTS: &[&str] = &[CLAUDE, CODEX];
@@ -50,7 +49,8 @@ pub fn manifest(agent: &str) -> &'static str {
     }
 }
 
-/// The agent family a role runs on: `"codex+deepseek"` is still Codex.
+/// The agent family a role runs on: an agent with a model inside it, such as
+/// `"claude+glm"`, is still the first one.
 pub fn family(role_agent: &str) -> &str {
     role_agent.split('+').next().unwrap_or(role_agent)
 }
@@ -431,7 +431,7 @@ mod tests {
     }
 
     #[test]
-    fn codex_plugins_work_for_codex_and_deepseek_roles() {
+    fn codex_plugins_work_for_codex_roles() {
         let dir = project_for(
             CODEX,
             MANIFEST_OK,
@@ -440,12 +440,10 @@ mod tests {
         let plugins = load(
             dir.path(),
             "[roles.developer]\nagent = \"codex\"\nplugins = [\"review\"]\n\
-             [roles.tester]\nagent = \"codex+deepseek\"\nplugins = [\"review\"]\n\
              [plugins.review]\nagent = \"codex\"\n",
         )
         .unwrap();
         assert_eq!(plugins.for_role(Role::Developer).len(), 1);
-        assert_eq!(plugins.for_role(Role::Tester).len(), 1);
 
         // A Claude Code manifest is not enough for Codex.
         let claude_only = project(MANIFEST_OK, &[]);

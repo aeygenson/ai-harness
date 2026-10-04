@@ -14,7 +14,7 @@
 //! ```
 //!
 //! Plugins differ between agents: a Claude Code plugin is only for roles on
-//! Claude, a Codex plugin for roles on Codex (and Codex with DeepSeek), and
+//! Claude, a Codex plugin for roles on Codex, and
 //! Antigravity has none. The role's own plugins come first; the others are
 //! grey and cannot be given to it. Giving a plugin changes the same
 //! `plugins = [...]` as the «Roles» tab and is kept with that tab's other

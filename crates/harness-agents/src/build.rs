@@ -13,7 +13,7 @@ use harness_core::plugins::{Plugin, Plugins};
 use harness_core::suggest;
 
 use crate::credentials::{self, Secret};
-use crate::{codex, Antigravity, AnyAgent, ClaudeCode, Codex, Dsh, Team};
+use crate::{dsh, Antigravity, AnyAgent, ClaudeCode, Codex, Dsh, Team};
 
 /// Why an agent cannot be built, in words for Lisa: a missing login, an
 /// unknown agent name, a broken setting.
@@ -115,9 +115,8 @@ pub fn build_agent(
     let role = choice.role;
     let agent = match choice.agent {
         "claude" => {
-            let token = credentials::load_token(&dir, "claude").map_err(|_| {
-                problem("no Claude token saved; sign in on the Agents tab first")
-            })?;
+            let token = credentials::load_token(&dir, "claude")
+                .map_err(|_| problem("no Claude token saved; sign in on the Agents tab first"))?;
             let mut agent = ClaudeCode::new(token).with_timeout(timeout);
             if let Some(model) = choice.model {
                 agent = agent.with_model(role, model);
@@ -153,23 +152,11 @@ pub fn build_agent(
             )
         }
         "codex+deepseek" => {
-            let key = deepseek_key(&dir)?;
-            let mut agent = Codex::deepseek(key).with_timeout(timeout);
-            if let Some(model) = choice.model {
-                agent = agent.with_model(role, model);
-            }
-            if choice.effort.is_some() {
-                return Err(problem(format!(
-                    "{} uses codex+deepseek, which has no effort levels: remove `effort`",
-                    choice.who
-                )));
-            }
-            AnyAgent::Codex(
-                agent
-                    .with_launcher(&harness)
-                    .with_mcp_servers(role, servers)
-                    .with_plugins(role, plugins),
-            )
+            return Err(problem(format!(
+                "{} uses agent \"codex+deepseek\", which was removed; use \"dsh\" \
+                 (DeepSeek Harness, with the same DeepSeek key)",
+                choice.who
+            )))
         }
         "antigravity" => {
             let auth_dir = dir.join("antigravity");
@@ -207,7 +194,7 @@ pub fn build_agent(
         }
         other => {
             return Err(problem(format!(
-                "{} uses agent {other:?}; use \"claude\", \"codex\", \"codex+deepseek\", \"antigravity\" or \"dsh\"",
+                "{} uses agent {other:?}; use \"claude\", \"codex\", \"antigravity\" or \"dsh\"",
                 choice.who
             )))
         }
@@ -218,7 +205,7 @@ pub fn build_agent(
 /// The DeepSeek API key: one in the shell wins; otherwise the one the Agents
 /// tab («Sign in») saved.
 fn deepseek_key(dir: &Path) -> Result<Secret, BuildError> {
-    match std::env::var(codex::DEEPSEEK_KEY_ENV) {
+    match std::env::var(dsh::KEY_ENV) {
         Ok(key) if !key.trim().is_empty() => Ok(Secret::new(key.trim())),
         _ => credentials::load_token(dir, "deepseek")
             .map_err(|_| problem("no DeepSeek API key saved; sign in on the Agents tab first")),

@@ -1,13 +1,11 @@
-//! Two tiny helpers the `harness` program runs for Codex, so that Codex never
+//! A tiny helper the `harness` program runs for Codex, so that Codex never
 //! holds a secret in its own environment. Commands the agent runs inherit that
 //! environment, and a live run showed that Codex's `shell_environment_policy`
 //! does not keep variables out of them.
 //!
 //! - `harness mcp-exec <file>` starts an MCP server: the file (JSON, readable
 //!   only by Lisa, in a temporary folder outside the project) holds its
-//!   command, arguments and variables with the secrets;
-//! - `harness print-secret <file>` prints a key for Codex's model provider
-//!   (`model_providers.<name>.auth`), used for the DeepSeek key.
+//!   command, arguments and variables with the secrets.
 
 use std::fs;
 use std::io;
@@ -16,11 +14,10 @@ use std::process::Command;
 
 use harness_core::mcp::McpServer;
 
-use crate::credentials::{write_private, Secret};
+use crate::credentials::write_private;
 
-/// The `harness` subcommands.
+/// The `harness` subcommand.
 pub const MCP_EXEC: &str = "mcp-exec";
-pub const PRINT_SECRET: &str = "print-secret";
 
 /// The servers with the web bridge (`harness mcp-remote`) pointed at
 /// `harness`, the running program; other servers stay as they are.
@@ -52,13 +49,6 @@ pub fn write_server(dir: &Path, server: &McpServer) -> io::Result<PathBuf> {
     });
     let path = dir.join(format!("{}.json", server.name));
     write_private(&path, &spec.to_string())?;
-    Ok(path)
-}
-
-/// Writes a secret for `harness print-secret` into `<dir>/<name>`.
-pub fn write_secret(dir: &Path, name: &str, secret: &Secret) -> io::Result<PathBuf> {
-    let path = dir.join(name);
-    write_private(&path, secret.expose())?;
     Ok(path)
 }
 
@@ -102,14 +92,10 @@ pub fn exec_server(spec_file: &Path) -> io::Error {
     }
 }
 
-/// `harness print-secret`: the secret, for Codex to read from standard output.
-pub fn read_secret(file: &Path) -> io::Result<String> {
-    Ok(fs::read_to_string(file)?.trim().to_string())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::credentials::Secret;
     use std::collections::BTreeMap;
 
     #[test]
@@ -142,13 +128,6 @@ mod tests {
         assert_eq!(env.len(), 1);
         assert_eq!(env[0].0, "TOKEN");
         assert_eq!(env[0].1.unwrap(), "tok-secret-1");
-    }
-
-    #[test]
-    fn a_secret_file_is_read_back_without_line_breaks() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = write_secret(dir.path(), "deepseek-key", &Secret::new("sk-abc")).unwrap();
-        assert_eq!(read_secret(&path).unwrap(), "sk-abc");
     }
 
     #[test]

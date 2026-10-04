@@ -34,6 +34,9 @@ use serde_json::{json, Value};
 use crate::credentials::Secret;
 use crate::process::{self, failed};
 
+/// The variable in Lisa's shell that may hold the DeepSeek API key; it wins
+/// over the saved one. dsh's own name for the key too.
+pub const KEY_ENV: &str = "DEEPSEEK_API_KEY";
 /// The model dsh uses when harness.toml names none.
 pub const DEFAULT_MODEL: &str = "deepseek-flash";
 /// The effort levels of DeepSeek models in dsh, weakest first.
@@ -122,7 +125,7 @@ impl Dsh {
         // MCP server secrets, so it is private too.
         let credentials = json!({
             "version": 1,
-            "refs": { crate::codex::DEEPSEEK_KEY_ENV: self.key.expose() },
+            "refs": { KEY_ENV: self.key.expose() },
         });
         crate::credentials::write_private(
             &home.path().join(CREDENTIALS_FILE),
