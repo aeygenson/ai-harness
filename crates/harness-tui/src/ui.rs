@@ -148,6 +148,8 @@ pub enum ButtonId {
     RetroApply,
     /// «Check again» on the Agents tab.
     AgentsCheck,
+    /// «Install» or «Update» for the agent selected on the Agents tab.
+    AgentRun,
 }
 
 /// Where the clickable things were drawn in the last frame. Drawing fills it,

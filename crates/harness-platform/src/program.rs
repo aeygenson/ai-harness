@@ -104,6 +104,27 @@ pub fn on_this_system<T>(unix: T, windows: T) -> T {
     }
 }
 
+/// Where `npm install -g` puts programs without asking for `sudo`: on Linux
+/// Node usually belongs to the system, so programs go into `~/.local`
+/// (`~/.local/bin`, which [`usual_places`] covers), as the harness's own
+/// installer does. On macOS (Homebrew's Node) and Windows npm's own place
+/// is writable: `None`.
+pub fn npm_user_prefix() -> Option<&'static str> {
+    cfg!(target_os = "linux").then_some("$HOME/.local")
+}
+
+/// The shell that runs a command line: `sh -c` on Linux and macOS,
+/// PowerShell on Windows (installers there are `irm … | iex`).
+pub fn shell() -> (&'static str, &'static [&'static str]) {
+    on_this_system(
+        ("sh", &["-c"][..]),
+        (
+            "powershell",
+            &["-NoProfile", "-NonInteractive", "-Command"][..],
+        ),
+    )
+}
+
 /// Looks for `name` in the folders of `path`, trying each extension of
 /// `exts` (`;`-separated, as in `PATHEXT`; empty on Unix).
 pub fn find_in(name: &str, path: &OsStr, exts: &OsStr) -> Option<PathBuf> {
