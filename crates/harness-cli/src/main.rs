@@ -490,14 +490,22 @@ fn agents() {
             None => {}
         }
         println!("    plan: {}", entry.plan);
-        let (what, commands) = if status.installed() {
-            ("update", entry.update)
-        } else {
-            ("install", entry.install)
-        };
-        match commands.here() {
-            Some(command) => println!("    {what}: {command}"),
-            None => println!("    {what}: see {}", entry.site),
+        if status.host_only() {
+            println!("    the harness cannot run it yet");
+        }
+        if let Some((action, command)) = status.action() {
+            let what = match action {
+                catalog::Action::Install => "install",
+                catalog::Action::Update => "update",
+                catalog::Action::Remove => "remove",
+            };
+            match command {
+                Some(command) => println!("    {what}: {command}"),
+                None => println!("    {what}: see {}", entry.site),
+            }
+        }
+        if let Some(command) = status.removal() {
+            println!("    remove: {command}");
         }
     }
 }

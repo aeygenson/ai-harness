@@ -63,7 +63,7 @@ mod tasks;
 mod theme;
 mod ui;
 
-use agents_tab::{AgentChecker, AgentsTab};
+use agents_tab::{AgentChecker, AgentsTab, Installer, JobEvent};
 use i18n::I18n;
 use mcp_tab::McpTab;
 use picker::{Browser, Native};
@@ -148,6 +148,12 @@ enum Purpose {
     ApplyUpdate(Box<plugin_ops::Prepared>),
     /// Apply these proposals of the retrospective in this folder.
     ApplyProposals(PathBuf, Vec<u32>),
+    /// Run this maker's command to install or update the agent named.
+    RunAgentCommand {
+        name: &'static str,
+        action: harness_agents::catalog::Action,
+        command: String,
+    },
 }
 
 /// What a download in the background brought.
@@ -331,6 +337,10 @@ struct App {
     agent_checker: AgentChecker,
     /// The answer of that check, while it runs.
     agent_check: Option<mpsc::Receiver<Vec<harness_agents::catalog::Status>>>,
+    /// Runs an agent's install or update command; tests give a fake one.
+    installer: Installer,
+    /// What that command prints, while it runs.
+    install_events: Option<mpsc::Receiver<JobEvent>>,
     form: Option<(Purpose, Form)>,
     /// The folder browser, when the system has no folder dialog.
     browser: Option<(Pick, Browser)>,
@@ -387,6 +397,8 @@ impl App {
             agents: AgentsTab::new(),
             agent_checker: agents_tab::check,
             agent_check: None,
+            installer: agents_tab::install,
+            install_events: None,
             form: None,
             browser: None,
             native: false,
@@ -488,6 +500,109 @@ impl App {
         self.agent_check = Some(rx);
     }
 
+    /// «Install», «Update» or «Remove»: first the command is shown to be confirmed.
+    fn ask_to_run_agent_command(&mut self, remove: bool) {
+        use harness_agents::catalog::Action;
+        let Some((status, action, command)) = self.agents.next_step(remove) else {
+            return;
+        };
+        let name = status.entry.name;
+        let (title, ok, text) = match action {
+            Action::Install => (
+                "agents.confirm_install",
+                "agents.run_install",
+                "agents.confirm_text",
+            ),
+            Action::Update => (
+                "agents.confirm_update",
+                "agents.run_update",
+                "agents.confirm_text",
+            ),
+            Action::Remove => (
+                "agents.confirm_remove",
+                "agents.run_remove",
+                "agents.confirm_remove_text",
+            ),
+        };
+        let tr = &self.tr;
+        let text = tr.f(text, &[("command", &command)]);
+        let form = Form::new(&tr.f(title, &[("name", &name)]), &text, tr.t(ok));
+        self.form = Some((
+            Purpose::RunAgentCommand {
+                name,
+                action,
+                command,
+            },
+            form,
+        ));
+    }
+
+    /// Runs a confirmed install or update in the background; its lines come in `tick`.
+    fn run_agent_command(
+        &mut self,
+        name: &'static str,
+        action: harness_agents::catalog::Action,
+        command: String,
+    ) {
+        if self.install_events.is_some() {
+            return;
+        }
+        let (tx, rx) = mpsc::channel();
+        let (installer, line) = (self.installer, command.clone());
+        std::thread::spawn(move || installer(&line, tx));
+        self.agents.job = Some(agents_tab::Job {
+            name,
+            action,
+            command,
+            lines: Vec::new(),
+            done: None,
+        });
+        self.install_events = Some(rx);
+        self.message = Some((self.tr.f("agents.job_running", &[("name", &name)]), false));
+    }
+
+    /// Takes the lines of a running install or update, and its end.
+    fn take_install_events(&mut self) {
+        use harness_agents::catalog::Action;
+        let mut finished = None;
+        if let Some(rx) = &self.install_events {
+            loop {
+                match rx.try_recv() {
+                    Ok(JobEvent::Line(line)) => {
+                        if let Some(job) = &mut self.agents.job {
+                            job.push(line);
+                        }
+                    }
+                    Ok(JobEvent::Done(result)) => {
+                        finished = Some(result);
+                        break;
+                    }
+                    Err(mpsc::TryRecvError::Empty) => break,
+                    Err(mpsc::TryRecvError::Disconnected) => {
+                        finished = Some(Err("the command stopped".into()));
+                        break;
+                    }
+                }
+            }
+        }
+        let Some(result) = finished else {
+            return;
+        };
+        self.install_events = None;
+        if let Some(job) = &mut self.agents.job {
+            let key = match (&result, job.action) {
+                (Err(_), _) => "agents.job_failed",
+                (Ok(()), Action::Install) => "agents.job_installed",
+                (Ok(()), Action::Update) => "agents.job_updated",
+                (Ok(()), Action::Remove) => "agents.job_removed",
+            };
+            self.message = Some((self.tr.f(key, &[("name", &job.name)]), result.is_err()));
+            job.done = Some(result);
+        }
+        // See what is installed now.
+        self.check_agents();
+    }
+
     /// Opens a tab. The Agents tab checks the computer the first time.
     fn show(&mut self, tab: Tab) {
         self.tab = tab;
@@ -518,6 +633,7 @@ impl App {
                 None => self.message = Some(("the download stopped".into(), true)),
             }
         }
+        self.take_install_events();
         let checked = self
             .agent_check
             .as_ref()
@@ -532,7 +648,7 @@ impl App {
             self.agents.checked(statuses);
             if failed {
                 self.message = Some((self.tr.t("agents.check_stopped").to_string(), true));
-            } else if self.tab == Tab::Agents {
+            } else if self.tab == Tab::Agents && self.agents.job.is_none() {
                 let installed = self.agents.statuses.iter().filter(|s| s.installed());
                 let text = self.tr.f(
                     "agents.checked",
@@ -822,6 +938,8 @@ impl App {
                 }
                 Tab::Agents => match code {
                     KeyCode::Char('c') => self.press(ButtonId::AgentsCheck),
+                    KeyCode::Char('i') | KeyCode::Enter => self.press(ButtonId::AgentRun),
+                    KeyCode::Delete => self.press(ButtonId::AgentRemove),
                     code => self.agents.on_key(code),
                 },
                 Tab::Projects => match code {
@@ -2291,6 +2409,8 @@ impl App {
     fn press(&mut self, id: ButtonId) {
         match id {
             ButtonId::AgentsCheck => self.check_agents(),
+            ButtonId::AgentRun => self.ask_to_run_agent_command(false),
+            ButtonId::AgentRemove => self.ask_to_run_agent_command(true),
             ButtonId::RefreshModels => self.ask_for_models(),
             ButtonId::McpRole(index) => {
                 if let Some(mcp) = &mut self.mcp {
@@ -2591,6 +2711,14 @@ impl App {
                 Ok(())
             }
             Purpose::ApplyProposals(dir, ids) => self.apply_proposals(dir, ids),
+            Purpose::RunAgentCommand {
+                name,
+                action,
+                command,
+            } => {
+                self.run_agent_command(name, *action, command.clone());
+                Ok(())
+            }
             Purpose::Remove(path) => {
                 let path = path.clone();
                 let result = self.projects.update(|list| list.remove(&path));

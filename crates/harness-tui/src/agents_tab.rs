@@ -2,7 +2,7 @@
 //! this computer marked (see `harness_agents::catalog`). It does not need an
 //! open project: agents are installed on the computer, not in a project.
 
-use harness_agents::catalog::{self, Status, CATALOG};
+use harness_agents::catalog::{self, Action, Status, CATALOG};
 use harness_agents::credentials;
 use ratatui::crossterm::event::KeyCode;
 use ratatui::layout::{Constraint, Layout, Rect};
@@ -24,6 +24,35 @@ pub struct AgentsTab {
     /// A check runs in the background.
     pub checking: bool,
     pub selected: usize,
+    /// The install or update that runs or ran last, with what it printed.
+    pub job: Option<Job>,
+}
+
+/// An install or update command, started from the tab.
+#[derive(Debug)]
+pub struct Job {
+    pub name: &'static str,
+    pub action: Action,
+    pub command: String,
+    pub lines: Vec<String>,
+    /// `None` while it runs.
+    pub done: Option<Result<(), String>>,
+}
+
+/// The most lines of a command's output kept.
+const KEEP_LINES: usize = 500;
+
+impl Job {
+    pub fn running(&self) -> bool {
+        self.done.is_none()
+    }
+
+    pub fn push(&mut self, line: String) {
+        self.lines.push(line);
+        if self.lines.len() > KEEP_LINES {
+            self.lines.drain(..self.lines.len() - KEEP_LINES);
+        }
+    }
 }
 
 impl AgentsTab {
@@ -43,6 +72,7 @@ impl AgentsTab {
             known: false,
             checking: false,
             selected: 0,
+            job: None,
         }
     }
 
@@ -58,6 +88,22 @@ impl AgentsTab {
 
     pub fn current(&self) -> Option<&Status> {
         self.statuses.get(self.selected)
+    }
+
+    /// What «Install»/«Update» (or, with `remove`, «Remove») would do for
+    /// the selected agent, with the command: only once the computer was
+    /// checked, while nothing else runs, and when there is a command for
+    /// this system.
+    pub fn next_step(&self, remove: bool) -> Option<(&Status, Action, String)> {
+        if !self.known || self.checking || self.job.as_ref().is_some_and(Job::running) {
+            return None;
+        }
+        let status = self.current()?;
+        if remove {
+            return Some((status, Action::Remove, status.removal()?));
+        }
+        let (action, command) = status.action()?;
+        Some((status, action, command?))
     }
 
     pub fn select(&mut self, index: usize) {
@@ -99,11 +145,22 @@ impl AgentsTab {
         } else {
             tr.t("agents.check")
         };
+        let step = self.next_step(false);
+        let removable = self.next_step(true).is_some();
+        let run = match self.current().and_then(Status::action) {
+            Some((Action::Update, _)) => tr.t("agents.run_update"),
+            _ => tr.t("agents.run_install"),
+        };
+        let running = self.job.as_ref().is_some_and(Job::running);
         buttons(
             frame,
             bar,
             hits,
-            &[(check, ButtonId::AgentsCheck, !self.checking)],
+            &[
+                (check, ButtonId::AgentsCheck, !self.checking && !running),
+                (run, ButtonId::AgentRun, step.is_some()),
+                (tr.t("agents.run_remove"), ButtonId::AgentRemove, removable),
+            ],
         );
         let [left, right] =
             Layout::horizontal([Constraint::Percentage(38), Constraint::Percentage(62)])
@@ -138,6 +195,15 @@ impl AgentsTab {
             true,
         );
 
+        let (right, log) = match &self.job {
+            Some(_) => {
+                let [top, bottom] =
+                    Layout::vertical([Constraint::Percentage(55), Constraint::Percentage(45)])
+                        .areas(right);
+                (top, Some(bottom))
+            }
+            None => (right, None),
+        };
         let text = match self.current() {
             Some(status) => self.details(status, tr),
             None => vec![],
@@ -148,6 +214,9 @@ impl AgentsTab {
                 .wrap(Wrap { trim: false }),
             right,
         );
+        if let (Some(job), Some(area)) = (&self.job, log) {
+            draw_job(frame, area, job, tr);
+        }
     }
 
     fn details(&self, status: &Status, tr: &I18n) -> Vec<Line<'static>> {
@@ -161,6 +230,9 @@ impl AgentsTab {
         ];
         let state = if !self.known {
             Line::styled(tr.t("agents.checking").to_string(), theme::dim())
+        } else if status.host_only() {
+            let host = entry.inside.unwrap_or_default();
+            Line::styled(tr.f("agents.host_only", &[("host", &host)]), theme::warn())
         } else if let Some(path) = &status.path {
             let version = status.version.as_deref().unwrap_or("?");
             let text = tr.f(
@@ -210,23 +282,45 @@ impl AgentsTab {
             lines.extend(about.lines().map(|l| Line::from(l.to_string())));
         }
         lines.push(Line::default());
-        let (key, commands) = if status.installed() {
-            ("agents.update", entry.update)
-        } else {
-            ("agents.install", entry.install)
-        };
-        match commands.here() {
-            Some(command) => {
+        match status.action() {
+            Some((action, Some(command))) => {
+                let key = match action {
+                    Action::Install => "agents.install",
+                    Action::Update | Action::Remove => "agents.update",
+                };
                 lines.push(Line::from(tr.t(key).to_string()));
                 lines.push(Line::styled(format!("  {command}"), theme::accent()));
             }
-            None => lines.push(Line::from(
+            Some((_, None)) => lines.push(Line::from(
                 tr.f("agents.see_site", &[("site", &entry.site)]),
             )),
+            None => {}
         }
         lines.push(Line::from(tr.f("agents.site", &[("site", &entry.site)])));
         lines
     }
+}
+
+/// The output of the install or update: the last lines that fit, and how it ended.
+fn draw_job(frame: &mut Frame, area: Rect, job: &Job, tr: &I18n) {
+    let key = match (job.action, &job.done) {
+        (_, None) => "agents.job_running",
+        (Action::Install, Some(Ok(()))) => "agents.job_installed",
+        (Action::Update, Some(Ok(()))) => "agents.job_updated",
+        (Action::Remove, Some(Ok(()))) => "agents.job_removed",
+        (_, Some(Err(_))) => "agents.job_failed",
+    };
+    let title = format!(" {} ", tr.f(key, &[("name", &job.name)]));
+    let inner_height = usize::from(area.height.saturating_sub(2));
+    let mut lines: Vec<Line> = vec![Line::styled(format!("$ {}", job.command), theme::accent())];
+    if let Some(Err(error)) = &job.done {
+        lines.push(Line::styled(error.clone(), theme::bad()));
+    }
+    let room = inner_height.saturating_sub(lines.len());
+    let start = job.lines.len().saturating_sub(room);
+    lines.extend(job.lines[start..].iter().map(|l| Line::from(l.clone())));
+    let focused = job.running();
+    frame.render_widget(Paragraph::new(lines).block(panel(&title, focused)), area);
 }
 
 /// Checks the computer: which agents are installed, their versions, logins.
@@ -234,4 +328,21 @@ pub type AgentChecker = fn(Option<&std::path::Path>) -> Vec<Status>;
 
 pub fn check(credentials_dir: Option<&std::path::Path>) -> Vec<Status> {
     catalog::check_all(credentials_dir)
+}
+
+/// What a running install or update sends: a line it printed, or its end.
+#[derive(Debug)]
+pub enum JobEvent {
+    Line(String),
+    Done(Result<(), String>),
+}
+
+/// Runs an install or update command; tests give a fake one.
+pub type Installer = fn(&str, std::sync::mpsc::Sender<JobEvent>);
+
+pub fn install(command: &str, tx: std::sync::mpsc::Sender<JobEvent>) {
+    let result = catalog::run_command(command, |line| {
+        let _ = tx.send(JobEvent::Line(line));
+    });
+    let _ = tx.send(JobEvent::Done(result));
 }

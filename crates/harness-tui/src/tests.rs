@@ -2344,7 +2344,8 @@ fn the_agents_tab_shows_the_catalog_with_what_is_installed() {
         "! Codex CLI",
         "○ Antigravity CLI",
         "○ GitHub Copilot CLI  · catalog",
-        "Agents installed: 4 of",
+        "Agents installed: 3 of",
+        "○ Claude Code + GLM",
         "✓ Installed: /bin/claude · version 2.1.300",
         "No login: harness login claude",
         "Update with the maker's command:",
@@ -2357,10 +2358,7 @@ fn the_agents_tab_shows_the_catalog_with_what_is_installed() {
     key(&mut app, KeyCode::Down);
     let text = screen_of_width(&mut app, 160);
     assert!(text.contains("! Older than 0.158.0"), "{text}");
-    assert!(
-        text.contains("npm install -g @openai/codex@latest"),
-        "{text}"
-    );
+    assert!(text.contains("@openai/codex@latest"), "{text}");
 
     // Not installed: the install command for this system.
     app.agents.select(3);
@@ -2373,4 +2371,123 @@ fn the_agents_tab_shows_the_catalog_with_what_is_installed() {
     assert!(app.agents.checking);
     click(&mut app, "Antigravity CLI");
     assert_eq!(app.agents.current().unwrap().entry.id, "antigravity");
+}
+
+/// Prints two lines and succeeds.
+fn fake_installer(command: &str, tx: mpsc::Sender<agents_tab::JobEvent>) {
+    use agents_tab::JobEvent;
+    let _ = tx.send(JobEvent::Line(format!("running {command}")));
+    let _ = tx.send(JobEvent::Line("added 1 package".into()));
+    let _ = tx.send(JobEvent::Done(Ok(())));
+}
+
+/// Opens the Agents tab with the fake agents and waits for the check.
+fn agents_app(env: &Env) -> App {
+    let mut app = env.app(env.code.path());
+    app.agent_checker = fake_agents;
+    app.installer = fake_installer;
+    key(&mut app, KeyCode::Char('8'));
+    wait_for_agents(&mut app);
+    app
+}
+
+fn wait_for_agents(app: &mut App) {
+    for _ in 0..200 {
+        app.tick();
+        if !app.agents.checking && app.install_events.is_none() {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    panic!("the agents were not checked");
+}
+
+#[test]
+fn an_agent_is_updated_after_its_command_is_confirmed() {
+    let env = Env::new();
+    let mut app = agents_app(&env);
+    // Codex is installed but old: «Update» shows the command first.
+    app.agents.select(1);
+    let text = screen_of_width(&mut app, 160);
+    assert!(text.contains(" Update "), "{text}");
+    key(&mut app, KeyCode::Char('i'));
+    let text = screen_of_width(&mut app, 160);
+    assert!(text.contains("Update Codex CLI?"), "{text}");
+    assert!(text.contains("@openai/codex@latest"), "{text}");
+    // Escape changes its mind: nothing runs.
+    key(&mut app, KeyCode::Esc);
+    assert!(app.agents.job.is_none());
+
+    key(&mut app, KeyCode::Char('i'));
+    key(&mut app, KeyCode::Enter);
+    assert!(app.agents.job.as_ref().unwrap().running());
+    wait_for_agents(&mut app);
+    let job = app.agents.job.as_ref().unwrap();
+    assert_eq!(job.done, Some(Ok(())));
+    assert_eq!(job.lines.len(), 2);
+    let text = screen_of_width(&mut app, 160);
+    for part in ["Codex CLI updated", "added 1 package", "$ npm install -g"] {
+        assert!(text.contains(part), "missing {part:?} in:\n{text}");
+    }
+    // Afterwards the computer was checked again.
+    assert!(app.agents.known && !app.agents.checking);
+}
+
+#[test]
+fn claude_alone_does_not_mark_glm_installed() {
+    let env = Env::new();
+    let mut app = agents_app(&env);
+    let glm = app
+        .agents
+        .statuses
+        .iter()
+        .position(|s| s.entry.id == "claude+glm")
+        .unwrap();
+    app.agents.select(glm);
+    let text = screen_of_width(&mut app, 160);
+    assert!(text.contains("○ Claude Code + GLM"), "{text}");
+    assert!(
+        text.contains("Claude Code is installed, but the harness"),
+        "{text}"
+    );
+    // Nothing to install or update for it yet.
+    assert!(app.agents.next_step(false).is_none() && app.agents.next_step(true).is_none());
+    // A missing agent without the maker's command for this system has none either.
+    let kiro = app
+        .agents
+        .statuses
+        .iter()
+        .position(|s| s.entry.id == "kiro")
+        .unwrap();
+    app.agents.select(kiro);
+    assert!(app.agents.next_step(false).is_none() && app.agents.next_step(true).is_none());
+    let text = screen_of_width(&mut app, 160);
+    assert!(
+        text.contains("How to install: see https://kiro.dev"),
+        "{text}"
+    );
+}
+
+#[test]
+fn an_installed_agent_is_removed_after_confirming() {
+    let env = Env::new();
+    let mut app = agents_app(&env);
+    // Claude Code is installed: «Remove» deletes its program file.
+    app.agents.select(0);
+    let text = screen_of_width(&mut app, 160);
+    assert!(text.contains(" Remove "), "{text}");
+    key(&mut app, KeyCode::Delete);
+    let text = screen_of_width(&mut app, 160);
+    assert!(text.contains("Remove Claude Code?"), "{text}");
+    assert!(text.contains("saved logins stay"), "{text}");
+    let (_, form) = app.form.as_ref().unwrap();
+    assert!(form.text.contains("/bin/claude"), "{}", form.text);
+    key(&mut app, KeyCode::Enter);
+    wait_for_agents(&mut app);
+    assert_eq!(app.agents.job.as_ref().unwrap().done, Some(Ok(())));
+    assert!(screen_of_width(&mut app, 160).contains("Claude Code removed"));
+
+    // Nothing to remove for an agent that is not installed.
+    app.agents.select(3);
+    assert!(app.agents.next_step(true).is_none());
 }

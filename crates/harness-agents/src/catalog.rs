@@ -4,10 +4,13 @@
 //! An agent is installed when its program is found the way a role would
 //! start it ([`harness_platform::program::find`]). Its version is what
 //! `<program> --version` prints; it is too old when it is below the version
-//! the harness was checked with. Nothing here installs anything: the
-//! install and update commands are the makers' own, shown to Lisa.
+//! the harness was checked with. The install and update commands are the
+//! makers' own; [`run_command`] runs one after Lisa has seen and confirmed it.
 
+use std::io::{BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
+use std::sync::mpsc;
 use std::time::Duration;
 
 use harness_core::config::AGENTS;
@@ -39,9 +42,22 @@ impl Commands {
         }
     }
 
-    /// The command for this computer's system.
-    pub fn here(&self) -> Option<&'static str> {
-        harness_platform::program::on_this_system(self.unix, self.windows)
+    /// The command for this computer's system. On Linux `npm install -g`
+    /// installs into `~/.local`, which needs no `sudo`.
+    pub fn here(&self) -> Option<String> {
+        let command = harness_platform::program::on_this_system(self.unix, self.windows)?;
+        Some(for_npm(
+            command,
+            harness_platform::program::npm_user_prefix(),
+        ))
+    }
+}
+
+/// `npm install -g …` with `--prefix "<prefix>"` when there is one.
+fn for_npm(command: &str, prefix: Option<&str>) -> String {
+    match (command.strip_prefix("npm install -g "), prefix) {
+        (Some(rest), Some(prefix)) => format!("npm install -g --prefix \"{prefix}\" {rest}"),
+        _ => command.to_string(),
     }
 }
 
@@ -70,6 +86,12 @@ impl Entry {
     /// The harness can run it: it is one of the agents of `harness.toml`.
     pub fn runs(&self) -> bool {
         AGENTS.contains(&self.id)
+    }
+
+    /// The npm package it is installed from (`npm install -g <package>@latest`).
+    pub fn npm_package(&self) -> Option<&'static str> {
+        let rest = self.install.unix?.strip_prefix("npm install -g ")?;
+        Some(rest.strip_suffix("@latest").unwrap_or(rest))
     }
 }
 
@@ -187,8 +209,9 @@ pub const CATALOG: &[Entry] = &[
         inside: None,
         plan: "Kimi membership $19–199",
         min_version: None,
-        install: Commands::both("npm install -g @kimi-code/cli@latest"),
-        update: Commands::both("npm install -g @kimi-code/cli@latest"),
+        // Its install command is on the site; not checked yet.
+        install: Commands::NONE,
+        update: Commands::NONE,
         site: "https://www.kimi.com/code",
     },
     Entry {
@@ -256,8 +279,58 @@ pub struct Status {
 }
 
 impl Status {
+    /// Its program is here. An agent that is a model inside another agent's
+    /// program counts only when the harness runs it: Claude Code alone is
+    /// not GLM, which also needs its plan's key and an adapter.
     pub fn installed(&self) -> bool {
-        self.path.is_some()
+        self.path.is_some() && (self.entry.inside.is_none() || self.entry.runs())
+    }
+
+    /// The program this agent lives inside is here, but the agent itself is
+    /// not usable yet (see [`Status::installed`]).
+    pub fn host_only(&self) -> bool {
+        self.path.is_some() && !self.installed()
+    }
+
+    /// What can be done now: update an installed agent, install a missing
+    /// one, nothing for a [`host_only`](Status::host_only) one. With the command for
+    /// this computer, if the maker gives one.
+    pub fn action(&self) -> Option<(Action, Option<String>)> {
+        if self.host_only() {
+            None
+        } else if self.installed() {
+            Some((Action::Update, self.entry.update.here()))
+        } else {
+            Some((Action::Install, self.entry.install.here()))
+        }
+    }
+
+    /// How to take the agent's program off this computer: `npm uninstall`
+    /// for what npm installed, otherwise deleting the program file that was
+    /// found (Claude Code, Antigravity and Cursor install one command there).
+    /// Its settings, saved logins and data stay. `None` when it is not
+    /// installed, or lives inside another agent's program: removing Codex
+    /// for «Codex + DeepSeek» would surprise.
+    pub fn removal(&self) -> Option<String> {
+        if !self.installed() || self.entry.inside.is_some() {
+            return None;
+        }
+        let path = self.path.as_ref()?;
+        if let Some(package) = self.entry.npm_package() {
+            // Into ~/.local it went with --prefix; anywhere else npm's own place.
+            let local = harness_platform::home::home_dir()
+                .is_some_and(|home| path.starts_with(home.join(".local")));
+            let prefix = harness_platform::program::npm_user_prefix().filter(|_| local);
+            return Some(match prefix {
+                Some(prefix) => format!("npm uninstall -g --prefix \"{prefix}\" {package}"),
+                None => format!("npm uninstall -g {package}"),
+            });
+        }
+        let path = path.to_string_lossy();
+        Some(harness_platform::program::on_this_system(
+            format!("rm -f '{}'", path.replace('\'', "'\\''")),
+            format!("Remove-Item -LiteralPath '{}'", path.replace('\'', "''")),
+        ))
     }
 
     /// Installed, but older than the harness was checked with.
@@ -267,6 +340,114 @@ impl Status {
             _ => false,
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Action {
+    Install,
+    Update,
+    Remove,
+}
+
+/// Runs a maker's install or update `command` in the system's shell, with
+/// the user's own environment (installers need the network settings and
+/// `PATH`), nothing on standard input. Each line it prints goes to
+/// `on_line`, cleaned of colours and progress bars. `Err` says how it ended.
+pub fn run_command(command: &str, mut on_line: impl FnMut(String)) -> Result<(), String> {
+    let (shell, args) = harness_platform::program::shell();
+    let mut child = Command::new(harness_platform::program::resolve(shell));
+    child
+        .args(args)
+        .arg(command)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    // Programs installed into ~/.local/bin are found by the next steps.
+    if let Some(path) = with_local_bin() {
+        child.env("PATH", path);
+    }
+    let mut child =
+        crate::process::spawn(&mut child).map_err(|e| format!("cannot start {shell}: {e}"))?;
+    let (tx, rx) = mpsc::channel();
+    let pipes: Vec<Box<dyn Read + Send>> = [
+        child
+            .stdout
+            .take()
+            .map(|p| Box::new(p) as Box<dyn Read + Send>),
+        child
+            .stderr
+            .take()
+            .map(|p| Box::new(p) as Box<dyn Read + Send>),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+    let readers: Vec<_> = pipes
+        .into_iter()
+        .map(|pipe| {
+            let tx = tx.clone();
+            std::thread::spawn(move || {
+                for line in BufReader::new(pipe).split(b'\n').map_while(Result::ok) {
+                    let _ = tx.send(String::from_utf8_lossy(&line).into_owned());
+                }
+            })
+        })
+        .collect();
+    drop(tx);
+    for line in rx {
+        let line = clean_line(&line);
+        if !line.is_empty() {
+            on_line(line);
+        }
+    }
+    for reader in readers {
+        let _ = reader.join();
+    }
+    let status = child.wait().map_err(|e| e.to_string())?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!("the command ended with {status}"))
+    }
+}
+
+/// `PATH` with `~/.local/bin` in front, if it is not there already.
+fn with_local_bin() -> Option<std::ffi::OsString> {
+    let local = harness_platform::home::home_dir()?
+        .join(".local")
+        .join("bin");
+    let path = std::env::var_os("PATH").unwrap_or_default();
+    if std::env::split_paths(&path).any(|dir| dir == local) {
+        return None;
+    }
+    std::env::join_paths(std::iter::once(local).chain(std::env::split_paths(&path))).ok()
+}
+
+/// A line as a terminal would end up showing it: after the last carriage
+/// return (progress bars redraw with `\r`), without colour codes.
+pub fn clean_line(line: &str) -> String {
+    let line = line.trim_end_matches(['\r', '\n']);
+    let line = line.rsplit('\r').next().unwrap_or(line);
+    let mut out = String::new();
+    let mut chars = line.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '\u{1b}' {
+            // ESC [ … letter, or ESC and one more character.
+            if chars.peek() == Some(&'[') {
+                chars.next();
+                for c in chars.by_ref() {
+                    if c.is_ascii_alphabetic() {
+                        break;
+                    }
+                }
+            } else {
+                chars.next();
+            }
+        } else if !c.is_control() || c == '\t' {
+            out.push(c);
+        }
+    }
+    out.trim_end().to_string()
 }
 
 /// Checks every agent of the catalog on this computer, all at once.
@@ -432,6 +613,101 @@ mod tests {
         assert_eq!(cursor.path, Some(PathBuf::from("/bin/agent")));
         assert_eq!(cursor.login, None);
         assert_eq!(all.len(), CATALOG.len());
+    }
+
+    #[test]
+    fn npm_installs_go_to_the_users_folder_where_npm_needs_it() {
+        assert_eq!(
+            for_npm("npm install -g opencode-ai@latest", Some("$HOME/.local")),
+            "npm install -g --prefix \"$HOME/.local\" opencode-ai@latest"
+        );
+        assert_eq!(
+            for_npm("npm install -g opencode-ai@latest", None),
+            "npm install -g opencode-ai@latest"
+        );
+        assert_eq!(
+            for_npm("claude update", Some("$HOME/.local")),
+            "claude update"
+        );
+    }
+
+    #[test]
+    fn claude_alone_is_not_glm() {
+        let glm = CATALOG.iter().find(|e| e.id == "claude+glm").unwrap();
+        let found = Status {
+            entry: *glm,
+            path: Some(PathBuf::from("/bin/claude")),
+            version: Some("2.1.0".into()),
+            problem: None,
+            login: None,
+        };
+        assert!(!found.installed() && found.host_only());
+        assert_eq!(found.action(), None);
+        let missing = Status {
+            path: None,
+            ..found.clone()
+        };
+        assert!(!missing.host_only());
+        assert_eq!(missing.action().unwrap().0, Action::Install);
+        // DeepSeek is run by the harness, so Codex is enough for it.
+        let deepseek = CATALOG.iter().find(|e| e.id == "codex+deepseek").unwrap();
+        let found = Status {
+            entry: *deepseek,
+            ..found
+        };
+        assert!(found.installed());
+        assert_eq!(found.action().unwrap().0, Action::Update);
+    }
+
+    #[test]
+    fn removing_takes_away_only_the_program() {
+        let entry = |id: &str| *CATALOG.iter().find(|e| e.id == id).unwrap();
+        let status = |id: &str, path: &str| Status {
+            entry: entry(id),
+            path: Some(PathBuf::from(path)),
+            version: None,
+            problem: None,
+            login: Some(true),
+        };
+        assert_eq!(entry("opencode").npm_package(), Some("opencode-ai"));
+        assert_eq!(entry("claude").npm_package(), None);
+        // A program file is deleted, quoted for the shell.
+        let claude = status("claude", "/home/x/it's/claude").removal().unwrap();
+        if cfg!(windows) {
+            assert_eq!(claude, "Remove-Item -LiteralPath '/home/x/it''s/claude'");
+        } else {
+            assert_eq!(claude, "rm -f '/home/x/it'\\''s/claude'");
+        }
+        // What npm installed in its own place, npm takes away.
+        assert_eq!(
+            status("opencode", "/usr/bin/opencode").removal().unwrap(),
+            "npm uninstall -g opencode-ai"
+        );
+        // Not for an agent inside another one, nor for one not installed.
+        assert_eq!(status("codex+deepseek", "/usr/bin/codex").removal(), None);
+        let missing = Status {
+            path: None,
+            ..status("claude", "/x")
+        };
+        assert_eq!(missing.removal(), None);
+    }
+
+    #[test]
+    fn output_lines_lose_colours_and_progress_bars() {
+        assert_eq!(clean_line("\u{1b}[32m✓ done\u{1b}[0m\r\n"), "✓ done");
+        assert_eq!(clean_line("10%\r50%\r100% installed"), "100% installed");
+        assert_eq!(clean_line("   \r"), "");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_command_runs_in_the_shell_and_its_lines_come_back() {
+        let mut lines = Vec::new();
+        run_command("echo one; echo two >&2", |l| lines.push(l)).unwrap();
+        lines.sort();
+        assert_eq!(lines, ["one", "two"]);
+        let error = run_command("echo bad; exit 3", |_| {}).unwrap_err();
+        assert!(error.contains('3'), "{error}");
     }
 
     #[cfg(unix)]
