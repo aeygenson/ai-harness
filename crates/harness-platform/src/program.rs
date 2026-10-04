@@ -14,30 +14,84 @@ use std::path::{Path, PathBuf};
 /// Windows' list when `PATHEXT` is not set.
 const DEFAULT_PATHEXT: &str = ".COM;.EXE;.BAT;.CMD";
 
-/// The full path of `name`, if it is installed. A name with a folder in it
-/// (`./x`, `C:\tools\x.exe`) is only checked, not searched.
+/// The full path of `name`, if it is installed: in `PATH`, or else in one of
+/// the [`usual_places`]. A name with a folder in it (`./x`,
+/// `C:\tools\x.exe`) is only checked, not searched.
 pub fn find(name: &str) -> Option<PathBuf> {
-    let path = std::env::var_os("PATH").unwrap_or_default();
-    let exts = if cfg!(windows) {
-        std::env::var_os("PATHEXT").unwrap_or_else(|| DEFAULT_PATHEXT.into())
-    } else {
-        OsString::new()
-    };
-    find_in(name, &path, &exts)
+    in_path(name).or_else(|| in_usual_places(name, crate::home::home_dir().as_deref()))
 }
 
-/// What to start for `name`: on Windows its full path when it is installed
-/// (so `codex` becomes `…\codex.cmd`); on Linux and macOS the name itself,
-/// which the system looks up in `PATH` on its own. A program that is not
-/// found stays `name`, and starting it fails with «not found», as before.
+/// What to start for `name`. In `PATH` on Linux and macOS: the name itself,
+/// which the system looks up on its own; on Windows the full path (so
+/// `codex` becomes `…\codex.cmd`). Found only in one of the
+/// [`usual_places`]: its full path. A program that is not found stays
+/// `name`, and starting it fails with «not found», as before.
 pub fn resolve(name: impl AsRef<OsStr>) -> PathBuf {
     let name = name.as_ref();
-    if cfg!(windows) {
-        if let Some(found) = name.to_str().and_then(find) {
+    if let Some(text) = name.to_str() {
+        let found = if cfg!(windows) {
+            find(text)
+        } else if in_path(text).is_none() {
+            in_usual_places(text, crate::home::home_dir().as_deref())
+        } else {
+            None
+        };
+        if let Some(found) = found {
             return found;
         }
     }
     PathBuf::from(name)
+}
+
+/// `name` in the folders of `PATH`.
+fn in_path(name: &str) -> Option<PathBuf> {
+    let path = std::env::var_os("PATH").unwrap_or_default();
+    find_in(name, &path, &path_exts())
+}
+
+/// Windows' `PATHEXT`; empty on Linux and macOS.
+fn path_exts() -> OsString {
+    if cfg!(windows) {
+        std::env::var_os("PATHEXT").unwrap_or_else(|| DEFAULT_PATHEXT.into())
+    } else {
+        OsString::new()
+    }
+}
+
+/// Folders where installers put programs, besides `PATH`. A program started
+/// from a desktop icon gets the desktop's `PATH`, and on Linux that often
+/// lacks `~/.local/bin`, where Claude Code and Antigravity install
+/// themselves: a shell adds it in `.bashrc` or `.profile`, the desktop does
+/// not. Windows installers change the `PATH` of the whole account, so there
+/// it is only `PATH`.
+pub fn usual_places(home: Option<&Path>) -> Vec<PathBuf> {
+    if cfg!(windows) {
+        return Vec::new();
+    }
+    let mut places: Vec<PathBuf> = home
+        .map(|home| {
+            [
+                ".local/bin",
+                ".claude/local",
+                ".npm-global/bin",
+                ".cargo/bin",
+            ]
+            .iter()
+            .map(|dir| home.join(dir))
+            .collect()
+        })
+        .unwrap_or_default();
+    places.extend(["/opt/homebrew/bin", "/usr/local/bin"].map(PathBuf::from));
+    places
+}
+
+/// `name` in one of the [`usual_places`] of `home`.
+fn in_usual_places(name: &str, home: Option<&Path>) -> Option<PathBuf> {
+    if name.contains('/') || name.contains('\\') {
+        return None;
+    }
+    let places = std::env::join_paths(usual_places(home)).ok()?;
+    find_in(name, &places, &path_exts())
 }
 
 /// `unix` on Linux and macOS, `windows` on Windows: for things written
@@ -128,6 +182,26 @@ mod tests {
             Some(dir.path().join("codex"))
         );
         assert_eq!(find_in("npx", &path, none), None);
+    }
+
+    #[test]
+    fn a_program_outside_path_is_found_in_the_usual_places() {
+        let home = tempfile::tempdir().unwrap();
+        let places = usual_places(Some(home.path()));
+        if cfg!(windows) {
+            assert!(places.is_empty());
+            return;
+        }
+        assert!(places.contains(&home.path().join(".local/bin")));
+        assert_eq!(in_usual_places("agy", Some(home.path())), None);
+        fs::create_dir_all(home.path().join(".local/bin")).unwrap();
+        fs::write(home.path().join(".local/bin/agy"), "").unwrap();
+        assert_eq!(
+            in_usual_places("agy", Some(home.path())),
+            Some(home.path().join(".local/bin/agy"))
+        );
+        // A path is never looked up there.
+        assert_eq!(in_usual_places("./agy", Some(home.path())), None);
     }
 
     #[test]
