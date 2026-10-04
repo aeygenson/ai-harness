@@ -6,6 +6,7 @@ use harness_agents::catalog::{self, Action, Status, CATALOG};
 use harness_agents::credentials;
 use ratatui::crossterm::event::KeyCode;
 use ratatui::layout::{Constraint, Layout, Rect};
+use ratatui::style::Modifier;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{ListItem, Paragraph, Wrap};
 use ratatui::Frame;
@@ -213,7 +214,7 @@ impl AgentsTab {
                 if !status.entry.runs() {
                     spans.push(Span::styled(
                         format!("  {}", tr.t("agents.catalog_only")),
-                        theme::dim(),
+                        theme::bad(),
                     ));
                 }
                 ListItem::new(Line::from(spans))
@@ -263,6 +264,20 @@ impl AgentsTab {
             ),
             Line::default(),
         ];
+        // Said first and loud: roles cannot use it, whatever is installed.
+        if !entry.runs() {
+            let loud = theme::bad().add_modifier(Modifier::BOLD);
+            lines.push(Line::styled(tr.t("agents.not_run_title").to_string(), loud));
+            lines.push(Line::styled(
+                tr.t("agents.not_run").to_string(),
+                theme::bad(),
+            ));
+            lines.push(Line::styled(
+                tr.t("agents.not_run_ask").to_string(),
+                theme::bad(),
+            ));
+            lines.push(Line::default());
+        }
         let state = if !self.known {
             Line::styled(tr.t("agents.checking").to_string(), theme::dim())
         } else if status.host_only() {
@@ -291,11 +306,6 @@ impl AgentsTab {
         }
         if entry.runs() {
             lines.push(Line::from(tr.f("agents.runs", &[("id", &entry.id)])));
-        } else {
-            lines.push(Line::styled(
-                tr.t("agents.not_run").to_string(),
-                theme::dim(),
-            ));
         }
         match status.login {
             Some(true) if self.known => {

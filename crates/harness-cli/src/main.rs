@@ -465,7 +465,11 @@ fn agents() {
         } else {
             "○"
         };
-        let runs = if entry.runs() { "" } else { "  (catalog only)" };
+        let runs = if entry.runs() {
+            ""
+        } else {
+            "  (NOT IMPLEMENTED YET)"
+        };
         println!("{mark} {:<20} {}{runs}", entry.name, entry.vendor);
         match &status.path {
             Some(path) => {
@@ -489,8 +493,9 @@ fn agents() {
             None => {}
         }
         println!("    plan: {}", entry.plan);
-        if status.host_only() {
-            println!("    the harness cannot run it yet");
+        if !entry.runs() {
+            println!("    NOT IMPLEMENTED YET: the harness has no adapter for it, so roles");
+            println!("    cannot use it. If you need it, ask the developer to implement it.");
         }
         if let Some((action, command)) = status.action() {
             let what = match action {

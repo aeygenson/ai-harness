@@ -597,6 +597,9 @@ impl App {
         if action == Action::Remove && status.entry.id == "claude" {
             text = format!("{text}\n\n{}", tr.t("agents.remove_claude_note"));
         }
+        if action == Action::Install && !status.entry.runs() {
+            text = format!("{}\n\n{text}", tr.t("agents.confirm_not_run"));
+        }
         let form = Form::new(&tr.f(title, &[("name", &name)]), &text, tr.t(ok));
         self.form = Some((
             Purpose::RunAgentCommand {
