@@ -19,8 +19,8 @@
 # the code in ~/code/ai-harness):
 #   curl -fsSL .../install.sh | bash -s -- --dev
 #
-# At the end it adds «AI Harness» to the applications. It never asks for or
-# prints a key.
+# At the end it adds «AI Harness» to the applications (on Linux to the
+# desktop too). It never asks for or prints a key.
 #
 # Only the harness itself, nothing else:  HARNESS_ONLY=harness
 set -euo pipefail
@@ -235,19 +235,44 @@ shortcut() {
             -e "tell application \"Terminal\" to do script \"'$BIN/harness' tui\"" \
             -e 'tell application "Terminal" to activate' >/dev/null
     else
-        say "«AI Harness» in the applications menu"
+        say "«AI Harness» in the applications menu and on the desktop"
+        local share="$HOME/.local/share/ai-harness"
         local menu="$HOME/.local/share/applications"
-        mkdir -p "$menu"
-        cat >"$menu/ai-harness.desktop" <<ENTRY
+        mkdir -p "$share" "$menu"
+        # Started from the desktop, nothing from ~/.bashrc or ~/.profile is
+        # loaded, so the roles would not find the tools installed there
+        # (dotnet, node, anything). This starts the harness inside the
+        # person's own shell, the way a terminal does.
+        cat >"$share/start.sh" <<'START'
+#!/usr/bin/env bash
+case "${SHELL:-}" in
+    */bash | */zsh | */ksh) user_shell="$SHELL" ;;
+    *) user_shell=/bin/bash ;; # fish and others take other arguments
+esac
+# A login bash reads ~/.profile but not ~/.bashrc, so read that too.
+exec "$user_shell" -l -i -c \
+    '[ -n "${BASH_VERSION:-}" ] && [ -f ~/.bashrc ] && . ~/.bashrc; exec "$0" tui' \
+    "$1"
+START
+        chmod +x "$share/start.sh"
+        local desktop
+        desktop="$(xdg-user-dir DESKTOP 2>/dev/null || echo "$HOME/Desktop")"
+        for dir in "$menu" "$desktop"; do
+            [ -d "$dir" ] || continue
+            cat >"$dir/ai-harness.desktop" <<ENTRY
 [Desktop Entry]
 Type=Application
 Name=AI Harness
 Comment=Tasks, roles and projects of the AI harness
-Exec=$BIN/harness tui
+Exec="$share/start.sh" "$BIN/harness"
 Terminal=true
-Icon=$HOME/.local/share/ai-harness/ai-harness-256.png
+Icon=$share/ai-harness-256.png
 Categories=Development;
 ENTRY
+            chmod +x "$dir/ai-harness.desktop"
+        done
+        # GNOME asks before it runs an icon it does not trust yet.
+        gio set "$desktop/ai-harness.desktop" metadata::trusted true 2>/dev/null || true
     fi
 }
 

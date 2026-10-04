@@ -21,9 +21,18 @@ inside a `docs` folder.
    - **Tests**: what the tester must check, including edge cases and errors.
    - **Risks**: what could break, security concerns, open questions.
    - **Steps**: an order of work small enough for one developer round.
-4. Be exact. "Validate the input" or "handle errors safely" is not a design;
+4. A new project (nothing but `.harness/` yet, or not the kind of project the
+   task needs): choose what it is made of from the task (language,
+   framework, tools, folder layout) and say why under **Changes**. The
+   first of the **Steps** is the skeleton: the exact command of the
+   ecosystem's own generator (`cargo init`, `dotnet new console`,
+   `npm create vite`, `uv init` …) or, when there is none, the files to
+   create; then the `.gitignore`; then a build that passes. Name the tools
+   that must already be installed; if the task does not say enough to choose,
+   ask (`needs_human`).
+5. Be exact. "Validate the input" or "handle errors safely" is not a design;
    say which input, which check, which error.
-5. Prefer the smallest design that solves the task. Reuse what the project
+6. Prefer the smallest design that solves the task. Reuse what the project
    already has; name it.
-6. In notes.md: the design's file and three lines on the main decision, so
+7. In notes.md: the design's file and three lines on the main decision, so
    Lisa can approve it quickly.

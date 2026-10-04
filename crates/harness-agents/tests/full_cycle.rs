@@ -9,7 +9,7 @@ use harness_agents::{MockAgent, MockStep};
 use harness_core::git::Repo;
 use harness_core::handoff::{NextStep, Role, Verdict};
 use harness_core::orchestrator::{
-    self, create_task, record_human_decision, StopReason, ATTEMPTS_PER_ROLE,
+    self, create_task, record_human_decision, StopReason, ATTEMPTS_PER_ROLE, MAX_CHANGE_BYTES,
 };
 use harness_core::store::TaskStore;
 use harness_core::task::{Stage, TaskState, WaitReason, DEFAULT_MAX_ROUNDS};
@@ -376,6 +376,41 @@ async fn security_may_not_change_anything() {
             ..
         }
     ));
+}
+
+#[tokio::test]
+async fn build_output_is_not_committed() {
+    let (_dir, repo) = new_project();
+    let (store, mut state) = new_task(&repo);
+    state.stage = Stage::Working(Role::Developer);
+    let before = state.clone();
+    let big = "x".repeat(MAX_CHANGE_BYTES as usize + 1);
+    let agent = MockAgent::new().then(
+        Role::Developer,
+        MockStep::finish_writing(
+            Verdict::Approved,
+            NextStep::To(Role::Tester),
+            &[("src/main.rs", "fn main() {}"), ("target/debug/app", &big)],
+        ),
+    );
+    let head = repo.head().unwrap();
+
+    let stop = orchestrator::run(&repo, &store, &mut state, &agent)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        stop,
+        StopReason::TooLarge {
+            role: Role::Developer,
+            files: vec![("target/debug/app".to_string(), MAX_CHANGE_BYTES + 1)],
+        }
+    );
+    // Nothing committed, everything left in place for Lisa.
+    assert_eq!(state, before);
+    assert_eq!(repo.head().unwrap(), head);
+    assert!(repo.root().join("src/main.rs").exists());
+    assert!(repo.root().join("target/debug/app").exists());
 }
 
 #[tokio::test]

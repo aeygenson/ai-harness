@@ -1363,6 +1363,17 @@ fn outcome_text(outcome: &Outcome, tr: &I18n) -> (String, bool) {
             ),
             true,
         ),
+        StopReason::TooLarge { role: r, files } => (
+            tr.f(
+                "tasks.stop_too_large",
+                &[
+                    ("task", task),
+                    ("role", &role(r)),
+                    ("files", &sized_list(files)),
+                ],
+            ),
+            true,
+        ),
         StopReason::AgentCommitted(r) => (
             tr.f(
                 "tasks.stop_committed",
@@ -1371,6 +1382,15 @@ fn outcome_text(outcome: &Outcome, tr: &I18n) -> (String, bool) {
             true,
         ),
     }
+}
+
+/// `target (812 MB), data.bin (60 MB)`
+fn sized_list(files: &[(String, u64)]) -> String {
+    files
+        .iter()
+        .map(|(path, bytes)| format!("{path} ({} MB)", bytes.div_ceil(1024 * 1024)))
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 /// Room for five lines of text and the buttons; less in a small window.
