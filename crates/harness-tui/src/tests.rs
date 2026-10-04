@@ -2305,10 +2305,14 @@ fn the_same_task_sent_twice_is_not_started_again() {
 /// Codex is installed but old, Claude is installed and new, nothing else.
 fn fake_agents(credentials: Option<&Path>) -> Vec<harness_agents::catalog::Status> {
     use harness_agents::catalog;
-    let find = |name: &str| {
-        ["claude", "codex"]
-            .contains(&name)
-            .then(|| PathBuf::from(format!("/bin/{name}")))
+    // Codex sits in the user's own npm folder, so the tab may update it.
+    let local = harness_platform::home::home_dir()
+        .map(|home| home.join(".local/bin/codex"))
+        .unwrap_or_else(|| PathBuf::from("/bin/codex"));
+    let find = move |name: &str| match name {
+        "claude" => Some(PathBuf::from("/bin/claude")),
+        "codex" => Some(local.clone()),
+        _ => None,
     };
     let version = |path: &Path| {
         Ok(if path.ends_with("codex") {
@@ -2431,6 +2435,36 @@ fn an_agent_is_updated_after_its_command_is_confirmed() {
     }
     // Afterwards the computer was checked again.
     assert!(app.agents.known && !app.agents.checking);
+}
+
+#[test]
+fn a_codex_in_a_system_folder_shows_the_terminal_commands() {
+    fn system_codex(credentials: Option<&Path>) -> Vec<harness_agents::catalog::Status> {
+        use harness_agents::catalog;
+        let find = |name: &str| (name == "codex").then(|| PathBuf::from("/usr/bin/codex"));
+        let version = |_: &Path| Ok("codex-cli 0.150.0".to_string());
+        catalog::check_with(catalog::CATALOG, &find, &version, credentials)
+    }
+    if harness_platform::program::npm_user_prefix().is_none() {
+        // Only Linux keeps npm's global folder out of the user's reach.
+        return;
+    }
+    let env = Env::new();
+    let mut app = env.app(env.code.path());
+    app.agent_checker = system_codex;
+    key(&mut app, KeyCode::Char('8'));
+    wait_for_agents(&mut app);
+    app.agents.select(1);
+    assert!(app.agents.next_step(false).is_none());
+    assert!(app.agents.next_step(true).is_none());
+    let text = screen_of_width(&mut app, 200);
+    for part in [
+        "in a terminal",
+        "sudo npm install -g @openai/codex@latest",
+        "sudo npm uninstall -g @openai/codex",
+    ] {
+        assert!(text.contains(part), "missing {part:?} in:\n{text}");
+    }
 }
 
 #[test]

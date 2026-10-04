@@ -291,9 +291,22 @@ impl AgentsTab {
                 lines.push(Line::from(tr.t(key).to_string()));
                 lines.push(Line::styled(format!("  {command}"), theme::accent()));
             }
-            Some((_, None)) => lines.push(Line::from(
-                tr.f("agents.see_site", &[("site", &entry.site)]),
-            )),
+            Some((_, None)) => match (
+                status.needs_sudo(Action::Update),
+                status.needs_sudo(Action::Remove),
+            ) {
+                (Some(update), Some(remove)) => {
+                    lines.push(Line::styled(
+                        tr.t("agents.system_npm").to_string(),
+                        theme::warn(),
+                    ));
+                    lines.push(Line::styled(format!("  {update}"), theme::accent()));
+                    lines.push(Line::styled(format!("  {remove}"), theme::accent()));
+                }
+                _ => lines.push(Line::from(
+                    tr.f("agents.see_site", &[("site", &entry.site)]),
+                )),
+            },
             None => {}
         }
         lines.push(Line::from(tr.f("agents.site", &[("site", &entry.site)])));

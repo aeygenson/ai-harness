@@ -79,6 +79,9 @@ pub struct Entry {
     pub min_version: Option<&'static str>,
     pub install: Commands,
     pub update: Commands,
+    /// The maker's own way to take it off, when deleting the program file
+    /// is not enough (Claude Code keeps its versions next to it).
+    pub remove: Commands,
     pub site: &'static str,
 }
 
@@ -125,6 +128,11 @@ pub const CATALOG: &[Entry] = &[
         min_version: None,
         install: CLAUDE_INSTALL,
         update: Commands::both("claude update"),
+        // Its native installer's files: the command and all its versions.
+        remove: Commands {
+            unix: Some("rm -f \"$HOME/.local/bin/claude\" && rm -rf \"$HOME/.local/share/claude\""),
+            windows: Some("Remove-Item -Force \"$env:USERPROFILE\\.local\\bin\\claude.exe\"; Remove-Item -Recurse -Force \"$env:USERPROFILE\\.local\\share\\claude\""),
+        },
         site: "https://claude.com/product/claude-code",
     },
     Entry {
@@ -138,6 +146,7 @@ pub const CATALOG: &[Entry] = &[
         min_version: Some("0.158.0"),
         install: Commands::both(NPM_CODEX),
         update: Commands::both(NPM_CODEX),
+        remove: Commands::NONE,
         site: "https://developers.openai.com/codex/cli",
     },
     Entry {
@@ -150,6 +159,7 @@ pub const CATALOG: &[Entry] = &[
         min_version: Some("0.158.0"),
         install: Commands::both(NPM_CODEX),
         update: Commands::both(NPM_CODEX),
+        remove: Commands::NONE,
         site: "https://platform.deepseek.com",
     },
     Entry {
@@ -163,6 +173,7 @@ pub const CATALOG: &[Entry] = &[
         install: AGY_INSTALL,
         // The installer always brings the newest version.
         update: AGY_INSTALL,
+        remove: Commands::NONE,
         site: "https://antigravity.google/docs/cli/install",
     },
     Entry {
@@ -175,6 +186,7 @@ pub const CATALOG: &[Entry] = &[
         min_version: None,
         install: CLAUDE_INSTALL,
         update: Commands::both("claude update"),
+        remove: Commands::NONE,
         site: "https://docs.z.ai/devpack",
     },
     Entry {
@@ -187,6 +199,7 @@ pub const CATALOG: &[Entry] = &[
         min_version: None,
         install: Commands::both("npm install -g @github/copilot@latest"),
         update: Commands::both("npm install -g @github/copilot@latest"),
+        remove: Commands::NONE,
         site: "https://docs.github.com/en/copilot/concepts/agents/about-copilot-cli",
     },
     Entry {
@@ -199,6 +212,7 @@ pub const CATALOG: &[Entry] = &[
         min_version: None,
         install: CURSOR_INSTALL,
         update: CURSOR_INSTALL,
+        remove: Commands::NONE,
         site: "https://cursor.com/docs/cli/overview",
     },
     Entry {
@@ -212,6 +226,7 @@ pub const CATALOG: &[Entry] = &[
         // Its install command is on the site; not checked yet.
         install: Commands::NONE,
         update: Commands::NONE,
+        remove: Commands::NONE,
         site: "https://www.kimi.com/code",
     },
     Entry {
@@ -224,6 +239,7 @@ pub const CATALOG: &[Entry] = &[
         min_version: None,
         install: GROK_INSTALL,
         update: GROK_INSTALL,
+        remove: Commands::NONE,
         site: "https://x.ai",
     },
     Entry {
@@ -236,6 +252,7 @@ pub const CATALOG: &[Entry] = &[
         min_version: None,
         install: Commands::NONE,
         update: Commands::NONE,
+        remove: Commands::NONE,
         site: "https://kiro.dev/docs/cli/",
     },
     Entry {
@@ -248,6 +265,7 @@ pub const CATALOG: &[Entry] = &[
         min_version: None,
         install: Commands::NONE,
         update: Commands::NONE,
+        remove: Commands::NONE,
         site: "https://mistral.ai/products/vibe",
     },
     Entry {
@@ -260,6 +278,7 @@ pub const CATALOG: &[Entry] = &[
         min_version: None,
         install: Commands::both("npm install -g opencode-ai@latest"),
         update: Commands::both("npm install -g opencode-ai@latest"),
+        remove: Commands::NONE,
         site: "https://opencode.ai",
     },
 ];
@@ -299,9 +318,49 @@ impl Status {
         if self.host_only() {
             None
         } else if self.installed() {
-            Some((Action::Update, self.entry.update.here()))
+            let command = match (self.entry.npm_package(), self.npm_place()) {
+                (Some(_), NpmPlace::System) => None,
+                (Some(package), NpmPlace::User(prefix)) => {
+                    Some(npm_command("install", prefix, &format!("{package}@latest")))
+                }
+                (None, _) => self.entry.update.here(),
+            };
+            Some((Action::Update, command))
         } else {
             Some((Action::Install, self.entry.install.here()))
+        }
+    }
+
+    /// For an agent npm installed into the system's own folders (on Linux,
+    /// with `sudo`): the command to run in a terminal for `action`. The
+    /// harness cannot run it, it would ask for a password; installing a
+    /// second copy into `~/.local` instead would leave the old one in use
+    /// by everything else.
+    pub fn needs_sudo(&self, action: Action) -> Option<String> {
+        let package = self.entry.npm_package()?;
+        if !self.installed() || self.npm_place() != NpmPlace::System {
+            return None;
+        }
+        match action {
+            Action::Install => None,
+            Action::Update => Some(format!("sudo npm install -g {package}@latest")),
+            Action::Remove => Some(format!("sudo npm uninstall -g {package}")),
+        }
+    }
+
+    /// Where npm keeps this installed agent, judged by its program's path.
+    fn npm_place(&self) -> NpmPlace {
+        let Some(prefix) = harness_platform::program::npm_user_prefix() else {
+            // macOS (Homebrew) and Windows: npm's own folder is the user's.
+            return NpmPlace::User(None);
+        };
+        let home = harness_platform::home::home_dir();
+        let path = self.path.as_deref().unwrap_or(Path::new(""));
+        match home {
+            Some(home) if path.starts_with(home.join(".local")) => NpmPlace::User(Some(prefix)),
+            // nvm and other npm folders of the user's own.
+            Some(home) if path.starts_with(&home) => NpmPlace::User(None),
+            _ => NpmPlace::System,
         }
     }
 
@@ -317,14 +376,16 @@ impl Status {
         }
         let path = self.path.as_ref()?;
         if let Some(package) = self.entry.npm_package() {
-            // Into ~/.local it went with --prefix; anywhere else npm's own place.
-            let local = harness_platform::home::home_dir()
-                .is_some_and(|home| path.starts_with(home.join(".local")));
-            let prefix = harness_platform::program::npm_user_prefix().filter(|_| local);
-            return Some(match prefix {
-                Some(prefix) => format!("npm uninstall -g --prefix \"{prefix}\" {package}"),
-                None => format!("npm uninstall -g {package}"),
-            });
+            return match self.npm_place() {
+                NpmPlace::User(prefix) => Some(npm_command("uninstall", prefix, package)),
+                NpmPlace::System => None,
+            };
+        }
+        // The maker's own way, for an install in the usual place.
+        let local = harness_platform::home::home_dir()
+            .is_some_and(|home| path.starts_with(home.join(".local")));
+        if let (true, Some(command)) = (local, self.entry.remove.here()) {
+            return Some(command);
         }
         let path = path.to_string_lossy();
         Some(harness_platform::program::on_this_system(
@@ -339,6 +400,22 @@ impl Status {
             (Some(version), Some(min)) => older(version, min),
             _ => false,
         }
+    }
+}
+
+/// Where npm keeps an installed agent: the user's own folders (with the
+/// `--prefix` it was installed with, if any) or the system's.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum NpmPlace {
+    User(Option<&'static str>),
+    System,
+}
+
+/// `npm <verb> -g [--prefix "<prefix>"] <what>`.
+fn npm_command(verb: &str, prefix: Option<&str>, what: &str) -> String {
+    match prefix {
+        Some(prefix) => format!("npm {verb} -g --prefix \"{prefix}\" {what}"),
+        None => format!("npm {verb} -g {what}"),
     }
 }
 
@@ -672,17 +749,53 @@ mod tests {
         assert_eq!(entry("opencode").npm_package(), Some("opencode-ai"));
         assert_eq!(entry("claude").npm_package(), None);
         // A program file is deleted, quoted for the shell.
-        let claude = status("claude", "/home/x/it's/claude").removal().unwrap();
+        let claude = status("claude", "/opt/x/it's/claude").removal().unwrap();
         if cfg!(windows) {
-            assert_eq!(claude, "Remove-Item -LiteralPath '/home/x/it''s/claude'");
+            assert_eq!(claude, "Remove-Item -LiteralPath '/opt/x/it''s/claude'");
         } else {
-            assert_eq!(claude, "rm -f '/home/x/it'\\''s/claude'");
+            assert_eq!(claude, "rm -f '/opt/x/it'\\''s/claude'");
         }
-        // What npm installed in its own place, npm takes away.
-        assert_eq!(
-            status("opencode", "/usr/bin/opencode").removal().unwrap(),
-            "npm uninstall -g opencode-ai"
+        // Claude Code's own installer: its versions go too.
+        let home = harness_platform::home::home_dir().unwrap();
+        let native = home.join(".local/bin/claude");
+        let native = status("claude", native.to_str().unwrap())
+            .removal()
+            .unwrap();
+        assert!(
+            native.contains(".local") && native.contains("share"),
+            "{native}"
         );
+
+        // What npm installed, npm takes away, from where it lives.
+        let local = home.join(".local/bin/opencode");
+        let local = status("opencode", local.to_str().unwrap());
+        let system = status("opencode", "/usr/bin/opencode");
+        if harness_platform::program::npm_user_prefix().is_some() {
+            assert_eq!(
+                local.removal().unwrap(),
+                "npm uninstall -g --prefix \"$HOME/.local\" opencode-ai"
+            );
+            assert_eq!(
+                local.action().unwrap().1.unwrap(),
+                "npm install -g --prefix \"$HOME/.local\" opencode-ai@latest"
+            );
+            // In the system's folders only sudo can: the harness says how
+            // instead of putting a second copy into ~/.local.
+            assert_eq!(system.removal(), None);
+            assert_eq!(system.action().unwrap(), (Action::Update, None));
+            assert_eq!(
+                system.needs_sudo(Action::Update).unwrap(),
+                "sudo npm install -g opencode-ai@latest"
+            );
+            assert_eq!(
+                system.needs_sudo(Action::Remove).unwrap(),
+                "sudo npm uninstall -g opencode-ai"
+            );
+            assert_eq!(local.needs_sudo(Action::Update), None);
+        } else {
+            assert_eq!(system.removal().unwrap(), "npm uninstall -g opencode-ai");
+            assert_eq!(system.needs_sudo(Action::Update), None);
+        }
         // Not for an agent inside another one, nor for one not installed.
         assert_eq!(status("codex+deepseek", "/usr/bin/codex").removal(), None);
         let missing = Status {
