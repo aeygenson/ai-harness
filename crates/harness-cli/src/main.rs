@@ -499,13 +499,16 @@ fn agents() {
                 catalog::Action::Update => "update",
                 catalog::Action::Remove => "remove",
             };
-            match command {
-                Some(command) => println!("    {what}: {command}"),
-                None => println!("    {what}: see {}", entry.site),
+            match (command, status.needs_sudo(catalog::Action::Update)) {
+                (Some(command), _) => println!("    {what}: {command}"),
+                (None, Some(sudo)) => println!("    {what} (in a terminal): {sudo}"),
+                (None, None) => println!("    {what}: see {}", entry.site),
             }
         }
-        if let Some(command) = status.removal() {
-            println!("    remove: {command}");
+        match (status.removal(), status.needs_sudo(catalog::Action::Remove)) {
+            (Some(command), _) => println!("    remove: {command}"),
+            (None, Some(sudo)) => println!("    remove (in a terminal): {sudo}"),
+            (None, None) => {}
         }
     }
 }
