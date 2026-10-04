@@ -75,6 +75,7 @@ stop_failed = "{task}: the {role} failed twice: {problem}"
 stop_steps = "{task}: stopped after too many steps in one run; choose «Continue»"
 stop_dirty = "{task}: the project has uncommitted changes ({files}); commit or remove them, then choose «Continue»"
 stop_forbidden = "{task}: the {role} changed files it may not touch ({files}); they are left uncommitted for you to check"
+stop_too_large = "{task}: the {role} made files too big to commit ({files}); usually this is build output: add it to .gitignore or delete it, commit or remove the rest, then choose «Continue»"
 stop_committed = "{task}: the {role} made a git commit itself; check git log before going on"
 [roles]
 title = " Roles "

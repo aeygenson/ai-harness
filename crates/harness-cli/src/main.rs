@@ -843,6 +843,15 @@ fn explain(stop: &StopReason, task_id: &str) -> String {
             "The {role:?} changed files it may not touch (left uncommitted for you to check):\n  {}",
             files.join("\n  ")
         ),
+        StopReason::TooLarge { role, files } => format!(
+            "The {role:?} made files too big to commit (left uncommitted). Usually this is build \
+             output: add it to .gitignore or delete it, commit or remove the rest, then run again:\n  {}",
+            files
+                .iter()
+                .map(|(path, bytes)| format!("{path} ({} MB)", bytes.div_ceil(1024 * 1024)))
+                .collect::<Vec<_>>()
+                .join("\n  ")
+        ),
         StopReason::AgentCommitted(role) => format!(
             "The {role:?} made a git commit itself. Check `git log` before running again."
         ),

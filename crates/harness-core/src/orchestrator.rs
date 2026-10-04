@@ -4,10 +4,13 @@
 //!
 //! 1. Before: the project must have no uncommitted changes, so everything that
 //!    changes afterwards was done by this role.
-//! 2. After: the changed files are checked against the role's permissions.
+//! 2. After: the changed files are checked against the role's permissions
+//!    and against [`MAX_CHANGE_BYTES`], so build output never lands in git.
 //! 3. If the role's work is accepted, everything is committed:
 //!    `task-001 round 2: tester (rejected) - ...`. A failed attempt is thrown away.
 
+use std::collections::BTreeMap;
+use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::agent::{AgentRunner, RoleJob};
@@ -21,6 +24,12 @@ use crate::task::{Stage, TaskState, WaitReason};
 
 /// How many times one role may try before the harness gives up and asks Lisa.
 pub const ATTEMPTS_PER_ROLE: u32 = 2;
+
+/// A role's change bigger than this (one file, or the new files of one folder)
+/// is not committed. It is almost always build output or downloaded packages
+/// (`target/`, `node_modules/`, `bin/`) that belong in `.gitignore`, whatever
+/// the project is written in.
+pub const MAX_CHANGE_BYTES: u64 = 50 * 1024 * 1024;
 
 /// Safety net: never run more than this many roles in one call to `run`.
 pub const MAX_STEPS_PER_RUN: u32 = 50;
@@ -45,6 +54,14 @@ pub enum StopReason {
     ForbiddenChanges {
         role: Role,
         files: Vec<String>,
+    },
+    /// The role's change is too big to commit (see [`MAX_CHANGE_BYTES`]):
+    /// each entry is a file or folder and its size in bytes, `.` meaning the
+    /// change as a whole. Everything is left in place, uncommitted, so Lisa
+    /// can add it to `.gitignore` or delete it.
+    TooLarge {
+        role: Role,
+        files: Vec<(String, u64)>,
     },
     /// The agent made a git commit itself, which agents must never do.
     AgentCommitted(Role),
@@ -203,6 +220,13 @@ pub async fn run_with_skills<A: AgentRunner>(
                     files: forbidden,
                 });
             }
+            let too_large = oversized_changes(repo.root(), &agent_changes, MAX_CHANGE_BYTES);
+            if !too_large.is_empty() {
+                return Ok(StopReason::TooLarge {
+                    role,
+                    files: too_large,
+                });
+            }
             match accept_inbox(store, state)? {
                 Ok((handoff, step_dir)) => {
                     store.save_log(&step_dir, &outcome.log)?;
@@ -224,6 +248,56 @@ pub async fn run_with_skills<A: AgentRunner>(
         }
     }
     Ok(StopReason::StepLimitReached)
+}
+
+/// The changed paths (as `git status` lists them, relative to `root`) that
+/// are bigger than `limit`, with their sizes. A folder counts the files under
+/// it; only the most exact path is named: `app/node_modules`, not `app` too.
+/// `.` stands for the change as a whole, when no single part is too big.
+pub fn oversized_changes(root: &Path, files: &[String], limit: u64) -> Vec<(String, u64)> {
+    // The size of every changed path and of every folder above it; "" is the
+    // whole change.
+    let mut sizes: BTreeMap<String, u64> = BTreeMap::new();
+    for file in files {
+        let size = size_of(&root.join(file));
+        if size == 0 {
+            continue;
+        }
+        let path = file.trim_end_matches('/');
+        *sizes.entry(String::new()).or_default() += size;
+        for (i, c) in path.char_indices() {
+            if c == '/' {
+                *sizes.entry(path[..i].to_string()).or_default() += size;
+            }
+        }
+        *sizes.entry(path.to_string()).or_default() += size;
+    }
+    let over: Vec<&String> = sizes
+        .iter()
+        .filter(|(_, size)| **size > limit)
+        .map(|(path, _)| path)
+        .collect();
+    let inside = |inner: &str, outer: &str| {
+        outer.is_empty() && !inner.is_empty() || inner.starts_with(&format!("{outer}/"))
+    };
+    over.iter()
+        .filter(|outer| !over.iter().any(|inner| inside(inner, outer)))
+        .map(|path| {
+            let name = if path.is_empty() { "." } else { path.as_str() };
+            (name.to_string(), sizes[*path])
+        })
+        .collect()
+}
+
+/// Bytes in a file, or in all files under a folder. Links are not followed.
+fn size_of(path: &Path) -> u64 {
+    match fs::symlink_metadata(path) {
+        Ok(meta) if meta.is_dir() => fs::read_dir(path)
+            .map(|entries| entries.flatten().map(|e| size_of(&e.path())).sum())
+            .unwrap_or(0),
+        Ok(meta) => meta.len(),
+        Err(_) => 0,
+    }
 }
 
 /// Lisa's decision (approve the design, send work back, answer a question),
@@ -357,6 +431,51 @@ fn commit_message(handoff: &Handoff) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_the_most_exact_oversized_path_is_named() {
+        let dir = tempfile::tempdir().unwrap();
+        let write = |path: &str, bytes: usize| {
+            let path = dir.path().join(path);
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(path, vec![b'x'; bytes]).unwrap();
+        };
+        write("src/main.rs", 10);
+        write("app/node_modules/a/index.js", 60);
+        write("app/node_modules/b/index.js", 60);
+        write("app/package.json", 10);
+        write("data.bin", 200);
+        let files: Vec<String> = [
+            "src/main.rs",
+            "app/node_modules/a/index.js",
+            "app/node_modules/b/index.js",
+            "app/package.json",
+            "data.bin",
+            "gone.txt", // deleted: no size
+        ]
+        .map(String::from)
+        .to_vec();
+
+        assert_eq!(
+            oversized_changes(dir.path(), &files, 100),
+            vec![
+                ("app/node_modules".to_string(), 120),
+                ("data.bin".to_string(), 200),
+            ]
+        );
+        // A folder git lists as a whole (a nested repository) is counted too.
+        assert_eq!(
+            oversized_changes(dir.path(), &["app/".to_string()], 100),
+            vec![("app".to_string(), 130)]
+        );
+        // Many small parts: the change as a whole is too big.
+        assert!(oversized_changes(dir.path(), &files[..4], 150).is_empty());
+        assert_eq!(
+            oversized_changes(dir.path(), &files[..4], 135),
+            vec![(".".to_string(), 140)]
+        );
+        assert!(oversized_changes(dir.path(), &files, 1000).is_empty());
+    }
 
     #[test]
     fn the_same_text_does_not_make_a_second_unfinished_task() {

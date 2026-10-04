@@ -10,10 +10,25 @@
 # The desktop icon made by scripts/install-desktop-launcher.sh runs this file.
 set -u
 
-# Started from the desktop, the shell may not know where cargo is.
+# Started from the desktop, nothing from ~/.bashrc or ~/.profile is loaded,
+# so the roles would not find the tools Lisa installed (dotnet, node, solana,
+# anything). Start once more inside her own shell, the way a terminal does.
+if [ -z "${HARNESS_SHELL_ENV:-}" ]; then
+    export HARNESS_SHELL_ENV=1
+    case "${SHELL:-}" in
+        */bash | */zsh | */ksh) user_shell="$SHELL" ;;
+        *) user_shell=/bin/bash ;; # fish and others take other arguments
+    esac
+    # A login bash reads ~/.profile but not ~/.bashrc, so read that too.
+    exec "$user_shell" -l -i -c \
+        '[ -n "${BASH_VERSION:-}" ] && [ -f ~/.bashrc ] && . ~/.bashrc; exec "$0" "$@"' \
+        "$0" "$@"
+fi
+
+# If her shell settings do not add them, add the usual places anyway.
 [ -f "$HOME/.cargo/env" ] && . "$HOME/.cargo/env"
-# Nor ~/.local/bin, where Claude Code and Antigravity install themselves
-# (the desktop does not read .bashrc or .profile). The roles start them.
+# And ~/.local/bin, where Claude Code and Antigravity install themselves
+# (when her shell settings do not add it). The roles start them.
 case ":$PATH:" in
     *":$HOME/.local/bin:"*) ;;
     *) PATH="$HOME/.local/bin:$PATH" ;;
