@@ -2301,3 +2301,76 @@ fn the_same_task_sent_twice_is_not_started_again() {
     assert!(!tasks.is_running());
     assert!(!root.join(".harness/runs/task-002").exists());
 }
+
+/// Codex is installed but old, Claude is installed and new, nothing else.
+fn fake_agents(credentials: Option<&Path>) -> Vec<harness_agents::catalog::Status> {
+    use harness_agents::catalog;
+    let find = |name: &str| {
+        ["claude", "codex"]
+            .contains(&name)
+            .then(|| PathBuf::from(format!("/bin/{name}")))
+    };
+    let version = |path: &Path| {
+        Ok(if path.ends_with("codex") {
+            "codex-cli 0.150.0".to_string()
+        } else {
+            "2.1.300 (Claude Code)".to_string()
+        })
+    };
+    catalog::check_with(catalog::CATALOG, &find, &version, credentials)
+}
+
+#[test]
+fn the_agents_tab_shows_the_catalog_with_what_is_installed() {
+    let env = Env::new();
+    // Works without an open project.
+    let mut app = env.app(env.code.path());
+    app.agent_checker = fake_agents;
+    key(&mut app, KeyCode::Char('8'));
+    assert_eq!(app.tab, Tab::Agents);
+    assert!(app.agents.checking);
+    for _ in 0..100 {
+        app.tick();
+        if app.agents.known {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert!(app.agents.known && !app.agents.checking);
+    let text = screen_of_width(&mut app, 160);
+    for part in [
+        "8 Agents",
+        "✓ Claude Code",
+        "! Codex CLI",
+        "○ Antigravity CLI",
+        "○ GitHub Copilot CLI  · catalog",
+        "Agents installed: 4 of",
+        "✓ Installed: /bin/claude · version 2.1.300",
+        "No login: harness login claude",
+        "Update with the maker's command:",
+        "claude update",
+    ] {
+        assert!(text.contains(part), "missing {part:?} in:\n{text}");
+    }
+
+    // An old Codex says so, and offers its update.
+    key(&mut app, KeyCode::Down);
+    let text = screen_of_width(&mut app, 160);
+    assert!(text.contains("! Older than 0.158.0"), "{text}");
+    assert!(
+        text.contains("npm install -g @openai/codex@latest"),
+        "{text}"
+    );
+
+    // Not installed: the install command for this system.
+    app.agents.select(3);
+    let text = screen_of_width(&mut app, 160);
+    assert!(text.contains("○ Not installed"), "{text}");
+    assert!(text.contains("Install with the maker's command:"), "{text}");
+
+    // «Check again» asks once more; a click on the list selects.
+    click(&mut app, "Check again");
+    assert!(app.agents.checking);
+    click(&mut app, "Antigravity CLI");
+    assert_eq!(app.agents.current().unwrap().entry.id, "antigravity");
+}
