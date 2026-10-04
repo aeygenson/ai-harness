@@ -5,7 +5,7 @@
 //!   never reach the agent;
 //! - `CLAUDE_CONFIG_DIR` points to `<project>/.harness/agents/claude/`, so the
 //!   agent does not see `~/.claude` (plugins, MCP servers, hooks, memory);
-//! - login only through the token saved by `harness login claude`;
+//! - login only through the token saved by the Agents tab («Sign in»);
 //! - the role's tools and file rules are given as flags, and anything not
 //!   allowed is refused without asking (`--permission-mode dontAsk`).
 

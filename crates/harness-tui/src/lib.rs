@@ -239,6 +239,10 @@ fn event_loop(terminal: &mut DefaultTerminal, app: &mut App) -> Result<()> {
             let result = edit_outside(terminal, &job.path, &app.tr);
             app.finish_edit(&job, result);
         }
+        if let Some((login, name)) = app.sign_in.take() {
+            let result = sign_in_outside(terminal, login, name, &app.tr);
+            app.finish_sign_in(name, result);
+        }
         if loaded.elapsed() >= RELOAD_EVERY {
             if let Some(tasks) = &mut app.tasks {
                 tasks.reload();
@@ -255,6 +259,45 @@ fn edit_outside(terminal: &mut DefaultTerminal, file: &Path, tr: &I18n) -> Resul
     ratatui::restore();
     println!("{}", tr.f("skills.editing", &[("path", &file.display())]));
     let result = editor::run(file);
+    take_terminal_back(terminal);
+    result
+}
+
+/// Gives the terminal to `harness login` (it asks for a token or opens the
+/// browser) and takes it back once Lisa presses Enter.
+fn sign_in_outside(
+    terminal: &mut DefaultTerminal,
+    login: &str,
+    name: &str,
+    tr: &I18n,
+) -> Result<(), String> {
+    let _ = execute!(io::stdout(), DisableMouseCapture, DisableBracketedPaste);
+    ratatui::restore();
+    println!("{}\n", tr.f("agents.signing_in", &[("name", &name)]));
+    let result = std::env::current_exe()
+        .map_err(|e| e.to_string())
+        .and_then(|harness| {
+            std::process::Command::new(harness)
+                .args(["login", login])
+                .status()
+                .map_err(|e| e.to_string())
+        })
+        .and_then(|status| {
+            if status.success() {
+                Ok(())
+            } else {
+                Err(status.to_string())
+            }
+        });
+    println!("\n{}", tr.t("agents.sign_in_back"));
+    let mut line = String::new();
+    let _ = io::BufRead::read_line(&mut io::stdin().lock(), &mut line);
+    take_terminal_back(terminal);
+    result
+}
+
+/// Full screen again after a program had the terminal.
+fn take_terminal_back(terminal: &mut DefaultTerminal) {
     let _ = enable_raw_mode();
     let _ = execute!(
         io::stdout(),
@@ -269,7 +312,6 @@ fn edit_outside(terminal: &mut DefaultTerminal, file: &Path, tr: &I18n) -> Resul
     if let Ok(fresh) = Terminal::new(CrosstermBackend::new(io::stdout())) {
         *terminal = fresh;
     }
-    result
 }
 
 /// Each agent's answer: its model list, or why there is none.
@@ -331,6 +373,9 @@ struct App {
     retro: Option<RetroTab>,
     /// A skill to open in the editor after this event.
     edit: Option<EditJob>,
+    /// An agent to sign in to after this event (the name `harness login` takes),
+    /// with the name shown.
+    sign_in: Option<(&'static str, &'static str)>,
     projects: ProjectsTab,
     agents: AgentsTab,
     /// Checks which agents are installed; tests give a fake one.
@@ -393,6 +438,7 @@ impl App {
             plugins: None,
             retro: None,
             edit: None,
+            sign_in: None,
             projects: ProjectsTab::load(home),
             agents: AgentsTab::new(),
             agent_checker: agents_tab::check,
@@ -450,7 +496,8 @@ impl App {
             return;
         }
         self.tasks = Some(TasksTab::load(root, self.home.as_deref()));
-        let roles = RolesTab::load(root, self.home.as_deref());
+        let mut roles = RolesTab::load(root, self.home.as_deref());
+        roles.set_ready(self.agents.ready());
         self.plugins = Some(PluginsTab::load(root, &roles));
         self.roles = Some(roles);
         self.skills = Some(SkillsTab::load(root));
@@ -498,6 +545,26 @@ impl App {
         });
         self.agents.checking = true;
         self.agent_check = Some(rx);
+    }
+
+    /// Back from `harness login`: say how it went and look at the logins again.
+    fn finish_sign_in(&mut self, name: &str, result: Result<(), String>) {
+        self.message = Some(match result {
+            Ok(()) => (self.tr.f("agents.signed_in", &[("name", &name)]), false),
+            Err(error) => (
+                self.tr.f(
+                    "agents.sign_in_failed",
+                    &[("name", &name), ("error", &error)],
+                ),
+                true,
+            ),
+        });
+        if let Some(dir) = self.home.as_ref().map(|h| h.join("credentials")) {
+            self.agents.reload_logins(&dir);
+        }
+        if let Some(roles) = &mut self.roles {
+            roles.set_ready(self.agents.ready());
+        }
     }
 
     /// «Install», «Update» or «Remove»: first the command is shown to be confirmed.
@@ -646,6 +713,9 @@ impl App {
             self.agent_check = None;
             let failed = statuses.is_empty();
             self.agents.checked(statuses);
+            if let Some(roles) = &mut self.roles {
+                roles.set_ready(self.agents.ready());
+            }
             if failed {
                 self.message = Some((self.tr.t("agents.check_stopped").to_string(), true));
             } else if self.tab == Tab::Agents && self.agents.job.is_none() {
@@ -940,6 +1010,7 @@ impl App {
                     KeyCode::Char('c') => self.press(ButtonId::AgentsCheck),
                     KeyCode::Char('i') | KeyCode::Enter => self.press(ButtonId::AgentRun),
                     KeyCode::Delete => self.press(ButtonId::AgentRemove),
+                    KeyCode::Char('l') => self.press(ButtonId::AgentSignIn),
                     code => self.agents.on_key(code),
                 },
                 Tab::Projects => match code {
@@ -2411,6 +2482,12 @@ impl App {
             ButtonId::AgentsCheck => self.check_agents(),
             ButtonId::AgentRun => self.ask_to_run_agent_command(false),
             ButtonId::AgentRemove => self.ask_to_run_agent_command(true),
+            ButtonId::AgentSignIn => {
+                if let Some(status) = self.agents.sign_in_target() {
+                    let entry = status.entry;
+                    self.sign_in = Some((credentials::login_name(entry.id), entry.name));
+                }
+            }
             ButtonId::RefreshModels => self.ask_for_models(),
             ButtonId::McpRole(index) => {
                 if let Some(mcp) = &mut self.mcp {

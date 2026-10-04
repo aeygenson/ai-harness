@@ -9,17 +9,18 @@
 #
 #   Git, Node.js      Homebrew on a Mac, the system's packages on Linux
 #   Zed               Homebrew on a Mac, Zed's own installer on Linux
-#   Claude Code       its official installer
-#   Codex CLI         npm
-#   Antigravity CLI   its official installer
 #   harness           the ready program from the Releases page
+#
+# The agents (Claude Code, Codex CLI, Antigravity CLI and the others) are not
+# installed here: each person installs and signs in to the ones they have a
+# subscription for, on the harness's «Agents» tab.
 #
 # Developer mode builds the harness from source with Rust instead (and keeps
 # the code in ~/code/ai-harness):
 #   curl -fsSL .../install.sh | bash -s -- --dev
 #
-# At the end it adds «AI Harness» to the applications and says how to sign in
-# to the three agents. It never asks for or prints a key.
+# At the end it adds «AI Harness» to the applications. It never asks for or
+# prints a key.
 #
 # Only the harness itself, nothing else:  HARNESS_ONLY=harness
 set -euo pipefail
@@ -77,7 +78,7 @@ esac
 
 # Versions before, one «tool|version» per line (the Mac's bash 3.2 has no
 # associative arrays).
-TOOLS="git node claude codex agy harness"
+TOOLS="git node harness"
 BEFORE=""
 for tool in $TOOLS; do BEFORE="$BEFORE$tool|$(version_of "$tool")
 "; done
@@ -160,30 +161,6 @@ linux_basics() {
     # Zed's own installer puts it in ~/.local and also updates it.
     say "Zed: installing the newest"
     run_installer https://zed.dev/install.sh
-}
-
-# --- The three agents ----------------------------------------------------
-
-agents() {
-    if has claude; then
-        say "Claude Code: updating"
-        claude update || note "could not update; it also updates itself"
-    else
-        say "Claude Code: installing"
-        run_installer https://claude.ai/install.sh
-    fi
-
-    # Codex: into Homebrew's Node on a Mac, into ~/.local on Linux (no sudo).
-    say "Codex CLI: installing the newest"
-    if [ "$SYSTEM" = mac ]; then
-        npm install -g --loglevel=error @openai/codex@latest >/dev/null || fail "npm could not install Codex CLI"
-    else
-        npm install -g --loglevel=error --prefix "$HOME/.local" @openai/codex@latest >/dev/null ||
-            fail "npm could not install Codex CLI"
-    fi
-
-    say "Antigravity CLI: installing the newest"
-    run_installer https://antigravity.google/cli/install.sh
 }
 
 # --- The harness ---------------------------------------------------------
@@ -278,7 +255,6 @@ ENTRY
 
 if [ "$ONLY_HARNESS" = 0 ]; then
     if [ "$SYSTEM" = mac ]; then mac_basics; else linux_basics; fi
-    agents
 fi
 
 target="$(release_target)"
@@ -298,9 +274,6 @@ for tool in $TOOLS; do
 done
 cat <<'NEXT'
 
-Last step, once: sign in to the agents. Open a NEW Terminal window and run:
-    harness login claude        (it asks for a token: run 'claude setup-token' in another window)
-    harness login codex         (a browser opens)
-    harness login antigravity   (sign in with Google, then type /quit)
-Then start «AI Harness» from your applications.
+Next: start «AI Harness» from your applications and open the «Agents» tab
+(key 8). Install the agents you have a subscription for and press «Sign in».
 NEXT

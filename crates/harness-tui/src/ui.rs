@@ -152,6 +152,8 @@ pub enum ButtonId {
     AgentRun,
     /// «Remove» for the agent selected on the Agents tab.
     AgentRemove,
+    /// «Sign in» for the agent selected on the Agents tab.
+    AgentSignIn,
 }
 
 /// Where the clickable things were drawn in the last frame. Drawing fills it,

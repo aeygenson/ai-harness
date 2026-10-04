@@ -116,7 +116,7 @@ pub fn build_agent(
     let agent = match choice.agent {
         "claude" => {
             let token = credentials::load_token(&dir, "claude").map_err(|_| {
-                problem("no Claude token saved; run `harness login claude` first")
+                problem("no Claude token saved; sign in on the Agents tab first")
             })?;
             let mut agent = ClaudeCode::new(token).with_timeout(timeout);
             if let Some(model) = choice.model {
@@ -135,7 +135,7 @@ pub fn build_agent(
             let auth_dir = dir.join("codex");
             if !auth_dir.join("auth.json").exists() {
                 return Err(problem(
-                    "no Codex login saved; run `harness login codex` first",
+                    "no Codex login saved; sign in on the Agents tab first",
                 ));
             }
             let mut agent = Codex::new(auth_dir).with_timeout(timeout);
@@ -153,11 +153,11 @@ pub fn build_agent(
             )
         }
         "codex+deepseek" => {
-            // A key in the shell wins; otherwise the one `harness login deepseek` saved.
+            // A key in the shell wins; otherwise the one the Agents tab («Sign in») saved.
             let key = match std::env::var(codex::DEEPSEEK_KEY_ENV) {
                 Ok(key) if !key.trim().is_empty() => Secret::new(key.trim()),
                 _ => credentials::load_token(&dir, "deepseek").map_err(|_| {
-                    problem("no DeepSeek API key saved; run `harness login deepseek` first")
+                    problem("no DeepSeek API key saved; sign in on the Agents tab first")
                 })?,
             };
             let mut agent = Codex::deepseek(key).with_timeout(timeout);
@@ -181,7 +181,7 @@ pub fn build_agent(
             let auth_dir = dir.join("antigravity");
             if !auth_dir.join(".gemini/antigravity-cli").is_dir() {
                 return Err(problem(
-                    "no Antigravity login saved; run `harness login antigravity` first",
+                    "no Antigravity login saved; sign in on the Agents tab first",
                 ));
             }
             let mut agent = Antigravity::new(auth_dir).with_timeout(timeout);

@@ -46,14 +46,13 @@ pub fn has_login(dir: &Path, agent: &str) -> bool {
     }
 }
 
-/// The command that saves the login `agent` needs.
-pub fn login_command(agent: &str) -> String {
-    let name = if agent == "codex+deepseek" {
+/// Whose login `agent` needs: Codex with DeepSeek needs the DeepSeek key.
+pub fn login_name(agent: &str) -> &str {
+    if agent == "codex+deepseek" {
         "deepseek"
     } else {
         agent
-    };
-    format!("harness login {name}")
+    }
 }
 
 /// Where `harness secret set` keeps secrets for MCP servers, one file each.
@@ -119,7 +118,7 @@ mod tests {
         save_token(dir, "deepseek", &Secret::new("k")).unwrap();
         assert!(has_login(dir, "codex+deepseek"));
         assert!(!has_login(dir, "gemini"));
-        assert_eq!(login_command("codex+deepseek"), "harness login deepseek");
+        assert_eq!(login_name("codex+deepseek"), "deepseek");
     }
 
     #[test]
