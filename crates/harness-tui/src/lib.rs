@@ -592,7 +592,11 @@ impl App {
             ),
         };
         let tr = &self.tr;
-        let text = tr.f(text, &[("command", &command)]);
+        let mut text = tr.f(text, &[("command", &command)]);
+        // Claude Code may also be what runs Claude's own sessions here.
+        if action == Action::Remove && status.entry.id == "claude" {
+            text = format!("{text}\n\n{}", tr.t("agents.remove_claude_note"));
+        }
         let form = Form::new(&tr.f(title, &[("name", &name)]), &text, tr.t(ok));
         self.form = Some((
             Purpose::RunAgentCommand {

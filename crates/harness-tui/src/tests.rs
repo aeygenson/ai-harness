@@ -2516,6 +2516,7 @@ fn an_installed_agent_is_removed_after_confirming() {
     assert!(text.contains("saved logins stay"), "{text}");
     let (_, form) = app.form.as_ref().unwrap();
     assert!(form.text.contains("/bin/claude"), "{}", form.text);
+    assert!(form.text.contains("Remote Control"), "{}", form.text);
     key(&mut app, KeyCode::Enter);
     wait_for_agents(&mut app);
     assert_eq!(app.agents.job.as_ref().unwrap().done, Some(Ok(())));
