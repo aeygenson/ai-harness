@@ -439,6 +439,10 @@ pub fn run_command(command: &str, mut on_line: impl FnMut(String)) -> Result<(),
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+    // Started from PowerShell 7, Windows PowerShell 5.1 inherits a module
+    // path it cannot load its own modules from, and installers fail with
+    // «'Get-FileHash' is not recognized». Without it, it uses its default.
+    child.env_remove("PSModulePath");
     // Programs installed into ~/.local/bin are found by the next steps.
     if let Some(path) = with_local_bin() {
         child.env("PATH", path);
