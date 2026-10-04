@@ -62,11 +62,22 @@ fn path_exts() -> OsString {
 /// from a desktop icon gets the desktop's `PATH`, and on Linux that often
 /// lacks `~/.local/bin`, where Claude Code and Antigravity install
 /// themselves: a shell adds it in `.bashrc` or `.profile`, the desktop does
-/// not. Windows installers change the `PATH` of the whole account, so there
-/// it is only `PATH`.
+/// not. Windows installers change the `PATH` of the whole account, but a
+/// program already running keeps its old `PATH`: so after an install from
+/// the Agents tab the new agent is found in its installer's folder.
 pub fn usual_places(home: Option<&Path>) -> Vec<PathBuf> {
     if cfg!(windows) {
-        return Vec::new();
+        let mut places: Vec<PathBuf> = home
+            .map(|h| h.join(".local").join("bin"))
+            .into_iter()
+            .collect();
+        if let Some(roaming) = std::env::var_os("APPDATA") {
+            places.push(Path::new(&roaming).join("npm"));
+        }
+        if let Some(local) = std::env::var_os("LOCALAPPDATA") {
+            places.push(Path::new(&local).join("agy").join("bin"));
+        }
+        return places;
     }
     let mut places: Vec<PathBuf> = home
         .map(|home| {
@@ -209,18 +220,13 @@ mod tests {
     fn a_program_outside_path_is_found_in_the_usual_places() {
         let home = tempfile::tempdir().unwrap();
         let places = usual_places(Some(home.path()));
-        if cfg!(windows) {
-            assert!(places.is_empty());
-            return;
-        }
-        assert!(places.contains(&home.path().join(".local/bin")));
+        let bin = home.path().join(".local").join("bin");
+        assert!(places.contains(&bin));
         assert_eq!(in_usual_places("agy", Some(home.path())), None);
-        fs::create_dir_all(home.path().join(".local/bin")).unwrap();
-        fs::write(home.path().join(".local/bin/agy"), "").unwrap();
-        assert_eq!(
-            in_usual_places("agy", Some(home.path())),
-            Some(home.path().join(".local/bin/agy"))
-        );
+        let file = bin.join(if cfg!(windows) { "agy.exe" } else { "agy" });
+        fs::create_dir_all(&bin).unwrap();
+        fs::write(&file, "").unwrap();
+        assert_eq!(in_usual_places("agy", Some(home.path())), Some(file));
         // A path is never looked up there.
         assert_eq!(in_usual_places("./agy", Some(home.path())), None);
     }

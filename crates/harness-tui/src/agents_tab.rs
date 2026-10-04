@@ -106,6 +106,36 @@ impl AgentsTab {
         Some((status, action, command?))
     }
 
+    /// The agent «Sign in» would sign in to: one the harness runs and that
+    /// is installed, once the computer was checked and while nothing runs.
+    pub fn sign_in_target(&self) -> Option<&Status> {
+        if !self.known || self.checking || self.job.as_ref().is_some_and(Job::running) {
+            return None;
+        }
+        self.current()
+            .filter(|status| status.entry.runs() && status.installed())
+    }
+
+    /// Looks again which agents have a saved login (after «Sign in»).
+    pub fn reload_logins(&mut self, credentials_dir: &std::path::Path) {
+        for status in &mut self.statuses {
+            if status.entry.runs() {
+                status.login = Some(credentials::has_login(credentials_dir, status.entry.id));
+            }
+        }
+    }
+
+    /// The agents ready for a role: installed, with a saved login.
+    pub fn ready(&self) -> Option<std::collections::BTreeSet<&'static str>> {
+        self.known.then(|| {
+            self.statuses
+                .iter()
+                .filter(|s| s.entry.runs() && s.installed() && s.login == Some(true))
+                .map(|s| s.entry.id)
+                .collect()
+        })
+    }
+
     pub fn select(&mut self, index: usize) {
         if index < self.statuses.len() {
             self.selected = index;
@@ -160,6 +190,11 @@ impl AgentsTab {
                 (check, ButtonId::AgentsCheck, !self.checking && !running),
                 (run, ButtonId::AgentRun, step.is_some()),
                 (tr.t("agents.run_remove"), ButtonId::AgentRemove, removable),
+                (
+                    tr.t("agents.run_sign_in"),
+                    ButtonId::AgentSignIn,
+                    self.sign_in_target().is_some(),
+                ),
             ],
         );
         let [left, right] =
@@ -267,9 +302,10 @@ impl AgentsTab {
                 lines.push(Line::styled(tr.t("agents.login").to_string(), theme::ok()));
             }
             Some(false) if self.known => {
-                let command = credentials::login_command(entry.id);
-                let text = tr.f("agents.no_login", &[("command", &command)]);
-                lines.push(Line::styled(text, theme::warn()));
+                lines.push(Line::styled(
+                    tr.t("agents.no_login").to_string(),
+                    theme::warn(),
+                ));
             }
             _ => {}
         }

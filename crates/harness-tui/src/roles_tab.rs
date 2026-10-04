@@ -8,11 +8,10 @@
 //! `harness_core::settings::save`: the same checks as before a run, then
 //! `harness.toml` is changed with `toml_edit` (comments stay) and committed.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use harness_agents::credentials;
 use harness_core::config::{
     Config, McpConfig, PluginConfig, RetroConfig, RoleConfig, AGENTS, CONFIG_FILE,
 };
@@ -96,8 +95,9 @@ pub struct RolesTab {
     roles: BTreeMap<Role, RoleConfig>,
     retro: Option<RetroConfig>,
     skills: Vec<SkillFile>,
-    /// Which agents have a saved login.
-    logins: BTreeMap<&'static str, bool>,
+    /// The agents installed with a saved login, from the Agents tab's check;
+    /// `None` until it has answered, then all agents are offered.
+    ready: Option<BTreeSet<&'static str>>,
     pub selected: usize,
     /// The chosen row of the details.
     pub row: usize,
@@ -118,7 +118,7 @@ impl RolesTab {
             roles: BTreeMap::new(),
             retro: None,
             skills: Vec::new(),
-            logins: BTreeMap::new(),
+            ready: None,
             selected: 0,
             row: 0,
             focus: Focus::List,
@@ -149,17 +149,20 @@ impl RolesTab {
             Err(problem) => self.problem = Some(problem),
         }
         self.skills = read_skills(&harness_dir);
-        let dir = credentials::default_dir();
-        self.logins = AGENTS
-            .iter()
-            .map(|&agent| {
-                let saved = dir
-                    .as_deref()
-                    .is_some_and(|dir| credentials::has_login(dir, agent));
-                (agent, saved)
-            })
-            .collect();
         self.reload_models();
+    }
+
+    /// What the Agents tab found: only these agents are offered for a role.
+    pub fn set_ready(&mut self, ready: Option<BTreeSet<&'static str>>) {
+        self.ready = ready;
+        self.row = self.row.min(self.rows().len().saturating_sub(1));
+    }
+
+    /// The agent can work: installed with a login, or not checked yet.
+    fn is_ready(&self, agent: &str) -> bool {
+        self.ready
+            .as_ref()
+            .is_none_or(|ready| ready.contains(agent))
     }
 
     /// Reads the saved model lists again (after «Refresh models»).
@@ -275,7 +278,13 @@ impl RolesTab {
 
     /// The rows of the details, in order.
     pub fn rows(&self) -> Vec<Row> {
-        let mut rows: Vec<Row> = AGENTS.iter().map(|a| Row::Agent(a)).collect();
+        // Only agents ready to work, and the one chosen now even if it is not.
+        let chosen = self.choice().0;
+        let mut rows: Vec<Row> = AGENTS
+            .iter()
+            .filter(|a| self.is_ready(a) || chosen == Some(**a))
+            .map(|a| Row::Agent(a))
+            .collect();
         rows.push(Row::Model(None));
         if let Some(list) = self.model_list() {
             rows.extend(list.models.iter().map(|m| Row::Model(Some(m.id.clone()))));
@@ -693,18 +702,14 @@ impl RolesTab {
             let line = match row {
                 Row::Agent(name) => {
                     let mark = if agent == Some(name) { "(•)" } else { "( )" };
-                    let login = if self.logins.get(name).copied().unwrap_or(false) {
-                        Span::styled(tr.t("roles.login_saved").to_string(), theme::ok())
-                    } else {
-                        Span::styled(
-                            tr.f(
-                                "roles.no_login",
-                                &[("command", &credentials::login_command(name))],
-                            ),
-                            theme::warn(),
-                        )
-                    };
-                    Line::from(vec![Span::raw(format!("  {mark} {name:<16}")), login])
+                    let mut spans = vec![Span::raw(format!("  {mark} {name:<16}"))];
+                    if !self.is_ready(name) {
+                        spans.push(Span::styled(
+                            tr.t("roles.not_ready").to_string(),
+                            theme::bad(),
+                        ));
+                    }
+                    Line::from(spans)
                 }
                 Row::Model(None) => {
                     lines.push((None, Line::default()));

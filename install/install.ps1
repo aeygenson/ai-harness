@@ -7,13 +7,14 @@
 # alone, so running the same command again later is the update.
 #
 #   Git, Node.js, Zed      through winget (comes with Windows)
-#   Claude Code            its official installer
-#   Codex CLI              npm
-#   Antigravity CLI        its official installer
 #   harness                the ready program from the Releases page
 #
-# At the end it puts «AI Harness» on the desktop and in the Start menu and
-# says how to sign in to the three agents. It never asks for or prints a key.
+# The agents (Claude Code, Codex CLI, Antigravity CLI and the others) are not
+# installed here: each person installs and signs in to the ones they have a
+# subscription for, on the harness's «Agents» tab.
+#
+# At the end it puts «AI Harness» on the desktop and in the Start menu. It
+# never asks for or prints a key.
 #
 # Without winget's packages (only the harness itself):
 #   $env:HARNESS_ONLY = "harness"; irm ... | iex
@@ -81,7 +82,7 @@ function Install-AiHarness {
         }
     }
 
-    $tools = @("git", "node", "claude", "codex", "agy", "harness")
+    $tools = @("git", "node", "harness")
     $before = @{}
     foreach ($tool in $tools) { $before[$tool] = Version-Of $tool }
 
@@ -93,31 +94,14 @@ function Install-AiHarness {
         Winget-Package "OpenJS.NodeJS.LTS" "Node.js"
         Winget-Package "ZedIndustries.Zed" "Zed"
         Update-Path
-
-        # Claude Code: its own installer; once there, it updates itself.
-        if (Has "claude") {
-            Say "Claude Code: updating"
-            & claude update
-        } else {
-            Say "Claude Code: installing"
-            Run-Installer "https://claude.ai/install.ps1"
-        }
-        $claudeBin = Join-Path $env:USERPROFILE ".local\bin"
-        if (Test-Path (Join-Path $claudeBin "claude.exe")) { Add-UserPath $claudeBin }
-
-        # Codex: npm puts it in %APPDATA%\npm.
-        Say "Codex CLI: installing the newest"
-        Add-UserPath (Join-Path $env:APPDATA "npm")
-        & npm install -g --loglevel=error "@openai/codex@latest"
-        if ($LASTEXITCODE -ne 0) { throw "npm could not install Codex CLI" }
-
-        # Antigravity: its installer always brings the newest version.
-        Say "Antigravity CLI: installing the newest"
-        Run-Installer "https://antigravity.google/cli/install.ps1"
-        Update-Path
-        $agyBin = Join-Path $env:LOCALAPPDATA "agy\bin"
-        if (Test-Path $agyBin) { Add-UserPath $agyBin }
     }
+
+    # Where the agents' installers put them (Claude Code and Antigravity in
+    # their own folders, npm in %APPDATA%\npm): in PATH already, so an agent
+    # installed later on the Agents tab works in every new window.
+    Add-UserPath (Join-Path $env:USERPROFILE ".local\bin")
+    Add-UserPath (Join-Path $env:APPDATA "npm")
+    Add-UserPath (Join-Path $env:LOCALAPPDATA "agy\bin")
 
     # The harness: the newest ready program from the Releases page.
     Say "harness: downloading the newest version"
@@ -158,11 +142,8 @@ function Install-AiHarness {
         Write-Host ("    {0,-8} {1}  ->  {2}" -f $tool, $before[$tool], $now)
     }
     Write-Host ""
-    Write-Host "Last step, once: sign in to the agents. Open a NEW PowerShell window and run:" -ForegroundColor Green
-    Write-Host "    harness login claude        (it asks for a token: run 'claude setup-token' in another window)"
-    Write-Host "    harness login codex         (a browser opens)"
-    Write-Host "    harness login antigravity   (sign in with Google, then type /quit)"
-    Write-Host "Then start «AI Harness» from the desktop."
+    Write-Host "Next: start «AI Harness» from the desktop and open the «Agents» tab (key 8)." -ForegroundColor Green
+    Write-Host "Install the agents you have a subscription for and press «Sign in»."
 }
 
 try {

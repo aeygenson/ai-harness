@@ -197,7 +197,7 @@ async fn without_a_saved_login_the_role_fails_with_a_hint() {
 
     match stop {
         StopReason::RoleFailed { problem, .. } => {
-            assert!(problem.contains("harness login antigravity"), "{problem}")
+            assert!(problem.contains("sign in on the Agents tab"), "{problem}")
         }
         other => panic!("expected RoleFailed, got {other:?}"),
     }

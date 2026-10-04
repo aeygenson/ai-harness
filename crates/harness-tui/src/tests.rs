@@ -551,7 +551,7 @@ fn no_login(
     _: &Path,
 ) -> Result<harness_agents::Team, harness_agents::build::BuildError> {
     Err(harness_agents::build::BuildError(
-        "no Claude token saved; run `harness login claude` first".into(),
+        "no Claude token saved; sign in on the Agents tab first".into(),
     ))
 }
 
@@ -739,7 +739,7 @@ fn a_missing_login_stops_before_anything_is_saved() {
     send(&mut app);
     wait(&mut app);
     let (message, problem) = app.message.clone().unwrap();
-    assert!(message.contains("harness login claude"), "{message}");
+    assert!(message.contains("sign in on the Agents tab"), "{message}");
     assert!(problem);
     assert!(!root.join(".harness/runs/task-001").exists());
     // The error is in the log too, where it is not cut off.
@@ -2351,7 +2351,7 @@ fn the_agents_tab_shows_the_catalog_with_what_is_installed() {
         "Agents installed: 3 of",
         "○ Claude Code + GLM",
         "✓ Installed: /bin/claude · version 2.1.300",
-        "No login: harness login claude",
+        "No login: press «Sign in».",
         "Update with the maker's command:",
         "claude update",
     ] {
@@ -2516,6 +2516,7 @@ fn an_installed_agent_is_removed_after_confirming() {
     assert!(text.contains("saved logins stay"), "{text}");
     let (_, form) = app.form.as_ref().unwrap();
     assert!(form.text.contains("/bin/claude"), "{}", form.text);
+    assert!(form.text.contains("Remote Control"), "{}", form.text);
     key(&mut app, KeyCode::Enter);
     wait_for_agents(&mut app);
     assert_eq!(app.agents.job.as_ref().unwrap().done, Some(Ok(())));
@@ -2524,4 +2525,76 @@ fn an_installed_agent_is_removed_after_confirming() {
     // Nothing to remove for an agent that is not installed.
     app.agents.select(3);
     assert!(app.agents.next_step(true).is_none());
+}
+
+#[test]
+fn sign_in_is_offered_for_installed_agents_the_harness_runs() {
+    let env = Env::new();
+    let mut app = agents_app(&env);
+    // Claude Code is installed: «Sign in» gives the terminal to `harness login claude`.
+    app.agents.select(0);
+    let text = screen_of_width(&mut app, 160);
+    assert!(text.contains(" Sign in "), "{text}");
+    assert!(text.contains("No login: press «Sign in»."), "{text}");
+    key(&mut app, KeyCode::Char('l'));
+    assert_eq!(app.sign_in.take(), Some(("claude", "Claude Code")));
+    // Codex with DeepSeek signs in with the DeepSeek key.
+    let deepseek = app
+        .agents
+        .statuses
+        .iter()
+        .position(|s| s.entry.id == "codex+deepseek")
+        .unwrap();
+    app.agents.select(deepseek);
+    key(&mut app, KeyCode::Char('l'));
+    assert_eq!(app.sign_in.take().map(|(login, _)| login), Some("deepseek"));
+    // Not installed, or only in the catalog: nothing to sign in to.
+    for id in ["antigravity", "copilot"] {
+        let index = app
+            .agents
+            .statuses
+            .iter()
+            .position(|s| s.entry.id == id)
+            .unwrap();
+        app.agents.select(index);
+        key(&mut app, KeyCode::Char('l'));
+        assert_eq!(app.sign_in, None, "{id}");
+    }
+}
+
+#[test]
+fn roles_offer_only_agents_ready_on_the_agents_tab() {
+    let env = Env::new();
+    let root = env.path("test");
+    project(&root);
+    let mut app = env.app(&root);
+    app.agent_checker = fake_agents;
+    key(&mut app, KeyCode::Char('8'));
+    wait_for_agents(&mut app);
+    click(&mut app, "2 Roles");
+    let text = screen_of_width(&mut app, 160);
+    // Claude is installed without a login: it stays, as the roles use it, but
+    // marked; Codex is installed without a login, Antigravity not at all.
+    assert!(text.contains("(•) claude"), "{text}");
+    assert!(text.contains("not ready"), "{text}");
+    for gone in ["( ) codex ", "( ) codex+deepseek", "( ) antigravity"] {
+        assert!(!text.contains(gone), "{gone:?} in:\n{text}");
+    }
+
+    // Signing in to Claude and Codex makes them ready.
+    let credentials = env.home.path().join("credentials");
+    harness_agents::credentials::save_token(
+        &credentials,
+        "claude",
+        &harness_agents::credentials::Secret::new("t"),
+    )
+    .unwrap();
+    fs::create_dir_all(credentials.join("codex")).unwrap();
+    fs::write(credentials.join("codex/auth.json"), "{}").unwrap();
+    app.finish_sign_in("Claude Code", Ok(()));
+    assert_eq!(app.message.as_ref().unwrap().0, "Claude Code: login saved");
+    let text = screen_of_width(&mut app, 160);
+    assert!(text.contains("( ) codex "), "{text}");
+    assert!(!text.contains("not ready"), "{text}");
+    assert!(!text.contains("( ) antigravity"), "{text}");
 }

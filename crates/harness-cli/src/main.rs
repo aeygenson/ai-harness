@@ -3,10 +3,6 @@
 //!
 //! ```text
 //! harness init                         prepare .harness/ in the project
-//! harness login claude                 save the token from `claude setup-token`
-//! harness login codex                  log in to Codex (ChatGPT subscription)
-//! harness login deepseek               save the DeepSeek API key
-//! harness login antigravity            log in to Antigravity CLI (Google account)
 //! harness secret set context7          save a secret an MCP server needs
 //! harness secret list                  show the names of the saved secrets
 //! harness marketplace add anthropics/claude-plugins-official
@@ -67,7 +63,10 @@ struct Cli {
 enum Command {
     /// Create .harness/ with a default harness.toml and commit it.
     Init,
-    /// Save an agent's login token (outside the project, never in git).
+    /// Save an agent's login (outside the project, never in git). Hidden:
+    /// agents are signed in on the TUI's Agents tab, which runs this in its
+    /// terminal.
+    #[command(hide = true)]
     Login {
         /// `claude`, `codex`, `deepseek` or `antigravity`.
         agent: String,
@@ -486,7 +485,7 @@ fn agents() {
         }
         match status.login {
             Some(true) => println!("    login saved"),
-            Some(false) => println!("    no login: {}", credentials::login_command(entry.id)),
+            Some(false) => println!("    no login: sign in on the Agents tab (harness tui)"),
             None => {}
         }
         println!("    plan: {}", entry.plan);
@@ -526,14 +525,21 @@ fn login(agent: &str) -> Result<()> {
     }
 }
 
+/// Runs `claude setup-token` (it opens the browser and prints a long-lived
+/// token), then asks for that token and saves it.
 fn login_claude(dir: &Path) -> Result<()> {
-    println!("1. In another terminal run:  claude setup-token");
-    println!("2. Paste the token it prints here and press Enter.");
-    print!("Token: ");
-    io::stdout().flush()?;
-    let mut token = String::new();
-    io::stdin().lock().read_line(&mut token)?;
-    let token = Secret::new(token.trim());
+    println!("Starting `claude setup-token`; finish the login in your browser.");
+    let status = std::process::Command::new(harness_platform::program::resolve("claude"))
+        .arg("setup-token")
+        .status()
+        .context("cannot start `claude`; is Claude Code installed?")?;
+    if !status.success() {
+        bail!("`claude setup-token` failed ({status})");
+    }
+    println!();
+    println!("Copy the token it printed above, paste it here and press Enter.");
+    println!("It is not shown while you type: paste it once, then press Enter.");
+    let token = read_hidden("Token: ")?;
     if token.expose().is_empty() {
         bail!("no token given");
     }

@@ -5,7 +5,7 @@
 //! - `CODEX_HOME` points to `<project>/.harness/agents/codex/`, and
 //!   `--ignore-user-config` / `--ignore-rules` skip every config and rules file,
 //!   so the agent sees no MCP servers, plugins, hooks or profiles;
-//! - login: `harness login codex` runs `codex login` into
+//! - login: the Agents tab («Sign in») runs `codex login` into
 //!   `~/.harness/credentials/codex/`. Only `auth.json` is copied into the
 //!   project for the run and removed right after it;
 //! - Codex's own sandbox (`workspace-write`): commands may write only inside
@@ -92,7 +92,7 @@ pub const DEEPSEEK_DEFAULT_MODEL: &str = "deepseek-flash";
 /// Who Codex talks to.
 #[derive(Debug, Clone)]
 enum Provider {
-    /// OpenAI, with the ChatGPT login saved by `harness login codex`.
+    /// OpenAI, with the ChatGPT login saved by the Agents tab («Sign in»).
     ChatGpt,
     /// DeepSeek, with an API key.
     DeepSeek(Secret),
@@ -328,7 +328,7 @@ impl Codex {
         let saved = fs::read(self.auth_dir.join(AUTH_FILE)).map_err(|e| {
             io::Error::new(
                 e.kind(),
-                "no Codex login saved; run `harness login codex` first",
+                "no Codex login saved; sign in on the Agents tab first",
             )
         })?;
         harness_platform::private::write(&dir.join(AUTH_FILE), &saved)

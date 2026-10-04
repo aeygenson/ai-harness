@@ -5,7 +5,7 @@
 //!   `GEMINI_API_KEY` reaches the agent;
 //! - `agy` has no setting for its config folder, so it gets a fresh `HOME`: a
 //!   temporary folder outside the project, deleted after the role. It holds a
-//!   copy of the login saved by `harness login antigravity` and our
+//!   copy of the login saved by the Agents tab («Sign in») and our
 //!   `settings.json` and `mcp_config.json`, and nothing else: no MCP servers,
 //!   plugins or skills of Lisa's (only the role's own MCP servers from
 //!   harness.toml), and no history of earlier runs;
@@ -133,7 +133,7 @@ impl Antigravity {
         if !self.auth_dir.join(SETTINGS_DIR).is_dir() {
             return Err(io::Error::new(
                 io::ErrorKind::NotFound,
-                "no Antigravity login saved; run `harness login antigravity` first",
+                "no Antigravity login saved; sign in on the Agents tab first",
             ));
         }
         let home = tempfile::Builder::new().prefix("harness-agy-").tempdir()?;
