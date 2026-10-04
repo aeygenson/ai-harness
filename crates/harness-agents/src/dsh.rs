@@ -128,14 +128,17 @@ impl Dsh {
             &home.path().join(CREDENTIALS_FILE),
             &credentials.to_string(),
         )?;
-        crate::credentials::write_private(&home.path().join(PATCH_FILE), &self.patch(role))?;
+        crate::credentials::write_private(
+            &home.path().join(PATCH_FILE),
+            &self.patch(role, home.path()),
+        )?;
         fs::create_dir_all(home.path().join("agents"))?;
         Ok(home)
     }
 
     /// dsh's settings overlay for `role`: a list of changes to its plugins,
-    /// in JSON (which dsh reads as YAML).
-    fn patch(&self, role: Role) -> String {
+    /// in JSON (which dsh reads as YAML). `home` is the temporary `DSH_HOME`.
+    fn patch(&self, role: Role, home: &Path) -> String {
         let model = self.models.get(&role).map_or(DEFAULT_MODEL, String::as_str);
         let effort = self
             .efforts
@@ -151,6 +154,12 @@ impl Dsh {
             json!({ "id": "session-telemetry-otel", "config": { "mode": "DISABLED" } }),
             // Skills come in the prompt; none from the project or Lisa's folders.
             json!({ "id": "skill-filesystem", "config": { "includeDefaultRoots": false } }),
+            // Long command output is kept in files; by default in a new
+            // `/tmp/dsh-spill-*` folder that stays after the run.
+            json!({
+                "id": "spill-local",
+                "config": { "root": home.join("spill"), "cleanupPeriodDays": 0 },
+            }),
         ];
         let servers: Vec<Value> = self
             .mcp
@@ -360,7 +369,8 @@ mod tests {
         let dsh = Dsh::new(Secret::new("k"))
             .with_model(Role::Developer, "deepseek-v4-pro")
             .with_effort(Role::Developer, "max");
-        let patch: Value = serde_json::from_str(&dsh.patch(Role::Developer)).unwrap();
+        let patch: Value =
+            serde_json::from_str(&dsh.patch(Role::Developer, Path::new("/h"))).unwrap();
         let entry = |id: &str| {
             patch
                 .as_array()
@@ -383,9 +393,14 @@ mod tests {
             entry("skill-filesystem")["config"]["includeDefaultRoots"],
             false
         );
+        assert_eq!(
+            entry("spill-local")["config"]["root"],
+            Path::new("/h").join("spill").to_string_lossy().as_ref()
+        );
 
         // Another role keeps dsh's defaults.
-        let tester: Value = serde_json::from_str(&dsh.patch(Role::Tester)).unwrap();
+        let tester: Value =
+            serde_json::from_str(&dsh.patch(Role::Tester, Path::new("/h"))).unwrap();
         assert_eq!(tester[0]["config"]["model"], DEFAULT_MODEL);
         assert_eq!(tester[0]["config"]["reasoningEffort"], DEFAULT_EFFORT);
     }
@@ -401,7 +416,8 @@ mod tests {
             env: BTreeMap::from([("CONTEXT7_API_KEY".into(), Secret::new("ctx-secret"))]),
         };
         let dsh = Dsh::new(Secret::new("k")).with_mcp_servers(Role::Security, vec![server]);
-        let patch: Value = serde_json::from_str(&dsh.patch(Role::Security)).unwrap();
+        let patch: Value =
+            serde_json::from_str(&dsh.patch(Role::Security, Path::new("/h"))).unwrap();
         let insert = patch
             .as_array()
             .unwrap()
@@ -415,7 +431,8 @@ mod tests {
         assert_eq!(config["args"][1], "@upstash/context7-mcp");
         assert_eq!(config["env"]["CONTEXT7_API_KEY"], "ctx-secret");
 
-        let tester: Value = serde_json::from_str(&dsh.patch(Role::Tester)).unwrap();
+        let tester: Value =
+            serde_json::from_str(&dsh.patch(Role::Tester, Path::new("/h"))).unwrap();
         assert!(!tester
             .as_array()
             .unwrap()
