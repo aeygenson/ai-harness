@@ -14,7 +14,7 @@ Architect → (утверждение Лизы) → Developer → Tester → Sec
 работу назад. Каждая роль оставляет короткие заметки (`notes.md`) и `handoff.json`.
 
 **Главная идея: харнесс — дирижёр, а не музыкант.** ✅
-Роли выполняют **готовые консольные агенты**: Claude Code, OpenAI Codex CLI, Antigravity CLI.
+Роли выполняют **готовые консольные агенты**: Claude Code, OpenAI Codex CLI, Antigravity CLI, DeepSeek Harness.
 Они сами читают и меняют файлы, запускают `cargo test` и так далее. Мы не пишем своего
 агента. Наша программа:
 
@@ -209,6 +209,7 @@ MCP-серверы для каждой роли — раздел 5.5 (этап 6
 | `codex` | OpenAI Codex CLI | подписка ChatGPT | |
 | `antigravity` | Antigravity CLI (`agy`) | аккаунт Google / подписка Google AI Pro | |
 | `codex+deepseek` | Codex CLI с моделью DeepSeek | ключ API DeepSeek (дёшево) | сделано в этапе 5c, см. раздел 5.3 |
+| `dsh` | DeepSeek Harness, собственный агент DeepSeek | тот же ключ API DeepSeek | раздел 5.4a |
 | `mock` | заранее записанный «агент» | бесплатно | для тестов всего цикла без интернета |
 
 **Подписки Лизы** (27.09.2026): Claude за $100 (Max), OpenAI за $100, Google AI Pro (Gemini Pro).
@@ -388,6 +389,26 @@ Codex предупреждает «Model metadata for `deepseek-flash` not found
 
 Что ещё не закрыто: запрет чтения интернета (по умолчанию `agy` спрашивает, а без окна
 отказывает, но с `--dangerously-skip-permissions` у Developer и Tester, вероятно, разрешено).
+
+### 5.4a. Адаптер DeepSeek Harness ✅
+
+`dsh` — собственный консольный агент DeepSeek с открытым кодом (MIT,
+github.com/deepseek-ai/deepseek-harness, npm `@deepseek-ai/dsh`, нужен Node.js 22.19+).
+Проверено на 0.2.0-rc.2 (предварительная версия, настройки могут меняться).
+
+| Что | Как |
+|-----|-----|
+| Запуск | `dsh --profile headless --patch <файл> --json -`: одна задача без окна; промпт идёт на стандартный ввод (`-`) |
+| Окружение | `env_clear()` и короткий список, плюс `DSH_HOME`, `DSH_AGENTS_HOME`, `DSH_PERMISSION_MODE=workspace-write`, `DSH_TELEMETRY_MODE=DISABLED`. Ключа в окружении нет: его унаследовали бы команды агента |
+| Папка настроек | `DSH_HOME` — временная папка вне проекта, удаляется после роли. В ней ключ в собственном файле `dsh` `.credentials.yaml` (доступен только Лизе; `dsh` не кладёт его в окружение) и наш файл настроек. Настройки, навыки и MCP-серверы Лизы роль не видит |
+| Вход | тот же ключ DeepSeek, что у `codex+deepseek` (`harness login deepseek`, кнопка «Войти» на вкладке Agents) |
+| Настройки роли | `--patch` (слой настроек `dsh`, JSON читается как YAML): модель и уровень (`agent-default-model`, уровни `off`, `low`, `high`, `max`), MCP-серверы роли (`dsh-mcp-client`), выключены выгрузка журнала сессии в DeepSeek (`session-log-deepseek`, по умолчанию включена), отзывы (`session-telemetry-otel`) и навыки из папок (`skill-filesystem`: навыки даёт промпт) |
+| Права | песочница самого `dsh` (на Linux bwrap или Landlock): писать можно только в проекте. Если команде нужно больше, `dsh` спрашивает, а без окна это отказ, работа идёт дальше. Папки ролей, как у Codex, проверяет `git status`; коммит агента ловит проверка из раздела 6 |
+| Настройки проекта | `dsh` читает навыки проекта из `.dsh/skills` и `.agents/skills`; `.dsh` добавлена в «никому нельзя» |
+| Вывод | события JSON по строкам (`session`, `status`, `text`, `tool_call`, ..., `final`). Код выхода 0 — задача сделана; иначе причина в последнем `turn_end` (`reason.error`) или в строке `dsh: <код>: <текст>` в stderr |
+| Модели | тот же `GET /models` API DeepSeek, с уровнями `dsh` (по умолчанию `high`) |
+
+Что ещё не закрыто: сеть песочница `dsh` не ограничивает ни для одной роли.
 
 ### 5.5. MCP-серверы для ролей ✅ (этап 6b)
 

@@ -99,6 +99,7 @@ impl Entry {
 }
 
 const NPM_CODEX: &str = "npm install -g @openai/codex@latest";
+const NPM_DSH: &str = "npm install -g @deepseek-ai/dsh@latest";
 const CLAUDE_INSTALL: Commands = Commands {
     unix: Some("curl -fsSL https://claude.ai/install.sh | bash"),
     windows: Some("irm https://claude.ai/install.ps1 | iex"),
@@ -175,6 +176,20 @@ pub const CATALOG: &[Entry] = &[
         update: AGY_INSTALL,
         remove: Commands::NONE,
         site: "https://antigravity.google/docs/cli/install",
+    },
+    Entry {
+        id: "dsh",
+        name: "DeepSeek Harness",
+        vendor: "DeepSeek",
+        programs: &["dsh"],
+        inside: None,
+        plan: "DeepSeek API key, pay per use",
+        // Checked with 0.2.0-rc.2; it needs Node.js 22.19 or newer.
+        min_version: None,
+        install: Commands::both(NPM_DSH),
+        update: Commands::both(NPM_DSH),
+        remove: Commands::NONE,
+        site: "https://github.com/deepseek-ai/deepseek-harness",
     },
     Entry {
         id: "claude+glm",
@@ -607,14 +622,28 @@ pub fn parse_version(text: &str) -> Option<String> {
             .take_while(|c| c.is_ascii_digit() || *c == '.')
             .collect();
         let number = number.trim_end_matches('.');
+        // A preview keeps its mark: `0.2.0-rc.2`.
+        let pre: String = word[number.len()..]
+            .strip_prefix('-')
+            .map(|rest| {
+                rest.chars()
+                    .take_while(|c| c.is_ascii_alphanumeric() || *c == '.')
+                    .collect::<String>()
+            })
+            .map(|rest| rest.trim_end_matches('.').to_string())
+            .filter(|rest| rest.starts_with(|c: char| c.is_ascii_alphabetic()))
+            .map(|rest| format!("-{rest}"))
+            .unwrap_or_default();
         (number.contains('.') && number.starts_with(|c: char| c.is_ascii_digit()))
-            .then(|| number.to_string())
+            .then(|| format!("{number}{pre}"))
     })
 }
 
-/// Is `version` below `min`? Compared number by number: 0.99 < 0.158.
+/// Is `version` below `min`? Compared number by number: 0.99 < 0.158. A
+/// preview mark (`-rc.2`) is left out.
 pub fn older(version: &str, min: &str) -> bool {
     let numbers = |text: &str| -> Vec<u64> {
+        let text = text.split('-').next().unwrap_or(text);
         text.split('.')
             .map(|part| part.parse().unwrap_or(0))
             .collect()
@@ -648,6 +677,10 @@ mod tests {
         assert_eq!(parse_version("2.1.283 (Claude Code)").unwrap(), "2.1.283");
         assert_eq!(parse_version("agy v1.2.12.").unwrap(), "1.2.12");
         assert_eq!(parse_version("no version here 3"), None);
+        assert_eq!(parse_version("0.2.0-rc.2\n").unwrap(), "0.2.0-rc.2");
+        assert_eq!(parse_version("tool 1.2.3-1").unwrap(), "1.2.3");
+        assert!(!older("0.2.0-rc.2", "0.2.0"));
+        assert!(older("0.1.9-beta", "0.2.0"));
         assert!(older("0.99.0", "0.158.0"));
         assert!(older("0.157.1", "0.158"));
         assert!(!older("0.158.0", "0.158.0"));

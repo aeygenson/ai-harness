@@ -8,7 +8,9 @@
 //! - Codex: `codex debug models`;
 //! - DeepSeek: `GET /models` of its API, with the saved key (Codex itself
 //!   only knows OpenAI's models);
-//! - Antigravity: `agy models`.
+//! - Antigravity: `agy models`;
+//! - DeepSeek Harness: the same `GET /models` as for Codex with DeepSeek,
+//!   with dsh's effort levels.
 
 use std::fs;
 use std::io::{Read, Write};
@@ -107,7 +109,7 @@ pub fn ask(agent: &str, credentials_dir: &Path, programs: &Programs) -> Result<M
             command.env("CODEX_HOME", &home).args(["debug", "models"]);
             parse_codex(&run(command, "", &[])?)?
         }
-        "codex+deepseek" => {
+        "codex+deepseek" | "dsh" => {
             let key = match std::env::var(DEEPSEEK_KEY_ENV) {
                 Ok(key) if !key.trim().is_empty() => Secret::new(key.trim()),
                 _ => credentials::load_token(credentials_dir, "deepseek")
@@ -125,7 +127,12 @@ pub fn ask(agent: &str, credentials_dir: &Path, programs: &Programs) -> Result<M
                 .args(["-sS", "-m", "60", "-H"])
                 .arg(format!("@{}", header.display()))
                 .arg(DEEPSEEK_MODELS_URL);
-            parse_deepseek(&run(command, "", &[key.expose()])?)?
+            let models = parse_deepseek(&run(command, "", &[key.expose()])?)?;
+            if agent == "dsh" {
+                with_dsh_efforts(models)
+            } else {
+                models
+            }
         }
         "antigravity" => {
             let home = tmp.join("home");
@@ -370,6 +377,18 @@ pub fn parse_deepseek(output: &str) -> Result<Vec<Model>, String> {
         .collect())
 }
 
+/// DeepSeek's models as DeepSeek Harness runs them: with its effort levels.
+pub fn with_dsh_efforts(models: Vec<Model>) -> Vec<Model> {
+    models
+        .into_iter()
+        .map(|model| Model {
+            efforts: crate::dsh::EFFORTS.iter().map(|e| e.to_string()).collect(),
+            default_effort: Some(crate::dsh::DEFAULT_EFFORT.to_string()),
+            ..model
+        })
+        .collect()
+}
+
 /// `agy models`: `id<TAB>name` per line. The level is part of the id
 /// (`gemini-3.8-flash-high`), so there are no separate levels.
 pub fn parse_agy(output: &str) -> Vec<Model> {
@@ -461,6 +480,14 @@ mod tests {
             .unwrap_err()
             .contains("bad key"));
 
+        let dsh = with_dsh_efforts(
+            parse_deepseek(r#"{"data":[{"id":"deepseek-flash"},{"id":"deepseek-v4-pro"}]}"#)
+                .unwrap(),
+        );
+        assert_eq!(dsh[1].efforts, ["off", "low", "high", "max"]);
+        assert_eq!(dsh[0].default_effort.as_deref(), Some("high"));
+        assert!(dsh[0].default);
+
         let models = parse_agy(
             "gemini-3.8-flash-high\tGemini 3.8 Flash (High)\nclaude-opus-4-6-thinking\tClaude Opus 4.6 (Thinking)\nFetching available models...\n",
         );
@@ -505,6 +532,6 @@ echo '{"models":[{"slug":"gpt-x","visibility":"list","supported_reasoning_levels
             .into_iter()
             .map(|(agent, _)| agent)
             .collect();
-        assert_eq!(asked, ["codex", "codex+deepseek"]);
+        assert_eq!(asked, ["codex", "codex+deepseek", "dsh"]);
     }
 }

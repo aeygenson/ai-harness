@@ -23,7 +23,7 @@ use crate::task::DEFAULT_MAX_ROUNDS;
 pub const CONFIG_FILE: &str = "harness.toml";
 
 /// The agents a role can run on.
-pub const AGENTS: [&str; 4] = ["claude", "codex", "codex+deepseek", "antigravity"];
+pub const AGENTS: [&str; 5] = ["claude", "codex", "codex+deepseek", "antigravity", "dsh"];
 
 /// What `harness init` writes into a new project.
 pub const DEFAULT_CONFIG: &str = r#"# Settings of the AI harness for this project.
@@ -33,7 +33,8 @@ agent_timeout_minutes = 30
 
 # Which agent works as each role: "claude" (Claude Code), "codex" (Codex CLI),
 # "codex+deepseek" (Codex CLI with DeepSeek models; the Agents tab («Sign in»)
-# saves the API key) or "antigravity" (Antigravity CLI).
+# saves the API key), "antigravity" (Antigravity CLI) or "dsh" (DeepSeek
+# Harness, DeepSeek's own agent, with the same API key).
 # Add `model = "..."` to pick a model, for example "opus" for claude or
 # "deepseek-v4-pro" for codex+deepseek (default "deepseek-flash"), and
 # `effort = "..."` for how hard it thinks, for example "high". `harness models`

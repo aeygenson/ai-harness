@@ -36,7 +36,7 @@ pub fn has_login(dir: &Path, agent: &str) -> bool {
     match agent {
         "claude" => dir.join("claude").join(TOKEN_FILE).is_file(),
         "codex" => dir.join("codex").join("auth.json").is_file(),
-        "codex+deepseek" => {
+        "codex+deepseek" | "dsh" => {
             dir.join("deepseek").join(TOKEN_FILE).is_file()
                 || std::env::var(crate::codex::DEEPSEEK_KEY_ENV)
                     .is_ok_and(|key| !key.trim().is_empty())
@@ -46,12 +46,12 @@ pub fn has_login(dir: &Path, agent: &str) -> bool {
     }
 }
 
-/// Whose login `agent` needs: Codex with DeepSeek needs the DeepSeek key.
+/// Whose login `agent` needs: Codex with DeepSeek and DeepSeek Harness need
+/// the DeepSeek key.
 pub fn login_name(agent: &str) -> &str {
-    if agent == "codex+deepseek" {
-        "deepseek"
-    } else {
-        agent
+    match agent {
+        "codex+deepseek" | "dsh" => "deepseek",
+        other => other,
     }
 }
 
@@ -117,8 +117,10 @@ mod tests {
         assert!(has_login(dir, "antigravity"));
         save_token(dir, "deepseek", &Secret::new("k")).unwrap();
         assert!(has_login(dir, "codex+deepseek"));
+        assert!(has_login(dir, "dsh"));
         assert!(!has_login(dir, "gemini"));
         assert_eq!(login_name("codex+deepseek"), "deepseek");
+        assert_eq!(login_name("dsh"), "deepseek");
     }
 
     #[test]
