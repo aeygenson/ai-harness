@@ -26,6 +26,7 @@ use harness_agents::build::BuildError;
 use harness_agents::{process, AnyAgent};
 use harness_core::config::Config;
 use harness_core::git::{Repo, HARNESS_DIR};
+use harness_core::projects::name_of;
 use harness_core::proposals::Proposal;
 use harness_core::retro_ops::{self, RetroInfo};
 use harness_core::suggest::{self, RETRO_MD};
@@ -368,7 +369,7 @@ impl RetroTab {
             hits,
             retros_area,
             ListId::Retros,
-            tr.t("retro.list"),
+            &tr.f("retro.list", &[("name", &name_of(&self.root))]),
             items,
             self.row,
             self.focus == Focus::Retros,

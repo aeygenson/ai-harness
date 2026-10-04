@@ -2043,9 +2043,23 @@ fn a_retrospective_is_generated_edited_and_its_proposals_applied() {
     let text = screen(&mut app);
     assert!(text.contains("No retrospectives yet."), "{text}");
     assert!(text.contains(" Generate "), "{text}");
+    // The tab says which project the retrospectives are of.
+    assert!(text.contains("Retrospectives · fresh"), "{text}");
+
+    // «Generate» first asks about the open project; Esc changes nothing.
+    click(&mut app, " Generate ");
+    let text = screen(&mut app);
+    assert!(
+        text.contains("Make a retrospective of the project «fresh»?"),
+        "{text}"
+    );
+    key(&mut app, KeyCode::Esc);
+    assert!(app.form.is_none());
+    assert!(!app.retro.as_ref().unwrap().is_generating());
 
     // Without tasks there is nothing to learn from.
     click(&mut app, " Generate ");
+    key(&mut app, KeyCode::Enter);
     wait_retro(&mut app);
     let (message, problem) = app.message.clone().unwrap();
     assert!(
@@ -2055,6 +2069,7 @@ fn a_retrospective_is_generated_edited_and_its_proposals_applied() {
 
     orchestrator::create_task(&repo, "task-001", "Build a parser", 5).unwrap();
     click(&mut app, " Generate ");
+    key(&mut app, KeyCode::Enter);
     assert!(app.retro.as_ref().unwrap().is_generating());
     key(&mut app, KeyCode::Char('q'));
     assert!(!app.quit);
