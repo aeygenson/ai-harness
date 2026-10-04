@@ -146,6 +146,8 @@ enum Purpose {
     RemoveCatalog(String),
     /// Take the new version of a plugin, after seeing what changes.
     ApplyUpdate(Box<plugin_ops::Prepared>),
+    /// Make a retrospective of the open project.
+    GenerateRetro,
     /// Apply these proposals of the retrospective in this folder.
     ApplyProposals(PathBuf, Vec<u32>),
     /// Run this maker's command to install or update the agent named.
@@ -2256,11 +2258,19 @@ impl App {
                     self.message = Some((self.tr.t("retro.tasks_running").to_string(), true));
                     return;
                 }
-                let language = self.tr.t("retro.language").to_string();
-                if let Some(retro) = &mut self.retro {
-                    retro.generate(self.retro_builder, &language);
-                    self.message = Some((self.tr.t("retro.started").to_string(), false));
-                }
+                // Lisa sees which project the retrospective is for.
+                let Some(root) = &self.project else {
+                    return;
+                };
+                let tr = &self.tr;
+                let text = tr.f(
+                    "retro.generate_text",
+                    &[("name", &name_of(root)), ("path", &root.display())],
+                );
+                self.form = Some((
+                    Purpose::GenerateRetro,
+                    Form::new(tr.t("retro.generate_title"), &text, tr.t("retro.generate")),
+                ));
             }
             A::Open(number, path) => {
                 self.edit = Some(EditJob {
@@ -2318,6 +2328,23 @@ impl App {
                     Form::new(tr.t("retro.apply_title"), &text, tr.t("retro.apply_ok")),
                 ));
             }
+        }
+    }
+
+    /// OK in «Make a retrospective»: the agent starts in the background.
+    fn generate_retro(&mut self) {
+        // The roles may have started while the question was open.
+        if self.tasks.as_ref().is_some_and(TasksTab::is_running) {
+            self.message = Some((self.tr.t("retro.tasks_running").to_string(), true));
+            return;
+        }
+        let language = self.tr.t("retro.language").to_string();
+        if let Some(retro) = &mut self.retro {
+            if retro.is_generating() {
+                return;
+            }
+            retro.generate(self.retro_builder, &language);
+            self.message = Some((self.tr.t("retro.started").to_string(), false));
         }
     }
 
@@ -2792,6 +2819,10 @@ impl App {
             }
             Purpose::ApplyUpdate(prepared) => {
                 self.apply_plugin_update(prepared);
+                Ok(())
+            }
+            Purpose::GenerateRetro => {
+                self.generate_retro();
                 Ok(())
             }
             Purpose::ApplyProposals(dir, ids) => self.apply_proposals(dir, ids),

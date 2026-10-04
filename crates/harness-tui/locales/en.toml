@@ -399,7 +399,7 @@ update_failed = "Plugin {name} was not updated: {error}"
 [retro]
 # The language the retrospective's agent writes in.
 language = "English"
-list = " Retrospectives "
+list = " Retrospectives · {name} "
 proposals = " Proposals for the skills "
 proposal = "Proposal"
 all = "whole project"
@@ -410,6 +410,8 @@ empty = "No retrospectives yet.\n\n«Generate» reads the whole history of the p
 no_proposals = "No proposals."
 no_agent = "The agent wrote nothing here: only the statistics were saved."
 generate = "Generate"
+generate_title = " Make a retrospective "
+generate_text = "Make a retrospective of the project «{name}»?\n{path}\n\nThe agent reads the whole history of this project."
 open = "Open in Zed"
 choose = "Choose"
 unchoose = "Unchoose"
