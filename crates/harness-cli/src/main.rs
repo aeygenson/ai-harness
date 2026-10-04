@@ -497,11 +497,15 @@ fn agents() {
             let what = match action {
                 catalog::Action::Install => "install",
                 catalog::Action::Update => "update",
+                catalog::Action::Remove => "remove",
             };
             match command {
                 Some(command) => println!("    {what}: {command}"),
                 None => println!("    {what}: see {}", entry.site),
             }
+        }
+        if let Some(command) = status.removal() {
+            println!("    remove: {command}");
         }
     }
 }

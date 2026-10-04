@@ -500,19 +500,32 @@ impl App {
         self.agent_check = Some(rx);
     }
 
-    /// «Install» or «Update»: first the maker's command is shown to be confirmed.
-    fn ask_to_run_agent_command(&mut self) {
+    /// «Install», «Update» or «Remove»: first the command is shown to be confirmed.
+    fn ask_to_run_agent_command(&mut self, remove: bool) {
         use harness_agents::catalog::Action;
-        let Some((status, action, command)) = self.agents.next_step() else {
+        let Some((status, action, command)) = self.agents.next_step(remove) else {
             return;
         };
         let name = status.entry.name;
-        let (title, ok) = match action {
-            Action::Install => ("agents.confirm_install", "agents.run_install"),
-            Action::Update => ("agents.confirm_update", "agents.run_update"),
+        let (title, ok, text) = match action {
+            Action::Install => (
+                "agents.confirm_install",
+                "agents.run_install",
+                "agents.confirm_text",
+            ),
+            Action::Update => (
+                "agents.confirm_update",
+                "agents.run_update",
+                "agents.confirm_text",
+            ),
+            Action::Remove => (
+                "agents.confirm_remove",
+                "agents.run_remove",
+                "agents.confirm_remove_text",
+            ),
         };
         let tr = &self.tr;
-        let text = tr.f("agents.confirm_text", &[("command", &command)]);
+        let text = tr.f(text, &[("command", &command)]);
         let form = Form::new(&tr.f(title, &[("name", &name)]), &text, tr.t(ok));
         self.form = Some((
             Purpose::RunAgentCommand {
@@ -581,6 +594,7 @@ impl App {
                 (Err(_), _) => "agents.job_failed",
                 (Ok(()), Action::Install) => "agents.job_installed",
                 (Ok(()), Action::Update) => "agents.job_updated",
+                (Ok(()), Action::Remove) => "agents.job_removed",
             };
             self.message = Some((self.tr.f(key, &[("name", &job.name)]), result.is_err()));
             job.done = Some(result);
@@ -925,6 +939,7 @@ impl App {
                 Tab::Agents => match code {
                     KeyCode::Char('c') => self.press(ButtonId::AgentsCheck),
                     KeyCode::Char('i') | KeyCode::Enter => self.press(ButtonId::AgentRun),
+                    KeyCode::Delete => self.press(ButtonId::AgentRemove),
                     code => self.agents.on_key(code),
                 },
                 Tab::Projects => match code {
@@ -2394,7 +2409,8 @@ impl App {
     fn press(&mut self, id: ButtonId) {
         match id {
             ButtonId::AgentsCheck => self.check_agents(),
-            ButtonId::AgentRun => self.ask_to_run_agent_command(),
+            ButtonId::AgentRun => self.ask_to_run_agent_command(false),
+            ButtonId::AgentRemove => self.ask_to_run_agent_command(true),
             ButtonId::RefreshModels => self.ask_for_models(),
             ButtonId::McpRole(index) => {
                 if let Some(mcp) = &mut self.mcp {

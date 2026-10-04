@@ -150,6 +150,8 @@ pub enum ButtonId {
     AgentsCheck,
     /// «Install» or «Update» for the agent selected on the Agents tab.
     AgentRun,
+    /// «Remove» for the agent selected on the Agents tab.
+    AgentRemove,
 }
 
 /// Where the clickable things were drawn in the last frame. Drawing fills it,

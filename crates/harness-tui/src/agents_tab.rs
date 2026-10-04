@@ -90,14 +90,18 @@ impl AgentsTab {
         self.statuses.get(self.selected)
     }
 
-    /// What the button would do for the selected agent, with the command:
-    /// only once the computer was checked, while nothing else runs, and
-    /// when the maker gives a command for this system.
-    pub fn next_step(&self) -> Option<(&Status, Action, String)> {
+    /// What «Install»/«Update» (or, with `remove`, «Remove») would do for
+    /// the selected agent, with the command: only once the computer was
+    /// checked, while nothing else runs, and when there is a command for
+    /// this system.
+    pub fn next_step(&self, remove: bool) -> Option<(&Status, Action, String)> {
         if !self.known || self.checking || self.job.as_ref().is_some_and(Job::running) {
             return None;
         }
         let status = self.current()?;
+        if remove {
+            return Some((status, Action::Remove, status.removal()?));
+        }
         let (action, command) = status.action()?;
         Some((status, action, command?))
     }
@@ -141,7 +145,8 @@ impl AgentsTab {
         } else {
             tr.t("agents.check")
         };
-        let step = self.next_step();
+        let step = self.next_step(false);
+        let removable = self.next_step(true).is_some();
         let run = match self.current().and_then(Status::action) {
             Some((Action::Update, _)) => tr.t("agents.run_update"),
             _ => tr.t("agents.run_install"),
@@ -154,6 +159,7 @@ impl AgentsTab {
             &[
                 (check, ButtonId::AgentsCheck, !self.checking && !running),
                 (run, ButtonId::AgentRun, step.is_some()),
+                (tr.t("agents.run_remove"), ButtonId::AgentRemove, removable),
             ],
         );
         let [left, right] =
@@ -280,7 +286,7 @@ impl AgentsTab {
             Some((action, Some(command))) => {
                 let key = match action {
                     Action::Install => "agents.install",
-                    Action::Update => "agents.update",
+                    Action::Update | Action::Remove => "agents.update",
                 };
                 lines.push(Line::from(tr.t(key).to_string()));
                 lines.push(Line::styled(format!("  {command}"), theme::accent()));
@@ -301,6 +307,7 @@ fn draw_job(frame: &mut Frame, area: Rect, job: &Job, tr: &I18n) {
         (_, None) => "agents.job_running",
         (Action::Install, Some(Ok(()))) => "agents.job_installed",
         (Action::Update, Some(Ok(()))) => "agents.job_updated",
+        (Action::Remove, Some(Ok(()))) => "agents.job_removed",
         (_, Some(Err(_))) => "agents.job_failed",
     };
     let title = format!(" {} ", tr.f(key, &[("name", &job.name)]));

@@ -2451,7 +2451,7 @@ fn claude_alone_does_not_mark_glm_installed() {
         "{text}"
     );
     // Nothing to install or update for it yet.
-    assert!(app.agents.next_step().is_none());
+    assert!(app.agents.next_step(false).is_none() && app.agents.next_step(true).is_none());
     // A missing agent without the maker's command for this system has none either.
     let kiro = app
         .agents
@@ -2460,10 +2460,34 @@ fn claude_alone_does_not_mark_glm_installed() {
         .position(|s| s.entry.id == "kiro")
         .unwrap();
     app.agents.select(kiro);
-    assert!(app.agents.next_step().is_none());
+    assert!(app.agents.next_step(false).is_none() && app.agents.next_step(true).is_none());
     let text = screen_of_width(&mut app, 160);
     assert!(
         text.contains("How to install: see https://kiro.dev"),
         "{text}"
     );
+}
+
+#[test]
+fn an_installed_agent_is_removed_after_confirming() {
+    let env = Env::new();
+    let mut app = agents_app(&env);
+    // Claude Code is installed: «Remove» deletes its program file.
+    app.agents.select(0);
+    let text = screen_of_width(&mut app, 160);
+    assert!(text.contains(" Remove "), "{text}");
+    key(&mut app, KeyCode::Delete);
+    let text = screen_of_width(&mut app, 160);
+    assert!(text.contains("Remove Claude Code?"), "{text}");
+    assert!(text.contains("saved logins stay"), "{text}");
+    let (_, form) = app.form.as_ref().unwrap();
+    assert!(form.text.contains("/bin/claude"), "{}", form.text);
+    key(&mut app, KeyCode::Enter);
+    wait_for_agents(&mut app);
+    assert_eq!(app.agents.job.as_ref().unwrap().done, Some(Ok(())));
+    assert!(screen_of_width(&mut app, 160).contains("Claude Code removed"));
+
+    // Nothing to remove for an agent that is not installed.
+    app.agents.select(3);
+    assert!(app.agents.next_step(true).is_none());
 }

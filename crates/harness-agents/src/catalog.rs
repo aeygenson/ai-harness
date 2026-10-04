@@ -87,6 +87,12 @@ impl Entry {
     pub fn runs(&self) -> bool {
         AGENTS.contains(&self.id)
     }
+
+    /// The npm package it is installed from (`npm install -g <package>@latest`).
+    pub fn npm_package(&self) -> Option<&'static str> {
+        let rest = self.install.unix?.strip_prefix("npm install -g ")?;
+        Some(rest.strip_suffix("@latest").unwrap_or(rest))
+    }
 }
 
 const NPM_CODEX: &str = "npm install -g @openai/codex@latest";
@@ -299,6 +305,34 @@ impl Status {
         }
     }
 
+    /// How to take the agent's program off this computer: `npm uninstall`
+    /// for what npm installed, otherwise deleting the program file that was
+    /// found (Claude Code, Antigravity and Cursor install one command there).
+    /// Its settings, saved logins and data stay. `None` when it is not
+    /// installed, or lives inside another agent's program: removing Codex
+    /// for «Codex + DeepSeek» would surprise.
+    pub fn removal(&self) -> Option<String> {
+        if !self.installed() || self.entry.inside.is_some() {
+            return None;
+        }
+        let path = self.path.as_ref()?;
+        if let Some(package) = self.entry.npm_package() {
+            // Into ~/.local it went with --prefix; anywhere else npm's own place.
+            let local = harness_platform::home::home_dir()
+                .is_some_and(|home| path.starts_with(home.join(".local")));
+            let prefix = harness_platform::program::npm_user_prefix().filter(|_| local);
+            return Some(match prefix {
+                Some(prefix) => format!("npm uninstall -g --prefix \"{prefix}\" {package}"),
+                None => format!("npm uninstall -g {package}"),
+            });
+        }
+        let path = path.to_string_lossy();
+        Some(harness_platform::program::on_this_system(
+            format!("rm -f '{}'", path.replace('\'', "'\\''")),
+            format!("Remove-Item -LiteralPath '{}'", path.replace('\'', "''")),
+        ))
+    }
+
     /// Installed, but older than the harness was checked with.
     pub fn old(&self) -> bool {
         match (self.version.as_deref(), self.entry.min_version) {
@@ -312,6 +346,7 @@ impl Status {
 pub enum Action {
     Install,
     Update,
+    Remove,
 }
 
 /// Runs a maker's install or update `command` in the system's shell, with
@@ -622,6 +657,39 @@ mod tests {
         };
         assert!(found.installed());
         assert_eq!(found.action().unwrap().0, Action::Update);
+    }
+
+    #[test]
+    fn removing_takes_away_only_the_program() {
+        let entry = |id: &str| *CATALOG.iter().find(|e| e.id == id).unwrap();
+        let status = |id: &str, path: &str| Status {
+            entry: entry(id),
+            path: Some(PathBuf::from(path)),
+            version: None,
+            problem: None,
+            login: Some(true),
+        };
+        assert_eq!(entry("opencode").npm_package(), Some("opencode-ai"));
+        assert_eq!(entry("claude").npm_package(), None);
+        // A program file is deleted, quoted for the shell.
+        let claude = status("claude", "/home/x/it's/claude").removal().unwrap();
+        if cfg!(windows) {
+            assert_eq!(claude, "Remove-Item -LiteralPath '/home/x/it''s/claude'");
+        } else {
+            assert_eq!(claude, "rm -f '/home/x/it'\\''s/claude'");
+        }
+        // What npm installed in its own place, npm takes away.
+        assert_eq!(
+            status("opencode", "/usr/bin/opencode").removal().unwrap(),
+            "npm uninstall -g opencode-ai"
+        );
+        // Not for an agent inside another one, nor for one not installed.
+        assert_eq!(status("codex+deepseek", "/usr/bin/codex").removal(), None);
+        let missing = Status {
+            path: None,
+            ..status("claude", "/x")
+        };
+        assert_eq!(missing.removal(), None);
     }
 
     #[test]
