@@ -326,7 +326,7 @@ dependencies = [
 
 [[package]]
 name = "harness-agents"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "getrandom",
  "harness-core",
@@ -339,7 +339,7 @@ dependencies = [
 
 [[package]]
 name = "harness-cli"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -355,7 +355,7 @@ dependencies = [
 
 [[package]]
 name = "harness-core"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "harness-platform",
  "serde",
@@ -369,14 +369,14 @@ dependencies = [
 
 [[package]]
 name = "harness-platform"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "tempfile",
 ]
 
 [[package]]
 name = "harness-tui"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "harness-agents",
