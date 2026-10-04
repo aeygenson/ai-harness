@@ -55,3 +55,23 @@ jobs:
           [System.Management.Automation.Language.Parser]::ParseFile(
             (Resolve-Path install/install.ps1), [ref]$null, [ref]$errors) | Out-Null
           if ($errors) { $errors | ForEach-Object { Write-Host $_ }; exit 1 }
+
+  # The Agents tab's real commands on each system: install an agent with
+  # the maker's command, find it, update it, remove it (see
+  # crates/harness-agents/tests/live_install.rs).
+  agents-live:
+    name: agents ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install, update and remove OpenCode and Claude Code
+        run: cargo test -p harness-agents --test live_install -- --ignored --nocapture --test-threads=1
