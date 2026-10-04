@@ -12,6 +12,13 @@ set -u
 
 # Started from the desktop, the shell may not know where cargo is.
 [ -f "$HOME/.cargo/env" ] && . "$HOME/.cargo/env"
+# Nor ~/.local/bin, where Claude Code and Antigravity install themselves
+# (the desktop does not read .bashrc or .profile). The roles start them.
+case ":$PATH:" in
+    *":$HOME/.local/bin:"*) ;;
+    *) PATH="$HOME/.local/bin:$PATH" ;;
+esac
+export PATH
 
 REPO="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
 PROJECT="${1:-$HOME}"
