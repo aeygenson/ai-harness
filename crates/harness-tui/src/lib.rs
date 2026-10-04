@@ -5,7 +5,7 @@
 //! ┌ Tasks ─────────────┐┌ task-001 · round 2 of 5 · done ──────────────────────────┐
 //! │> task-001  done    ││  r1 architect  approved → human    Design ready          │
 //! ...
-//!  click or 1–7 tabs · ↑↓ select · wheel scroll · … · L language · q quit
+//!  click or 1–8 tabs · ↑↓ select · wheel scroll · … · L language · q quit
 //! ```
 //!
 //! Everything works with the mouse (click, double click, wheel) and with the
@@ -46,6 +46,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Paragraph, Wrap};
 use ratatui::{DefaultTerminal, Frame, Terminal};
 
+mod agents_tab;
 mod editor;
 mod i18n;
 mod keys;
@@ -62,6 +63,7 @@ mod tasks;
 mod theme;
 mod ui;
 
+use agents_tab::{AgentChecker, AgentsTab};
 use i18n::I18n;
 use mcp_tab::McpTab;
 use picker::{Browser, Native};
@@ -88,10 +90,11 @@ enum Tab {
     Plugins,
     Retro,
     Projects,
+    Agents,
 }
 
 /// The tabs in order, with the key of the label.
-const TABS: [(Tab, &str); 7] = [
+const TABS: [(Tab, &str); 8] = [
     (Tab::Tasks, "tabs.tasks"),
     (Tab::Roles, "tabs.roles"),
     (Tab::Skills, "tabs.skills"),
@@ -99,6 +102,7 @@ const TABS: [(Tab, &str); 7] = [
     (Tab::Plugins, "tabs.plugins"),
     (Tab::Retro, "tabs.retro"),
     (Tab::Projects, "tabs.projects"),
+    (Tab::Agents, "tabs.agents"),
 ];
 
 /// What the open form is for.
@@ -194,6 +198,8 @@ enum Pick {
 pub fn run(start: &Path) -> Result<()> {
     let mut app = App::new(projects::harness_home(), start);
     app.native = true;
+    // Which agents are installed: asked once at the start, in the background.
+    app.check_agents();
     let mut terminal = ratatui::init();
     // Give the mouse back to the terminal even if the program panics.
     let hook = std::panic::take_hook();
@@ -320,6 +326,11 @@ struct App {
     /// A skill to open in the editor after this event.
     edit: Option<EditJob>,
     projects: ProjectsTab,
+    agents: AgentsTab,
+    /// Checks which agents are installed; tests give a fake one.
+    agent_checker: AgentChecker,
+    /// The answer of that check, while it runs.
+    agent_check: Option<mpsc::Receiver<Vec<harness_agents::catalog::Status>>>,
     form: Option<(Purpose, Form)>,
     /// The folder browser, when the system has no folder dialog.
     browser: Option<(Pick, Browser)>,
@@ -373,6 +384,9 @@ impl App {
             retro: None,
             edit: None,
             projects: ProjectsTab::load(home),
+            agents: AgentsTab::new(),
+            agent_checker: agents_tab::check,
+            agent_check: None,
             form: None,
             browser: None,
             native: false,
@@ -459,6 +473,29 @@ impl App {
         running
     }
 
+    /// Looks in the background which agents are installed on this computer.
+    fn check_agents(&mut self) {
+        if self.agent_check.is_some() {
+            return;
+        }
+        let (tx, rx) = mpsc::channel();
+        let checker = self.agent_checker;
+        let credentials = self.home.as_ref().map(|h| h.join("credentials"));
+        std::thread::spawn(move || {
+            let _ = tx.send(checker(credentials.as_deref()));
+        });
+        self.agents.checking = true;
+        self.agent_check = Some(rx);
+    }
+
+    /// Opens a tab. The Agents tab checks the computer the first time.
+    fn show(&mut self, tab: Tab) {
+        self.tab = tab;
+        if tab == Tab::Agents && !self.agents.known {
+            self.check_agents();
+        }
+    }
+
     /// The retrospective's agent is working.
     fn generating(&self) -> bool {
         self.retro.as_ref().is_some_and(RetroTab::is_generating)
@@ -479,6 +516,32 @@ impl App {
             match done {
                 Some(done) => self.plugin_job_done(done),
                 None => self.message = Some(("the download stopped".into(), true)),
+            }
+        }
+        let checked = self
+            .agent_check
+            .as_ref()
+            .and_then(|rx| match rx.try_recv() {
+                Ok(statuses) => Some(statuses),
+                Err(mpsc::TryRecvError::Empty) => None,
+                Err(mpsc::TryRecvError::Disconnected) => Some(Vec::new()),
+            });
+        if let Some(statuses) = checked {
+            self.agent_check = None;
+            let failed = statuses.is_empty();
+            self.agents.checked(statuses);
+            if failed {
+                self.message = Some((self.tr.t("agents.check_stopped").to_string(), true));
+            } else if self.tab == Tab::Agents {
+                let installed = self.agents.statuses.iter().filter(|s| s.installed());
+                let text = self.tr.f(
+                    "agents.checked",
+                    &[
+                        ("count", &installed.count()),
+                        ("all", &self.agents.statuses.len()),
+                    ],
+                );
+                self.message = Some((text, false));
             }
         }
         let answers = self.asking.as_ref().and_then(|rx| match rx.try_recv() {
@@ -663,9 +726,9 @@ impl App {
             KeyCode::Char('q') | KeyCode::Esc => self.quit = true,
             KeyCode::Char('L') | KeyCode::F(2) => self.press(ButtonId::Language),
             KeyCode::Char('T') | KeyCode::F(3) => self.press(ButtonId::Theme),
-            KeyCode::Char(c @ '1'..='7') => {
+            KeyCode::Char(c @ '1'..='8') => {
                 let index = usize::from(c as u8 - b'1');
-                self.tab = TABS[index].0;
+                self.show(TABS[index].0);
             }
             KeyCode::Char('r') | KeyCode::F(5) => {
                 if let Some(tasks) = &mut self.tasks {
@@ -757,6 +820,10 @@ impl App {
                         self.retro_action(action);
                     }
                 }
+                Tab::Agents => match code {
+                    KeyCode::Char('c') => self.press(ButtonId::AgentsCheck),
+                    code => self.agents.on_key(code),
+                },
                 Tab::Projects => match code {
                     KeyCode::Enter => self.press(ButtonId::UseProject),
                     KeyCode::Char('n') => self.press(ButtonId::NewProject),
@@ -806,6 +873,7 @@ impl App {
                         self.projects
                             .on_key(if down { KeyCode::Down } else { KeyCode::Up });
                     }
+                    (Tab::Agents, _) => self.agents.move_by(if down { 1 } else { -1 }),
                     (Tab::Roles, Some((ListId::Roles, _))) => {
                         if let Some(roles) = &mut self.roles {
                             let next = if down {
@@ -935,7 +1003,7 @@ impl App {
             return;
         };
         match target {
-            Target::Tab(index) => self.tab = TABS[index].0,
+            Target::Tab(index) => self.show(TABS[index].0),
             Target::Button(id) => self.press(id),
             Target::List { .. } => match Hits::row(target, row) {
                 Some((ListId::Projects, index)) => {
@@ -951,6 +1019,7 @@ impl App {
                         roles.select(index);
                     }
                 }
+                Some((ListId::Agents, index)) => self.agents.select(index),
                 Some((ListId::Skills, index)) => {
                     if let Some(skills) = &mut self.skills {
                         skills.select(index);
@@ -2221,6 +2290,7 @@ impl App {
     /// A button, clicked or chosen with its key.
     fn press(&mut self, id: ButtonId) {
         match id {
+            ButtonId::AgentsCheck => self.check_agents(),
             ButtonId::RefreshModels => self.ask_for_models(),
             ButtonId::McpRole(index) => {
                 if let Some(mcp) = &mut self.mcp {
@@ -2721,6 +2791,7 @@ impl App {
                     self.tr.t("tabs.no_open_project"),
                 ),
             },
+            Tab::Agents => self.agents.draw(frame, main, &mut self.hits, &self.tr),
             Tab::Projects => {
                 self.projects.draw(
                     frame,
@@ -2817,15 +2888,22 @@ impl App {
         // On the right: always at hand, whichever tab is open.
         let right = Rect::new(x, area.y, area.right().saturating_sub(x), 1);
         let theme_label = format!("◐ {}", self.tr.t(theme::current().name));
-        let items = [
+        let mut items = [
             (self.tr.t("tabs.new_project"), ButtonId::NewProject),
             (self.tr.label(), ButtonId::Language),
             (theme_label.as_str(), ButtonId::Theme),
         ];
-        let width: u16 = items
-            .iter()
-            .map(|(label, _)| ui::button_width(label) + 1)
-            .sum();
+        let width = |items: &[(&str, ButtonId)]| -> u16 {
+            items
+                .iter()
+                .map(|(label, _)| ui::button_width(label) + 1)
+                .sum()
+        };
+        // In a narrow window the theme button shows only its sign.
+        if width(&items) >= right.width {
+            items[2].0 = "◐";
+        }
+        let width = width(&items);
         let start = right.right().saturating_sub(width);
         if start > right.x {
             let area = Rect::new(start, area.y, width, 1);

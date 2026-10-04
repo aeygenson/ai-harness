@@ -165,7 +165,17 @@ pub(crate) fn command(program: &Path, dir: &Path) -> Command {
 
 /// Runs `command` with `input`, waits at most `TIME_LIMIT`, returns what it
 /// printed. `secrets` never appear in an error.
-pub(crate) fn run(mut command: Command, input: &str, secrets: &[&str]) -> Result<String, String> {
+pub(crate) fn run(command: Command, input: &str, secrets: &[&str]) -> Result<String, String> {
+    run_for(command, input, secrets, TIME_LIMIT)
+}
+
+/// [`run`] with its own time limit.
+pub(crate) fn run_for(
+    mut command: Command,
+    input: &str,
+    secrets: &[&str],
+    limit: Duration,
+) -> Result<String, String> {
     let program = command.get_program().to_string_lossy().into_owned();
     command
         .stdin(Stdio::piped())
@@ -201,14 +211,11 @@ pub(crate) fn run(mut command: Command, input: &str, secrets: &[&str]) -> Result
     let status = loop {
         match child.try_wait() {
             Ok(Some(status)) => break status,
-            Ok(None) if start.elapsed() < TIME_LIMIT => thread::sleep(Duration::from_millis(100)),
+            Ok(None) if start.elapsed() < limit => thread::sleep(Duration::from_millis(100)),
             Ok(None) => {
                 let _ = child.kill();
                 let _ = child.wait();
-                return Err(format!(
-                    "{program} did not answer in {} s",
-                    TIME_LIMIT.as_secs()
-                ));
+                return Err(format!("{program} did not answer in {} s", limit.as_secs()));
             }
             Err(e) => return Err(format!("{program}: {e}")),
         }

@@ -129,6 +129,9 @@ enum Command {
         #[arg(long)]
         refresh: bool,
     },
+    /// Which agents of the catalog are installed here, their versions and
+    /// logins, and how to install or update them.
+    Agents,
     /// Used by Codex: start an MCP server from its private settings file.
     #[command(name = "mcp-exec", hide = true)]
     McpExec { file: PathBuf },
@@ -343,6 +346,10 @@ async fn main() -> Result<()> {
             None => retro(project, args.task_id.as_deref(), args.suggest).await,
         },
         Command::Models { refresh } => models(refresh),
+        Command::Agents => {
+            agents();
+            Ok(())
+        }
         Command::Tui => {
             // Inside a project it opens that project, anywhere else the last one.
             let start =
@@ -444,6 +451,55 @@ fn models(refresh: bool) -> Result<()> {
         println!("No model lists yet: run `harness models --refresh`.");
     }
     Ok(())
+}
+
+/// The catalog of agents with what was found on this computer.
+fn agents() {
+    use harness_agents::catalog;
+    let dir = credentials::default_dir();
+    for status in catalog::check_all(dir.as_deref()) {
+        let entry = &status.entry;
+        let mark = if status.old() {
+            "!"
+        } else if status.installed() {
+            "✓"
+        } else {
+            "○"
+        };
+        let runs = if entry.runs() { "" } else { "  (catalog only)" };
+        println!("{mark} {:<20} {}{runs}", entry.name, entry.vendor);
+        match &status.path {
+            Some(path) => {
+                let version = status.version.as_deref().unwrap_or("?");
+                println!("    {} · version {version}", path.display());
+            }
+            None => println!("    not installed"),
+        }
+        if let Some(problem) = &status.problem {
+            println!("    {problem}");
+        }
+        if let (true, Some(min)) = (status.old(), entry.min_version) {
+            println!("    older than {min}, which the harness was checked with");
+        }
+        if let Some(host) = entry.inside {
+            println!("    runs inside {host}");
+        }
+        match status.login {
+            Some(true) => println!("    login saved"),
+            Some(false) => println!("    no login: {}", credentials::login_command(entry.id)),
+            None => {}
+        }
+        println!("    plan: {}", entry.plan);
+        let (what, commands) = if status.installed() {
+            ("update", entry.update)
+        } else {
+            ("install", entry.install)
+        };
+        match commands.here() {
+            Some(command) => println!("    {what}: {command}"),
+            None => println!("    {what}: see {}", entry.site),
+        }
+    }
 }
 
 fn login(agent: &str) -> Result<()> {

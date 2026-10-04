@@ -3,6 +3,7 @@
 
 pub mod antigravity;
 pub mod build;
+pub mod catalog;
 pub mod claude;
 pub mod codex;
 pub mod credentials;

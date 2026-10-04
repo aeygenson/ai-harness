@@ -51,6 +51,8 @@ pub enum ListId {
     Retros,
     /// The proposals of the selected retrospective.
     RetroProposals,
+    /// The catalog of the Agents tab.
+    Agents,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -144,6 +146,8 @@ pub enum ButtonId {
     RetroToggle,
     /// Apply the chosen proposals.
     RetroApply,
+    /// «Check again» on the Agents tab.
+    AgentsCheck,
 }
 
 /// Where the clickable things were drawn in the last frame. Drawing fills it,

@@ -40,6 +40,16 @@ pub fn resolve(name: impl AsRef<OsStr>) -> PathBuf {
     PathBuf::from(name)
 }
 
+/// `unix` on Linux and macOS, `windows` on Windows: for things written
+/// differently per system, such as an installer command.
+pub fn on_this_system<T>(unix: T, windows: T) -> T {
+    if cfg!(windows) {
+        windows
+    } else {
+        unix
+    }
+}
+
 /// Looks for `name` in the folders of `path`, trying each extension of
 /// `exts` (`;`-separated, as in `PATHEXT`; empty on Unix).
 pub fn find_in(name: &str, path: &OsStr, exts: &OsStr) -> Option<PathBuf> {
