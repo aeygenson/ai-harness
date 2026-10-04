@@ -2347,7 +2347,7 @@ fn the_agents_tab_shows_the_catalog_with_what_is_installed() {
         "✓ Claude Code",
         "! Codex CLI",
         "○ Antigravity CLI",
-        "○ GitHub Copilot CLI  · catalog",
+        "○ GitHub Copilot CLI  · not implemented",
         "Agents installed: 3 of",
         "○ Claude Code + GLM",
         "✓ Installed: /bin/claude · version 2.1.300",
@@ -2597,4 +2597,49 @@ fn roles_offer_only_agents_ready_on_the_agents_tab() {
     assert!(text.contains("( ) codex "), "{text}");
     assert!(!text.contains("not ready"), "{text}");
     assert!(!text.contains("( ) antigravity"), "{text}");
+}
+
+#[test]
+fn an_agent_without_an_adapter_says_loudly_it_is_not_implemented() {
+    let env = Env::new();
+    let mut app = agents_app(&env);
+    let copilot = app
+        .agents
+        .statuses
+        .iter()
+        .position(|s| s.entry.id == "copilot")
+        .unwrap();
+    app.agents.select(copilot);
+    let text = screen_of_width(&mut app, 160);
+    for part in [
+        "⚠ NOT IMPLEMENTED YET",
+        "it has no adapter",
+        "ask the developer and it will be implemented",
+    ] {
+        assert!(text.contains(part), "missing {part:?} in:\n{text}");
+    }
+    // Installing it is allowed, but the confirm window says it first.
+    key(&mut app, KeyCode::Char('i'));
+    let (_, form) = app.form.as_ref().unwrap();
+    assert!(
+        form.text
+            .starts_with("Note: the harness cannot work with this agent yet"),
+        "{}",
+        form.text
+    );
+    key(&mut app, KeyCode::Esc);
+
+    // In Russian too.
+    key(&mut app, KeyCode::Char('L'));
+    let text = screen_of_width(&mut app, 160);
+    for part in [
+        "⚠ ПОКА НЕ РЕАЛИЗОВАНО",
+        "· не реализовано",
+        "обратитесь к программисту",
+    ] {
+        assert!(text.contains(part), "missing {part:?} in:\n{text}");
+    }
+    // An agent the harness runs has none of it.
+    app.agents.select(0);
+    assert!(!screen_of_width(&mut app, 160).contains("ПОКА НЕ РЕАЛИЗОВАНО"));
 }
