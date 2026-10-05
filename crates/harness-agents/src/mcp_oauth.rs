@@ -30,6 +30,7 @@ use std::process::Stdio;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use harness_core::mcp::is_allowed_url;
+use harness_core::text::safe_line;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -438,7 +439,10 @@ fn answer_browser(mut stream: TcpStream, state: &str) -> Option<Result<String, S
         Err("the browser came back with a wrong state; try again".to_string())
     } else if let Some(error) = get("error") {
         let detail = get("error_description").unwrap_or_default();
-        Err(clean(&format!("the sign-in was refused: {error} {detail}")))
+        Err(safe_line(
+            &format!("the sign-in was refused: {error} {detail}"),
+            300,
+        ))
     } else {
         get("code").ok_or_else(|| "the browser came back without a code".to_string())
     };
@@ -506,7 +510,7 @@ fn said(body: &str) -> String {
     if text.is_empty() {
         String::new()
     } else {
-        format!(" ({})", clean(&text))
+        format!(" ({})", safe_line(&text, 300))
     }
 }
 
@@ -600,10 +604,13 @@ fn http(
         }
         None => {
             let why = stderr.lines().map(str::trim).rfind(|l| !l.is_empty());
-            Err(clean(&format!(
-                "{address}: {}",
-                why.unwrap_or(&format!("no answer ({status})"))
-            )))
+            Err(safe_line(
+                &format!(
+                    "{address}: {}",
+                    why.unwrap_or(&format!("no answer ({status})"))
+                ),
+                300,
+            ))
         }
     }
 }
@@ -627,10 +634,6 @@ fn split_url(url: &str) -> (&str, &str) {
         Some(slash) => without_query.split_at(scheme_end + slash),
         None => (without_query, ""),
     }
-}
-
-fn clean(text: &str) -> String {
-    text.chars().filter(|c| !c.is_control()).take(300).collect()
 }
 
 /// `a=1&b=x%20y`, with every character outside the unreserved set encoded.

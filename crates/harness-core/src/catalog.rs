@@ -30,6 +30,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::mcp::is_simple_name;
 use crate::plugins::{CLAUDE, CODEX};
+use crate::text;
 
 /// Where each agent's catalog file is inside a catalog repository.
 pub const CATALOG_FILES: &[(&str, &str)] = &[
@@ -171,8 +172,8 @@ fn entry(
     let description = fields
         .get("description")
         .and_then(|d| d.as_str())
-        .unwrap_or("")
-        .to_string();
+        .map(text::safe)
+        .unwrap_or_default();
     let source = source(fields.get("source"));
     Some(Entry {
         name,

@@ -15,6 +15,7 @@ use std::time::{Duration, Instant};
 
 use harness_core::mcp::McpServer;
 use harness_core::mcp_tools::Tool;
+use harness_core::text::safe_line;
 use serde_json::{json, Value};
 
 use crate::process::base_command;
@@ -82,7 +83,7 @@ pub fn list_tools_within(
             .lines()
             .map(str::trim)
             .rfind(|l| !l.is_empty())
-            .map(|l| format!(" ({})", clean(l)))
+            .map(|l| format!(" ({})", safe_line(l, 200)))
             .unwrap_or_default();
         hide(format!("{}: {why}{said}", server.name))
     })
@@ -161,7 +162,7 @@ impl Session {
             }
             if let Some(error) = message.get("error") {
                 let text = error["message"].as_str().unwrap_or("an error");
-                return Err(format!("{method} failed: {}", clean(text)));
+                return Err(format!("{method} failed: {}", safe_line(text, 200)));
             }
             return Ok(message["result"].clone());
         }
@@ -203,24 +204,16 @@ pub fn parse_tools(result: &Value) -> Vec<Tool> {
             tools
                 .iter()
                 .filter_map(|tool| {
-                    let name = clean(tool["name"].as_str()?);
+                    let name = safe_line(tool["name"].as_str()?, 200);
                     let description = tool["description"]
                         .as_str()
                         .and_then(|d| d.lines().map(str::trim).find(|l| !l.is_empty()))
-                        .map(clean);
+                        .map(|t| safe_line(t, 200));
                     Some(Tool { name, description })
                 })
                 .collect()
         })
         .unwrap_or_default()
-}
-
-/// The text without control characters (a terminal would act on them), and
-/// not longer than 200 characters.
-fn clean(text: &str) -> String {
-    let mut text: String = text.chars().filter(|c| !c.is_control()).take(200).collect();
-    text.truncate(text.trim_end().len());
-    text
 }
 
 #[cfg(test)]
@@ -239,7 +232,8 @@ mod tests {
         let tools = parse_tools(&result);
         assert_eq!(tools.len(), 2);
         assert_eq!(tools[0].description.as_deref(), Some("Searches."));
-        assert_eq!(tools[1].name, "bad[2J");
+        // The whole escape sequence goes, not only the ESC character.
+        assert_eq!(tools[1].name, "bad");
         assert_eq!(tools[1].description.as_deref(), Some("Second line first"));
     }
 

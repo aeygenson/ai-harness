@@ -27,3 +27,4 @@ pub mod skills;
 pub mod store;
 pub mod suggest;
 pub mod task;
+pub mod text;

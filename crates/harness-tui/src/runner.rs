@@ -17,6 +17,7 @@ use harness_core::handoff::{NextStep, Role, Verdict};
 use harness_core::orchestrator::{self, StopReason};
 use harness_core::skills::Skills;
 use harness_core::store::{next_task_id, TaskStore};
+use harness_core::text;
 
 /// Builds the agents of the project: `build_team`, or mock agents in tests.
 pub type Builder = fn(&Config, &Path) -> Result<Team, BuildError>;
@@ -260,8 +261,10 @@ fn collect_texts(value: &serde_json::Value, out: &mut Vec<String>) {
     }
 }
 
-/// At most 300 characters: the panel cuts at its width anyway.
+/// At most 300 characters (the panel cuts at its width anyway), without
+/// terminal control characters, which agents may print.
 fn shorten(text: &str) -> String {
+    let text = text::safe(text);
     let mut short: String = text.chars().take(300).collect();
     if short.len() < text.len() {
         short.push('…');
@@ -286,6 +289,10 @@ mod tests {
         assert_eq!(readable(r#"{"type":"turn.started"}"#), None);
         assert_eq!(readable("  "), None);
         assert_eq!(readable("warning: slow").unwrap(), "warning: slow");
+        // Colours and screen commands from the agent do not reach the panel.
+        assert_eq!(readable("\u{1b}[31mred\u{1b}[0m").unwrap(), "red");
+        let event = r#"{"type":"assistant","text":"done\u001b[2J"}"#;
+        assert_eq!(readable(event).unwrap(), "assistant      done");
         let long = "x".repeat(400);
         assert_eq!(readable(&long).unwrap().chars().count(), 301);
     }

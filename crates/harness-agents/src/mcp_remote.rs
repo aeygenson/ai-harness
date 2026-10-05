@@ -19,6 +19,7 @@ use std::thread;
 use std::time::Duration;
 
 use harness_core::mcp::{is_allowed_url, BRIDGE_HEADER, BRIDGE_URL};
+use harness_core::text::safe_line;
 use serde_json::{json, Value};
 
 use crate::credentials::write_private;
@@ -132,7 +133,7 @@ impl Shared {
     /// The text without the secrets of the headers and without control
     /// characters.
     fn hide(&self, text: &str) -> String {
-        let mut text: String = text.chars().filter(|c| !c.is_control()).take(300).collect();
+        let mut text = safe_line(text, 300);
         for header in &self.bridge.headers {
             let value = header.split_once(':').map_or("", |(_, v)| v.trim());
             if !value.is_empty() {

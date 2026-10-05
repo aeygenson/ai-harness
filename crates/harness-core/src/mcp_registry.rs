@@ -18,6 +18,7 @@ use serde_json::Value;
 
 use crate::config::McpConfig;
 use crate::mcp::{is_simple_name, SECRET_PREFIX};
+use crate::text::safe_line;
 
 pub const REGISTRY_URL: &str = "https://registry.modelcontextprotocol.io/v0/servers";
 
@@ -73,8 +74,13 @@ pub fn parse(answer: &str) -> Result<Vec<Entry>, String> {
 }
 
 fn entry(server: &Value) -> Option<Entry> {
-    let name = clean(server["name"].as_str()?);
-    let text = |key: &str| server[key].as_str().map(clean).filter(|t| !t.is_empty());
+    let name = safe_line(server["name"].as_str()?, 300);
+    let text = |key: &str| {
+        server[key]
+            .as_str()
+            .map(|t| safe_line(t, 300))
+            .filter(|t| !t.is_empty())
+    };
     let version = text("version").unwrap_or_default();
     let packages = server["packages"].as_array().cloned().unwrap_or_default();
     let remotes = server["remotes"].as_array().cloned().unwrap_or_default();
@@ -94,7 +100,9 @@ fn entry(server: &Value) -> Option<Entry> {
         title: text("title"),
         description: text("description"),
         version,
-        repository: server["repository"]["url"].as_str().map(clean),
+        repository: server["repository"]["url"]
+            .as_str()
+            .map(|t| safe_line(t, 300)),
         offer,
         unusable,
         name,
@@ -106,7 +114,7 @@ fn remote_offer(registry_name: &str, remote: &Value) -> Option<Offer> {
     if remote["type"].as_str()? != "streamable-http" {
         return None;
     }
-    let url = clean(remote["url"].as_str()?);
+    let url = safe_line(remote["url"].as_str()?, 300);
     if url.contains('{') || !crate::mcp::is_allowed_url(&url) {
         return None;
     }
@@ -115,17 +123,17 @@ fn remote_offer(registry_name: &str, remote: &Value) -> Option<Offer> {
     let mut variables = Vec::new();
     let mut secrets = 0;
     for header in remote["headers"].as_array().into_iter().flatten() {
-        let Some(header_name) = header["name"].as_str().map(clean) else {
+        let Some(header_name) = header["name"].as_str().map(|t| safe_line(t, 300)) else {
             continue;
         };
         let description = header["description"]
             .as_str()
-            .map(clean)
+            .map(|t| safe_line(t, 300))
             .unwrap_or_default();
         let given = header["value"]
             .as_str()
             .or_else(|| header["default"].as_str())
-            .map(clean);
+            .map(|t| safe_line(t, 300));
         let value = if header["isSecret"] == true {
             secrets += 1;
             let secret = if secrets == 1 {
@@ -169,13 +177,13 @@ fn offer(registry_name: &str, package: &Value) -> Option<Offer> {
         return None;
     }
     let kind = package["registryType"].as_str()?.to_string();
-    let identifier = clean(package["identifier"].as_str()?);
+    let identifier = safe_line(package["identifier"].as_str()?, 300);
     if identifier.is_empty() || identifier.starts_with('-') {
         return None;
     }
     let version = package["version"]
         .as_str()
-        .map(clean)
+        .map(|t| safe_line(t, 300))
         .filter(|v| !v.is_empty() && v != "latest");
     let name = local_name(registry_name);
     let runtime = arguments(&package["runtimeArguments"]);
@@ -187,12 +195,12 @@ fn offer(registry_name: &str, package: &Value) -> Option<Offer> {
         .into_iter()
         .flatten()
     {
-        let Some(var) = variable["name"].as_str().map(clean) else {
+        let Some(var) = variable["name"].as_str().map(|t| safe_line(t, 300)) else {
             continue;
         };
         let description = variable["description"]
             .as_str()
-            .map(clean)
+            .map(|t| safe_line(t, 300))
             .unwrap_or_default();
         let value = if variable["isSecret"] == true {
             secrets += 1;
@@ -203,7 +211,7 @@ fn offer(registry_name: &str, package: &Value) -> Option<Offer> {
             };
             Some(format!("{SECRET_PREFIX}{secret}"))
         } else if let Some(default) = variable["default"].as_str() {
-            Some(clean(default))
+            Some(safe_line(default, 300))
         } else if variable["isRequired"] == true {
             Some(String::new())
         } else {
@@ -272,17 +280,17 @@ fn arguments(list: &Value) -> Vec<String> {
         let value = argument["value"]
             .as_str()
             .or_else(|| argument["default"].as_str())
-            .map(clean);
+            .map(|t| safe_line(t, 300));
         let hint = || {
             let name = argument["valueHint"]
                 .as_str()
                 .or_else(|| argument["name"].as_str())
                 .unwrap_or("value");
-            format!("<{}>", clean(name.trim_start_matches('-')))
+            format!("<{}>", safe_line(name.trim_start_matches('-'), 300))
         };
         match argument["type"].as_str() {
             Some("named") => {
-                let Some(name) = argument["name"].as_str().map(clean) else {
+                let Some(name) = argument["name"].as_str().map(|t| safe_line(t, 300)) else {
                     continue;
                 };
                 if value.is_none() && argument["isRequired"] != true {
@@ -328,13 +336,6 @@ pub fn local_name(registry_name: &str) -> String {
         name = "server".into();
     }
     name
-}
-
-/// Without control characters (a terminal would act on them), at most 300
-/// characters.
-fn clean(text: &str) -> String {
-    let text: String = text.chars().filter(|c| !c.is_control()).take(300).collect();
-    text.trim().to_string()
 }
 
 #[cfg(test)]
@@ -396,7 +397,8 @@ mod tests {
         let web = &entries[3];
         assert!(web.offer.is_none());
         assert!(web.unusable.as_ref().unwrap().contains("web"));
-        assert_eq!(web.description.as_deref(), Some("Web only[2J"));
+        // The whole escape sequence goes, not only the ESC character.
+        assert_eq!(web.description.as_deref(), Some("Web only"));
 
         let files = entries[1].offer.as_ref().unwrap();
         assert_eq!(files.name, "files-server");

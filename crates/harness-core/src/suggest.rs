@@ -24,6 +24,7 @@ use crate::handoff::Role;
 use crate::proposals::{FileChange, ProposalError, ProposalsFile, SkillList};
 use crate::retro::Stats;
 use crate::skills::{SkillError, Skills, SKILLS_DIR};
+use crate::text;
 
 pub const RETRO_MD: &str = "retro.md";
 pub const PROPOSALS_JSON: &str = "proposals.json";
@@ -307,13 +308,14 @@ pub async fn suggest<A: AgentRunner>(
         let message = if outcome.usage_limit_reached {
             "the usage limit was reached".to_string()
         } else {
-            outcome.message
+            text::safe_line(&outcome.message, 500)
         };
         return failed(SuggestError::AgentFailed(message));
     }
     let Ok(retro) = fs::read_to_string(inbox.join(RETRO_MD)) else {
         return failed(SuggestError::Missing(RETRO_MD));
     };
+    let retro = text::safe(&retro);
     let Ok(json) = fs::read_to_string(inbox.join(PROPOSALS_JSON)) else {
         return failed(SuggestError::Missing(PROPOSALS_JSON));
     };
@@ -353,9 +355,14 @@ pub fn load(retro_dir: &Path) -> Result<Suggestions, SuggestError> {
         .map_err(|e| io_error(&retro_dir.join(RETRO_MD), e))?;
     let path = retro_dir.join(PROPOSALS_JSON);
     let json = fs::read_to_string(&path).map_err(|e| io_error(&path, e))?;
-    let proposals =
+    let mut proposals: ProposalsFile =
         serde_json::from_str(&json).map_err(|e| ProposalError::Format(e.to_string()))?;
-    Ok(Suggestions { retro, proposals })
+    // Saved files are cleaned on the way in, but older ones may not be.
+    proposals.make_text_safe();
+    Ok(Suggestions {
+        retro: text::safe(&retro),
+        proposals,
+    })
 }
 
 impl Applied {

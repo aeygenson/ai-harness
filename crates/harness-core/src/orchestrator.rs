@@ -21,6 +21,7 @@ use crate::prompt;
 use crate::skills::Skills;
 use crate::store::{self, StoreError, TaskStore};
 use crate::task::{Stage, TaskState, WaitReason};
+use crate::text;
 
 /// How many times one role may try before the harness gives up and asks Lisa.
 pub const ATTEMPTS_PER_ROLE: u32 = 2;
@@ -202,7 +203,7 @@ pub async fn run_with_skills<A: AgentRunner>(
                 let log = store.save_failure_log(state.round, role, &outcome.log)?;
                 problem = format!(
                     "the agent failed: {} (full log: {})",
-                    outcome.message,
+                    text::safe_line(&outcome.message, 500),
                     log.display()
                 );
                 failure_logs.push(log);
