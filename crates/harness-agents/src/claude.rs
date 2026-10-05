@@ -10,14 +10,13 @@
 //! - the role's tools and file rules are given as flags, and anything not
 //!   allowed is refused without asking (`--permission-mode dontAsk`).
 
-use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::time::Duration;
 
 use crate::credentials::Secret;
 use crate::process::{self, failed};
+use crate::role_settings::RoleSettings;
 use harness_core::agent::{AgentOutcome, AgentRunner, RoleJob};
 use harness_core::handoff::Role;
 use harness_core::mcp::McpServer;
@@ -46,57 +45,23 @@ const NO_MCP_SERVERS: &str = r#"{"mcpServers":{}}"#;
 pub struct ClaudeCode {
     program: PathBuf,
     token: Secret,
-    models: HashMap<Role, String>,
-    efforts: HashMap<Role, String>,
-    mcp: HashMap<Role, Vec<McpServer>>,
-    plugins: HashMap<Role, Vec<Plugin>>,
-    timeout: Duration,
+    /// Model, effort, MCP servers, plugins and time limit of each role.
+    settings: RoleSettings,
 }
 
 impl ClaudeCode {
-    pub fn new(token: Secret) -> Self {
+    /// Claude Code logged in with the saved `token`, running each role with its `settings`.
+    pub fn new(token: Secret, settings: RoleSettings) -> Self {
         Self {
             program: PathBuf::from("claude"),
             token,
-            models: HashMap::new(),
-            efforts: HashMap::new(),
-            mcp: HashMap::new(),
-            plugins: HashMap::new(),
-            timeout: Duration::from_secs(30 * 60),
+            settings,
         }
     }
 
     /// Which program to run instead of `claude` (tests use a fake script).
     pub fn with_program(mut self, program: impl Into<PathBuf>) -> Self {
         self.program = program.into();
-        self
-    }
-
-    pub fn with_model(mut self, role: Role, model: impl Into<String>) -> Self {
-        self.models.insert(role, model.into());
-        self
-    }
-
-    /// The reasoning effort of a role, such as "high".
-    pub fn with_effort(mut self, role: Role, effort: impl Into<String>) -> Self {
-        self.efforts.insert(role, effort.into());
-        self
-    }
-
-    pub fn with_timeout(mut self, timeout: Duration) -> Self {
-        self.timeout = timeout;
-        self
-    }
-
-    /// The MCP servers this role gets (from harness.toml).
-    pub fn with_mcp_servers(mut self, role: Role, servers: Vec<McpServer>) -> Self {
-        self.mcp.insert(role, servers);
-        self
-    }
-
-    /// The plugins this role gets (from harness.toml).
-    pub fn with_plugins(mut self, role: Role, plugins: Vec<Plugin>) -> Self {
-        self.plugins.insert(role, plugins);
         self
     }
 
@@ -109,8 +74,8 @@ impl ClaudeCode {
     /// `mcp_config` is the JSON itself or a file with it: `--mcp-config` takes both.
     fn command_with_mcp(&self, job: &RoleJob, mcp_config: &std::ffi::OsStr) -> Command {
         let config_dir = job.project_dir.join(CONFIG_DIR);
-        let plugins = self.role_plugins(job.role);
-        let rules = RoleRules::for_job(job, self.servers(job.role), plugins);
+        let plugins = self.settings.plugins(job.role);
+        let rules = RoleRules::for_job(job, self.settings.servers(job.role), plugins);
 
         let mut command = process::base_command(&self.program, &job.project_dir);
         command
@@ -138,10 +103,10 @@ impl ClaudeCode {
         if plugins.is_empty() {
             command.arg("--disable-slash-commands");
         }
-        if let Some(model) = self.models.get(&job.role) {
+        if let Some(model) = self.settings.model(job.role) {
             command.args(["--model", model]);
         }
-        if let Some(effort) = self.efforts.get(&job.role) {
+        if let Some(effort) = self.settings.effort(job.role) {
             command.args(["--effort", effort]);
         }
         if harness_platform::program::sandbox_ready() {
@@ -150,19 +115,12 @@ impl ClaudeCode {
         command
     }
 
-    fn servers(&self, role: Role) -> &[McpServer] {
-        self.mcp.get(&role).map_or(&[], Vec::as_slice)
-    }
-
-    fn role_plugins(&self, role: Role) -> &[Plugin] {
-        self.plugins.get(&role).map_or(&[], Vec::as_slice)
-    }
-
     /// The role's servers as a temporary file outside the project, readable
     /// only by Lisa. Secrets are in it, so it is not passed as an argument;
     /// the file is deleted when the returned value is dropped.
     fn write_mcp_config(&self, role: Role) -> std::io::Result<tempfile::NamedTempFile> {
         let servers: serde_json::Map<String, serde_json::Value> = self
+            .settings
             .servers(role)
             .iter()
             .map(|server| {
@@ -199,26 +157,14 @@ impl ClaudeCode {
 
     /// Hooks run only if a plugin of the role is allowed to have them.
     fn settings(&self, role: Role) -> String {
-        let hooks = self.role_plugins(role).iter().any(|p| p.allow_hooks);
+        let hooks = self.settings.plugins(role).iter().any(|p| p.allow_hooks);
         format!("{}\n", serde_json::json!({ "disableAllHooks": !hooks }))
-    }
-
-    fn header(&self, job: &RoleJob) -> String {
-        let effort = self
-            .efforts
-            .get(&job.role)
-            .map_or("default", String::as_str);
-        let model = self.models.get(&job.role).map_or("default", String::as_str);
-        format!(
-            "agent: claude, model: {model}, effort: {effort}, role: {:?}, round: {}\n",
-            job.role, job.round
-        )
     }
 }
 
 impl AgentRunner for ClaudeCode {
     async fn run(&self, job: &RoleJob) -> AgentOutcome {
-        let mut log = self.header(job);
+        let mut log = self.settings.header("claude", job);
         if !harness_platform::program::sandbox_ready() {
             log.push_str(NO_SANDBOX_NOTE);
         }
@@ -226,7 +172,7 @@ impl AgentRunner for ClaudeCode {
             return failed(log, format!("cannot prepare {CONFIG_DIR}: {e}"));
         }
 
-        let mcp_file = if self.servers(job.role).is_empty() {
+        let mcp_file = if self.settings.servers(job.role).is_empty() {
             None
         } else {
             match self.write_mcp_config(job.role) {
@@ -238,13 +184,9 @@ impl AgentRunner for ClaudeCode {
             Some(file) => self.command_with_mcp(job, file.path().as_os_str()),
             None => self.command(job),
         };
-        let secrets: Vec<&str> = self
-            .servers(job.role)
-            .iter()
-            .flat_map(|server| server.env.values().map(|v| v.expose()))
-            .chain([self.token.expose()])
-            .collect();
-        let result = process::run(command, &job.prompt, self.timeout, &secrets).await;
+        let mut secrets = self.settings.server_secrets(job.role);
+        secrets.push(self.token.expose());
+        let result = process::run(command, &job.prompt, self.settings.timeout(), &secrets).await;
         let result = process::hide_secrets(result, secrets);
         let finished = match result {
             Ok(finished) => finished,
@@ -427,6 +369,7 @@ impl FinalResult {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashMap;
 
     fn job(role: Role) -> RoleJob {
         RoleJob {
@@ -448,9 +391,12 @@ mod tests {
 
     #[test]
     fn model_and_effort_are_set_per_role() {
-        let agent = ClaudeCode::new(Secret::new("t"))
-            .with_model(Role::Tester, "opus")
-            .with_effort(Role::Tester, "max");
+        let agent = ClaudeCode::new(
+            Secret::new("t"),
+            RoleSettings::default()
+                .with_model(Role::Tester, "opus")
+                .with_effort(Role::Tester, "max"),
+        );
         let tester = args(&agent.command(&job(Role::Tester)));
         assert!(tester.windows(2).any(|w| w == ["--model", "opus"]));
         assert!(tester.windows(2).any(|w| w == ["--effort", "max"]));
@@ -465,7 +411,7 @@ mod tests {
 
     #[test]
     fn the_architect_cannot_run_commands_and_writes_only_docs() {
-        let agent = ClaudeCode::new(Secret::new("t"));
+        let agent = ClaudeCode::new(Secret::new("t"), RoleSettings::default());
         let command = agent.command(&job(Role::Architect));
 
         assert_eq!(arg_after(&command, "--tools"), "Read,Glob,Grep,Edit,Write");
@@ -478,7 +424,7 @@ mod tests {
 
     #[test]
     fn security_may_only_run_checks() {
-        let agent = ClaudeCode::new(Secret::new("t"));
+        let agent = ClaudeCode::new(Secret::new("t"), RoleSettings::default());
         let allowed = arg_after(&agent.command(&job(Role::Security)), "--allowedTools");
         assert!(allowed.contains("Bash(cargo audit:*)"));
         // Scanners of other ecosystems too, and git to read the change.
@@ -490,7 +436,7 @@ mod tests {
 
     #[test]
     fn the_tester_writes_tests_folders_and_test_files_next_to_the_code() {
-        let agent = ClaudeCode::new(Secret::new("t"));
+        let agent = ClaudeCode::new(Secret::new("t"), RoleSettings::default());
         let allowed = arg_after(&agent.command(&job(Role::Tester)), "--allowedTools");
         for rule in [
             "Edit(./tests/**)",
@@ -506,7 +452,8 @@ mod tests {
 
     #[test]
     fn no_mcp_servers_and_no_personal_settings() {
-        let command = ClaudeCode::new(Secret::new("t")).command(&job(Role::Developer));
+        let command = ClaudeCode::new(Secret::new("t"), RoleSettings::default())
+            .command(&job(Role::Developer));
         let args = args(&command);
         assert!(args.contains(&"--strict-mcp-config".to_string()));
         assert_eq!(arg_after(&command, "--mcp-config"), r#"{"mcpServers":{}}"#);
@@ -521,9 +468,12 @@ mod tests {
             path: PathBuf::from(format!("/work/app/.harness/plugins/{name}")),
             allow_hooks,
         };
-        let agent = ClaudeCode::new(Secret::new("t"))
-            .with_plugins(Role::Security, vec![plugin("review", false)])
-            .with_plugins(Role::Developer, vec![plugin("fmt", true)]);
+        let agent = ClaudeCode::new(
+            Secret::new("t"),
+            RoleSettings::default()
+                .with_plugins(Role::Security, vec![plugin("review", false)])
+                .with_plugins(Role::Developer, vec![plugin("fmt", true)]),
+        );
 
         let security = agent.command(&job(Role::Security));
         assert_eq!(
@@ -562,12 +512,22 @@ mod tests {
             args: vec!["-y".into(), "@upstash/context7-mcp".into()],
             env: BTreeMap::from([("CONTEXT7_API_KEY".into(), Secret::new("ctx-secret"))]),
         };
-        let agent =
-            ClaudeCode::new(Secret::new("t")).with_mcp_servers(Role::Developer, vec![server]);
+        let agent = ClaudeCode::new(
+            Secret::new("t"),
+            RoleSettings::default().with_mcp_servers(Role::Developer, vec![server]),
+        );
 
-        let rules = RoleRules::for_job(&job(Role::Developer), agent.servers(Role::Developer), &[]);
+        let rules = RoleRules::for_job(
+            &job(Role::Developer),
+            agent.settings.servers(Role::Developer),
+            &[],
+        );
         assert!(rules.allowed.contains(&"mcp__context7".to_string()));
-        let tester = RoleRules::for_job(&job(Role::Tester), agent.servers(Role::Tester), &[]);
+        let tester = RoleRules::for_job(
+            &job(Role::Tester),
+            agent.settings.servers(Role::Tester),
+            &[],
+        );
         assert!(!tester.allowed.iter().any(|rule| rule.starts_with("mcp__")));
 
         let file = agent.write_mcp_config(Role::Developer).unwrap();
@@ -595,7 +555,8 @@ mod tests {
 
     #[test]
     fn only_whitelisted_variables_and_the_token_reach_the_agent() {
-        let command = ClaudeCode::new(Secret::new("my-token")).command(&job(Role::Developer));
+        let command = ClaudeCode::new(Secret::new("my-token"), RoleSettings::default())
+            .command(&job(Role::Developer));
         let envs: HashMap<String, Option<String>> = command
             .get_envs()
             .map(|(k, v)| {
@@ -629,7 +590,8 @@ mod tests {
 
     #[test]
     fn the_token_is_hidden_from_the_agents_commands_where_possible() {
-        let command = ClaudeCode::new(Secret::new("t")).command(&job(Role::Developer));
+        let command = ClaudeCode::new(Secret::new("t"), RoleSettings::default())
+            .command(&job(Role::Developer));
         let hide = command
             .get_envs()
             .find(|(name, _)| *name == HIDE_TOKEN)
@@ -643,7 +605,10 @@ mod tests {
 
     #[test]
     fn the_model_is_set_per_role() {
-        let agent = ClaudeCode::new(Secret::new("t")).with_model(Role::Tester, "sonnet");
+        let agent = ClaudeCode::new(
+            Secret::new("t"),
+            RoleSettings::default().with_model(Role::Tester, "sonnet"),
+        );
         assert_eq!(
             arg_after(&agent.command(&job(Role::Tester)), "--model"),
             "sonnet"
@@ -653,7 +618,7 @@ mod tests {
 
     #[test]
     fn debug_output_hides_the_token() {
-        let agent = ClaudeCode::new(Secret::new("my-token"));
+        let agent = ClaudeCode::new(Secret::new("my-token"), RoleSettings::default());
         assert!(!format!("{agent:?}").contains("my-token"));
     }
 

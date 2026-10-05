@@ -6,7 +6,8 @@ use std::path::Path;
 
 use harness_core::mcp_registry::{parse, Entry, REGISTRY_URL};
 
-use crate::models::{command, run};
+use crate::models::run;
+use crate::process::base_command;
 
 /// At most this many servers per search.
 pub const LIMIT: usize = 30;
@@ -22,7 +23,7 @@ pub fn search_with(curl: &Path, query: &str) -> Result<Vec<Entry>, String> {
         .prefix("harness-registry-")
         .tempdir()
         .map_err(|e| format!("cannot make a temporary folder: {e}"))?;
-    let mut command = command(curl, dir.path());
+    let mut command = base_command(curl, dir.path());
     command
         .args(["-sS", "-f", "-m", "80", "--proto", "=https", "--get"])
         .args([

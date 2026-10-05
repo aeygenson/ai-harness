@@ -21,18 +21,16 @@
 //!   in headless mode, so the git check after the role is what enforces which
 //!   folders a role may change.
 
-use std::collections::HashMap;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::time::Duration;
 
 use harness_core::agent::{AgentOutcome, AgentRunner, RoleJob};
 use harness_core::handoff::Role;
-use harness_core::mcp::McpServer;
 
 use crate::process::{self, failed};
+use crate::role_settings::RoleSettings;
 
 /// Where `agy` keeps its settings, inside `HOME`.
 const SETTINGS_DIR: &str = ".gemini/antigravity-cli";
@@ -55,48 +53,22 @@ pub struct Antigravity {
     program: PathBuf,
     /// `~/.harness/credentials/antigravity`: the `HOME` Lisa logged in with.
     auth_dir: PathBuf,
-    models: HashMap<Role, String>,
-    efforts: HashMap<Role, String>,
-    mcp: HashMap<Role, Vec<McpServer>>,
-    timeout: Duration,
+    /// Model, effort, MCP servers and time limit of each role (plugins are not used).
+    settings: RoleSettings,
 }
 
 impl Antigravity {
-    pub fn new(auth_dir: impl Into<PathBuf>) -> Self {
+    /// Antigravity with the login saved in `auth_dir`, running each role with its `settings`.
+    pub fn new(auth_dir: impl Into<PathBuf>, settings: RoleSettings) -> Self {
         Self {
             program: PathBuf::from("agy"),
             auth_dir: auth_dir.into(),
-            models: HashMap::new(),
-            efforts: HashMap::new(),
-            mcp: HashMap::new(),
-            timeout: Duration::from_secs(30 * 60),
+            settings,
         }
     }
 
     pub fn with_program(mut self, program: impl Into<PathBuf>) -> Self {
         self.program = program.into();
-        self
-    }
-
-    pub fn with_model(mut self, role: Role, model: impl Into<String>) -> Self {
-        self.models.insert(role, model.into());
-        self
-    }
-
-    /// The reasoning effort of a role, such as "high".
-    pub fn with_effort(mut self, role: Role, effort: impl Into<String>) -> Self {
-        self.efforts.insert(role, effort.into());
-        self
-    }
-
-    pub fn with_timeout(mut self, timeout: Duration) -> Self {
-        self.timeout = timeout;
-        self
-    }
-
-    /// The MCP servers this role gets (from harness.toml).
-    pub fn with_mcp_servers(mut self, role: Role, servers: Vec<McpServer>) -> Self {
-        self.mcp.insert(role, servers);
         self
     }
 
@@ -118,10 +90,10 @@ impl Antigravity {
             .args(["--output-format", "stream-json"])
             .arg("--disable-slash-commands")
             .arg("--dangerously-skip-permissions");
-        if let Some(model) = self.models.get(&job.role) {
+        if let Some(model) = self.settings.model(job.role) {
             command.args(["--model", model]);
         }
-        if let Some(effort) = self.efforts.get(&job.role) {
+        if let Some(effort) = self.settings.effort(job.role) {
             command.args(["--effort", effort]);
         }
         command
@@ -155,9 +127,8 @@ impl Antigravity {
     /// `{"mcpServers": {"<name>": {"command", "args", "env"}}}`, agy's own format.
     fn mcp_config(&self, role: Role) -> String {
         let servers: serde_json::Map<String, serde_json::Value> = self
-            .mcp
-            .get(&role)
-            .map_or(&[][..], Vec::as_slice)
+            .settings
+            .servers(role)
             .iter()
             .map(|server| {
                 let env: serde_json::Map<String, serde_json::Value> = server
@@ -176,36 +147,24 @@ impl Antigravity {
             .collect();
         serde_json::json!({ "mcpServers": servers }).to_string()
     }
-
-    fn header(&self, job: &RoleJob) -> String {
-        let effort = self
-            .efforts
-            .get(&job.role)
-            .map_or("default", String::as_str);
-        let model = self.models.get(&job.role).map_or("default", String::as_str);
-        format!(
-            "agent: antigravity, model: {model}, effort: {effort}, role: {:?}, round: {}\n",
-            job.role, job.round
-        )
-    }
 }
 
 impl AgentRunner for Antigravity {
     async fn run(&self, job: &RoleJob) -> AgentOutcome {
-        let log = self.header(job);
+        let log = self.settings.header("antigravity", job);
         let home = match self.prepare_home(job.role) {
             Ok(home) => home,
             Err(e) => return failed(log, format!("cannot prepare the agent's HOME: {e}")),
         };
         // The prompt is given with `-p`; standard input stays empty.
-        let secrets: Vec<&str> = self
-            .mcp
-            .get(&job.role)
-            .into_iter()
-            .flatten()
-            .flat_map(|server| server.env.values().map(|v| v.expose()))
-            .collect();
-        let result = process::run(self.command(job, home.path()), "", self.timeout, &secrets).await;
+        let secrets = self.settings.server_secrets(job.role);
+        let result = process::run(
+            self.command(job, home.path()),
+            "",
+            self.settings.timeout(),
+            &secrets,
+        )
+        .await;
         drop(home);
         let result = process::hide_secrets(result, secrets);
         outcome(log, result)
@@ -402,6 +361,7 @@ pub(crate) fn copy_dir(from: &Path, to: &Path) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use harness_core::mcp::McpServer;
 
     fn job(role: Role) -> RoleJob {
         RoleJob {
@@ -423,7 +383,7 @@ mod tests {
 
     #[test]
     fn agy_runs_headless_with_its_own_home() {
-        let agy = Antigravity::new("/creds/antigravity");
+        let agy = Antigravity::new("/creds/antigravity", RoleSettings::default());
         let command = agy.command(&job(Role::Developer), Path::new("/tmp/home"));
         let args = args(&command);
         assert_eq!(&args[..2], ["-p", "do it"]);
@@ -438,7 +398,7 @@ mod tests {
 
     #[test]
     fn every_role_runs_commands_and_is_limited_by_deny_rules() {
-        let agy = Antigravity::new("/creds");
+        let agy = Antigravity::new("/creds", RoleSettings::default());
         let home = Path::new("/tmp/home");
         let flag = "--dangerously-skip-permissions".to_string();
         for role in [Role::Architect, Role::Developer, Role::Security] {
@@ -455,7 +415,8 @@ mod tests {
 
     #[test]
     fn no_api_keys_in_the_environment() {
-        let command = Antigravity::new("/creds").command(&job(Role::Tester), Path::new("/h"));
+        let command = Antigravity::new("/creds", RoleSettings::default())
+            .command(&job(Role::Tester), Path::new("/h"));
         for (name, _) in command.get_envs() {
             let name = name.to_string_lossy();
             assert!(
@@ -529,7 +490,7 @@ mod tests {
         )
         .unwrap();
 
-        let home = Antigravity::new(saved.path())
+        let home = Antigravity::new(saved.path(), RoleSettings::default())
             .prepare_home(Role::Architect)
             .unwrap();
         let copy = home.path().join(SETTINGS_DIR);
@@ -567,7 +528,10 @@ mod tests {
             args: vec!["-y".into(), "@upstash/context7-mcp".into()],
             env: BTreeMap::from([("CONTEXT7_API_KEY".into(), Secret::new("ctx-secret"))]),
         };
-        let agent = Antigravity::new(saved.path()).with_mcp_servers(Role::Security, vec![server]);
+        let agent = Antigravity::new(
+            saved.path(),
+            RoleSettings::default().with_mcp_servers(Role::Security, vec![server]),
+        );
 
         let read = |role| {
             let home = agent.prepare_home(role).unwrap();
