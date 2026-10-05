@@ -16,6 +16,7 @@ pub mod mcp_remote;
 pub mod mock;
 pub mod models;
 pub mod process;
+pub mod role_settings;
 pub mod team;
 
 pub use antigravity::Antigravity;

@@ -6,6 +6,7 @@ use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
+use harness_agents::role_settings::RoleSettings;
 use harness_agents::Antigravity;
 use harness_core::git::Repo;
 use harness_core::handoff::Role;
@@ -80,7 +81,7 @@ async fn a_well_behaved_agy_finishes_the_role_in_a_throwaway_home() {
         ),
     );
     std::env::set_var("GEMINI_API_KEY", "must-not-leak");
-    let agent = Antigravity::new(&s.auth_dir).with_program(script);
+    let agent = Antigravity::new(&s.auth_dir, RoleSettings::default()).with_program(script);
     let (store, mut state) = new_task(&s.repo);
 
     let stop = orchestrator::run(&s.repo, &store, &mut state, &agent)
@@ -124,7 +125,7 @@ async fn a_used_up_quota_pauses_the_task() {
         "echo 'AGY_ERROR: {\"status\":\"RESOURCE_EXHAUSTED\",\"retryable\":false}' >&2\n\
          exit 3\n",
     );
-    let agent = Antigravity::new(&s.auth_dir).with_program(script);
+    let agent = Antigravity::new(&s.auth_dir, RoleSettings::default()).with_program(script);
     let (store, mut state) = new_task(&s.repo);
 
     let stop = orchestrator::run(&s.repo, &store, &mut state, &agent)
@@ -143,7 +144,7 @@ async fn a_run_cut_short_by_a_permission_says_so() {
         "echo '{\"event\":\"result\",\"result\":{\"status\":\"SUCCESS\",\"response\":\"\",\
          \"denied_actions\":[{\"action\":\"command\",\"display_name\":\"RunCommand\"}]}}'\n",
     );
-    let agent = Antigravity::new(&s.auth_dir).with_program(script);
+    let agent = Antigravity::new(&s.auth_dir, RoleSettings::default()).with_program(script);
     let (store, mut state) = new_task(&s.repo);
 
     let stop = orchestrator::run(&s.repo, &store, &mut state, &agent)
@@ -168,7 +169,7 @@ async fn a_missing_login_is_shown_from_stderr() {
         s.scratch.path(),
         "echo 'error: authentication required' >&2\nexit 1\n",
     );
-    let agent = Antigravity::new(&s.auth_dir).with_program(script);
+    let agent = Antigravity::new(&s.auth_dir, RoleSettings::default()).with_program(script);
     let (store, mut state) = new_task(&s.repo);
 
     let stop = orchestrator::run(&s.repo, &store, &mut state, &agent)
@@ -188,7 +189,7 @@ async fn without_a_saved_login_the_role_fails_with_a_hint() {
     let s = setup();
     fs::remove_dir_all(&s.auth_dir).unwrap();
     let script = fake_agy(s.scratch.path(), "exit 0\n");
-    let agent = Antigravity::new(&s.auth_dir).with_program(script);
+    let agent = Antigravity::new(&s.auth_dir, RoleSettings::default()).with_program(script);
     let (store, mut state) = new_task(&s.repo);
 
     let stop = orchestrator::run(&s.repo, &store, &mut state, &agent)

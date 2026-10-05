@@ -23,6 +23,7 @@ use serde_json::Value;
 
 use crate::credentials::{self, Secret};
 use crate::dsh::{DEFAULT_MODEL as DEEPSEEK_DEFAULT_MODEL, KEY_ENV as DEEPSEEK_KEY_ENV};
+use crate::process::base_command;
 
 /// How long one agent may take to answer.
 const TIME_LIMIT: Duration = Duration::from_secs(90);
@@ -85,7 +86,7 @@ pub fn ask(agent: &str, credentials_dir: &Path, programs: &Programs) -> Result<M
         "claude" => {
             let token = credentials::load_token(credentials_dir, "claude")
                 .map_err(|_| "no Claude login saved".to_string())?;
-            let mut command = command(&programs.claude, tmp);
+            let mut command = base_command(&programs.claude, tmp);
             command
                 .env("CLAUDE_CONFIG_DIR", tmp.join("claude"))
                 .env("CLAUDE_CODE_OAUTH_TOKEN", token.expose())
@@ -103,7 +104,7 @@ pub fn ask(agent: &str, credentials_dir: &Path, programs: &Programs) -> Result<M
                 .map_err(|_| "no Codex login saved".to_string())?;
             credentials::write_private(&home.join("auth.json"), &auth)
                 .map_err(|e| e.to_string())?;
-            let mut command = command(&programs.codex, tmp);
+            let mut command = base_command(&programs.codex, tmp);
             command.env("CODEX_HOME", &home).args(["debug", "models"]);
             parse_codex(&run(command, "", &[])?)?
         }
@@ -120,7 +121,7 @@ pub fn ask(agent: &str, credentials_dir: &Path, programs: &Programs) -> Result<M
                 &format!("Authorization: Bearer {}\n", key.expose()),
             )
             .map_err(|e| e.to_string())?;
-            let mut command = command(&programs.curl, tmp);
+            let mut command = base_command(&programs.curl, tmp);
             command
                 .args(["-sS", "-m", "60", "-H"])
                 .arg(format!("@{}", header.display()))
@@ -131,7 +132,7 @@ pub fn ask(agent: &str, credentials_dir: &Path, programs: &Programs) -> Result<M
             let home = tmp.join("home");
             crate::antigravity::copy_dir(&credentials_dir.join("antigravity"), &home)
                 .map_err(|_| "no Antigravity login saved".to_string())?;
-            let mut command = command(&programs.agy, tmp);
+            let mut command = base_command(&programs.agy, tmp);
             harness_platform::home::set_for(&mut command, &home);
             command
                 .env("AGY_CLI_DISABLE_AUTO_UPDATE", "true")
@@ -151,16 +152,6 @@ pub fn ask(agent: &str, credentials_dir: &Path, programs: &Programs) -> Result<M
         fetched,
         models,
     })
-}
-
-/// `program` in `dir` with only the whitelisted environment.
-pub(crate) fn command(program: &Path, dir: &Path) -> Command {
-    let mut command = Command::new(harness_platform::program::resolve(program));
-    command
-        .current_dir(dir)
-        .env_clear()
-        .envs(harness_platform::env::inherited_values());
-    command
 }
 
 /// Runs `command` with `input`, waits at most `TIME_LIMIT`, returns what it

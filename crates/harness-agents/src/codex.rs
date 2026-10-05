@@ -27,20 +27,18 @@
 //! skills from GitHub) are always off, and the `skills` folder older runs left
 //! in `CODEX_HOME` is removed.
 
-use std::collections::HashMap;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::time::Duration;
 
 use harness_core::agent::{AgentOutcome, AgentRunner, RoleJob};
 use harness_core::handoff::Role;
-use harness_core::mcp::McpServer;
-use harness_core::plugins::{copy_dir, Plugin};
+use harness_core::plugins::copy_dir;
 
 use crate::launcher;
 use crate::process::{self, failed};
+use crate::role_settings::RoleSettings;
 
 /// Where the agent's own settings live inside the project (ignored by git).
 pub const CONFIG_DIR: &str = ".harness/agents/codex";
@@ -79,59 +77,25 @@ pub struct Codex {
     program: PathBuf,
     /// `~/.harness/credentials/codex`: holds the saved `auth.json`.
     auth_dir: PathBuf,
-    models: HashMap<Role, String>,
-    efforts: HashMap<Role, String>,
-    mcp: HashMap<Role, Vec<McpServer>>,
-    plugins: HashMap<Role, Vec<Plugin>>,
     /// The `harness` program, which starts MCP servers and hands over keys.
     launcher: PathBuf,
-    timeout: Duration,
+    /// Model, effort, MCP servers, plugins and time limit of each role.
+    settings: RoleSettings,
 }
 
 impl Codex {
-    pub fn new(auth_dir: impl Into<PathBuf>) -> Self {
+    /// Codex with the login saved in `auth_dir`, running each role with its `settings`.
+    pub fn new(auth_dir: impl Into<PathBuf>, settings: RoleSettings) -> Self {
         Self {
             program: PathBuf::from("codex"),
             auth_dir: auth_dir.into(),
-            models: HashMap::new(),
-            efforts: HashMap::new(),
-            mcp: HashMap::new(),
-            plugins: HashMap::new(),
             launcher: PathBuf::from("harness"),
-            timeout: Duration::from_secs(30 * 60),
+            settings,
         }
     }
 
     pub fn with_program(mut self, program: impl Into<PathBuf>) -> Self {
         self.program = program.into();
-        self
-    }
-
-    pub fn with_model(mut self, role: Role, model: impl Into<String>) -> Self {
-        self.models.insert(role, model.into());
-        self
-    }
-
-    /// The reasoning effort of a role, such as "high".
-    pub fn with_effort(mut self, role: Role, effort: impl Into<String>) -> Self {
-        self.efforts.insert(role, effort.into());
-        self
-    }
-
-    pub fn with_timeout(mut self, timeout: Duration) -> Self {
-        self.timeout = timeout;
-        self
-    }
-
-    /// The MCP servers this role gets (from harness.toml).
-    pub fn with_mcp_servers(mut self, role: Role, servers: Vec<McpServer>) -> Self {
-        self.mcp.insert(role, servers);
-        self
-    }
-
-    /// The plugins this role gets (from harness.toml).
-    pub fn with_plugins(mut self, role: Role, plugins: Vec<Plugin>) -> Self {
-        self.plugins.insert(role, plugins);
         self
     }
 
@@ -164,7 +128,7 @@ impl Codex {
                     needs_network(job.role)
                 ),
             ]);
-        let plugins = self.role_plugins(job.role);
+        let plugins = self.settings.plugins(job.role);
         let hooks = plugins.iter().any(|p| p.allow_hooks);
         for feature in DISABLED_FEATURES {
             let on = match *feature {
@@ -184,11 +148,11 @@ impl Codex {
             command.args(["-c", &format!("plugins={{{}}}", enabled.join(","))]);
         }
         self.add_mcp_servers(&mut command, job.role, secrets_dir);
-        if let Some(model) = self.models.get(&job.role) {
+        if let Some(model) = self.settings.model(job.role) {
             command.args(["--model", model]);
         }
         // A plain word (checked when harness.toml is read), so no quoting issue.
-        if let Some(effort) = self.efforts.get(&job.role) {
+        if let Some(effort) = self.settings.effort(job.role) {
             command.args(["-c", &format!("model_reasoning_effort=\"{effort}\"")]);
         }
         command.arg("-");
@@ -198,7 +162,7 @@ impl Codex {
     /// Each server as `-c mcp_servers.<name>.*` settings that start it through
     /// `harness mcp-exec <file>`; only the file knows the server's secrets.
     fn add_mcp_servers(&self, command: &mut Command, role: Role, secrets_dir: &Path) {
-        for server in self.servers(role) {
+        for server in self.settings.servers(role) {
             let key = format!("mcp_servers.{}", server.name);
             let spec = secrets_dir.join(format!("{}.json", server.name));
             let args = vec![
@@ -217,14 +181,6 @@ impl Codex {
         }
     }
 
-    fn servers(&self, role: Role) -> &[McpServer] {
-        self.mcp.get(&role).map_or(&[], Vec::as_slice)
-    }
-
-    fn role_plugins(&self, role: Role) -> &[Plugin] {
-        self.plugins.get(&role).map_or(&[], Vec::as_slice)
-    }
-
     /// Leaves in Codex's plugin cache exactly this role's plugins.
     fn put_plugins(&self, job: &RoleJob) -> io::Result<()> {
         remove_extras(job);
@@ -234,7 +190,7 @@ impl Codex {
             .join(PLUGINS_DIR)
             .join("cache")
             .join(MARKETPLACE);
-        for plugin in self.role_plugins(job.role) {
+        for plugin in self.settings.plugins(job.role) {
             copy_dir(&plugin.path, &cache.join(&plugin.name).join(PLUGIN_VERSION))?;
         }
         Ok(())
@@ -246,7 +202,7 @@ impl Codex {
         let dir = tempfile::Builder::new()
             .prefix("harness-codex-")
             .tempdir()?;
-        for server in self.servers(role) {
+        for server in self.settings.servers(role) {
             launcher::write_server(dir.path(), server)?;
         }
         Ok(dir)
@@ -278,23 +234,11 @@ impl Codex {
         }
         let _ = fs::remove_file(copy);
     }
-
-    fn header(&self, job: &RoleJob) -> String {
-        let effort = self
-            .efforts
-            .get(&job.role)
-            .map_or("default", String::as_str);
-        let model = self.models.get(&job.role).map_or("default", String::as_str);
-        format!(
-            "agent: codex, model: {model}, effort: {effort}, role: {:?}, round: {}\n",
-            job.role, job.round
-        )
-    }
 }
 
 impl AgentRunner for Codex {
     async fn run(&self, job: &RoleJob) -> AgentOutcome {
-        let mut log = self.header(job);
+        let mut log = self.settings.header("codex", job);
         let prepared = self.put_auth(job).and_then(|()| self.put_plugins(job));
         if let Err(e) = prepared {
             self.take_auth_back(job);
@@ -310,12 +254,8 @@ impl AgentRunner for Codex {
             }
         };
         let command = self.command(job, secrets.path());
-        let hidden: Vec<&str> = self
-            .servers(job.role)
-            .iter()
-            .flat_map(|server| server.env.values().map(|v| v.expose()))
-            .collect();
-        let result = process::run(command, &job.prompt, self.timeout, &hidden).await;
+        let hidden = self.settings.server_secrets(job.role);
+        let result = process::run(command, &job.prompt, self.settings.timeout(), &hidden).await;
         drop(secrets);
         self.take_auth_back(job);
         remove_extras(job);
@@ -396,6 +336,7 @@ impl TurnEnd {
 mod tests {
     use super::*;
     use crate::credentials::Secret;
+    use harness_core::plugins::Plugin;
 
     fn job(role: Role) -> RoleJob {
         RoleJob {
@@ -423,8 +364,8 @@ mod tests {
 
     #[test]
     fn codex_runs_isolated_in_the_project_sandbox() {
-        let command =
-            Codex::new("/creds/codex").command(&job(Role::Developer), Path::new("/secrets"));
+        let command = Codex::new("/creds/codex", RoleSettings::default())
+            .command(&job(Role::Developer), Path::new("/secrets"));
         let args = args(&command);
         for flag in [
             "exec",
@@ -459,9 +400,11 @@ mod tests {
             args: vec!["-y".into(), "@upstash/context7-mcp".into()],
             env: BTreeMap::from([("CONTEXT7_API_KEY".into(), Secret::new("ctx-secret"))]),
         };
-        let codex = Codex::new("/creds")
-            .with_launcher("/bin/harness")
-            .with_mcp_servers(Role::Developer, vec![server]);
+        let codex = Codex::new(
+            "/creds",
+            RoleSettings::default().with_mcp_servers(Role::Developer, vec![server]),
+        )
+        .with_launcher("/bin/harness");
         let command = codex.command(&job(Role::Developer), Path::new("/secrets"));
         let args = args(&command);
         for setting in [
@@ -504,12 +447,15 @@ mod tests {
             path: PathBuf::from(format!("/work/app/.harness/plugins/{name}")),
             allow_hooks,
         };
-        let codex = Codex::new("/creds/codex")
-            .with_plugins(Role::Security, vec![plugin("review", false)])
-            .with_plugins(
-                Role::Developer,
-                vec![plugin("fmt", true), plugin("lint", false)],
-            );
+        let codex = Codex::new(
+            "/creds/codex",
+            RoleSettings::default()
+                .with_plugins(Role::Security, vec![plugin("review", false)])
+                .with_plugins(
+                    Role::Developer,
+                    vec![plugin("fmt", true), plugin("lint", false)],
+                ),
+        );
 
         let security = args_of(&codex, Role::Security);
         assert!(security.contains(&"features.plugins=true".to_string()));
@@ -538,13 +484,16 @@ mod tests {
         fs::write(source.join(".codex-plugin/plugin.json"), "{}").unwrap();
         fs::create_dir_all(source.join("skills/audit")).unwrap();
         fs::write(source.join("skills/audit/SKILL.md"), "audit").unwrap();
-        let codex = Codex::new("/creds/codex").with_plugins(
-            Role::Security,
-            vec![Plugin {
-                name: "review".into(),
-                path: source.clone(),
-                allow_hooks: false,
-            }],
+        let codex = Codex::new(
+            "/creds/codex",
+            RoleSettings::default().with_plugins(
+                Role::Security,
+                vec![Plugin {
+                    name: "review".into(),
+                    path: source.clone(),
+                    allow_hooks: false,
+                }],
+            ),
         );
         let job = RoleJob {
             project_dir: project.path().to_path_buf(),
@@ -583,7 +532,7 @@ mod tests {
 
     #[test]
     fn only_command_running_roles_get_the_network() {
-        let codex = Codex::new("/creds/codex");
+        let codex = Codex::new("/creds/codex", RoleSettings::default());
         let architect = args(&codex.command(&job(Role::Architect), Path::new("/secrets")));
         assert!(architect.contains(&"sandbox_workspace_write.network_access=false".to_string()));
         let developer = args(&codex.command(&job(Role::Developer), Path::new("/secrets")));
@@ -592,7 +541,8 @@ mod tests {
 
     #[test]
     fn no_api_keys_in_the_environment() {
-        let command = Codex::new("/creds/codex").command(&job(Role::Tester), Path::new("/secrets"));
+        let command = Codex::new("/creds/codex", RoleSettings::default())
+            .command(&job(Role::Tester), Path::new("/secrets"));
         for (name, _) in command.get_envs() {
             let name = name.to_string_lossy();
             assert!(
@@ -604,7 +554,10 @@ mod tests {
 
     #[test]
     fn the_model_is_set_per_role() {
-        let codex = Codex::new("/creds").with_model(Role::Tester, "gpt-5-codex");
+        let codex = Codex::new(
+            "/creds",
+            RoleSettings::default().with_model(Role::Tester, "gpt-5-codex"),
+        );
         assert!(
             args(&codex.command(&job(Role::Tester), Path::new("/secrets")))
                 .contains(&"gpt-5-codex".to_string())
@@ -617,7 +570,10 @@ mod tests {
 
     #[test]
     fn the_effort_is_set_per_role() {
-        let codex = Codex::new("/creds").with_effort(Role::Tester, "xhigh");
+        let codex = Codex::new(
+            "/creds",
+            RoleSettings::default().with_effort(Role::Tester, "xhigh"),
+        );
         let tester = args(&codex.command(&job(Role::Tester), Path::new("/secrets")));
         assert!(tester.contains(&"model_reasoning_effort=\"xhigh\"".to_string()));
         let architect = args(&codex.command(&job(Role::Architect), Path::new("/secrets")));

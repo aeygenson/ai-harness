@@ -6,6 +6,7 @@ use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
+use harness_agents::role_settings::RoleSettings;
 use harness_agents::Codex;
 use harness_core::git::Repo;
 use harness_core::handoff::Role;
@@ -76,7 +77,7 @@ async fn a_well_behaved_codex_finishes_the_role_and_keeps_a_refreshed_login() {
         ),
     );
     std::env::set_var("OPENAI_API_KEY", "must-not-leak");
-    let agent = Codex::new(&s.auth_dir).with_program(script);
+    let agent = Codex::new(&s.auth_dir, RoleSettings::default()).with_program(script);
     let (store, mut state) = new_task(&s.repo);
 
     let stop = orchestrator::run(&s.repo, &store, &mut state, &agent)
@@ -118,7 +119,7 @@ async fn a_used_up_subscription_pauses_the_task() {
          echo '{\"type\":\"turn.failed\",\"error\":{\"message\":\"You have hit your usage limit.\"}}'\n\
          exit 1\n",
     );
-    let agent = Codex::new(&s.auth_dir).with_program(script);
+    let agent = Codex::new(&s.auth_dir, RoleSettings::default()).with_program(script);
     let (store, mut state) = new_task(&s.repo);
 
     let stop = orchestrator::run(&s.repo, &store, &mut state, &agent)
@@ -133,7 +134,7 @@ async fn without_a_saved_login_the_role_fails_with_a_hint() {
     let s = setup();
     fs::remove_file(s.auth_dir.join("auth.json")).unwrap();
     let script = fake_codex(s.scratch.path(), "exit 0\n");
-    let agent = Codex::new(&s.auth_dir).with_program(script);
+    let agent = Codex::new(&s.auth_dir, RoleSettings::default()).with_program(script);
     let (store, mut state) = new_task(&s.repo);
 
     let stop = orchestrator::run(&s.repo, &store, &mut state, &agent)

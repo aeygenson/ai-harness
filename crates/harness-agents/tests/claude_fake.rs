@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use harness_agents::credentials::Secret;
+use harness_agents::role_settings::RoleSettings;
 use harness_agents::ClaudeCode;
 use harness_core::git::Repo;
 use harness_core::handoff::Role;
@@ -71,7 +72,8 @@ async fn a_well_behaved_agent_finishes_the_role() {
         ),
     );
     std::env::set_var("SECRET_TEST_API_KEY", "must-not-leak");
-    let agent = ClaudeCode::new(Secret::new("tok-123")).with_program(script);
+    let agent =
+        ClaudeCode::new(Secret::new("tok-123"), RoleSettings::default()).with_program(script);
     let (store, mut state) = new_task(&s.repo);
 
     let stop = orchestrator::run(&s.repo, &store, &mut state, &agent)
@@ -109,7 +111,7 @@ async fn a_used_up_subscription_pauses_the_task() {
          echo '{\"type\":\"result\",\"is_error\":true,\"result\":\"Claude AI usage limit reached\"}'\n\
          exit 1\n",
     );
-    let agent = ClaudeCode::new(Secret::new("t")).with_program(script);
+    let agent = ClaudeCode::new(Secret::new("t"), RoleSettings::default()).with_program(script);
     let (store, mut state) = new_task(&s.repo);
 
     let stop = orchestrator::run(&s.repo, &store, &mut state, &agent)
@@ -123,9 +125,11 @@ async fn a_used_up_subscription_pauses_the_task() {
 async fn a_hanging_agent_is_stopped_by_the_time_out() {
     let s = setup();
     let script = fake_claude(s.scratch.path(), "sleep 10\n");
-    let agent = ClaudeCode::new(Secret::new("t"))
-        .with_program(script)
-        .with_timeout(Duration::from_millis(300));
+    let agent = ClaudeCode::new(
+        Secret::new("t"),
+        RoleSettings::default().with_timeout(Duration::from_millis(300)),
+    )
+    .with_program(script);
     let (store, mut state) = new_task(&s.repo);
 
     let started = std::time::Instant::now();
@@ -146,7 +150,8 @@ async fn a_hanging_agent_is_stopped_by_the_time_out() {
 #[tokio::test]
 async fn a_missing_claude_program_is_a_role_failure() {
     let s = setup();
-    let agent = ClaudeCode::new(Secret::new("t")).with_program("/no/such/claude");
+    let agent =
+        ClaudeCode::new(Secret::new("t"), RoleSettings::default()).with_program("/no/such/claude");
     let (store, mut state) = new_task(&s.repo);
 
     let stop = orchestrator::run(&s.repo, &store, &mut state, &agent)
@@ -187,9 +192,11 @@ async fn an_mcp_secret_the_agent_prints_is_hidden_in_the_log() {
         args: vec![],
         env: BTreeMap::from([("MCP_TEST_TOKEN".into(), Secret::new("mcp-secret-42"))]),
     };
-    let agent = ClaudeCode::new(Secret::new("t"))
-        .with_program(script)
-        .with_mcp_servers(Role::Architect, vec![server]);
+    let agent = ClaudeCode::new(
+        Secret::new("t"),
+        RoleSettings::default().with_mcp_servers(Role::Architect, vec![server]),
+    )
+    .with_program(script);
     let (store, mut state) = new_task(&s.repo);
 
     orchestrator::run(&s.repo, &store, &mut state, &agent)

@@ -19,20 +19,18 @@
 //!   goes on. As with Codex, the git check after the role is what enforces
 //!   which folders a role may change.
 
-use std::collections::HashMap;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::time::Duration;
 
 use harness_core::agent::{AgentOutcome, AgentRunner, RoleJob};
 use harness_core::handoff::Role;
-use harness_core::mcp::McpServer;
 use serde_json::{json, Value};
 
 use crate::credentials::Secret;
 use crate::process::{self, failed};
+use crate::role_settings::RoleSettings;
 
 /// The variable in Lisa's shell that may hold the DeepSeek API key; it wins
 /// over the saved one. dsh's own name for the key too.
@@ -55,48 +53,22 @@ const PROVIDER: &str = "deepseek-official";
 pub struct Dsh {
     program: PathBuf,
     key: Secret,
-    models: HashMap<Role, String>,
-    efforts: HashMap<Role, String>,
-    mcp: HashMap<Role, Vec<McpServer>>,
-    timeout: Duration,
+    /// Model, effort, MCP servers and time limit of each role (plugins are not used).
+    settings: RoleSettings,
 }
 
 impl Dsh {
-    pub fn new(key: Secret) -> Self {
+    /// dsh with the DeepSeek `key`, running each role with its `settings`.
+    pub fn new(key: Secret, settings: RoleSettings) -> Self {
         Self {
             program: PathBuf::from("dsh"),
             key,
-            models: HashMap::new(),
-            efforts: HashMap::new(),
-            mcp: HashMap::new(),
-            timeout: Duration::from_secs(30 * 60),
+            settings,
         }
     }
 
     pub fn with_program(mut self, program: impl Into<PathBuf>) -> Self {
         self.program = program.into();
-        self
-    }
-
-    pub fn with_model(mut self, role: Role, model: impl Into<String>) -> Self {
-        self.models.insert(role, model.into());
-        self
-    }
-
-    /// The reasoning effort of a role: "off", "low", "high" or "max".
-    pub fn with_effort(mut self, role: Role, effort: impl Into<String>) -> Self {
-        self.efforts.insert(role, effort.into());
-        self
-    }
-
-    pub fn with_timeout(mut self, timeout: Duration) -> Self {
-        self.timeout = timeout;
-        self
-    }
-
-    /// The MCP servers this role gets (from harness.toml).
-    pub fn with_mcp_servers(mut self, role: Role, servers: Vec<McpServer>) -> Self {
-        self.mcp.insert(role, servers);
         self
     }
 
@@ -142,11 +114,8 @@ impl Dsh {
     /// dsh's settings overlay for `role`: a list of changes to its plugins,
     /// in JSON (which dsh reads as YAML). `home` is the temporary `DSH_HOME`.
     fn patch(&self, role: Role, home: &Path) -> String {
-        let model = self.models.get(&role).map_or(DEFAULT_MODEL, String::as_str);
-        let effort = self
-            .efforts
-            .get(&role)
-            .map_or(DEFAULT_EFFORT, String::as_str);
+        let model = self.settings.model(role).unwrap_or(DEFAULT_MODEL);
+        let effort = self.settings.effort(role).unwrap_or(DEFAULT_EFFORT);
         let mut patch = vec![
             json!({
                 "id": "agent-default-model",
@@ -165,9 +134,8 @@ impl Dsh {
             }),
         ];
         let servers: Vec<Value> = self
-            .mcp
-            .get(&role)
-            .map_or(&[][..], Vec::as_slice)
+            .settings
+            .servers(role)
             .iter()
             .map(|server| {
                 let env: serde_json::Map<String, Value> = server
@@ -193,39 +161,21 @@ impl Dsh {
         }
         serde_json::to_string_pretty(&patch).expect("the patch is plain JSON")
     }
-
-    fn header(&self, job: &RoleJob) -> String {
-        let model = self.models.get(&job.role).map_or("default", String::as_str);
-        let effort = self
-            .efforts
-            .get(&job.role)
-            .map_or("default", String::as_str);
-        format!(
-            "agent: dsh, model: {model}, effort: {effort}, role: {:?}, round: {}\n",
-            job.role, job.round
-        )
-    }
 }
 
 impl AgentRunner for Dsh {
     async fn run(&self, job: &RoleJob) -> AgentOutcome {
-        let log = self.header(job);
+        let log = self.settings.header("dsh", job);
         let home = match self.prepare_home(job.role) {
             Ok(home) => home,
             Err(e) => return failed(log, format!("cannot prepare dsh's home: {e}")),
         };
-        let mut secrets: Vec<&str> = vec![self.key.expose()];
-        secrets.extend(
-            self.mcp
-                .get(&job.role)
-                .into_iter()
-                .flatten()
-                .flat_map(|server| server.env.values().map(|v| v.expose())),
-        );
+        let mut secrets = self.settings.server_secrets(job.role);
+        secrets.push(self.key.expose());
         let result = process::run(
             self.command(job, home.path()),
             &job.prompt,
-            self.timeout,
+            self.settings.timeout(),
             &secrets,
         )
         .await;
@@ -291,6 +241,7 @@ fn dsh_error(stderr: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use harness_core::mcp::McpServer;
 
     fn job(role: Role) -> RoleJob {
         RoleJob {
@@ -319,7 +270,7 @@ mod tests {
 
     #[test]
     fn dsh_runs_headless_with_its_own_home_and_the_prompt_on_stdin() {
-        let dsh = Dsh::new(Secret::new("sk-secret"));
+        let dsh = Dsh::new(Secret::new("sk-secret"), RoleSettings::default());
         let command = dsh.command(&job(Role::Developer), Path::new("/tmp/home"));
         let args = args(&command);
         assert_eq!(&args[..3], ["--profile", "headless", "--patch"]);
@@ -336,8 +287,8 @@ mod tests {
 
     #[test]
     fn the_key_is_never_in_the_environment() {
-        let command =
-            Dsh::new(Secret::new("sk-secret")).command(&job(Role::Tester), Path::new("/h"));
+        let command = Dsh::new(Secret::new("sk-secret"), RoleSettings::default())
+            .command(&job(Role::Tester), Path::new("/h"));
         for (name, value) in command.get_envs() {
             let name = name.to_string_lossy();
             assert!(
@@ -353,7 +304,7 @@ mod tests {
 
     #[test]
     fn the_home_holds_the_key_privately_and_is_deleted() {
-        let dsh = Dsh::new(Secret::new("sk-secret"));
+        let dsh = Dsh::new(Secret::new("sk-secret"), RoleSettings::default());
         let home = dsh.prepare_home(Role::Architect).unwrap();
         let credentials = home.path().join(CREDENTIALS_FILE);
         let parsed: Value =
@@ -369,9 +320,12 @@ mod tests {
 
     #[test]
     fn the_patch_sets_model_and_effort_and_stops_uploads() {
-        let dsh = Dsh::new(Secret::new("k"))
-            .with_model(Role::Developer, "deepseek-v4-pro")
-            .with_effort(Role::Developer, "max");
+        let dsh = Dsh::new(
+            Secret::new("k"),
+            RoleSettings::default()
+                .with_model(Role::Developer, "deepseek-v4-pro")
+                .with_effort(Role::Developer, "max"),
+        );
         let patch: Value =
             serde_json::from_str(&dsh.patch(Role::Developer, Path::new("/h"))).unwrap();
         let entry = |id: &str| {
@@ -418,7 +372,10 @@ mod tests {
             args: vec!["-y".into(), "@upstash/context7-mcp".into()],
             env: BTreeMap::from([("CONTEXT7_API_KEY".into(), Secret::new("ctx-secret"))]),
         };
-        let dsh = Dsh::new(Secret::new("k")).with_mcp_servers(Role::Security, vec![server]);
+        let dsh = Dsh::new(
+            Secret::new("k"),
+            RoleSettings::default().with_mcp_servers(Role::Security, vec![server]),
+        );
         let patch: Value =
             serde_json::from_str(&dsh.patch(Role::Security, Path::new("/h"))).unwrap();
         let insert = patch
@@ -479,7 +436,7 @@ mod tests {
         fs::set_permissions(&program, fs::Permissions::from_mode(0o755)).unwrap();
         let mut job = job(Role::Tester);
         job.project_dir = dir.path().to_path_buf();
-        let dsh = Dsh::new(Secret::new("k")).with_program(&program);
+        let dsh = Dsh::new(Secret::new("k"), RoleSettings::default()).with_program(&program);
         let outcome = dsh.run(&job).await;
         assert!(outcome.success, "{}", outcome.message);
         assert!(outcome.log.contains("done: do it"), "{}", outcome.log);

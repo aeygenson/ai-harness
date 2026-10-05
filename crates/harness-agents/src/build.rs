@@ -3,7 +3,7 @@
 //! and the TUI both start roles with these functions.
 
 use std::fmt;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use harness_core::config::Config;
@@ -13,6 +13,7 @@ use harness_core::plugins::{Plugin, Plugins};
 use harness_core::suggest;
 
 use crate::credentials::{self, Secret};
+use crate::role_settings::RoleSettings;
 use crate::{dsh, Antigravity, AnyAgent, ClaudeCode, Codex, Dsh, Team};
 
 /// Why an agent cannot be built, in words for Lisa: a missing login, an
@@ -100,6 +101,9 @@ pub struct AgentChoice<'a> {
     pub role: Role,
 }
 
+/// Builds the agent `choice` names, with the role's model, effort, MCP
+/// servers and plugins. Fails with a message for Lisa when the agent is
+/// unknown or its login is missing.
 pub fn build_agent(
     config: &Config,
     choice: &AgentChoice,
@@ -110,96 +114,100 @@ pub fn build_agent(
     // Codex starts MCP servers and reads keys through this same program.
     let harness = std::env::current_exe()
         .map_err(|e| problem(format!("cannot find the harness program: {e}")))?;
-    let timeout = Duration::from_secs(config.agent_timeout_minutes * 60);
-    let servers = crate::launcher::with_bridge(servers, &harness);
-    let role = choice.role;
-    let agent = match choice.agent {
-        "claude" => {
-            let token = credentials::load_token(&dir, "claude")
-                .map_err(|_| problem("no Claude token saved; sign in on the Agents tab first"))?;
-            let mut agent = ClaudeCode::new(token).with_timeout(timeout);
-            if let Some(model) = choice.model {
-                agent = agent.with_model(role, model);
-            }
-            if let Some(effort) = choice.effort {
-                agent = agent.with_effort(role, effort);
-            }
-            AnyAgent::Claude(
-                agent
-                    .with_mcp_servers(role, servers)
-                    .with_plugins(role, plugins),
-            )
-        }
+    let settings = role_settings(config, choice, &harness, servers, plugins);
+    match choice.agent {
+        "claude" => Ok(AnyAgent::Claude(ClaudeCode::new(
+            claude_token(&dir)?,
+            settings,
+        ))),
         "codex" => {
-            let auth_dir = dir.join("codex");
-            if !auth_dir.join("auth.json").exists() {
-                return Err(problem(
-                    "no Codex login saved; sign in on the Agents tab first",
-                ));
-            }
-            let mut agent = Codex::new(auth_dir).with_timeout(timeout);
-            if let Some(model) = choice.model {
-                agent = agent.with_model(role, model);
-            }
-            if let Some(effort) = choice.effort {
-                agent = agent.with_effort(role, effort);
-            }
-            AnyAgent::Codex(
-                agent
-                    .with_launcher(&harness)
-                    .with_mcp_servers(role, servers)
-                    .with_plugins(role, plugins),
-            )
+            let codex = Codex::new(codex_login(&dir)?, settings).with_launcher(&harness);
+            Ok(AnyAgent::Codex(codex))
         }
-        "codex+deepseek" => {
-            return Err(problem(format!(
-                "{} uses agent \"codex+deepseek\", which was removed; use \"dsh\" \
-                 (DeepSeek Harness, with the same DeepSeek key)",
-                choice.who
-            )))
-        }
-        "antigravity" => {
-            let auth_dir = dir.join("antigravity");
-            if !auth_dir.join(".gemini/antigravity-cli").is_dir() {
-                return Err(problem(
-                    "no Antigravity login saved; sign in on the Agents tab first",
-                ));
-            }
-            let mut agent = Antigravity::new(auth_dir).with_timeout(timeout);
-            if let Some(model) = choice.model {
-                agent = agent.with_model(role, model);
-            }
-            if let Some(effort) = choice.effort {
-                agent = agent.with_effort(role, effort);
-            }
-            AnyAgent::Antigravity(agent.with_mcp_servers(role, servers))
-        }
+        "codex+deepseek" => Err(problem(format!(
+            "{} uses agent \"codex+deepseek\", which was removed; use \"dsh\" \
+             (DeepSeek Harness, with the same DeepSeek key)",
+            choice.who
+        ))),
+        "antigravity" => Ok(AnyAgent::Antigravity(Antigravity::new(
+            antigravity_login(&dir)?,
+            settings,
+        ))),
         "dsh" => {
-            let key = deepseek_key(&dir)?;
-            let mut agent = Dsh::new(key).with_timeout(timeout);
-            if let Some(model) = choice.model {
-                agent = agent.with_model(role, model);
-            }
-            if let Some(effort) = choice.effort {
-                if !crate::dsh::EFFORTS.contains(&effort) {
-                    return Err(problem(format!(
-                        "{} uses dsh with effort {effort:?}; use one of {}",
-                        choice.who,
-                        crate::dsh::EFFORTS.join(", ")
-                    )));
-                }
-                agent = agent.with_effort(role, effort);
-            }
-            AnyAgent::Dsh(agent.with_mcp_servers(role, servers))
+            check_dsh_effort(choice)?;
+            Ok(AnyAgent::Dsh(Dsh::new(deepseek_key(&dir)?, settings)))
         }
-        other => {
-            return Err(problem(format!(
-                "{} uses agent {other:?}; use \"claude\", \"codex\", \"antigravity\" or \"dsh\"",
-                choice.who
-            )))
-        }
-    };
-    Ok(agent)
+        other => Err(problem(format!(
+            "{} uses agent {other:?}; use \"claude\", \"codex\", \"antigravity\" or \"dsh\"",
+            choice.who
+        ))),
+    }
+}
+
+/// The settings every agent gets: the role's model and effort from `choice`,
+/// its MCP servers (through the harness's bridge) and plugins, and the time
+/// limit from `harness.toml`.
+fn role_settings(
+    config: &Config,
+    choice: &AgentChoice,
+    harness: &Path,
+    servers: Vec<McpServer>,
+    plugins: Vec<Plugin>,
+) -> RoleSettings {
+    let role = choice.role;
+    let mut settings = RoleSettings::default()
+        .with_timeout(Duration::from_secs(config.agent_timeout_minutes * 60))
+        .with_mcp_servers(role, crate::launcher::with_bridge(servers, harness))
+        .with_plugins(role, plugins);
+    if let Some(model) = choice.model {
+        settings = settings.with_model(role, model);
+    }
+    if let Some(effort) = choice.effort {
+        settings = settings.with_effort(role, effort);
+    }
+    settings
+}
+
+/// The Claude token the Agents tab («Sign in») saved.
+fn claude_token(dir: &Path) -> Result<Secret, BuildError> {
+    credentials::load_token(dir, "claude")
+        .map_err(|_| problem("no Claude token saved; sign in on the Agents tab first"))
+}
+
+/// The folder with Codex's saved `auth.json`.
+fn codex_login(dir: &Path) -> Result<PathBuf, BuildError> {
+    let auth_dir = dir.join("codex");
+    if auth_dir.join("auth.json").exists() {
+        Ok(auth_dir)
+    } else {
+        Err(problem(
+            "no Codex login saved; sign in on the Agents tab first",
+        ))
+    }
+}
+
+/// The `HOME` Antigravity was logged in with.
+fn antigravity_login(dir: &Path) -> Result<PathBuf, BuildError> {
+    let auth_dir = dir.join("antigravity");
+    if auth_dir.join(".gemini/antigravity-cli").is_dir() {
+        Ok(auth_dir)
+    } else {
+        Err(problem(
+            "no Antigravity login saved; sign in on the Agents tab first",
+        ))
+    }
+}
+
+/// dsh knows only a few effort words; anything else is refused before it runs.
+fn check_dsh_effort(choice: &AgentChoice) -> Result<(), BuildError> {
+    match choice.effort {
+        Some(effort) if !dsh::EFFORTS.contains(&effort) => Err(problem(format!(
+            "{} uses dsh with effort {effort:?}; use one of {}",
+            choice.who,
+            dsh::EFFORTS.join(", ")
+        ))),
+        _ => Ok(()),
+    }
 }
 
 /// The DeepSeek API key: one in the shell wins; otherwise the one the Agents
