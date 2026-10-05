@@ -1,6 +1,7 @@
 use std::fs;
 
 use super::*;
+use crate::ui::ButtonId;
 use harness_core::git::Repo;
 use harness_core::handoff::{Handoff, Issue, NextStep, Role, Severity, Verdict};
 use harness_core::models;
