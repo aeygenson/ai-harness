@@ -149,6 +149,35 @@ impl Repo {
         }
     }
 
+    /// The repository's own settings file (`.git/config`) as it is now; empty if missing.
+    ///
+    /// The harness reads it before and after each role: an agent with a shell
+    /// could add a setting there that makes git run a command of its choice
+    /// (`core.fsmonitor`, a `filter` driver) the next time anyone runs git.
+    pub fn local_config(&self) -> Result<Vec<u8>, GitError> {
+        let path = self.local_config_path()?;
+        match fs::read(&path) {
+            Ok(bytes) => Ok(bytes),
+            // A deleted file is a change too; it differs from what was read before.
+            Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(Vec::new()),
+            Err(source) => Err(GitError::Io { path, source }),
+        }
+    }
+
+    /// Puts back the settings file that [`Repo::local_config`] read earlier.
+    pub fn restore_local_config(&self, bytes: &[u8]) -> Result<(), GitError> {
+        let path = self.local_config_path()?;
+        fs::write(&path, bytes).map_err(|source| GitError::Io { path, source })
+    }
+
+    /// Where `.git/config` is. Git says so itself, because `.git` can also be a
+    /// file pointing elsewhere (a worktree or a submodule).
+    fn local_config_path(&self) -> Result<PathBuf, GitError> {
+        let path = self.git(&["rev-parse", "--git-path", "config"])?;
+        // A relative answer is relative to the project; `join` keeps an absolute one as it is.
+        Ok(self.root.join(path.trim()))
+    }
+
     /// Writes `.harness/.gitignore` if it is missing or different, and commits it.
     pub fn ensure_harness_ignores(&self) -> Result<(), GitError> {
         let dir = self.root.join(HARNESS_DIR);
@@ -279,6 +308,8 @@ impl Repo {
             // Never run hooks: an agent could have written one to run its own code
             // outside its sandbox when the harness commits.
             .args(["-c", "core.hooksPath=/dev/null"])
+            // The same for the file-watcher command `git status` would start.
+            .args(["-c", "core.fsmonitor=false"])
             .args(args);
         if literal_paths {
             command.env("GIT_LITERAL_PATHSPECS", "1");
@@ -334,6 +365,7 @@ fn outside_git(dir: &Path, args: &[&str]) -> Result<String, GitError> {
         .current_dir(dir)
         .env("GIT_TERMINAL_PROMPT", "0")
         .args(["-c", "core.hooksPath=/dev/null"])
+        .args(["-c", "core.fsmonitor=false"])
         .args(["-c", "advice.detachedHead=false"])
         .args(["-c", "core.autocrlf=false"])
         .args(args)
@@ -352,6 +384,35 @@ fn outside_git(dir: &Path, args: &[&str]) -> Result<String, GitError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_file_watcher_an_agent_set_up_is_never_started() {
+        let (dir, repo) = new_repo();
+        let ran = dir.path().join("watcher-ran.txt");
+        // The command git would run on `git status`; it would create `ran`.
+        let watcher = format!("echo ran > '{}'; false", ran.display());
+        repo.git(&["config", "core.fsmonitor", &watcher]).unwrap();
+        fs::write(dir.path().join("README.md"), "changed\n").unwrap();
+
+        let changed = repo.changed_files().unwrap();
+
+        assert_eq!(changed, ["README.md"]);
+        assert!(!ran.exists());
+    }
+
+    #[test]
+    fn the_settings_file_is_read_and_put_back() {
+        let (_dir, repo) = new_repo();
+        let before = repo.local_config().unwrap();
+        assert!(String::from_utf8_lossy(&before).contains("[core]"));
+
+        repo.git(&["config", "filter.agent.clean", "sh agent-script.sh"])
+            .unwrap();
+        assert_ne!(repo.local_config().unwrap(), before);
+
+        repo.restore_local_config(&before).unwrap();
+        assert_eq!(repo.local_config().unwrap(), before);
+    }
 
     #[test]
     fn a_file_is_read_as_it_was_at_another_files_last_change() {

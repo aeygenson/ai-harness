@@ -1381,6 +1381,13 @@ fn outcome_text(outcome: &Outcome, tr: &I18n) -> (String, bool) {
             ),
             true,
         ),
+        StopReason::GitConfigChanged(r) => (
+            tr.f(
+                "tasks.stop_git_config",
+                &[("task", task), ("role", &role(r))],
+            ),
+            true,
+        ),
     }
 }
 

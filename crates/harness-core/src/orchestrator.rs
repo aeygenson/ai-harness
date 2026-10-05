@@ -66,6 +66,10 @@ pub enum StopReason {
     },
     /// The agent made a git commit itself, which agents must never do.
     AgentCommitted(Role),
+    /// The agent changed the repository's settings (`.git/config`), where a
+    /// setting can make git run any command. The old settings are put back;
+    /// the role's other changes are left uncommitted for Lisa to look at.
+    GitConfigChanged(Role),
 }
 
 /// A real problem of the harness itself, not a mistake of an agent.
@@ -186,9 +190,15 @@ pub async fn run_with_skills<A: AgentRunner>(
         let mut failure_logs: Vec<PathBuf> = Vec::new();
         for _ in 0..ATTEMPTS_PER_ROLE {
             let head = repo.head()?;
+            let config = repo.local_config()?;
             let job = prepare_job(repo.root(), store, state, role, skills)?;
             let outcome = agent.run(&job).await;
 
+            // First of all, before git runs again with the agent's settings.
+            if repo.local_config()? != config {
+                repo.restore_local_config(&config)?;
+                return Ok(StopReason::GitConfigChanged(role));
+            }
             if repo.head()? != head {
                 return Ok(StopReason::AgentCommitted(role));
             }
@@ -327,7 +337,7 @@ pub fn record_human_decision(
         vec![]
     };
     let handoff = Handoff {
-        schema_version: 1,
+        schema_version: crate::handoff::SCHEMA_VERSION,
         task_id: state.task_id.clone(),
         round: state.round,
         role: Role::Human,

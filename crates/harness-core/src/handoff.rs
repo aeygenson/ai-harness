@@ -5,6 +5,17 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::text;
 
+/// The format version this harness reads and writes (`schema_version`).
+pub const SCHEMA_VERSION: u32 = 1;
+
+/// The longest summary or issue description, in characters. The format asks
+/// for a sentence or two; this leaves room for a few paragraphs, but stops an
+/// agent from pasting a whole log into the history and the next prompt.
+pub const MAX_TEXT_CHARS: usize = 4000;
+
+/// The longest file path, issue location or skill name, in characters.
+pub const MAX_NAME_CHARS: usize = 500;
+
 /// Who wrote a handoff: one of the four AI roles, or Lisa's own decision.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -138,6 +149,33 @@ impl Handoff {
         }
     }
 
+    /// The first text that is too long, as `(field name, limit)`; `None` if all fit.
+    pub fn too_long_field(&self) -> Option<(&'static str, usize)> {
+        let too_long = |text: &str, limit: usize| text.chars().count() > limit;
+        if too_long(&self.summary, MAX_TEXT_CHARS) {
+            return Some(("summary", MAX_TEXT_CHARS));
+        }
+        if self.skills_used.iter().any(|s| too_long(s, MAX_NAME_CHARS)) {
+            return Some(("skills_used", MAX_NAME_CHARS));
+        }
+        if self.files.iter().any(|f| too_long(&f.path, MAX_NAME_CHARS)) {
+            return Some(("files.path", MAX_NAME_CHARS));
+        }
+        for issue in &self.issues {
+            if too_long(&issue.description, MAX_TEXT_CHARS) {
+                return Some(("issues.description", MAX_TEXT_CHARS));
+            }
+            if issue
+                .location
+                .as_deref()
+                .is_some_and(|l| too_long(l, MAX_NAME_CHARS))
+            {
+                return Some(("issues.location", MAX_NAME_CHARS));
+            }
+        }
+        None
+    }
+
     /// Writes the handoff as nicely indented JSON.
     pub fn to_json(&self) -> Result<String, serde_json::Error> {
         serde_json::to_string_pretty(self)
@@ -222,6 +260,30 @@ mod tests {
     fn rejects_an_unknown_verdict() {
         let bad = TESTER_EXAMPLE.replace("\"rejected\"", "\"maybe\"");
         assert!(Handoff::from_json(&bad).is_err());
+    }
+
+    #[test]
+    fn texts_within_the_limits_pass() {
+        let handoff = Handoff::from_json(TESTER_EXAMPLE).unwrap();
+        assert_eq!(handoff.too_long_field(), None);
+    }
+
+    #[test]
+    fn the_first_text_over_its_limit_is_named() {
+        let mut handoff = Handoff::from_json(TESTER_EXAMPLE).unwrap();
+        handoff.issues[0].location = Some("x".repeat(MAX_NAME_CHARS + 1));
+        assert_eq!(
+            handoff.too_long_field(),
+            Some(("issues.location", MAX_NAME_CHARS))
+        );
+        // Letters, not bytes: a Russian summary of the full length still fits.
+        handoff.summary = "я".repeat(MAX_TEXT_CHARS);
+        assert_eq!(
+            handoff.too_long_field(),
+            Some(("issues.location", MAX_NAME_CHARS))
+        );
+        handoff.summary.push('я');
+        assert_eq!(handoff.too_long_field(), Some(("summary", MAX_TEXT_CHARS)));
     }
 
     #[test]

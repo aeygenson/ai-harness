@@ -864,6 +864,10 @@ fn explain(stop: &StopReason, task_id: &str) -> String {
         StopReason::AgentCommitted(role) => format!(
             "The {role:?} made a git commit itself. Check `git log` before running again."
         ),
+        StopReason::GitConfigChanged(role) => format!(
+            "The {role:?} changed the project's git settings (.git/config). The old settings \
+             are back; its other changes are left uncommitted for you to check."
+        ),
     }
 }
 
