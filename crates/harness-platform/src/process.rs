@@ -81,17 +81,19 @@ pub fn replace_with(command: &mut Command) -> io::Error {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::{BufRead, BufReader, Read};
     use std::time::{Duration, Instant};
 
-    /// A program that starts a long-running child of its own.
+    /// A program that starts a long-running child of its own. The child
+    /// itself prints a first line, so a test can wait until it really runs.
     fn parent_with_a_child() -> Command {
         if cfg!(windows) {
             let mut command = Command::new("cmd");
-            command.args(["/C", "ping -n 30 127.0.0.1 >NUL"]);
+            command.args(["/C", "ping -n 30 127.0.0.1"]);
             command
         } else {
             let mut command = Command::new("sh");
-            command.args(["-c", "sleep 30 & wait"]);
+            command.args(["-c", "sh -c 'echo started; sleep 30' & wait"]);
             command
         }
     }
@@ -101,11 +103,23 @@ mod tests {
         let mut command = parent_with_a_child();
         command.stdout(Stdio::piped());
         let mut child = own_group(&mut command).spawn().unwrap();
+        // Wait for the child's first line: stopping the tree before the child
+        // exists would leave nothing to test (on Windows `taskkill /T` could
+        // then miss a child started a moment later).
+        let mut out = BufReader::new(child.stdout.take().unwrap());
+        let mut first = String::new();
+        while first.trim().is_empty() {
+            first.clear();
+            assert!(
+                out.read_line(&mut first).unwrap() > 0,
+                "the child never started"
+            );
+        }
         let start = Instant::now();
         kill_tree(&mut child);
         // The child kept the pipe open; with it stopped, reading ends at once.
-        let mut out = String::new();
-        std::io::Read::read_to_string(&mut child.stdout.take().unwrap(), &mut out).unwrap();
+        let mut rest = String::new();
+        out.read_to_string(&mut rest).unwrap();
         assert!(start.elapsed() < Duration::from_secs(10));
     }
 }
