@@ -23,7 +23,7 @@ purpose. Where a rule below differs from common Rust advice, the reason is given
 
 | Crate | What lives there |
 |---|---|
-| `harness-platform` | Everything that differs between Linux, macOS and Windows. No dependencies. |
+| `harness-platform` | Everything that differs between Linux, macOS and Windows. No dependencies, except `crossterm` on Windows for typing a secret. |
 | `harness-core` | The engine: config, handoffs, routes, git, skills, MCP config, retro. No `tokio`, no UI. |
 | `harness-agents` | Adapters that start each agent; process control; MCP check/OAuth/bridge. |
 | `harness-tui` | The full-screen Ratatui interface. |

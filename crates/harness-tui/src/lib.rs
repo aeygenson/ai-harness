@@ -32,6 +32,8 @@ use harness_core::models::{self, ModelList};
 use harness_core::projects::{self, name_of};
 use harness_core::skills::{self, SKILLS_DIR};
 use harness_core::{config_edit, plugin_ops, settings};
+use harness_platform::editor;
+use harness_platform::folder_dialog::{self, Native};
 use ratatui::crossterm::cursor::Hide;
 use ratatui::crossterm::event::{
     self, DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
@@ -47,7 +49,6 @@ use ratatui::widgets::{Paragraph, Wrap};
 use ratatui::{DefaultTerminal, Frame, Terminal};
 
 mod agents_tab;
-mod editor;
 mod i18n;
 mod keys;
 mod mcp_tab;
@@ -66,7 +67,7 @@ mod ui;
 use agents_tab::{AgentChecker, AgentsTab, Installer, JobEvent};
 use i18n::I18n;
 use mcp_tab::McpTab;
-use picker::{Browser, Native};
+use picker::Browser;
 use plugins_tab::PluginsTab;
 use projects_tab::{has_config, ProjectsTab};
 use retro_tab::{RetroBuilder, RetroTab};
@@ -2868,7 +2869,7 @@ impl App {
         }
         .to_string();
         let native = if self.native {
-            picker::native_folder(&title, &self.start_dir)
+            folder_dialog::native_folder(&title, &self.start_dir)
         } else {
             Native::Unavailable
         };
@@ -3078,11 +3079,7 @@ impl App {
             "footer.hint"
         };
         // The key that lets the terminal select text while the TUI has the mouse.
-        let copy = if cfg!(target_os = "macos") {
-            "⌥/fn"
-        } else {
-            "Shift"
-        };
+        let copy = harness_platform::terminal::select_text_key();
         spans.push(Span::styled(
             format!(" {}", self.tr.f(hint, &[("copy", &copy)])),
             theme::dim(),

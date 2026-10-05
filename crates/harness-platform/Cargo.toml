@@ -3,7 +3,9 @@ name = "harness-platform"
 version = "0.2.0"
 edition = "2021"
 
-[dependencies]
+# Only for reading a secret on Windows, which has no `stty`.
+[target.'cfg(windows)'.dependencies]
+crossterm = "0.29"
 
 [dev-dependencies]
 tempfile = "3"

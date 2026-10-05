@@ -6,6 +6,7 @@
 //! group is stopped. On Windows `taskkill /T` stops the program and every
 //! process it started.
 
+use std::io;
 use std::process::{Child, Command, Stdio};
 
 /// Prepares `command` so that [`kill_tree`] can stop everything it starts.
@@ -54,6 +55,27 @@ pub fn kill_tree_of(pid: u32) {
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .status();
+}
+
+/// Turns this program into `command`, keeping its standard input and output.
+/// Returns only on an error.
+///
+/// On Linux and macOS the program is replaced (`exec`), so nothing of the
+/// harness is left running. Windows has no `exec`: there `command` runs as a
+/// child, and the harness ends with the child's exit code when it finishes.
+pub fn replace_with(command: &mut Command) -> io::Error {
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        command.exec()
+    }
+    #[cfg(not(unix))]
+    {
+        match command.status() {
+            Ok(status) => std::process::exit(status.code().unwrap_or(1)),
+            Err(e) => e,
+        }
+    }
 }
 
 #[cfg(test)]

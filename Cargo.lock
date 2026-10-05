@@ -388,7 +388,6 @@ version = "0.2.0"
 dependencies = [
  "anyhow",
  "clap",
- "crossterm",
  "harness-agents",
  "harness-core",
  "harness-platform",
@@ -416,6 +415,7 @@ dependencies = [
 name = "harness-platform"
 version = "0.2.0"
 dependencies = [
+ "crossterm",
  "tempfile",
 ]
 

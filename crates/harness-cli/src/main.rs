@@ -22,7 +22,7 @@
 //! ```
 
 use std::fs;
-use std::io::{self, BufRead, Write};
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
 mod catalogs;
@@ -598,69 +598,8 @@ fn masked(key: &str) -> String {
 fn read_hidden(prompt: &str) -> Result<Secret> {
     print!("{prompt}");
     io::stdout().flush()?;
-    let line = read_line_hidden()?;
+    let line = harness_platform::terminal::read_line_hidden()?;
     Ok(Secret::new(line.trim()))
-}
-
-/// One line from the keyboard, not shown on the screen: `stty -echo` turns
-/// the echo off while it is typed.
-#[cfg(not(windows))]
-fn read_line_hidden() -> io::Result<String> {
-    let stty = |arg: &str| {
-        std::process::Command::new("stty")
-            .arg(arg)
-            .stdin(std::process::Stdio::inherit())
-            .stderr(std::process::Stdio::null())
-            .status()
-            .is_ok_and(|s| s.success())
-    };
-    let hidden = stty("-echo");
-    let mut line = String::new();
-    let read = io::stdin().lock().read_line(&mut line);
-    if hidden {
-        stty("echo");
-        println!();
-    }
-    read.map(|_| line)
-}
-
-/// One line from the keyboard, not shown on the screen. Windows has no
-/// `stty`, so the keys are read one by one with the console's echo off.
-/// Only presses count: Windows also reports each key's release, and a
-/// pasted key would otherwise be taken twice.
-#[cfg(windows)]
-fn read_line_hidden() -> io::Result<String> {
-    use crossterm::event::{read, Event, KeyCode, KeyEventKind, KeyModifiers};
-    use std::io::IsTerminal;
-
-    if !io::stdin().is_terminal() {
-        let mut line = String::new();
-        io::stdin().lock().read_line(&mut line)?;
-        return Ok(line);
-    }
-    crossterm::terminal::enable_raw_mode()?;
-    let mut line = String::new();
-    let result = loop {
-        match read() {
-            Ok(Event::Key(key)) if key.kind == KeyEventKind::Press => match key.code {
-                KeyCode::Enter => break Ok(()),
-                KeyCode::Backspace => {
-                    line.pop();
-                }
-                KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                    break Err(io::Error::new(io::ErrorKind::Interrupted, "cancelled"));
-                }
-                KeyCode::Char(c) => line.push(c),
-                _ => {}
-            },
-            Ok(Event::Paste(text)) => line.push_str(&text),
-            Ok(_) => {}
-            Err(e) => break Err(e),
-        }
-    };
-    let _ = crossterm::terminal::disable_raw_mode();
-    println!();
-    result.map(|()| line)
 }
 
 /// Saves a secret for MCP servers in `~/.harness/credentials/secrets/<name>`,
