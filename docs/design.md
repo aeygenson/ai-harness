@@ -127,8 +127,8 @@ trait AgentRunner {
 | Роль | Менять файлы | Запускать команды |
 |------|--------------|-------------------|
 | Architect | только `docs/` | нет |
-| Developer | да | да (`cargo` и т.п.) |
-| Tester | только папки `tests/` | да |
+| Developer | да | да (сборка, тесты проекта) |
+| Tester | только папки `tests/` и файлы тестов рядом с кодом (`*_test.*`, `*.test.*`, `*.spec.*`, `*_spec.*`, `test_*`, `*Test.*`, `*Tests.*`) | да |
 | Security | нет (только читать) | да, только проверки |
 
 Точные флаги каждого агента уточним при написании адаптера.
@@ -306,8 +306,8 @@ MCP-серверы для каждой роли — раздел 5.5 (этап 6
 | Токен скрыт от команд | `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1`: Claude Code убирает токен из окружения команд, хуков и MCP-серверов, которые он запускает; на Linux команды ещё и не видят чужие процессы (`/proc`). На Linux для этого нужен bubblewrap (`bwrap`), без него Claude Code не стартует, поэтому переменная ставится, только если `bwrap` есть, а иначе в `agent.log` пишется подсказка. Установщик ставит `bubblewrap` (проверено на Claude Code 2.1.289) |
 | MCP, навыки, личные настройки | `--strict-mcp-config --mcp-config '{"mcpServers":{}}'`, `--disable-slash-commands`, `--setting-sources user` |
 | Права | `--permission-mode dontAsk`: всё, что не разрешено явно, запрещено без вопросов |
-| Инструменты роли | `--tools`: Architect без `Bash`; Security только `Bash(cargo audit/deny)` |
-| Файлы роли | `--allowedTools "Edit(./docs/**)"` и т.п., плюс папка `inbox` |
+| Инструменты роли | `--tools`: Architect без `Bash`; Security только `git diff/log/show` и сканеры уязвимостей разных экосистем (`cargo audit/deny`, `npm/pnpm/yarn audit`, `pip-audit`, `govulncheck`, `bundle audit`, `dotnet list package`, `osv-scanner`, `semgrep`, `gitleaks`) |
+| Файлы роли | `--allowedTools "Edit(./docs/**)"` и т.п., плюс папка `inbox`; правила строятся из `harness_core::permissions`, так что совпадают с проверкой git |
 | Всегда запрещено | `Bash(git commit:*)`, `Bash(git push:*)`, правка `.git/` и `.claude/` |
 | Вывод | `--output-format stream-json --verbose`, сохраняется как `agent.log` |
 
@@ -371,11 +371,11 @@ agent = "codex"
 | Что | Как |
 |-----|-----|
 | Запуск | `agy -p "<промпт>" --output-format stream-json --disable-slash-commands`, стандартный ввод пустой |
-| Окружение | то же, что у Claude: `env_clear()` и короткий список переменных, плюс `AGY_CLI_DISABLE_AUTO_UPDATE=true`. Раз `HOME` подменён, харнесс передаёт `CARGO_HOME` и `RUSTUP_HOME` на настоящие `~/.cargo` и `~/.rustup` (если Лиза не задала их сама), иначе `cargo` внутри агента не находит Rust |
+| Окружение | то же, что у Claude: `env_clear()` и короткий список переменных, плюс `AGY_CLI_DISABLE_AUTO_UPDATE=true`. Раз `HOME` подменён, харнесс направляет инструменты, которые ищут себя через `HOME`, в настоящую домашнюю папку: `CARGO_HOME`, `RUSTUP_HOME`, `GOPATH`, `PYENV_ROOT`, `NVM_DIR` (только если Лиза не задала их сама и папка есть), иначе, например, `cargo` внутри агента не находит Rust |
 | Папка настроек | своей переменной у `agy` нет, поэтому для каждой роли создаётся временный `HOME` вне проекта и удаляется после роли. Там только копия входа и наш `settings.json`: ни MCP-серверов, ни плагинов Лизы, ни истории прошлых запусков |
 | Вход | `harness login antigravity` запускает `agy` с `HOME=~/.harness/credentials/antigravity` и пустым окружением, поэтому вход ложится в файлы, а не в системное хранилище паролей. Одного файла с токеном нет, поэтому перед ролью копируется вся папка без `log`, `brain`, `conversations` и другой истории. Во время работы файлы входа не меняются, поэтому обратно ничего не копируется |
 | Права роли | `settings.json` → `permissions`. Запреты (`deny`) действуют всегда, даже с `--dangerously-skip-permissions`, и запрещённая команда просто не выполняется, работа идёт дальше. Разрешения (`allow`) без окна не работают как белый список, поэтому папки проверяет `git status` из раздела 6 |
-| Команды | Все роли запускаются с `--dangerously-skip-permissions`: без окна любая неразрешённая команда сразу заканчивает всю работу, и `handoff.json` не пишется (так остановилась Security в первом живом прогоне на `ls`). Поэтому роли ограничены только запретами: всем — `git commit`, `git push`; Architect и Security ещё `rm`, `mv`, `cp`, `git add/checkout/reset/restore/stash`, `cargo build/install/run/publish`, `curl`, `wget`. Список неполный; изменённые файлы всё равно ловит проверка git |
+| Команды | Все роли запускаются с `--dangerously-skip-permissions`: без окна любая неразрешённая команда сразу заканчивает всю работу, и `handoff.json` не пишется (так остановилась Security в первом живом прогоне на `ls`). Поэтому роли ограничены только запретами: всем — `git commit`, `git push`; Architect и Security ещё `rm`, `mv`, `cp`, `git add/checkout/reset/restore/stash`, `cargo build/install/run/publish`, `npm install/publish`, `pip install`, `go install`, `dotnet build`, `curl`, `wget`. Список неполный; изменённые файлы всё равно ловит проверка git |
 | Остановка без разрешения | если `agy` всё же остановился из-за действия, которое без окна нельзя разрешить, в `result` есть `denied_actions`; роль считается неуспешной, и в сообщении сказано, какое действие было нужно |
 | Настройки проекта | `agy` читает навыки, правила и MCP-серверы проекта из `.agents/`, поэтому эта папка добавлена в «никому нельзя» |
 | Вывод | события JSON по строкам; последнее `{"event":"result","result":{"status":"SUCCESS"}}` — успех. Ошибка модели — код выхода 3 и строка `AGY_ERROR: {...}` в stderr; её текст идёт в сообщение, `RESOURCE_EXHAUSTED` ставит задачу на паузу |
@@ -563,7 +563,9 @@ harness.toml правится библиотекой `toml_edit`: коммент
 2. Проверяет, что агент не сделал git-коммит сам. Сделал — стоп.
 3. Смотрит `git status`: роль трогала только разрешённые файлы?
    - Architect — только файлы в папках `docs`, Tester — только в папках `tests`
-     (на любой глубине, например `crates/core/tests/`), Developer — любые,
+     (на любой глубине, например `crates/core/tests/`) и файлы тестов рядом с
+     кодом по имени (`parser_test.go`, `parser.test.ts`, `test_parser.py`,
+     `ParserTest.java`), Developer — любые,
      Security — ничего.
    - Никому нельзя: `.harness/`, `.git/`, `.claude/`, `.codex/`, `.gemini/`, `.agents/`,
      `.dsh/`, `CLAUDE.md`, `AGENTS.md`, `GEMINI.md` — это файлы, которые управляют агентами.

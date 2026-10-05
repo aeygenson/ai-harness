@@ -33,7 +33,8 @@ project file except `.harness/`, agent settings and the design.
 6. Tests next to the code you change. A test must really go through the code
    it claims to test; do not "prove" behaviour with a mock that skips it.
 7. Before you finish, build the project and run its tests, formatter and
-   linter (for Rust: `cargo build`, `cargo test`, `cargo fmt --check`,
-   `cargo clippy`). Fix what fails. Give slow test suites the time they need.
+   linter, with the commands the design or the project itself names (for
+   example `npm test`, `pytest`, `go test ./...`, `cargo test`). Fix what
+   fails. Give slow test suites the time they need.
 8. In notes.md: files changed, what you ran with the results, anything not
    run, and what the tester should look at closely.

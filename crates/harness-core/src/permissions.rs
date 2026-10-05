@@ -30,23 +30,46 @@ const ALWAYS_FORBIDDEN: &[&str] = &[
     "GEMINI.md",
 ];
 
+/// Names of test files that live next to the code, which the tester may write
+/// in any folder. `*` stands for any letters. Many languages keep tests there
+/// instead of in a `tests` folder.
+pub const TEST_FILE_NAMES: &[&str] = &[
+    // Go, Python: parser_test.go
+    "*_test.*", // JavaScript, TypeScript: parser.test.ts, parser.spec.ts
+    "*.test.*", "*.spec.*", // Ruby: parser_spec.rb
+    "*_spec.*", // Python: test_parser.py
+    "test_*",   // Java, Kotlin: ParserTest.java; C#, Swift: ParserTests.cs
+    "*Test.*", "*Tests.*",
+];
+
 /// What one role may write.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WriteRule {
     /// Any file (except the always forbidden ones).
     Anything,
-    /// Only files inside a folder with one of these names, at any depth:
-    /// `tests` allows `tests/a.rs` and `crates/core/tests/a.rs`.
-    FoldersNamed(&'static [&'static str]),
+    /// Only files inside a folder with one of these names, at any depth
+    /// (`tests` allows `tests/a.rs` and `crates/core/tests/a.rs`), or files
+    /// whose own name matches one of `files` (see [`TEST_FILE_NAMES`]).
+    Only {
+        folders: &'static [&'static str],
+        files: &'static [&'static str],
+    },
     /// Read only.
     Nothing,
 }
 
+/// What `role` may write; the same rule for every agent.
 pub fn rule_for(role: Role) -> WriteRule {
     match role {
-        Role::Architect => WriteRule::FoldersNamed(&["docs"]),
+        Role::Architect => WriteRule::Only {
+            folders: &["docs"],
+            files: &[],
+        },
         Role::Developer => WriteRule::Anything,
-        Role::Tester => WriteRule::FoldersNamed(&["tests"]),
+        Role::Tester => WriteRule::Only {
+            folders: &["tests"],
+            files: TEST_FILE_NAMES,
+        },
         Role::Security => WriteRule::Nothing,
         // Lisa's decisions are written by the harness itself, never by an agent.
         Role::Human => WriteRule::Nothing,
@@ -66,11 +89,41 @@ pub fn may_write(role: Role, path: &str) -> bool {
     match rule_for(role) {
         WriteRule::Anything => true,
         WriteRule::Nothing => false,
-        // Only folder names count, not the file name: `src/docs.rs` is not in `docs`.
-        WriteRule::FoldersNamed(names) => parts
-            .split_last()
-            .is_some_and(|(_file, folders)| folders.iter().any(|f| names.contains(f))),
+        WriteRule::Only { folders, files } => {
+            let Some((file, path_folders)) = parts.split_last() else {
+                return false;
+            };
+            // For `folders` only folder names count: `src/docs.rs` is not in `docs`.
+            path_folders.iter().any(|f| folders.contains(f))
+                || files.iter().any(|pattern| name_matches(pattern, file))
+        }
     }
+}
+
+/// Does the file name `name` match `pattern`, where `*` stands for any
+/// letters, also none? `*_test.*` matches `parser_test.go`.
+pub fn name_matches(pattern: &str, name: &str) -> bool {
+    // `split('*')` cuts the pattern into the fixed pieces between the stars:
+    // `*_test.*` becomes `""`, `"_test."`, `""`.
+    let mut pieces = pattern.split('*');
+    let first = pieces.next().unwrap_or_default();
+    let Some(mut rest) = name.strip_prefix(first) else {
+        return false;
+    };
+    let pieces: Vec<&str> = pieces.collect();
+    // No star at all: the name must be exactly the pattern.
+    let Some((last, middle)) = pieces.split_last() else {
+        return rest.is_empty();
+    };
+    // Each middle piece must come in order; taking the first place it occurs
+    // leaves the most room for the pieces after it.
+    for piece in middle {
+        let Some(at) = rest.find(piece) else {
+            return false;
+        };
+        rest = &rest[at + piece.len()..];
+    }
+    rest.ends_with(last)
 }
 
 /// Is this one path part (a folder or file name) on the always forbidden list?
@@ -122,6 +175,44 @@ mod tests {
         assert!(may_write(Role::Tester, "crates/core/tests/parser.rs"));
         assert!(!may_write(Role::Tester, "src/parser.rs"));
         assert!(!may_write(Role::Tester, "tests.rs"));
+    }
+
+    #[test]
+    fn tester_writes_test_files_next_to_the_code() {
+        for path in [
+            "parser_test.go",
+            "pkg/parser_test.go",
+            "src/parser.test.ts",
+            "web/parser.spec.js",
+            "spec/parser_spec.rb",
+            "app/test_parser.py",
+            "src/main/java/ParserTest.java",
+            "Parser/ParserTests.cs",
+        ] {
+            assert!(may_write(Role::Tester, path), "{path}");
+        }
+        for path in [
+            "src/latest.go",
+            "src/contest.py",
+            "src/testing.rs",
+            "src/parser.go",
+        ] {
+            assert!(!may_write(Role::Tester, path), "{path}");
+        }
+        // The always forbidden files stay forbidden, whatever their name.
+        assert!(!may_write(Role::Tester, ".harness/test_state.json"));
+    }
+
+    #[test]
+    fn a_star_stands_for_any_letters() {
+        assert!(name_matches("*_test.*", "a_test.go"));
+        assert!(name_matches("*_test.*", "_test."));
+        assert!(!name_matches("*_test.*", "a_test"));
+        assert!(name_matches("test_*", "test_parser.py"));
+        assert!(!name_matches("test_*", "my_test_parser.py"));
+        assert!(name_matches("*.spec.*", "a.spec.spec.ts"));
+        assert!(name_matches("docs", "docs"));
+        assert!(!name_matches("docs", "docs2"));
     }
 
     #[test]

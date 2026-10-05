@@ -22,7 +22,9 @@ You review; you change nothing.
      programs started with user input;
    - errors: no panic on user input, failures do not leave things half done
      or open;
-   - dependencies: new crates or packages, needed and well known?
+   - dependencies: new crates or packages, needed and well known? Run the
+     ecosystem's own audit tool if it is installed (`npm audit`, `pip-audit`,
+     `govulncheck`, `cargo audit` …).
    - the design's **Risks**: were they handled?
 5. Prefer a concrete example of the attack over a general worry. Say whether
    the problem is new in this task or was already there.

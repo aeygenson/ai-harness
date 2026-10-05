@@ -104,10 +104,10 @@ impl Antigravity {
     /// temporary `HOME` prepared by `prepare_home`.
     pub fn command(&self, job: &RoleJob, home: &Path) -> Command {
         let mut command = process::base_command(&self.program, &job.project_dir);
-        // `rustup` and `cargo` look for Rust under `$HOME`, which is replaced
+        // Some toolchains look for themselves under `$HOME`, which is replaced
         // below, so point them at the real folders first.
         if let Some(real_home) = harness_platform::home::home_dir() {
-            for (name, path) in rust_env(&real_home) {
+            for (name, path) in toolchain_env(&real_home) {
                 command.env(name, path);
             }
         }
@@ -254,11 +254,27 @@ fn outcome(mut log: String, result: Result<process::Finished, String>) -> AgentO
     }
 }
 
-/// `CARGO_HOME` and `RUSTUP_HOME` pointing at `real_home/.cargo` and
-/// `real_home/.rustup`, for those Lisa has not set herself and that exist.
-fn rust_env(real_home: &Path) -> Vec<(&'static str, PathBuf)> {
-    [("CARGO_HOME", ".cargo"), ("RUSTUP_HOME", ".rustup")]
-        .into_iter()
+/// Toolchains installed in the user's home folder that find themselves
+/// through `$HOME` unless their variable is set: `(variable, folder in home)`.
+/// With the temporary `HOME` of a role they would look in the wrong place.
+const TOOLCHAIN_HOMES: &[(&str, &str)] = &[
+    // Rust
+    ("CARGO_HOME", ".cargo"),
+    ("RUSTUP_HOME", ".rustup"),
+    // Go: downloaded modules and installed tools
+    ("GOPATH", "go"),
+    // Python versions from pyenv
+    ("PYENV_ROOT", ".pyenv"),
+    // Node versions from nvm
+    ("NVM_DIR", ".nvm"),
+];
+
+/// The [`TOOLCHAIN_HOMES`] variables pointing at the real home folder, for
+/// those Lisa has not set herself and whose folder exists.
+fn toolchain_env(real_home: &Path) -> Vec<(&'static str, PathBuf)> {
+    TOOLCHAIN_HOMES
+        .iter()
+        .copied()
         .filter(|(name, _)| std::env::var_os(name).is_none())
         .map(|(name, folder)| (name, real_home.join(folder)))
         .filter(|(_, path)| path.is_dir())
@@ -269,9 +285,10 @@ fn rust_env(real_home: &Path) -> Vec<(&'static str, PathBuf)> {
 const DENIED_FOR_ALL: &[&str] = &["git commit", "git push"];
 
 /// Commands the roles that only look (Architect, Security) may not run: they
-/// change files, the git state or reach the network. Reading and `cargo test`
-/// stay allowed. The list cannot be complete; the git check after the role
-/// still catches any changed file.
+/// change files, the git state, install or publish packages, or reach the
+/// network. Reading, running tests and audit tools stay allowed. The list
+/// cannot be complete; the git check after the role still catches any
+/// changed file.
 const DENIED_FOR_READERS: &[&str] = &[
     "rm",
     "mv",
@@ -285,6 +302,11 @@ const DENIED_FOR_READERS: &[&str] = &[
     "cargo install",
     "cargo run",
     "cargo publish",
+    "npm install",
+    "npm publish",
+    "pip install",
+    "go install",
+    "dotnet build",
     "curl",
     "wget",
 ];
@@ -478,12 +500,16 @@ mod tests {
     }
 
     #[test]
-    fn rust_is_found_in_the_real_home() {
+    fn toolchains_are_found_in_the_real_home() {
         let real_home = tempfile::tempdir().unwrap();
         fs::create_dir(real_home.path().join(".rustup")).unwrap();
-        let env = rust_env(real_home.path());
+        fs::create_dir(real_home.path().join("go")).unwrap();
+        let env = toolchain_env(real_home.path());
         if std::env::var_os("RUSTUP_HOME").is_none() {
             assert!(env.contains(&("RUSTUP_HOME", real_home.path().join(".rustup"))));
+        }
+        if std::env::var_os("GOPATH").is_none() {
+            assert!(env.contains(&("GOPATH", real_home.path().join("go"))));
         }
         // No `.cargo` folder there, so nothing is invented.
         assert!(!env.iter().any(|(name, _)| *name == "CARGO_HOME"));

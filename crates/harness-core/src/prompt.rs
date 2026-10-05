@@ -46,9 +46,15 @@ pub fn build(
         WriteRule::Anything => {
             "You may change any project file except .harness/ and agent settings.\n".to_string()
         }
-        WriteRule::FoldersNamed(names) => format!(
+        WriteRule::Only { folders, files: [] } => format!(
             "You may change only files inside folders named {}.\n",
-            names.join(" or ")
+            folders.join(" or ")
+        ),
+        WriteRule::Only { folders, files } => format!(
+            "You may change only files inside folders named {}, and test files \
+             anywhere named like {}.\n",
+            folders.join(" or "),
+            files.join(", ")
         ),
         WriteRule::Nothing => "Do not change any project files; only read them.\n".to_string(),
     });
