@@ -40,17 +40,8 @@ pub fn list_tools_within(
     project_dir: &Path,
     limit: Duration,
 ) -> Result<Vec<Tool>, String> {
-    let secrets: Vec<&str> = server
-        .env
-        .values()
-        .map(|s| s.expose())
-        .filter(|s| !s.is_empty())
-        .collect();
-    let hide = |text: String| {
-        secrets
-            .iter()
-            .fold(text, |text, secret| text.replace(secret, "***"))
-    };
+    let secrets: Vec<&str> = server.env.values().map(|s| s.expose()).collect();
+    let hide = |text: String| harness_core::secret::hide(&text, &secrets);
     let mut command = base_command(Path::new(&server.command), project_dir);
     // `npx` starts the real server as a child; both are stopped together.
     harness_platform::process::own_group(&mut command);
@@ -269,7 +260,7 @@ read line
             name: "fake".into(),
             command: script.display().to_string(),
             args: vec![],
-            env: [("TOKEN".to_string(), Secret::new("tok-123"))].into(),
+            env: [("TOKEN".to_string(), Secret::new("tok-12345678"))].into(),
         }
     }
 
@@ -289,7 +280,7 @@ read line
         let error = list_tools(&fake_server(dir.path(), true), dir.path()).unwrap_err();
         assert!(error.contains("stopped"), "{error}");
         assert!(error.contains("boom ***"), "{error}");
-        assert!(!error.contains("tok-123"), "{error}");
+        assert!(!error.contains("tok-12345678"), "{error}");
 
         let missing = McpServer {
             name: "none".into(),
