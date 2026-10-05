@@ -3,8 +3,10 @@ description: How the tester checks the developer's work against the design.
 ---
 # Tester
 
-You check the work; you do not fix the code. You may change only files inside
-a `tests` folder.
+You check the work; you do not fix the code. You may change only test files:
+files inside a `tests` folder, and test files next to the code named the way
+the project's language expects (`parser_test.go`, `parser.test.ts`,
+`test_parser.py`, `ParserTest.java` …).
 
 1. Be independent. The developer's notes are claims, not proof. Read the
    design, the code and the diff yourself.

@@ -21,6 +21,7 @@ use crate::process::{self, failed};
 use harness_core::agent::{AgentOutcome, AgentRunner, RoleJob};
 use harness_core::handoff::Role;
 use harness_core::mcp::McpServer;
+use harness_core::permissions::{self, WriteRule};
 use harness_core::plugins::Plugin;
 
 /// Where the agent's own settings live inside the project (ignored by git).
@@ -294,7 +295,10 @@ impl RoleRules {
         let (mut tools, allowed): (Vec<&str>, Vec<String>) = match job.role {
             Role::Architect => (
                 vec!["Read", "Glob", "Grep", "Edit", "Write"],
-                vec!["Edit(./docs/**)".into(), "Edit(./**/docs/**)".into(), inbox],
+                edit_rules(Role::Architect)
+                    .into_iter()
+                    .chain([inbox])
+                    .collect(),
             ),
             Role::Developer => (
                 vec!["Read", "Glob", "Grep", "Edit", "Write", "Bash"],
@@ -302,20 +306,17 @@ impl RoleRules {
             ),
             Role::Tester => (
                 vec!["Read", "Glob", "Grep", "Edit", "Write", "Bash"],
-                vec![
-                    "Edit(./tests/**)".into(),
-                    "Edit(./**/tests/**)".into(),
-                    inbox,
-                    "Bash".into(),
-                ],
+                edit_rules(Role::Tester)
+                    .into_iter()
+                    .chain([inbox, "Bash".into()])
+                    .collect(),
             ),
             Role::Security => (
                 vec!["Read", "Glob", "Grep", "Write", "Bash"],
-                vec![
-                    inbox,
-                    "Bash(cargo audit:*)".into(),
-                    "Bash(cargo deny:*)".into(),
-                ],
+                [inbox]
+                    .into_iter()
+                    .chain(SECURITY_COMMANDS.iter().map(|c| format!("Bash({c}:*)")))
+                    .collect(),
             ),
             // Lisa is never run as an agent.
             Role::Human => (vec![], vec![]),
@@ -353,6 +354,49 @@ impl RoleRules {
 }
 
 /// A path in Claude Code's rule syntax: `./x` inside the project, `//x` absolute.
+/// The commands Security may run: reading the change with git, and the
+/// vulnerability scanners of common ecosystems. They only read, so Security
+/// stays a role that changes nothing; a scanner that is not installed simply fails.
+const SECURITY_COMMANDS: &[&str] = &[
+    "git diff",
+    "git log",
+    "git show",
+    "cargo audit",
+    "cargo deny",
+    "npm audit",
+    "pnpm audit",
+    "yarn audit",
+    "pip-audit",
+    "govulncheck",
+    "bundle audit",
+    "dotnet list package",
+    "osv-scanner",
+    "semgrep",
+    "gitleaks",
+];
+
+/// Claude's `Edit(...)` rules for what `role` may write, made from
+/// `harness_core::permissions`, so both always say the same. Each pattern
+/// appears twice: `./x` for the project's top folder and `./**/x` for any
+/// folder below it.
+fn edit_rules(role: Role) -> Vec<String> {
+    let WriteRule::Only { folders, files } = permissions::rule_for(role) else {
+        return Vec::new();
+    };
+    let patterns = folders
+        .iter()
+        .map(|folder| format!("{folder}/**"))
+        .chain(files.iter().map(|file| file.to_string()));
+    patterns
+        .flat_map(|pattern| {
+            [
+                format!("Edit(./{pattern})"),
+                format!("Edit(./**/{pattern})"),
+            ]
+        })
+        .collect()
+}
+
 fn rule_path(project_dir: &Path, path: &Path) -> String {
     match path.strip_prefix(project_dir) {
         Ok(relative) => format!("./{}", relative.display()),
@@ -437,8 +481,27 @@ mod tests {
         let agent = ClaudeCode::new(Secret::new("t"));
         let allowed = arg_after(&agent.command(&job(Role::Security)), "--allowedTools");
         assert!(allowed.contains("Bash(cargo audit:*)"));
+        // Scanners of other ecosystems too, and git to read the change.
+        assert!(allowed.contains("Bash(npm audit:*)"));
+        assert!(allowed.contains("Bash(git diff:*)"));
         assert!(!allowed.contains("Edit(./**)"));
         assert!(!allowed.contains(",Bash,"));
+    }
+
+    #[test]
+    fn the_tester_writes_tests_folders_and_test_files_next_to_the_code() {
+        let agent = ClaudeCode::new(Secret::new("t"));
+        let allowed = arg_after(&agent.command(&job(Role::Tester)), "--allowedTools");
+        for rule in [
+            "Edit(./tests/**)",
+            "Edit(./**/tests/**)",
+            "Edit(./*_test.*)",
+            "Edit(./**/*_test.*)",
+            "Edit(./**/*.spec.*)",
+        ] {
+            assert!(allowed.contains(rule), "{rule} in {allowed}");
+        }
+        assert!(!allowed.contains("Edit(./**)"), "{allowed}");
     }
 
     #[test]
