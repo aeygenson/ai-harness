@@ -2,9 +2,9 @@
 
 use std::path::{Path, PathBuf};
 
+use harness_core::config::projects::{Project, Projects};
 use harness_core::config::CONFIG_FILE;
 use harness_core::git::HARNESS_DIR;
-use harness_core::projects::{Project, Projects};
 use ratatui::crossterm::event::KeyCode;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::text::Line;

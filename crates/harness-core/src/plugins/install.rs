@@ -16,8 +16,8 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use crate::catalog::{inside, Entry, Source};
 use crate::git::{self, GitError};
+use crate::plugins::catalog::{inside, Entry, Source};
 use crate::plugins::{self, manifest, Contents, PluginError, CLAUDE, CODEX};
 
 /// Catalog fields that describe the listing, not the plugin.
@@ -208,8 +208,8 @@ fn collect(root: &Path, dir: &Path, found: &mut BTreeMap<String, Vec<u8>>) -> io
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::catalog::Catalog;
     use crate::git::Repo;
+    use crate::plugins::catalog::Catalog;
 
     fn write(dir: &Path, file: &str, text: &str) {
         let path = dir.join(file);

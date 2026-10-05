@@ -24,7 +24,7 @@ purpose. Where a rule below differs from common Rust advice, the reason is given
 | Crate | What lives there |
 |---|---|
 | `harness-platform` | Everything that differs between Linux, macOS and Windows. No dependencies, except `crossterm` on Windows for typing a secret. |
-| `harness-core` | The engine: config, handoffs, routes, git, skills, MCP config, retro. No `tokio`, no UI. |
+| `harness-core` | The engine. No `tokio`, no UI. Folders: `task/` (state, handoffs, routes, run loop), `config/` (`harness.toml`, project list), `mcp/`, `plugins/`, `retro/`; single files: `git`, `skills`, `models`, `secret`, `text`. |
 | `harness-agents` | Adapters that start each agent; process control; MCP check/OAuth/bridge. |
 | `harness-tui` | The full-screen Ratatui interface: `app/` (event loop, keyboard, mouse, forms, drawing), `tabs/` (one module or folder per tab), `ui/` (shared widgets, themes, translations). |
 | `harness-cli` | The `harness` program (`clap`). |
@@ -48,7 +48,7 @@ purpose. Where a rule below differs from common Rust advice, the reason is given
 - **No extra code.** Solve the task asked, nothing more. No speculative options, no dead code,
   no commented-out code.
 - **Reuse before writing.** Look for an existing helper in the workspace first (for example
-  `ui::selector` in the TUI, `config_edit` for changing `harness.toml`).
+  `ui::selector` in the TUI, `harness_core::config::edit` for changing `harness.toml`).
 - **New crates need a reason.** Every dependency is checked by `cargo deny` (`deny.toml`:
   crates.io only, no known vulnerabilities, no unmaintained crates). Add a crate only when it
   removes a lot of code or risk, is small and well maintained, and say why in the PR.
@@ -201,7 +201,7 @@ This program starts AI agents with access to the user's files, so security rules
 - Know the limit: an agent runs as the same user, so a role with a shell (Developer, Tester)
   could still read a private file if it tried. Only an operating-system sandbox would stop
   that; until there is one, do not claim that an agent cannot see a secret.
-- Never weaken the role permissions (`harness_core::permissions`, deny rules, temporary HOME
+- Never weaken the role permissions (`harness_core::task::permissions`, deny rules, temporary HOME
   for Antigravity) without discussing it.
 - Treat everything an agent or an MCP server returns as untrusted input: strip control
   characters before showing it (`harness_core::text::safe` / `safe_line`; do not write

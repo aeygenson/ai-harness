@@ -4,9 +4,9 @@
 use std::sync::mpsc;
 
 use harness_agents::credentials;
+use harness_core::config;
 use harness_core::config::McpConfig;
-use harness_core::config_edit;
-use harness_core::mcp_tools::{self, Tool, ToolList};
+use harness_core::mcp::tools::{self, Tool, ToolList};
 
 use crate::tabs::roles::RolesTab;
 use crate::ui::Form;
@@ -78,7 +78,7 @@ impl App {
                     tools,
                 };
                 match &self.home {
-                    Some(home) => match mcp_tools::save(home, server, &list) {
+                    Some(home) => match tools::save(home, server, &list) {
                         Ok(()) => (
                             self.tr
                                 .f("mcp.checked", &[("name", &name), ("count", &count)]),
@@ -227,7 +227,7 @@ impl App {
         let server = super::server_from(form.value(1), form.value(2), form.value(3))?;
         harness_core::mcp::check_server(&name, &server).map_err(|e| e.to_string())?;
         self.save_settings(|text| {
-            config_edit::set_mcp(text, old.as_deref(), &name, &server).map_err(|e| e.to_string())
+            config::edit::set_mcp(text, old.as_deref(), &name, &server).map_err(|e| e.to_string())
         })?;
         if let (Some(mcp), Some(roles)) = (&mut self.mcp, &self.roles) {
             // A server from the catalog is now in the list.
@@ -240,7 +240,7 @@ impl App {
 
     /// Removes an MCP server from `harness.toml`.
     pub(crate) fn remove_mcp(&mut self, name: &str) -> Result<(), String> {
-        self.save_settings(|text| config_edit::remove_mcp(text, name).map_err(|e| e.to_string()))?;
+        self.save_settings(|text| config::edit::remove_mcp(text, name).map_err(|e| e.to_string()))?;
         self.message = Some((self.tr.f("mcp.removed", &[("name", &name)]), false));
         Ok(())
     }

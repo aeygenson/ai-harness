@@ -13,8 +13,8 @@ use std::sync::mpsc::{channel, Receiver, RecvTimeoutError};
 use std::thread;
 use std::time::{Duration, Instant};
 
+use harness_core::mcp::tools::Tool;
 use harness_core::mcp::McpServer;
-use harness_core::mcp_tools::Tool;
 use harness_core::text::safe_line;
 use serde_json::{json, Value};
 

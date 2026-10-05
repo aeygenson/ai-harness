@@ -28,8 +28,8 @@ use std::path::{Path, PathBuf};
 
 use harness_core::config::Config;
 use harness_core::git::HARNESS_DIR;
-use harness_core::handoff::Role;
 use harness_core::skills::{self, LibrarySkill, Source};
+use harness_core::task::handoff::Role;
 use ratatui::crossterm::event::KeyCode;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Modifier, Style};

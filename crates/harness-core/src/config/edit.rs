@@ -8,7 +8,7 @@
 use toml_edit::{value, Array, DocumentMut, Item, Table};
 
 use crate::config::{Config, McpConfig, RetroConfig, RoleConfig};
-use crate::handoff::Role;
+use crate::task::handoff::Role;
 
 #[derive(Debug, thiserror::Error)]
 pub enum EditError {

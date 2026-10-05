@@ -1,7 +1,7 @@
 //! What happens when a form is sent (Enter or its OK button) or closed.
 
-use harness_core::plugin_ops;
-use harness_core::projects;
+use harness_core::config::projects;
+use harness_core::plugins;
 
 use crate::{App, Purpose};
 
@@ -67,7 +67,7 @@ impl App {
                     .clone()
                     .ok_or_else(|| "HOME is not set".to_string())
                     .and_then(|home| {
-                        plugin_ops::remove_catalog(&home, &name).map_err(|e| e.to_string())
+                        plugins::ops::remove_catalog(&home, &name).map_err(|e| e.to_string())
                     })
                     .map(|()| {
                         self.reload_catalog_views();
@@ -123,7 +123,7 @@ impl App {
     /// waiting for it is dropped.
     pub(crate) fn close_form(&mut self) {
         if let Some((Purpose::ApplyUpdate(prepared), _)) = self.form.take() {
-            plugin_ops::discard(&prepared);
+            plugins::ops::discard(&prepared);
             self.message = Some((self.tr.t("plugins.update_dropped").to_string(), false));
         }
     }

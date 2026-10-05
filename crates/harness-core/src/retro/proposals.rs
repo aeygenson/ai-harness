@@ -30,8 +30,8 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::config::Config;
-use crate::handoff::Role;
 use crate::skills::{self, SKILLS_DIR};
+use crate::task::handoff::Role;
 use crate::text;
 
 /// A skill file bigger than this is refused: a skill is a short note.

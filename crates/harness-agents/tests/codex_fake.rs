@@ -9,9 +9,9 @@ use std::path::{Path, PathBuf};
 use harness_agents::role_settings::RoleSettings;
 use harness_agents::Codex;
 use harness_core::git::Repo;
-use harness_core::handoff::Role;
-use harness_core::orchestrator::{self, create_task, StopReason};
-use harness_core::store::TaskStore;
+use harness_core::task::handoff::Role;
+use harness_core::task::orchestrator::{self, create_task, StopReason};
+use harness_core::task::store::TaskStore;
 use harness_core::task::{TaskState, WaitReason, DEFAULT_MAX_ROUNDS};
 use tempfile::TempDir;
 

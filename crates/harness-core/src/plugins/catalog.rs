@@ -20,7 +20,7 @@
 //! ```
 //!
 //! This module only reads catalogs. Fetching them with git and copying a
-//! plugin into a project is done by `plugin_install`.
+//! plugin into a project is done by `plugins::install`.
 
 use std::collections::BTreeMap;
 use std::fs;

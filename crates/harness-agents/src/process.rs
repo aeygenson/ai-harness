@@ -8,8 +8,8 @@ use std::sync::mpsc::Sender;
 use std::sync::Mutex;
 use std::time::Duration;
 
-use harness_core::agent::AgentOutcome;
 use harness_core::secret;
+use harness_core::task::agent::AgentOutcome;
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWriteExt, BufReader};
 
 /// `program`, started in the project folder with an empty environment plus

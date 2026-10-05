@@ -17,11 +17,11 @@ use std::process::Command;
 use crate::credentials::Secret;
 use crate::process::{self, failed};
 use crate::role_settings::RoleSettings;
-use harness_core::agent::{AgentOutcome, AgentRunner, RoleJob};
-use harness_core::handoff::Role;
 use harness_core::mcp::McpServer;
-use harness_core::permissions::{self, WriteRule};
 use harness_core::plugins::Plugin;
+use harness_core::task::agent::{AgentOutcome, AgentRunner, RoleJob};
+use harness_core::task::handoff::Role;
+use harness_core::task::permissions::{self, WriteRule};
 
 /// Where the agent's own settings live inside the project (ignored by git).
 pub const CONFIG_DIR: &str = ".harness/agents/claude";
@@ -229,7 +229,7 @@ struct RoleRules {
 }
 
 impl RoleRules {
-    /// Mirrors `harness_core::permissions`. The harness checks the result with
+    /// Mirrors `harness_core::task::permissions`. The harness checks the result with
     /// git anyway; these rules stop a wrong edit before it happens.
     fn for_job(job: &RoleJob, servers: &[McpServer], plugins: &[Plugin]) -> Self {
         let inbox = format!("Edit({}/**)", rule_path(&job.project_dir, &job.output_dir));
@@ -318,7 +318,7 @@ const SECURITY_COMMANDS: &[&str] = &[
 ];
 
 /// Claude's `Edit(...)` rules for what `role` may write, made from
-/// `harness_core::permissions`, so both always say the same. Each pattern
+/// `harness_core::task::permissions`, so both always say the same. Each pattern
 /// appears twice: `./x` for the project's top folder and `./**/x` for any
 /// folder below it.
 fn edit_rules(role: Role) -> Vec<String> {

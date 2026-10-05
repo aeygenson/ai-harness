@@ -10,7 +10,7 @@
 
 use std::cell::Cell;
 
-use harness_core::handoff::Role;
+use harness_core::task::handoff::Role;
 use ratatui::style::{Color, Modifier, Style};
 
 /// One theme. `bg: None` keeps the terminal's background and text colour.

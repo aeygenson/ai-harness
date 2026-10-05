@@ -24,8 +24,8 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use harness_core::agent::{AgentOutcome, AgentRunner, RoleJob};
-use harness_core::handoff::Role;
+use harness_core::task::agent::{AgentOutcome, AgentRunner, RoleJob};
+use harness_core::task::handoff::Role;
 use serde_json::{json, Value};
 
 use crate::credentials::Secret;

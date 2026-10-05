@@ -36,12 +36,18 @@
 //! with the secrets itself (see [`BRIDGE_COMMAND`]).
 //!
 //! Every adapter turns the same list into its agent's own settings.
+//!
+//! The folder also holds `registry` (the official MCP registry) and `tools`
+//! (the tools a server offers).
+
+pub mod registry;
+pub mod tools;
 
 use std::collections::BTreeMap;
 
 use crate::config::Config;
-use crate::handoff::Role;
 use crate::secret::Secret;
+use crate::task::handoff::Role;
 
 /// A value `"secret:<name>"` in `env` is read from a saved secret.
 pub const SECRET_PREFIX: &str = "secret:";

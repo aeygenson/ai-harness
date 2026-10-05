@@ -20,16 +20,16 @@ use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
+use harness_core::config::projects::{self, name_of};
 use harness_core::config::McpConfig;
 use harness_core::git::{Repo, HARNESS_DIR};
-use harness_core::handoff::Role;
+use harness_core::mcp::registry::Entry;
+use harness_core::mcp::tools::Tool;
 use harness_core::mcp::McpServer;
-use harness_core::mcp_registry::Entry;
-use harness_core::mcp_tools::Tool;
 use harness_core::models::ModelList;
-use harness_core::projects::{self, name_of};
 use harness_core::skills::SKILLS_DIR;
-use harness_core::{plugin_ops, settings};
+use harness_core::task::handoff::Role;
+use harness_core::{config, plugins};
 use harness_platform::editor;
 use ratatui::crossterm::event::{
     DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
@@ -120,7 +120,7 @@ enum Purpose {
     /// Take this catalog off the list.
     RemoveCatalog(String),
     /// Take the new version of a plugin, after seeing what changes.
-    ApplyUpdate(Box<plugin_ops::Prepared>),
+    ApplyUpdate(Box<plugins::ops::Prepared>),
     /// Make a retrospective of the open project.
     GenerateRetro,
     /// Apply these proposals of the retrospective in this folder.
@@ -137,13 +137,13 @@ enum Purpose {
 #[derive(Debug)]
 enum PluginJob {
     CatalogAdded(Result<String, String>),
-    CatalogUpdated(String, Result<plugin_ops::CatalogUpdate, String>),
+    CatalogUpdated(String, Result<plugins::ops::CatalogUpdate, String>),
     Added {
         name: String,
         give: Option<Role>,
-        result: Result<plugin_ops::Added, String>,
+        result: Result<plugins::ops::Added, String>,
     },
-    UpdateReady(String, Result<Option<plugin_ops::Prepared>, String>),
+    UpdateReady(String, Result<Option<plugins::ops::Prepared>, String>),
 }
 
 /// A skill file, a plugin folder or a retrospective, waiting to be opened in the editor.
@@ -443,7 +443,7 @@ impl App {
         }
         let text = change(roles.text())?;
         let repo = Repo::open(&root).map_err(|e| e.to_string())?;
-        settings::save(&repo, &text).map_err(|e| e.to_string())?;
+        config::save::save(&repo, &text).map_err(|e| e.to_string())?;
         roles.reload();
         if let Some(plugins) = &mut self.plugins {
             plugins.reload(roles);

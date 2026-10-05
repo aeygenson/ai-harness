@@ -7,9 +7,9 @@ use anyhow::{bail, Result};
 use harness_agents::build::build_team;
 use harness_core::config::Config;
 use harness_core::git::HARNESS_DIR;
-use harness_core::handoff::{NextStep, Role, Verdict};
-use harness_core::orchestrator::{self, StopReason};
 use harness_core::skills::Skills;
+use harness_core::task::handoff::{NextStep, Role, Verdict};
+use harness_core::task::orchestrator::{self, StopReason};
 use harness_core::task::{Stage, WaitReason};
 
 use crate::{open_repo, open_task};

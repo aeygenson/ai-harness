@@ -25,8 +25,8 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use harness_core::config::PluginConfig;
-use harness_core::handoff::Role;
 use harness_core::plugins::{self, family, Details};
+use harness_core::task::handoff::Role;
 use ratatui::crossterm::event::KeyCode;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Modifier, Style};
@@ -34,7 +34,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{ListItem, Paragraph, Wrap};
 use ratatui::Frame;
 
-use harness_core::catalog::Entry;
+use harness_core::plugins::catalog::Entry;
 
 use crate::tabs::plugins::catalog::{
     draw_catalog, draw_catalogs, unusable, CatalogView, CatalogsView, OFFICIAL,

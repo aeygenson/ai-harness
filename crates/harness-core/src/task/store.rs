@@ -25,7 +25,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{de::DeserializeOwned, Serialize};
 
-use crate::handoff::{Handoff, Role};
+use crate::task::handoff::{Handoff, Role};
 use crate::task::{TaskState, TransitionError};
 use crate::text;
 
@@ -373,7 +373,7 @@ fn sorted_subdirs(dir: &Path) -> Result<Vec<PathBuf>, StoreError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::handoff::{Issue, NextStep, Severity, Verdict};
+    use crate::task::handoff::{Issue, NextStep, Severity, Verdict};
     use crate::task::{Stage, WaitReason, DEFAULT_MAX_ROUNDS};
 
     fn handoff(role: Role, round: u32, verdict: Verdict, next: NextStep) -> Handoff {

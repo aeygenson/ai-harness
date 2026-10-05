@@ -26,10 +26,9 @@ use std::path::{Path, PathBuf};
 
 use harness_agents::credentials;
 use harness_core::config::{McpConfig, AGENTS};
-use harness_core::handoff::Role;
+use harness_core::mcp::registry::{Entry, Offer};
 use harness_core::mcp::{self, SECRET_PREFIX};
-use harness_core::mcp_registry::{Entry, Offer};
-use harness_core::mcp_tools;
+use harness_core::task::handoff::Role;
 use ratatui::crossterm::event::KeyCode;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Modifier, Style};
@@ -683,7 +682,7 @@ impl McpTab {
         let saved = self
             .home
             .as_deref()
-            .and_then(|home| mcp_tools::load(home, name, server));
+            .and_then(|home| mcp::tools::load(home, name, server));
         match (&self.checking, saved) {
             (Some(checking), _) if checking == name => {
                 lines.push(Line::styled(tr.t("mcp.tools_checking").to_string(), dim));

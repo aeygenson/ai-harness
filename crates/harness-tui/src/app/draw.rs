@@ -1,7 +1,7 @@
 //! Drawing the whole screen: the tab bar, the open tab, the form on top and the
 //! footer with messages and hot keys.
 
-use harness_core::projects::name_of;
+use harness_core::config::projects::name_of;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};

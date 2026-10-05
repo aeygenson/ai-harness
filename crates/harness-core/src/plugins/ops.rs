@@ -10,14 +10,14 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::catalog::{self, Catalog, CatalogConfig, CatalogError, Entry, Registry};
+use crate::config::edit::{self, EditError, NewPlugin};
 use crate::config::{Config, CONFIG_FILE};
-use crate::config_edit::{self, EditError, NewPlugin};
 use crate::git::{self, GitError, Repo, HARNESS_DIR};
-use crate::handoff::Role;
 use crate::mcp::is_simple_name;
-use crate::plugin_install::{self, Changes, InstallError};
+use crate::plugins::catalog::{self, Catalog, CatalogConfig, CatalogError, Entry, Registry};
+use crate::plugins::install::{self, Changes, InstallError};
 use crate::plugins::{self, Contents, PluginError, Plugins, PLUGINS_DIR};
+use crate::task::handoff::Role;
 
 /// A catalog being added is downloaded here first, before its name is known.
 const ADDING_DIR: &str = ".adding";
@@ -270,7 +270,7 @@ pub fn add(
     let registry = Registry::load(home)?;
     let staged = staging(&target);
     let (contents, commit) = fetch_and_stage(home, &registry, entry, &staged)?;
-    let new_text = config_edit::add_plugin(
+    let new_text = edit::add_plugin(
         &text,
         &NewPlugin {
             name,
@@ -289,7 +289,7 @@ pub fn add(
             return Err(e.into());
         }
     };
-    plugin_install::put_in_place(&staged, &target).map_err(io(&target))?;
+    install::put_in_place(&staged, &target).map_err(io(&target))?;
     fs::write(&config_path, &new_text).map_err(io(&config_path))?;
     let checked = Config::parse(&new_text)
         .map_err(OpsError::from)
@@ -354,7 +354,7 @@ pub fn prepare_update(repo: &Repo, home: &Path, name: &str) -> Result<Option<Pre
     let target = repo.root().join(plugins::relative_path(name, plugin));
     let staged = staging(&target);
     let (contents, commit) = fetch_and_stage(home, &registry, entry, &staged)?;
-    let changes = plugin_install::changes(&target, &staged).map_err(io(&target))?;
+    let changes = install::changes(&target, &staged).map_err(io(&target))?;
     if changes.is_empty() {
         let _ = fs::remove_dir_all(&staged);
         return Ok(None);
@@ -381,9 +381,9 @@ pub fn apply_update(repo: &Repo, prepared: &Prepared) -> Result<(), OpsError> {
     let old = target.with_file_name(format!(".{name}.old"));
     let _ = fs::remove_dir_all(&old);
     fs::rename(target, &old).map_err(io(target))?;
-    plugin_install::put_in_place(&prepared.staged, target).map_err(io(target))?;
+    install::put_in_place(&prepared.staged, target).map_err(io(target))?;
     let new_text = match &prepared.commit {
-        Some(commit) => config_edit::set_plugin_commit(&text, name, commit)?,
+        Some(commit) => edit::set_plugin_commit(&text, name, commit)?,
         None => text.clone(),
     };
     fs::write(&config_path, &new_text).map_err(io(&config_path))?;
@@ -422,9 +422,9 @@ fn fetch_and_stage(
         .join(DOWNLOADS_DIR)
         .join(&entry.catalog)
         .join(&entry.name);
-    let fetched = plugin_install::fetch(entry, &catalog_dir, &download)?;
+    let fetched = install::fetch(entry, &catalog_dir, &download)?;
     let _ = fs::remove_dir_all(staged);
-    let contents = plugin_install::stage(entry, &fetched, staged)?;
+    let contents = install::stage(entry, &fetched, staged)?;
     Ok((contents, fetched.commit))
 }
 
@@ -449,7 +449,7 @@ pub fn remove(repo: &Repo, name: &str) -> Result<(), OpsError> {
         .get(name)
         .ok_or_else(|| OpsError::NoPlugin(name.to_string()))?;
     let folder = repo.root().join(plugins::relative_path(name, plugin));
-    let new_text = config_edit::remove_plugin(&text, name)?;
+    let new_text = edit::remove_plugin(&text, name)?;
     fs::write(&config_path, new_text).map_err(io(&config_path))?;
     if folder.starts_with(repo.root().join(PLUGINS_DIR)) && folder.exists() {
         fs::remove_dir_all(&folder).map_err(io(&folder))?;
@@ -464,8 +464,8 @@ pub fn remove(repo: &Repo, name: &str) -> Result<(), OpsError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::projects;
     use crate::config::DEFAULT_CONFIG;
-    use crate::projects;
 
     #[test]
     fn catalog_sources_become_clone_addresses() {

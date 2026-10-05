@@ -2,12 +2,12 @@ use std::fs;
 
 use super::*;
 use crate::ui::ButtonId;
+use harness_core::config::projects::Projects;
 use harness_core::git::Repo;
-use harness_core::handoff::{Handoff, Issue, NextStep, Role, Severity, Verdict};
 use harness_core::models;
-use harness_core::orchestrator;
-use harness_core::projects::Projects;
-use harness_core::store::TaskStore;
+use harness_core::task::handoff::{Handoff, Issue, NextStep, Role, Severity, Verdict};
+use harness_core::task::orchestrator;
+use harness_core::task::store::TaskStore;
 use ratatui::backend::TestBackend;
 use ratatui::crossterm::event::{
     KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
@@ -1365,17 +1365,17 @@ fn mcp_servers_are_added_changed_and_removed_and_secrets_saved() {
 fn fake_check(
     server: &harness_core::mcp::McpServer,
     _: &Path,
-) -> Result<Vec<harness_core::mcp_tools::Tool>, String> {
+) -> Result<Vec<harness_core::mcp::tools::Tool>, String> {
     // The server gets its secret, as a run would give it.
     if server.env["API_KEY"].expose() != "docs-key" {
         return Err("wrong key".into());
     }
     Ok(vec![
-        harness_core::mcp_tools::Tool {
+        harness_core::mcp::tools::Tool {
             name: "search".into(),
             description: Some("Searches the docs.".into()),
         },
-        harness_core::mcp_tools::Tool {
+        harness_core::mcp::tools::Tool {
             name: "fetch".into(),
             description: None,
         },
@@ -1427,11 +1427,11 @@ fn check_asks_a_server_for_its_tools() {
     );
 }
 
-fn fake_search(query: &str) -> Result<Vec<harness_core::mcp_registry::Entry>, String> {
+fn fake_search(query: &str) -> Result<Vec<harness_core::mcp::registry::Entry>, String> {
     if query != "docs" {
         return Err("offline".into());
     }
-    harness_core::mcp_registry::parse(
+    harness_core::mcp::registry::parse(
         r#"{"servers":[
         {"server":{"name":"io.github.someone/docs","title":"Docs","description":"Finds docs.",
           "version":"1.2.0","repository":{"url":"https://github.com/someone/docs"},
@@ -1590,7 +1590,7 @@ fn a_web_server_is_written_and_changed_in_the_form() {
 fn fake_web_check(
     server: &harness_core::mcp::McpServer,
     _: &Path,
-) -> Result<Vec<harness_core::mcp_tools::Tool>, String> {
+) -> Result<Vec<harness_core::mcp::tools::Tool>, String> {
     // The web server is reached through this program, with its header.
     assert_eq!(server.args, ["mcp-remote"]);
     assert_eq!(Path::new(&server.command), std::env::current_exe().unwrap());
@@ -1598,7 +1598,7 @@ fn fake_web_check(
         server.env["HARNESS_MCP_HEADER_1"].expose(),
         "Authorization: Bearer web-key"
     );
-    Ok(vec![harness_core::mcp_tools::Tool {
+    Ok(vec![harness_core::mcp::tools::Tool {
         name: "ask".into(),
         description: None,
     }])
@@ -2180,17 +2180,17 @@ fn files_of_a_step_open_in_zed_with_a_click() {
     );
     developer.round = 2;
     developer.files = vec![
-        harness_core::handoff::FileChange {
+        harness_core::task::handoff::FileChange {
             path: "src/parser.rs".into(),
-            action: harness_core::handoff::FileAction::Modified,
+            action: harness_core::task::handoff::FileAction::Modified,
         },
-        harness_core::handoff::FileChange {
+        harness_core::task::handoff::FileChange {
             path: "docs/parser.md".into(),
-            action: harness_core::handoff::FileAction::Created,
+            action: harness_core::task::handoff::FileAction::Created,
         },
-        harness_core::handoff::FileChange {
+        harness_core::task::handoff::FileChange {
             path: "Cargo.toml".into(),
-            action: harness_core::handoff::FileAction::Read,
+            action: harness_core::task::handoff::FileAction::Read,
         },
     ];
     store.record(&mut state, &developer, "Fixed.").unwrap();

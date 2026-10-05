@@ -7,8 +7,8 @@ use std::path::Path;
 use std::process::Command;
 use std::sync::Mutex;
 
-use harness_core::agent::{AgentOutcome, AgentRunner, RoleJob};
-use harness_core::handoff::{Handoff, Issue, NextStep, Role, Severity, Verdict};
+use harness_core::task::agent::{AgentOutcome, AgentRunner, RoleJob};
+use harness_core::task::handoff::{Handoff, Issue, NextStep, Role, Severity, Verdict};
 
 /// What the mock does the next time a given role runs.
 #[derive(Debug, Clone)]

@@ -5,23 +5,22 @@
 //! (`harness_core::models`, «Refresh models»); a model can also be typed in.
 //!
 //! Changes are kept here until «Save». Saving goes through
-//! `harness_core::settings::save`: the same checks as before a run, then
+//! `harness_core::config::save::save`: the same checks as before a run, then
 //! `harness.toml` is changed with `toml_edit` (comments stay) and committed.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use harness_core::config;
 use harness_core::config::{
     Config, McpConfig, PluginConfig, RetroConfig, RoleConfig, AGENTS, CONFIG_FILE,
 };
-use harness_core::config_edit;
 use harness_core::git::{Repo, HARNESS_DIR};
-use harness_core::handoff::Role;
 use harness_core::models::{self, ModelList};
 use harness_core::plugins::family;
-use harness_core::settings;
 use harness_core::skills;
+use harness_core::task::handoff::Role;
 use ratatui::crossterm::event::KeyCode;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Modifier, Style};
@@ -570,16 +569,16 @@ impl RolesTab {
         let mut text = self.text.clone();
         for (role, settings) in &self.roles {
             if self.saved.roles.get(role) != Some(settings) {
-                text = config_edit::set_role(&text, *role, settings).map_err(|e| e.to_string())?;
+                text = config::edit::set_role(&text, *role, settings).map_err(|e| e.to_string())?;
             }
         }
         if self.retro != self.saved.retro {
             if let Some(retro) = &self.retro {
-                text = config_edit::set_retro(&text, retro).map_err(|e| e.to_string())?;
+                text = config::edit::set_retro(&text, retro).map_err(|e| e.to_string())?;
             }
         }
         let repo = Repo::open(&self.root).map_err(|e| e.to_string())?;
-        settings::save(&repo, &text).map_err(|e| e.to_string())?;
+        config::save::save(&repo, &text).map_err(|e| e.to_string())?;
         let (selected, row) = (self.selected, self.row);
         self.reload();
         (self.selected, self.row) = (selected, row);

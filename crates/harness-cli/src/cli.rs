@@ -5,7 +5,7 @@ use std::path::PathBuf;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
-use harness_core::handoff::{NextStep, Role};
+use harness_core::task::handoff::{NextStep, Role};
 
 #[derive(Parser)]
 #[command(
@@ -227,7 +227,7 @@ fn parse_role(text: &str) -> Result<Role, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use harness_core::handoff::{NextStep, Role};
+    use harness_core::task::handoff::{NextStep, Role};
 
     #[test]
     fn next_step_words_are_the_handoff_words() {

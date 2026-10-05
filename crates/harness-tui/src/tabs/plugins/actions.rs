@@ -2,8 +2,8 @@
 //! hooks and servers, and removing it.
 
 use harness_core::git::Repo;
-use harness_core::handoff::Role;
-use harness_core::{config_edit, plugin_ops};
+use harness_core::task::handoff::Role;
+use harness_core::{config, plugins};
 
 use crate::tabs::plugins::catalog;
 use crate::ui::Form;
@@ -97,7 +97,7 @@ impl App {
                 let label = tr.f("plugins.updating_catalog", &[("name", &name)]);
                 self.start_plugin_job(label, move || {
                     let result =
-                        plugin_ops::update_catalog(&home, &name).map_err(|e| e.to_string());
+                        plugins::ops::update_catalog(&home, &name).map_err(|e| e.to_string());
                     PluginJob::CatalogUpdated(name, result)
                 });
             }
@@ -150,7 +150,7 @@ impl App {
         let none = self
             .home
             .as_deref()
-            .is_some_and(|home| plugin_ops::catalogs(home).is_ok_and(|c| c.is_empty()));
+            .is_some_and(|home| plugins::ops::catalogs(home).is_ok_and(|c| c.is_empty()));
         if let Some(plugins) = &mut self.plugins {
             plugins.catalog = Some(view);
         }
@@ -169,7 +169,7 @@ impl App {
             .f("plugins.downloading_catalog", &[("source", &source)]);
         let added = self.tr.t("plugins.catalog_added").to_string();
         self.start_plugin_job(label, move || {
-            let result = plugin_ops::add_catalog(&home, &source, None)
+            let result = plugins::ops::add_catalog(&home, &source, None)
                 .map(|catalog| {
                     added
                         .replace("{name}", &catalog.name)
@@ -181,7 +181,7 @@ impl App {
     }
 
     /// «Add»: the plugin is downloaded and copied in the background.
-    fn add_plugin(&mut self, entry: harness_core::catalog::Entry, give: bool) {
+    fn add_plugin(&mut self, entry: harness_core::plugins::catalog::Entry, give: bool) {
         if self.roles_unsaved() {
             return;
         }
@@ -197,7 +197,7 @@ impl App {
             let result = Repo::open(&root)
                 .map_err(|e| e.to_string())
                 .and_then(|repo| {
-                    plugin_ops::add(&repo, &home, &entry, None, false, false)
+                    plugins::ops::add(&repo, &home, &entry, None, false, false)
                         .map_err(|e| e.to_string())
                 });
             PluginJob::Added { name, give, result }
@@ -213,7 +213,7 @@ impl App {
             settings.plugins.push(name.to_string());
         }
         let result = self.save_settings(|text| {
-            config_edit::set_role(text, role, &settings).map_err(|e| e.to_string())
+            config::edit::set_role(text, role, &settings).map_err(|e| e.to_string())
         });
         let role = role.as_str();
         self.message = Some(match result {
@@ -261,7 +261,7 @@ impl App {
             return Err(self.tr.t("mcp.save_first").to_string());
         }
         let repo = Repo::open(&root).map_err(|e| e.to_string())?;
-        plugin_ops::remove(&repo, name).map_err(|e| e.to_string())?;
+        plugins::ops::remove(&repo, name).map_err(|e| e.to_string())?;
         roles.reload();
         if let Some(plugins) = &mut self.plugins {
             plugins.reload(roles);
@@ -281,7 +281,7 @@ impl App {
         servers: bool,
     ) -> Result<(), String> {
         self.save_settings(|text| {
-            config_edit::set_plugin_allow(text, name, hooks, servers).map_err(|e| e.to_string())
+            config::edit::set_plugin_allow(text, name, hooks, servers).map_err(|e| e.to_string())
         })?;
         if let (Some(plugins), Some(roles)) = (&mut self.plugins, &self.roles) {
             plugins.select_named(name, roles);

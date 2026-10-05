@@ -2,7 +2,7 @@
 
 use anyhow::{Context, Result};
 use harness_agents::credentials;
-use harness_core::projects;
+use harness_core::config::projects;
 
 /// `harness models`: the saved lists, after asking the agents again with
 /// `--refresh`.
