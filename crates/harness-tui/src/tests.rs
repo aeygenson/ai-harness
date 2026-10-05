@@ -7,6 +7,9 @@ use harness_core::orchestrator;
 use harness_core::projects::Projects;
 use harness_core::store::TaskStore;
 use ratatui::backend::TestBackend;
+use ratatui::crossterm::event::{
+    KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
+};
 use ratatui::Terminal;
 use std::time::Duration;
 
