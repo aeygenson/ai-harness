@@ -14,26 +14,23 @@
 //! Every change goes through the same core functions as the CLI. The texts
 //! come from translation files (see `i18n`); English is the default.
 
-use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
-use harness_agents::credentials;
 use harness_core::config::McpConfig;
 use harness_core::git::{Repo, HARNESS_DIR};
 use harness_core::handoff::Role;
 use harness_core::mcp::McpServer;
 use harness_core::mcp_registry::Entry;
 use harness_core::mcp_tools::Tool;
-use harness_core::models::{self, ModelList};
+use harness_core::models::ModelList;
 use harness_core::projects::{self, name_of};
-use harness_core::skills::{self, SKILLS_DIR};
+use harness_core::skills::SKILLS_DIR;
 use harness_core::{plugin_ops, settings};
 use harness_platform::editor;
-use harness_platform::folder_dialog::{self, Native};
 use ratatui::crossterm::event::{
     DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
 };
@@ -44,8 +41,10 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Paragraph, Wrap};
 use ratatui::Frame;
 
+mod agent_actions;
 mod agents_tab;
 mod background;
+mod edits;
 mod i18n;
 mod keyboard;
 mod keys;
@@ -58,10 +57,13 @@ mod plugin_jobs;
 mod plugins;
 mod plugins_tab;
 mod press;
+mod project_actions;
 mod projects_tab;
+mod retro_actions;
 mod retro_tab;
 mod roles_tab;
 mod runner;
+mod skill_actions;
 mod skills_tab;
 mod tasks;
 mod terminal;
@@ -444,70 +446,6 @@ impl App {
         running
     }
 
-    /// Back from `harness login`: say how it went and look at the logins again.
-    fn finish_sign_in(&mut self, name: &str, result: Result<(), String>) {
-        self.message = Some(match result {
-            Ok(()) => (self.tr.f("agents.signed_in", &[("name", &name)]), false),
-            Err(error) => (
-                self.tr.f(
-                    "agents.sign_in_failed",
-                    &[("name", &name), ("error", &error)],
-                ),
-                true,
-            ),
-        });
-        if let Some(dir) = self.home.as_ref().map(|h| h.join("credentials")) {
-            self.agents.reload_logins(&dir);
-        }
-        if let Some(roles) = &mut self.roles {
-            roles.set_ready(self.agents.ready());
-        }
-    }
-
-    /// «Install», «Update» or «Remove»: first the command is shown to be confirmed.
-    fn ask_to_run_agent_command(&mut self, remove: bool) {
-        use harness_agents::catalog::Action;
-        let Some((status, action, command)) = self.agents.next_step(remove) else {
-            return;
-        };
-        let name = status.entry.name;
-        let (title, ok, text) = match action {
-            Action::Install => (
-                "agents.confirm_install",
-                "agents.run_install",
-                "agents.confirm_text",
-            ),
-            Action::Update => (
-                "agents.confirm_update",
-                "agents.run_update",
-                "agents.confirm_text",
-            ),
-            Action::Remove => (
-                "agents.confirm_remove",
-                "agents.run_remove",
-                "agents.confirm_remove_text",
-            ),
-        };
-        let tr = &self.tr;
-        let mut text = tr.f(text, &[("command", &command)]);
-        // Claude Code may also be what runs Claude's own sessions here.
-        if action == Action::Remove && status.entry.id == "claude" {
-            text = format!("{text}\n\n{}", tr.t("agents.remove_claude_note"));
-        }
-        if action == Action::Install && !status.entry.runs() {
-            text = format!("{}\n\n{text}", tr.t("agents.confirm_not_run"));
-        }
-        let form = Form::new(&tr.f(title, &[("name", &name)]), &text, tr.t(ok));
-        self.form = Some((
-            Purpose::RunAgentCommand {
-                name,
-                action,
-                command,
-            },
-            form,
-        ));
-    }
-
     /// Opens a tab. The Agents tab checks the computer the first time.
     fn show(&mut self, tab: Tab) {
         self.tab = tab;
@@ -566,417 +504,6 @@ impl App {
             self.message = Some((self.tr.t("mcp.save_first").to_string(), true));
         }
         unsaved
-    }
-
-    /// What the Skills tab asks for.
-    fn skill_action(&mut self, action: skills_tab::Action) {
-        use skills_tab::Action as A;
-        let Some(root) = self.project.clone() else {
-            return;
-        };
-        let tr = &self.tr;
-        match action {
-            A::None => {}
-            A::Cycle(role, name) => {
-                if let Some(roles) = &mut self.roles {
-                    roles.cycle_skill(role, &name);
-                }
-            }
-            A::Edit(name) => {
-                let path = skill_path(&root, &name);
-                let mut copied = false;
-                if !path.is_file() {
-                    let Some(copy) = skills::copy_of_built_in(&name) else {
-                        return;
-                    };
-                    let written = path
-                        .parent()
-                        .map_or(Ok(()), fs::create_dir_all)
-                        .and_then(|()| fs::write(&path, copy));
-                    if let Err(error) = written {
-                        self.message = Some((format!("{}: {error}", path.display()), true));
-                        return;
-                    }
-                    copied = true;
-                }
-                self.edit = Some(EditJob {
-                    name,
-                    path,
-                    copied,
-                    kind: EditKind::Skill,
-                });
-            }
-            A::New => {
-                self.form = Some((
-                    Purpose::NewSkill,
-                    Form::new(
-                        tr.t("skills.new_title"),
-                        tr.t("skills.new_text"),
-                        tr.t("skills.create"),
-                    )
-                    .field(tr.t("skills.new_name"), "")
-                    .field(tr.t("skills.new_description"), ""),
-                ));
-            }
-            A::Restore(name) => {
-                let text = tr.f("skills.restore_text", &[("name", &name)]);
-                self.form = Some((
-                    Purpose::RestoreSkill(name),
-                    Form::new(tr.t("skills.restore_title"), &text, tr.t("skills.restore")),
-                ));
-            }
-        }
-    }
-
-    /// A file chosen in «Files» of the Tasks tab: Zed opens it and the TUI
-    /// goes on; without Zed the editor gets the terminal.
-    fn open_task_file(&mut self) {
-        let Some(path) = self.tasks.as_mut().and_then(|t| t.open.take()) else {
-            return;
-        };
-        let shown = self
-            .project
-            .as_deref()
-            .and_then(|root| path.strip_prefix(root).ok())
-            .map(harness_platform::path::slashed)
-            .unwrap_or_else(|| path.display().to_string());
-        if !path.is_file() {
-            self.message = Some((self.tr.f("tasks.file_missing", &[("path", &shown)]), true));
-            return;
-        }
-        match (self.viewer)(&path) {
-            Some(command) => {
-                self.message = Some(match editor::view(command) {
-                    Ok(()) => (self.tr.f("tasks.file_opened", &[("path", &shown)]), false),
-                    Err(error) => (
-                        self.tr.f("skills.editor_failed", &[("error", &error)]),
-                        true,
-                    ),
-                });
-            }
-            None => {
-                self.edit = Some(EditJob {
-                    name: shown,
-                    path,
-                    copied: false,
-                    kind: EditKind::View,
-                });
-            }
-        }
-    }
-
-    /// The editor was closed: keep the change in git, or drop a copy of a
-    /// built-in skill that was not changed.
-    fn finish_edit(&mut self, job: &EditJob, result: Result<(), String>) {
-        match job.kind {
-            EditKind::Skill => {}
-            EditKind::Plugin => return self.finish_plugin_edit(job, result),
-            EditKind::Retro => return self.finish_retro_edit(job, result),
-            EditKind::View => {
-                self.message = result.err().map(|error| {
-                    (
-                        self.tr.f("skills.editor_failed", &[("error", &error)]),
-                        true,
-                    )
-                });
-                return;
-            }
-        }
-        let tr = &self.tr;
-        let mut message = result
-            .err()
-            .map(|error| (tr.f("skills.editor_failed", &[("error", &error)]), true));
-        let text = fs::read_to_string(&job.path).unwrap_or_default();
-        let unchanged_copy =
-            job.copied && skills::copy_of_built_in(&job.name).as_deref() == Some(text.as_str());
-        if unchanged_copy {
-            let _ = fs::remove_file(&job.path);
-            message.get_or_insert((tr.t("skills.unchanged").to_string(), false));
-        } else if job.path.is_file() {
-            let saved = self
-                .project
-                .as_deref()
-                .ok_or_else(String::new)
-                .and_then(|root| Repo::open(root).map_err(|e| e.to_string()))
-                .and_then(|repo| {
-                    repo.commit_paths(&[&job.path], &format!("harness: skill {}", job.name))
-                        .map_err(|e| e.to_string())
-                });
-            let next = match saved {
-                Err(error) => (error, true),
-                Ok(_) if skills::split_header(&text).is_none() => {
-                    (tr.f("skills.broken", &[("name", &job.name)]), true)
-                }
-                Ok(true) => (tr.f("skills.saved", &[("name", &job.name)]), false),
-                Ok(false) => (tr.t("skills.unchanged").to_string(), false),
-            };
-            message.get_or_insert(next);
-        }
-        self.message = message;
-        self.reload_skills(Some(&job.name));
-    }
-
-    /// The retrospective was open in the editor: keep what changed in git.
-    fn finish_retro_edit(&mut self, job: &EditJob, result: Result<(), String>) {
-        let tr = &self.tr;
-        let saved = self
-            .project
-            .as_deref()
-            .ok_or_else(String::new)
-            .and_then(|root| Repo::open(root).map_err(|e| e.to_string()))
-            .and_then(|repo| {
-                repo.commit_paths(&[&job.path], &format!("harness: retro {} edited", job.name))
-                    .map_err(|e| e.to_string())
-            });
-        self.message = Some(match (result, saved) {
-            (Err(error), _) => (tr.f("skills.editor_failed", &[("error", &error)]), true),
-            (_, Err(error)) => (error, true),
-            (_, Ok(true)) => (tr.f("retro.edited", &[("number", &job.name)]), false),
-            (_, Ok(false)) => (tr.t("retro.unchanged").to_string(), false),
-        });
-        if let Some(retro) = &mut self.retro {
-            retro.reload();
-        }
-    }
-
-    /// What the Retro tab asks for.
-    fn retro_action(&mut self, action: retro_tab::Action) {
-        use retro_tab::Action as A;
-        match action {
-            A::None => {}
-            A::Say(key) => self.message = Some((self.tr.t(key).to_string(), true)),
-            A::Generate => {
-                if self.tasks.as_ref().is_some_and(TasksTab::is_running) {
-                    self.message = Some((self.tr.t("retro.tasks_running").to_string(), true));
-                    return;
-                }
-                // Lisa sees which project the retrospective is for.
-                let Some(root) = &self.project else {
-                    return;
-                };
-                let tr = &self.tr;
-                let text = tr.f(
-                    "retro.generate_text",
-                    &[("name", &name_of(root)), ("path", &root.display())],
-                );
-                self.form = Some((
-                    Purpose::GenerateRetro,
-                    Form::new(tr.t("retro.generate_title"), &text, tr.t("retro.generate")),
-                ));
-            }
-            A::Open(number, path) => {
-                self.edit = Some(EditJob {
-                    name: number,
-                    path,
-                    copied: false,
-                    kind: EditKind::Retro,
-                });
-            }
-            A::Apply(dir, ids) => {
-                if self.roles_unsaved() {
-                    return;
-                }
-                let Some(root) = self.project.clone() else {
-                    return;
-                };
-                let harness_dir = root.join(HARNESS_DIR);
-                let config = harness_core::config::Config::load(&harness_dir).ok();
-                let found = harness_core::suggest::load(&dir).ok();
-                let tr = &self.tr;
-                let mut text = tr.t("retro.apply_text").to_string();
-                for id in &ids {
-                    let Some(proposal) = found.as_ref().and_then(|f| f.proposals.get(*id)) else {
-                        continue;
-                    };
-                    text.push_str(&format!("\n{id}. {}", proposal.summary));
-                    use harness_core::proposals::FileChange;
-                    let file = match (proposal.file_change(&harness_dir), &proposal.content) {
-                        (FileChange::New, Some(_)) => Some("retro.new_skill"),
-                        (FileChange::Changed { .. }, Some(_)) => Some("retro.changed_skill"),
-                        _ => None,
-                    };
-                    if let Some(key) = file {
-                        text.push_str(&format!("\n   {}", tr.f(key, &[("name", &proposal.skill)])));
-                    }
-                    let roles: Vec<&str> = config
-                        .as_ref()
-                        .map(|c| proposal.missing_roles(c))
-                        .unwrap_or_default()
-                        .iter()
-                        .map(|given| given.role.as_str())
-                        .collect();
-                    if !roles.is_empty() {
-                        text.push_str(&format!(
-                            "\n   {}",
-                            tr.f(
-                                "retro.given_to",
-                                &[("name", &proposal.skill), ("roles", &roles.join(", "))]
-                            )
-                        ));
-                    }
-                }
-                self.form = Some((
-                    Purpose::ApplyProposals(dir, ids),
-                    Form::new(tr.t("retro.apply_title"), &text, tr.t("retro.apply_ok")),
-                ));
-            }
-        }
-    }
-
-    /// OK in «Make a retrospective»: the agent starts in the background.
-    fn generate_retro(&mut self) {
-        // The roles may have started while the question was open.
-        if self.tasks.as_ref().is_some_and(TasksTab::is_running) {
-            self.message = Some((self.tr.t("retro.tasks_running").to_string(), true));
-            return;
-        }
-        let language = self.tr.t("retro.language").to_string();
-        if let Some(retro) = &mut self.retro {
-            if retro.is_generating() {
-                return;
-            }
-            retro.generate(self.retro_builder, &language);
-            self.message = Some((self.tr.t("retro.started").to_string(), false));
-        }
-    }
-
-    /// OK in «Apply proposals»: skills and harness.toml change, one commit.
-    fn apply_proposals(&mut self, dir: &Path, ids: &[u32]) -> Result<(), String> {
-        let root = self.project.clone().ok_or_else(String::new)?;
-        let repo = Repo::open(&root).map_err(|e| e.to_string())?;
-        let applied = harness_core::retro_ops::apply(&repo, dir, ids).map_err(|e| e.to_string())?;
-        let list: Vec<String> = applied.iter().map(u32::to_string).collect();
-        self.message = Some((
-            self.tr.f("retro.applied", &[("ids", &list.join(", "))]),
-            false,
-        ));
-        if let Some(retro) = &mut self.retro {
-            retro.chosen.clear();
-            retro.reload();
-        }
-        self.reload_skills(None);
-        Ok(())
-    }
-
-    /// The skills changed: both tabs that show them read them again.
-    fn reload_skills(&mut self, select: Option<&str>) {
-        if let Some(skills) = &mut self.skills {
-            skills.reload();
-            if select.is_some() {
-                skills.select_named(select);
-            }
-        }
-        if let Some(roles) = self.roles.as_mut().filter(|r| !r.changed()) {
-            roles.reload();
-        }
-    }
-
-    /// OK in the «New skill» form: write the file and open it.
-    fn create_skill(&mut self, form: &Form) -> Result<(), String> {
-        let root = self.project.clone().ok_or_else(String::new)?;
-        let (name, description) = (form.value(0), form.value(1));
-        skills::check_name(name).map_err(|e| e.to_string())?;
-        if self.skills.as_ref().is_some_and(|s| s.exists(name)) {
-            return Err(self.tr.f("skills.exists", &[("name", &name)]));
-        }
-        if description.is_empty() {
-            return Err(self.tr.t("skills.need_description").to_string());
-        }
-        let path = skill_path(&root, name);
-        let text = format!("---\ndescription: {description}\n---\n# {name}\n\n");
-        path.parent()
-            .map_or(Ok(()), fs::create_dir_all)
-            .and_then(|()| fs::write(&path, text))
-            .map_err(|e| format!("{}: {e}", path.display()))?;
-        self.reload_skills(Some(name));
-        self.edit = Some(EditJob {
-            name: name.to_string(),
-            path,
-            copied: false,
-            kind: EditKind::Skill,
-        });
-        Ok(())
-    }
-
-    /// OK in the «Restore built-in» form: delete the project's copy.
-    fn restore_skill(&mut self, name: &str) -> Result<(), String> {
-        let root = self.project.clone().ok_or_else(String::new)?;
-        let path = skill_path(&root, name);
-        let repo = Repo::open(&root).map_err(|e| e.to_string())?;
-        let tracked = repo.is_tracked(&path);
-        fs::remove_file(&path).map_err(|e| format!("{}: {e}", path.display()))?;
-        if tracked {
-            repo.commit_paths(
-                &[&path],
-                &format!("harness: skill {name} is built-in again"),
-            )
-            .map_err(|e| e.to_string())?;
-        }
-        self.message = Some((self.tr.f("skills.restored", &[("name", &name)]), false));
-        self.reload_skills(Some(name));
-        Ok(())
-    }
-
-    /// «Refresh models»: the agents are asked in the background.
-    fn ask_for_models(&mut self) {
-        if self.asking.is_some() {
-            return;
-        }
-        let Some(dir) = credentials::default_dir() else {
-            return;
-        };
-        let (tx, rx) = mpsc::channel();
-        let asker = self.asker;
-        std::thread::spawn(move || {
-            let _ = tx.send(asker(&dir));
-        });
-        self.asking = Some(rx);
-        if let Some(roles) = &mut self.roles {
-            roles.refreshing = true;
-        }
-        self.message = Some((self.tr.t("roles.refreshing").to_string(), false));
-    }
-
-    /// The agents answered: keep the lists and say what came back.
-    fn models_answered(&mut self, answers: Answers) {
-        let mut got = Vec::new();
-        let mut failed = Vec::new();
-        for (agent, answer) in answers {
-            let saved = answer.and_then(|list| {
-                let count = list.models.len();
-                match &self.home {
-                    Some(home) => models::save(home, &list).map_err(|e| e.to_string()),
-                    None => Err("HOME is not set".into()),
-                }
-                .map(|()| count)
-            });
-            match saved {
-                Ok(count) => got.push(format!("{agent} {count}")),
-                Err(error) => failed.push(format!("{agent}: {error}")),
-            }
-        }
-        let text = match (got.is_empty(), failed.is_empty()) {
-            (true, true) => (self.tr.t("roles.no_logins").to_string(), true),
-            (_, true) => (
-                self.tr.f("roles.refreshed", &[("lists", &got.join(", "))]),
-                false,
-            ),
-            _ => {
-                let mut text = failed.join("; ");
-                if !got.is_empty() {
-                    text = format!(
-                        "{}; {text}",
-                        self.tr.f("roles.refreshed", &[("lists", &got.join(", "))])
-                    );
-                }
-                (text, true)
-            }
-        };
-        self.message = Some(text);
-        if let Some(roles) = &mut self.roles {
-            roles.refreshing = false;
-            roles.reload_models();
-        }
     }
 
     /// OK in the open form.
@@ -1090,76 +617,6 @@ impl App {
             form.error = Some(error);
             self.form = Some((purpose, form));
         }
-    }
-
-    /// Chooses a folder: in the system's dialog if there is one, otherwise
-    /// in the TUI's own browser.
-    fn pick(&mut self, pick: Pick) {
-        let title = match pick {
-            Pick::NewProject => self.tr.t("picker.new_title"),
-            Pick::Open => self.tr.t("picker.open_title"),
-        }
-        .to_string();
-        let native = if self.native {
-            folder_dialog::native_folder(&title, &self.start_dir)
-        } else {
-            Native::Unavailable
-        };
-        match native {
-            Native::Chosen(path) => self.picked(pick, path),
-            Native::Cancelled => {}
-            Native::Unavailable => {
-                self.browser = Some((pick, Browser::new(&title, &self.start_dir)));
-            }
-        }
-    }
-
-    /// A folder was chosen.
-    fn picked(&mut self, pick: Pick, path: PathBuf) {
-        let path = path.canonicalize().unwrap_or(path);
-        // The next choice starts next to this one.
-        if let Some(parent) = path.parent() {
-            self.start_dir = parent.to_path_buf();
-        }
-        match pick {
-            Pick::NewProject if has_config(&path) => {
-                self.message = Some((self.tr.t("form.exists").to_string(), true));
-            }
-            Pick::NewProject => {
-                let tr = &self.tr;
-                let text = tr.f("form.new_text", &[("path", &path.display())]);
-                self.form = Some((
-                    Purpose::NewProject(path.clone()),
-                    Form::new(tr.t("form.new_title"), &text, tr.t("form.create"))
-                        .field(tr.t("form.new_name"), &name_of(&path)),
-                ));
-            }
-            Pick::Open if has_config(&path) => self.open(&path),
-            Pick::Open => self.form = Some(self.init_form(&path)),
-        }
-    }
-
-    fn create_project(&mut self, path: &Path, form: &Form) -> Result<(), String> {
-        let path = path.to_path_buf();
-        if has_config(&path) {
-            return Err(self.tr.t("form.exists").to_string());
-        }
-        let done = projects::init(&path).map_err(|e| e.to_string())?;
-        let path = path.canonicalize().unwrap_or(path);
-        let name = match form.value(0) {
-            "" => name_of(&path),
-            name => name.to_string(),
-        };
-        self.projects.update(|list| list.add(&name, &path))?;
-        self.open(&path);
-        // A new project starts with choosing the agents.
-        self.tab = Tab::Roles;
-        let git = if done.created_git { "git, " } else { "" };
-        let text = self
-            .tr
-            .f("projects.created", &[("name", &name), ("git", &git)]);
-        self.message = Some((text, false));
-        Ok(())
     }
 
     fn draw(&mut self, frame: &mut Frame) {
@@ -1350,15 +807,6 @@ impl App {
             let items: Vec<_> = items.iter().map(|(l, id)| (*l, *id, true)).collect();
             buttons(frame, area, &mut self.hits, &items);
         }
-    }
-
-    fn init_form(&self, path: &Path) -> (Purpose, Form) {
-        let tr = &self.tr;
-        let text = tr.f("form.init_text", &[("path", &path.display())]);
-        (
-            Purpose::InitFolder(path.to_path_buf()),
-            Form::new(tr.t("form.init_title"), &text, tr.t("form.create")),
-        )
     }
 }
 
