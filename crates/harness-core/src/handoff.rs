@@ -1,5 +1,8 @@
 //! The handoff file (`handoff.json`) that every role writes when it finishes.
 
+use std::fmt;
+use std::str::FromStr;
+
 use serde::de::IntoDeserializer;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
@@ -25,6 +28,48 @@ pub enum Role {
     Tester,
     Security,
     Human,
+}
+
+impl Role {
+    /// The role's name as written in `handoff.json` and `harness.toml`, e.g. `"developer"`.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Role::Architect => "architect",
+            Role::Developer => "developer",
+            Role::Tester => "tester",
+            Role::Security => "security",
+            Role::Human => "human",
+        }
+    }
+}
+
+/// `{role}` in `format!` prints the same name as [`Role::as_str`].
+impl fmt::Display for Role {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // `pad` (not `write_str`) keeps widths like `{role:<10}` working.
+        f.pad(self.as_str())
+    }
+}
+
+/// The error when a text is not one of the role names.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("{0:?} is not a role (architect, developer, tester, security or human)")]
+pub struct UnknownRole(pub String);
+
+/// Lets `"developer".parse::<Role>()` turn a name back into a role.
+impl FromStr for Role {
+    type Err = UnknownRole;
+
+    fn from_str(text: &str) -> Result<Self, Self::Err> {
+        match text {
+            "architect" => Ok(Role::Architect),
+            "developer" => Ok(Role::Developer),
+            "tester" => Ok(Role::Tester),
+            "security" => Ok(Role::Security),
+            "human" => Ok(Role::Human),
+            _ => Err(UnknownRole(text.to_string())),
+        }
+    }
 }
 
 /// A role's decision about the work it received.
@@ -185,6 +230,25 @@ impl Handoff {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn role_names_match_the_json_and_parse_back() {
+        let roles = [
+            Role::Architect,
+            Role::Developer,
+            Role::Tester,
+            Role::Security,
+            Role::Human,
+        ];
+        for role in roles {
+            let json = serde_json::to_string(&role).unwrap();
+            assert_eq!(json, format!("\"{}\"", role.as_str()));
+            assert_eq!(role.to_string(), role.as_str());
+            assert_eq!(format!("{role:<10}|").len(), 11);
+            assert_eq!(role.as_str().parse::<Role>(), Ok(role));
+        }
+        assert_eq!("done".parse::<Role>(), Err(UnknownRole("done".to_string())));
+    }
 
     const TESTER_EXAMPLE: &str = r#"{
         "schema_version": 1,

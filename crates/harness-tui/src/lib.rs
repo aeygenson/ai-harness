@@ -1786,7 +1786,7 @@ impl App {
         let result = self.save_settings(|text| {
             config_edit::set_role(text, role, &settings).map_err(|e| e.to_string())
         });
-        let role = skills_tab::role_name(role);
+        let role = role.as_str();
         self.message = Some(match result {
             Ok(()) => (
                 self.tr
@@ -2311,7 +2311,7 @@ impl App {
                         .map(|c| proposal.missing_roles(c))
                         .unwrap_or_default()
                         .iter()
-                        .map(|given| skills_tab::role_name(given.role))
+                        .map(|given| given.role.as_str())
                         .collect();
                     if !roles.is_empty() {
                         text.push_str(&format!(

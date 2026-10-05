@@ -620,7 +620,7 @@ impl RolesTab {
             .map(|who| {
                 let (name, agent) = match who {
                     Some(role) => (
-                        role_key(*role),
+                        role.as_str(),
                         self.roles.get(role).map(|r| r.agent.as_str()),
                     ),
                     None => ("retro", self.retro.as_ref().map(|r| r.agent.as_str())),
@@ -644,7 +644,7 @@ impl RolesTab {
             self.focus == Focus::List,
         );
 
-        let name = self.who().map_or("retro", role_key);
+        let name = self.who().map_or("retro", Role::as_str);
         let block = panel(&format!(" {name} "), self.focus == Focus::Details);
         let inner = block.inner(right);
         frame.render_widget(block, right);
@@ -902,16 +902,6 @@ fn empty_role() -> RoleConfig {
         always_skills: Vec::new(),
         mcp: Vec::new(),
         plugins: Vec::new(),
-    }
-}
-
-pub fn role_key(role: Role) -> &'static str {
-    match role {
-        Role::Architect => "architect",
-        Role::Developer => "developer",
-        Role::Tester => "tester",
-        Role::Security => "security",
-        Role::Human => "human",
     }
 }
 

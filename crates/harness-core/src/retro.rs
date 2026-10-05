@@ -312,7 +312,7 @@ impl Stats {
                 let _ = writeln!(
                     md,
                     "| {} | {} | {} | {} | {} | {} | {} |",
-                    role_name(*role),
+                    role.as_str(),
                     r.steps,
                     r.approved,
                     r.rejected,
@@ -331,8 +331,8 @@ impl Stats {
             let _ = writeln!(
                 md,
                 "- {} -> {}: {} {}",
-                role_name(r.from),
-                role_name(r.to),
+                r.from.as_str(),
+                r.to.as_str(),
                 r.count,
                 times(r.count)
             );
@@ -353,7 +353,7 @@ impl Stats {
             md.push_str("\nFound more than once:\n\n");
         }
         for issue in &self.repeated_issues {
-            let roles: Vec<&str> = issue.roles.iter().map(|r| role_name(*r)).collect();
+            let roles: Vec<&str> = issue.roles.iter().map(|r| r.as_str()).collect();
             let _ = writeln!(
                 md,
                 "- {} {}, {}: {} (by {}; in {})",
@@ -382,7 +382,7 @@ impl Stats {
                 let _ = writeln!(
                     md,
                     "| {} | {} | {} | {} |",
-                    role_name(s.role),
+                    s.role.as_str(),
                     s.skill,
                     setting,
                     s.used
@@ -390,7 +390,7 @@ impl Stats {
             }
             let unused: Vec<String> = self
                 .unused_skills()
-                .map(|s| format!("{} ({})", s.skill, role_name(s.role)))
+                .map(|s| format!("{} ({})", s.skill, s.role.as_str()))
                 .collect();
             if !unused.is_empty() {
                 let _ = writeln!(md, "\nConfigured but never used: {}.", unused.join(", "));
@@ -499,16 +499,6 @@ fn severity_name(severity: Severity) -> &'static str {
     }
 }
 
-fn role_name(role: Role) -> &'static str {
-    match role {
-        Role::Architect => "architect",
-        Role::Developer => "developer",
-        Role::Tester => "tester",
-        Role::Security => "security",
-        Role::Human => "human",
-    }
-}
-
 fn times(count: usize) -> &'static str {
     if count == 1 {
         "time"
@@ -520,10 +510,10 @@ fn times(count: usize) -> &'static str {
 /// Where a task is, in words: `done`, `working: tester`, `waiting: approve design`.
 pub fn stage_text(stage: Stage) -> String {
     match stage {
-        Stage::Working(role) => format!("working: {}", role_name(role)),
+        Stage::Working(role) => format!("working: {}", role.as_str()),
         Stage::WaitingForHuman(WaitReason::ApproveDesign) => "waiting: approve design".into(),
         Stage::WaitingForHuman(WaitReason::RoleAskedForHelp(role)) => {
-            format!("waiting: {} asked for help", role_name(role))
+            format!("waiting: {} asked for help", role.as_str())
         }
         Stage::WaitingForHuman(WaitReason::RoundLimitReached) => {
             "waiting: round limit reached".into()

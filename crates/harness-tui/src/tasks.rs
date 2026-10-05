@@ -222,7 +222,7 @@ impl TasksTab {
                 for (role, settings) in &config.roles {
                     self.roles.push((
                         Some(*role),
-                        agent_line(role_name(*role), &settings.agent, &settings.model),
+                        agent_line(role.as_str(), &settings.agent, &settings.model),
                     ));
                 }
                 if let Some(retro) = &config.retro {
@@ -580,7 +580,7 @@ impl TasksTab {
             let line = tr.f(
                 "tasks.run_with",
                 &[
-                    ("role", &role_name(role)),
+                    ("role", &role),
                     ("agent", &agent),
                     ("model", &model.unwrap_or(default)),
                     ("level", &effort.unwrap_or(default)),
@@ -903,7 +903,7 @@ impl TasksTab {
             })
             .collect();
         let title = match self.filter {
-            Some(role) => tr.f("tasks.title_filtered", &[("role", &role_name(role))]),
+            Some(role) => tr.f("tasks.title_filtered", &[("role", &role)]),
             None => tr.t("tasks.title").to_string(),
         };
         draw_list(
@@ -920,7 +920,7 @@ impl TasksTab {
 
         let Some(task) = self.current() else {
             let empty = match self.filter {
-                Some(role) => tr.f("tasks.empty_filtered", &[("role", &role_name(role))]),
+                Some(role) => tr.f("tasks.empty_filtered", &[("role", &role)]),
                 None => tr.t("tasks.empty").to_string(),
             };
             let empty = Paragraph::new(empty)
@@ -963,10 +963,7 @@ impl TasksTab {
                 let (text, links) = step_text(step, &self.artifacts(step), tr);
                 let title = tr.f(
                     "tasks.step",
-                    &[
-                        ("round", &step.handoff.round),
-                        ("role", &role_name(step.handoff.role)),
-                    ],
+                    &[("round", &step.handoff.round), ("role", &step.handoff.role)],
                 );
                 (title, text, links)
             }
@@ -1040,8 +1037,8 @@ impl TasksTab {
     fn choice_label(choice: Choice, tr: &I18n) -> String {
         match choice {
             Choice::NewTask => tr.t("tasks.choice_new").to_string(),
-            Choice::Role(role) => role_name(role).to_string(),
-            Choice::Continue(role) => tr.f("tasks.choice_continue", &[("role", &role_name(role))]),
+            Choice::Role(role) => role.as_str().to_string(),
+            Choice::Continue(role) => tr.f("tasks.choice_continue", &[("role", &role)]),
             Choice::Finish => tr.t("tasks.choice_finish").to_string(),
         }
     }
@@ -1313,7 +1310,7 @@ fn wrap(text: &str, width: usize) -> Vec<String> {
 /// The message after the work: what happened and what Lisa does next.
 fn outcome_text(outcome: &Outcome, tr: &I18n) -> (String, bool) {
     let task = &outcome.task;
-    let role = |role: &Role| role_name(*role);
+    let role = |role: &Role| role.as_str();
     let Some(stop) = &outcome.stop else {
         return (tr.f("tasks.stop_finished", &[("task", task)]), false);
     };
@@ -1476,7 +1473,7 @@ fn step_item(step: &Step) -> ListItem<'static> {
     };
     ListItem::new(Line::from(vec![
         Span::raw(format!("r{} ", h.round)),
-        Span::styled(format!("{:<10} ", role_name(h.role)), theme::role(h.role)),
+        Span::styled(format!("{:<10} ", h.role.as_str()), theme::role(h.role)),
         verdict_span(h.verdict),
         Span::styled(" → ", theme::dim()),
         Span::styled(format!("{:<10}", next_name(h.next_role)), next),
@@ -1564,17 +1561,7 @@ fn verdict_span(verdict: Verdict) -> Span<'static> {
 
 fn next_name(next: NextStep) -> &'static str {
     match next {
-        NextStep::To(role) => role_name(role),
+        NextStep::To(role) => role.as_str(),
         NextStep::Done => "done",
-    }
-}
-
-fn role_name(role: Role) -> &'static str {
-    match role {
-        Role::Architect => "architect",
-        Role::Developer => "developer",
-        Role::Tester => "tester",
-        Role::Security => "security",
-        Role::Human => "human",
     }
 }

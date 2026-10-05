@@ -39,7 +39,7 @@ use ratatui::Frame;
 
 use crate::i18n::I18n;
 use crate::roles_tab::RolesTab;
-use crate::skills_tab::{role_name, ROLES};
+use crate::skills_tab::ROLES;
 use crate::tasks::draw_list;
 use crate::theme;
 use crate::ui::{buttons, panel, selector, ButtonId, Hits, ListId};
@@ -393,7 +393,7 @@ impl McpTab {
         ])
         .areas(area);
         let role = self.role();
-        let names: Vec<&str> = ROLES.iter().map(|r| role_name(*r)).collect();
+        let names: Vec<&str> = ROLES.iter().map(|r| r.as_str()).collect();
         selector(
             frame,
             top,
@@ -406,8 +406,8 @@ impl McpTab {
         // The role's agent, on the right of the selector.
         if let Some(settings) = roles.settings(role) {
             let text = match &settings.model {
-                Some(model) => format!("{} · {} ({model}) ", role_name(role), settings.agent),
-                None => format!("{} · {} ", role_name(role), settings.agent),
+                Some(model) => format!("{} · {} ({model}) ", role.as_str(), settings.agent),
+                None => format!("{} · {} ", role.as_str(), settings.agent),
             };
             let width = u16::try_from(text.chars().count()).unwrap_or(0);
             let x = top.right().saturating_sub(width);
@@ -449,7 +449,7 @@ impl McpTab {
                 ]))
             })
             .collect();
-        let title = tr.f("mcp.title", &[("role", &role_name(role))]);
+        let title = tr.f("mcp.title", &[("role", &role)]);
         draw_list(
             frame,
             hits,
@@ -480,8 +480,8 @@ impl McpTab {
         );
 
         let toggle = match &current {
-            Some(name) if self.has(roles, name) => tr.f("mcp.take", &[("role", &role_name(role))]),
-            _ => tr.f("mcp.give", &[("role", &role_name(role))]),
+            Some(name) if self.has(roles, name) => tr.f("mcp.take", &[("role", &role)]),
+            _ => tr.f("mcp.give", &[("role", &role)]),
         };
         let can = current
             .as_deref()
@@ -714,7 +714,7 @@ impl McpTab {
                     .settings(**r)
                     .is_some_and(|s| s.mcp.iter().any(|n| n == name))
             })
-            .map(|r| role_name(*r))
+            .map(|r| r.as_str())
             .collect();
         let users = if users.is_empty() {
             tr.t("mcp.no_roles").to_string()

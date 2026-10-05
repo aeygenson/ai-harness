@@ -63,12 +63,12 @@ pub fn add_plugin(text: &str, plugin: &NewPlugin, role: Option<Role>) -> Result<
     }
     plugins.insert(plugin.name, Item::Table(entry));
     if let Some(role) = role {
-        let key = role_key(role);
+        let key = role.as_str();
         let roles = table(&mut doc, "roles")?;
         let role_table = roles
-            .get_mut(&key)
+            .get_mut(key)
             .and_then(Item::as_table_mut)
-            .ok_or_else(|| EditError::NoRole(key.clone()))?;
+            .ok_or_else(|| EditError::NoRole(key.to_string()))?;
         let list = role_table
             .entry("plugins")
             .or_insert(value(Array::new()))
@@ -124,12 +124,12 @@ pub fn add_role_skill(
     always: bool,
 ) -> Result<String, EditError> {
     let mut doc: DocumentMut = text.parse()?;
-    let key = role_key(role);
+    let key = role.as_str();
     let list_name = if always { "always_skills" } else { "skills" };
     let list = table(&mut doc, "roles")?
-        .get_mut(&key)
+        .get_mut(key)
         .and_then(Item::as_table_mut)
-        .ok_or_else(|| EditError::NoRole(key.clone()))?
+        .ok_or_else(|| EditError::NoRole(key.to_string()))?
         .entry(list_name)
         .or_insert(value(Array::new()))
         .as_array_mut()
@@ -145,10 +145,10 @@ pub fn add_role_skill(
 /// their lines and comments. An empty list or no model removes the key.
 pub fn set_role(text: &str, role: Role, settings: &RoleConfig) -> Result<String, EditError> {
     let mut doc: DocumentMut = text.parse()?;
-    let key = role_key(role);
+    let key = role.as_str();
     let roles = table(&mut doc, "roles")?;
     let entry = roles
-        .entry(&key)
+        .entry(key)
         .or_insert_with(|| Item::Table(Table::new()));
     let role_table = entry
         .as_table_mut()
@@ -340,13 +340,6 @@ fn table<'a>(doc: &'a mut DocumentMut, key: &str) -> Result<&'a mut Table, EditE
     });
     item.as_table_mut()
         .ok_or_else(|| EditError::NotATable(key.to_string()))
-}
-
-fn role_key(role: Role) -> String {
-    serde_json::to_value(role)
-        .ok()
-        .and_then(|v| v.as_str().map(str::to_string))
-        .unwrap_or_default()
 }
 
 fn finish(doc: DocumentMut) -> Result<String, EditError> {

@@ -146,7 +146,7 @@ impl TaskStore {
         if !dir.exists() {
             create_dir(&dir)?;
         }
-        let prefix = format!("round-{round:02}-{}-", role_name(role));
+        let prefix = format!("round-{round:02}-{}-", role.as_str());
         let mut attempt = 1;
         loop {
             let path = dir.join(format!("{prefix}{attempt}.log"));
@@ -240,7 +240,7 @@ impl TaskStore {
             create_dir(&round_dir)?;
         }
         let step = sorted_subdirs(&round_dir)?.len() + 1;
-        let step_dir = round_dir.join(format!("{step:02}-{}", role_name(role)));
+        let step_dir = round_dir.join(format!("{step:02}-{}", role.as_str()));
         create_dir(&step_dir)?;
         Ok(step_dir)
     }
@@ -285,7 +285,7 @@ fn parse_failure(name: &str) -> Option<(u32, Role)> {
     let (round, rest) = rest.split_once('-')?;
     let (role, attempt) = rest.rsplit_once('-')?;
     attempt.parse::<u32>().ok()?;
-    let role = serde_json::from_value(serde_json::Value::String(role.to_string())).ok()?;
+    let role = role.parse().ok()?;
     Some((round.parse().ok()?, role))
 }
 
@@ -300,16 +300,6 @@ fn check_task_id(task_id: &str) -> Result<(), StoreError> {
         Ok(())
     } else {
         Err(StoreError::InvalidTaskId(task_id.to_string()))
-    }
-}
-
-fn role_name(role: Role) -> &'static str {
-    match role {
-        Role::Architect => "architect",
-        Role::Developer => "developer",
-        Role::Tester => "tester",
-        Role::Security => "security",
-        Role::Human => "human",
     }
 }
 

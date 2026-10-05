@@ -363,12 +363,7 @@ fn commit_failure_logs(
     role: Role,
     what: &str,
 ) -> Result<(), GitError> {
-    let message = format!(
-        "{} round {}: {} {what}",
-        state.task_id,
-        state.round,
-        format!("{role:?}").to_lowercase()
-    );
+    let message = format!("{} round {}: {} {what}", state.task_id, state.round, role);
     let paths: Vec<&Path> = logs.iter().map(PathBuf::as_path).collect();
     repo.commit_paths(&paths, &message)?;
     Ok(())
@@ -433,9 +428,7 @@ fn commit_message(handoff: &Handoff) -> String {
     }
     format!(
         "{} round {}: {} ({verdict}) - {summary}",
-        handoff.task_id,
-        handoff.round,
-        format!("{:?}", handoff.role).to_lowercase(),
+        handoff.task_id, handoff.round, handoff.role,
     )
 }
 
