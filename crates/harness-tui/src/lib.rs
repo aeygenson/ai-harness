@@ -34,21 +34,19 @@ use harness_core::skills::{self, SKILLS_DIR};
 use harness_core::{config_edit, plugin_ops, settings};
 use harness_platform::editor;
 use harness_platform::folder_dialog::{self, Native};
-use ratatui::crossterm::cursor::Hide;
 use ratatui::crossterm::event::{
-    self, DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
-    Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
+    DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture, KeyCode,
+    KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
 };
 use ratatui::crossterm::execute;
-use ratatui::crossterm::terminal::{enable_raw_mode, Clear, ClearType, EnterAlternateScreen};
 use ratatui::layout::{Constraint, Layout, Rect};
-use ratatui::prelude::CrosstermBackend;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Paragraph, Wrap};
-use ratatui::{DefaultTerminal, Frame, Terminal};
+use ratatui::Frame;
 
 mod agents_tab;
+mod background;
 mod i18n;
 mod keys;
 mod mcp_tab;
@@ -61,6 +59,7 @@ mod roles_tab;
 mod runner;
 mod skills_tab;
 mod tasks;
+mod terminal;
 mod theme;
 mod ui;
 
@@ -77,8 +76,6 @@ use skills_tab::SkillsTab;
 use tasks::{Menu, TasksTab};
 use ui::{buttons, panel, ButtonId, Form, Hits, ListId, Target};
 
-/// How often the open project is read again.
-const RELOAD_EVERY: Duration = Duration::from_secs(3);
 /// Two clicks on the same thing within this time are a double click.
 const DOUBLE_CLICK: Duration = Duration::from_millis(500);
 
@@ -218,103 +215,10 @@ pub fn run(start: &Path) -> Result<()> {
     }));
     // A pasted text arrives as one event, so its line breaks do not send it.
     execute!(io::stdout(), EnableMouseCapture, EnableBracketedPaste)?;
-    let result = event_loop(&mut terminal, &mut app);
+    let result = terminal::event_loop(&mut terminal, &mut app);
     let _ = execute!(io::stdout(), DisableMouseCapture, DisableBracketedPaste);
     ratatui::restore();
     result
-}
-
-fn event_loop(terminal: &mut DefaultTerminal, app: &mut App) -> Result<()> {
-    let mut loaded = Instant::now();
-    while !app.quit {
-        terminal.draw(|frame| app.draw(frame))?;
-        if event::poll(Duration::from_millis(250))? {
-            match event::read()? {
-                Event::Key(key) if key.kind == KeyEventKind::Press => app.on_key(key),
-                Event::Mouse(mouse) => app.on_mouse(mouse),
-                Event::Paste(text) => app.on_paste(&text),
-                _ => {}
-            }
-        }
-        app.tick();
-        app.open_task_file();
-        if let Some(job) = app.edit.take() {
-            let result = edit_outside(terminal, &job.path, &app.tr);
-            app.finish_edit(&job, result);
-        }
-        if let Some((login, name)) = app.sign_in.take() {
-            let result = sign_in_outside(terminal, login, name, &app.tr);
-            app.finish_sign_in(name, result);
-        }
-        if loaded.elapsed() >= RELOAD_EVERY {
-            if let Some(tasks) = &mut app.tasks {
-                tasks.reload();
-            }
-            loaded = Instant::now();
-        }
-    }
-    Ok(())
-}
-
-/// Gives the terminal to the editor and takes it back when the editor is closed.
-fn edit_outside(terminal: &mut DefaultTerminal, file: &Path, tr: &I18n) -> Result<(), String> {
-    let _ = execute!(io::stdout(), DisableMouseCapture, DisableBracketedPaste);
-    ratatui::restore();
-    println!("{}", tr.f("skills.editing", &[("path", &file.display())]));
-    let result = editor::run(file);
-    take_terminal_back(terminal);
-    result
-}
-
-/// Gives the terminal to `harness login` (it asks for a token or opens the
-/// browser) and takes it back once Lisa presses Enter.
-fn sign_in_outside(
-    terminal: &mut DefaultTerminal,
-    login: &str,
-    name: &str,
-    tr: &I18n,
-) -> Result<(), String> {
-    let _ = execute!(io::stdout(), DisableMouseCapture, DisableBracketedPaste);
-    ratatui::restore();
-    println!("{}\n", tr.f("agents.signing_in", &[("name", &name)]));
-    let result = std::env::current_exe()
-        .map_err(|e| e.to_string())
-        .and_then(|harness| {
-            std::process::Command::new(harness)
-                .args(["login", login])
-                .status()
-                .map_err(|e| e.to_string())
-        })
-        .and_then(|status| {
-            if status.success() {
-                Ok(())
-            } else {
-                Err(status.to_string())
-            }
-        });
-    println!("\n{}", tr.t("agents.sign_in_back"));
-    let mut line = String::new();
-    let _ = io::BufRead::read_line(&mut io::stdin().lock(), &mut line);
-    take_terminal_back(terminal);
-    result
-}
-
-/// Full screen again after a program had the terminal.
-fn take_terminal_back(terminal: &mut DefaultTerminal) {
-    let _ = enable_raw_mode();
-    let _ = execute!(
-        io::stdout(),
-        EnterAlternateScreen,
-        Clear(ClearType::All),
-        Hide,
-        EnableMouseCapture,
-        EnableBracketedPaste
-    );
-    // A new terminal draws everything again. (`Terminal::clear` would ask the
-    // terminal where its cursor is, and not every terminal answers.)
-    if let Ok(fresh) = Terminal::new(CrosstermBackend::new(io::stdout())) {
-        *terminal = fresh;
-    }
 }
 
 /// Each agent's answer: its model list, or why there is none.
@@ -535,21 +439,6 @@ impl App {
         running
     }
 
-    /// Looks in the background which agents are installed on this computer.
-    fn check_agents(&mut self) {
-        if self.agent_check.is_some() {
-            return;
-        }
-        let (tx, rx) = mpsc::channel();
-        let checker = self.agent_checker;
-        let credentials = self.home.as_ref().map(|h| h.join("credentials"));
-        std::thread::spawn(move || {
-            let _ = tx.send(checker(credentials.as_deref()));
-        });
-        self.agents.checking = true;
-        self.agent_check = Some(rx);
-    }
-
     /// Back from `harness login`: say how it went and look at the logins again.
     fn finish_sign_in(&mut self, name: &str, result: Result<(), String>) {
         self.message = Some(match result {
@@ -614,72 +503,6 @@ impl App {
         ));
     }
 
-    /// Runs a confirmed install or update in the background; its lines come in `tick`.
-    fn run_agent_command(
-        &mut self,
-        name: &'static str,
-        action: harness_agents::catalog::Action,
-        command: String,
-    ) {
-        if self.install_events.is_some() {
-            return;
-        }
-        let (tx, rx) = mpsc::channel();
-        let (installer, line) = (self.installer, command.clone());
-        std::thread::spawn(move || installer(&line, tx));
-        self.agents.job = Some(agents_tab::Job {
-            name,
-            action,
-            command,
-            lines: Vec::new(),
-            done: None,
-        });
-        self.install_events = Some(rx);
-        self.message = Some((self.tr.f("agents.job_running", &[("name", &name)]), false));
-    }
-
-    /// Takes the lines of a running install or update, and its end.
-    fn take_install_events(&mut self) {
-        use harness_agents::catalog::Action;
-        let mut finished = None;
-        if let Some(rx) = &self.install_events {
-            loop {
-                match rx.try_recv() {
-                    Ok(JobEvent::Line(line)) => {
-                        if let Some(job) = &mut self.agents.job {
-                            job.push(line);
-                        }
-                    }
-                    Ok(JobEvent::Done(result)) => {
-                        finished = Some(result);
-                        break;
-                    }
-                    Err(mpsc::TryRecvError::Empty) => break,
-                    Err(mpsc::TryRecvError::Disconnected) => {
-                        finished = Some(Err("the command stopped".into()));
-                        break;
-                    }
-                }
-            }
-        }
-        let Some(result) = finished else {
-            return;
-        };
-        self.install_events = None;
-        if let Some(job) = &mut self.agents.job {
-            let key = match (&result, job.action) {
-                (Err(_), _) => "agents.job_failed",
-                (Ok(()), Action::Install) => "agents.job_installed",
-                (Ok(()), Action::Update) => "agents.job_updated",
-                (Ok(()), Action::Remove) => "agents.job_removed",
-            };
-            self.message = Some((self.tr.f(key, &[("name", &job.name)]), result.is_err()));
-            job.done = Some(result);
-        }
-        // See what is installed now.
-        self.check_agents();
-    }
-
     /// Opens a tab. The Agents tab checks the computer the first time.
     fn show(&mut self, tab: Tab) {
         self.tab = tab;
@@ -691,119 +514,6 @@ impl App {
     /// The retrospective's agent is working.
     fn generating(&self) -> bool {
         self.retro.as_ref().is_some_and(RetroTab::is_generating)
-    }
-
-    /// Takes what the background work sent.
-    fn tick(&mut self) {
-        let job = self.plugin_job.as_ref().and_then(|rx| match rx.try_recv() {
-            Ok(done) => Some(Some(done)),
-            Err(mpsc::TryRecvError::Empty) => None,
-            Err(mpsc::TryRecvError::Disconnected) => Some(None),
-        });
-        if let Some(done) = job {
-            self.plugin_job = None;
-            if let Some(plugins) = &mut self.plugins {
-                plugins.busy = None;
-            }
-            match done {
-                Some(done) => self.plugin_job_done(done),
-                None => self.message = Some(("the download stopped".into(), true)),
-            }
-        }
-        self.take_install_events();
-        let checked = self
-            .agent_check
-            .as_ref()
-            .and_then(|rx| match rx.try_recv() {
-                Ok(statuses) => Some(statuses),
-                Err(mpsc::TryRecvError::Empty) => None,
-                Err(mpsc::TryRecvError::Disconnected) => Some(Vec::new()),
-            });
-        if let Some(statuses) = checked {
-            self.agent_check = None;
-            let failed = statuses.is_empty();
-            self.agents.checked(statuses);
-            if let Some(roles) = &mut self.roles {
-                roles.set_ready(self.agents.ready());
-            }
-            if failed {
-                self.message = Some((self.tr.t("agents.check_stopped").to_string(), true));
-            } else if self.tab == Tab::Agents && self.agents.job.is_none() {
-                let installed = self.agents.statuses.iter().filter(|s| s.installed());
-                let text = self.tr.f(
-                    "agents.checked",
-                    &[
-                        ("count", &installed.count()),
-                        ("all", &self.agents.statuses.len()),
-                    ],
-                );
-                self.message = Some((text, false));
-            }
-        }
-        let answers = self.asking.as_ref().and_then(|rx| match rx.try_recv() {
-            Ok(answers) => Some(Some(answers)),
-            Err(mpsc::TryRecvError::Empty) => None,
-            Err(mpsc::TryRecvError::Disconnected) => Some(None),
-        });
-        if let Some(answers) = answers {
-            self.asking = None;
-            self.models_answered(answers.unwrap_or_default());
-        }
-        let checked = self
-            .checking
-            .as_ref()
-            .and_then(|(_, _, rx)| match rx.try_recv() {
-                Ok(answer) => Some(answer),
-                Err(mpsc::TryRecvError::Empty) => None,
-                Err(mpsc::TryRecvError::Disconnected) => Some(Err("the check stopped".into())),
-            });
-        if let Some(answer) = checked {
-            if let Some((name, server, _)) = self.checking.take() {
-                self.mcp_checked(&name, &server, answer);
-            }
-        }
-        let found = self.searching.as_ref().and_then(|rx| match rx.try_recv() {
-            Ok(answer) => Some(answer),
-            Err(mpsc::TryRecvError::Empty) => None,
-            Err(mpsc::TryRecvError::Disconnected) => Some(Err("the search stopped".into())),
-        });
-        if let Some(answer) = found {
-            self.searching = None;
-            if let Some(catalog) = self.mcp.as_mut().and_then(|m| m.catalog.as_mut()) {
-                catalog.found(answer);
-            }
-        }
-        let signed = self
-            .signing
-            .as_ref()
-            .and_then(|(_, rx)| match rx.try_recv() {
-                Ok(answer) => Some(answer),
-                Err(mpsc::TryRecvError::Empty) => None,
-                Err(mpsc::TryRecvError::Disconnected) => Some(Err("the sign-in stopped".into())),
-            });
-        if let Some(answer) = signed {
-            if let Some((name, _)) = self.signing.take() {
-                if let Some(mcp) = &mut self.mcp {
-                    mcp.signing = None;
-                }
-                self.message = Some(match answer {
-                    Ok(()) => (self.tr.f("mcp.signed_in_as", &[("name", &name)]), false),
-                    Err(error) => (error, true),
-                });
-            }
-        }
-        if let Some(tasks) = &mut self.tasks {
-            if let Some(message) = tasks.tick(&self.tr) {
-                self.message = Some(message);
-            }
-        }
-        if let Some(retro) = &mut self.retro {
-            if let Some(message) = retro.tick(&self.tr) {
-                self.message = Some(message);
-                // A failed attempt is committed too; the agent may have used skills.
-                self.reload_skills(None);
-            }
-        }
     }
 
     fn on_paste(&mut self, text: &str) {
