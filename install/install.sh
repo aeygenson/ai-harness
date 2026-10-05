@@ -159,9 +159,14 @@ linux_node() {
 }
 
 linux_basics() {
-    say "Git, curl: installing or updating with the system's packages"
-    # xz unpacks Node.js; Debian and Ubuntu call it xz-utils.
-    if has apt-get; then linux_packages git curl xz-utils; else linux_packages git curl xz; fi
+    say "Git, curl, bubblewrap: installing or updating with the system's packages"
+    # xz unpacks Node.js; Debian and Ubuntu call it xz-utils. Bubblewrap lets
+    # Claude Code hide its login from the commands the agent runs.
+    if has apt-get; then
+        linux_packages git curl xz-utils bubblewrap
+    else
+        linux_packages git curl xz bubblewrap
+    fi
     linux_node
     # Zed's own installer puts it in ~/.local and also updates it.
     say "Zed: installing the newest"
