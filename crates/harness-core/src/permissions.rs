@@ -9,6 +9,10 @@ use crate::handoff::Role;
 /// Nobody may change these, whatever the role: the harness's own files, and the
 /// files that give agents their instructions and settings. An agent that rewrites
 /// them could change how the next agent behaves.
+///
+/// They are refused at any depth (`sub/CLAUDE.md`, `pkg/.claude/settings.json`),
+/// because agents also read such files from subfolders, and in any letter case,
+/// because macOS and Windows treat `Claude.md` and `CLAUDE.md` as the same file.
 const ALWAYS_FORBIDDEN: &[&str] = &[
     ".harness",
     ".git",
@@ -56,10 +60,7 @@ pub fn may_write(role: Role, path: &str) -> bool {
     if parts.contains(&"..") {
         return false;
     }
-    if parts
-        .first()
-        .is_some_and(|first| ALWAYS_FORBIDDEN.contains(first))
-    {
+    if parts.iter().any(|part| is_always_forbidden(part)) {
         return false;
     }
     match rule_for(role) {
@@ -70,6 +71,13 @@ pub fn may_write(role: Role, path: &str) -> bool {
             .split_last()
             .is_some_and(|(_file, folders)| folders.iter().any(|f| names.contains(f))),
     }
+}
+
+/// Is this one path part (a folder or file name) on the always forbidden list?
+fn is_always_forbidden(part: &str) -> bool {
+    ALWAYS_FORBIDDEN
+        .iter()
+        .any(|name| name.eq_ignore_ascii_case(part))
 }
 
 /// The files from `changed` that `role` was not allowed to touch.
@@ -127,6 +135,27 @@ mod tests {
         assert!(!may_write(Role::Developer, "../outside.txt"));
         assert!(!may_write(Role::Tester, "tests/../src/main.rs"));
         assert!(!may_write(Role::Tester, "tests\\..\\src\\main.rs"));
+    }
+
+    #[test]
+    fn agent_files_are_refused_in_subfolders_too() {
+        assert!(!may_write(Role::Developer, "sub/CLAUDE.md"));
+        assert!(!may_write(Role::Developer, "packages/web/AGENTS.md"));
+        assert!(!may_write(Role::Developer, "pkg/.claude/settings.json"));
+        assert!(!may_write(Role::Developer, "vendor/lib/.git/config"));
+        assert!(!may_write(Role::Architect, "docs/GEMINI.md"));
+        assert!(!may_write(Role::Tester, "tests/.codex/config.toml"));
+        // A name that only contains a forbidden one is fine.
+        assert!(may_write(Role::Developer, "docs/CLAUDE.md.bak"));
+        assert!(may_write(Role::Developer, "src/agents.rs"));
+    }
+
+    #[test]
+    fn agent_files_are_refused_in_any_letter_case() {
+        assert!(!may_write(Role::Developer, "Claude.md"));
+        assert!(!may_write(Role::Developer, "agents.md"));
+        assert!(!may_write(Role::Developer, ".Claude/settings.json"));
+        assert!(!may_write(Role::Developer, "sub/.GIT/config"));
     }
 
     #[test]
