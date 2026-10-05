@@ -37,7 +37,7 @@ struct Places<'a> {
 
 /// Runs `work` with this system's places.
 fn with_places<T>(work: impl FnOnce(&Places) -> T) -> T {
-    let home = harness_platform::home::home_dir();
+    let home = crate::home::home_dir();
     let path = env::var_os("PATH").unwrap_or_default();
     let exts = if cfg!(windows) {
         env::var_os("PATHEXT").unwrap_or_else(|| OsString::from(".COM;.EXE;.BAT;.CMD"))
@@ -109,7 +109,7 @@ fn system_editor(file: &Path, places: &Places) -> Option<Command> {
 
 /// `program` in one of the folders of `PATH`.
 fn find(places: &Places, program: &str) -> Option<PathBuf> {
-    harness_platform::program::find_in(program, places.path, places.exts)
+    crate::program::find_in(program, places.path, places.exts)
 }
 
 /// Zed, from `PATH`, `~/.local/bin`, the Zed app (macOS) or its install

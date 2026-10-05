@@ -17,9 +17,5 @@ serde_json = "1"
 tokio = { version = "1", features = ["macros", "rt", "signal"] }
 harness-tui = { path = "../harness-tui" }
 
-# Windows has no `stty`: secrets are typed through the console directly.
-[target.'cfg(windows)'.dependencies]
-crossterm = "0.29"
-
 [dev-dependencies]
 tempfile = "3"

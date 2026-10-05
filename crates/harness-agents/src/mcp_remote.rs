@@ -333,7 +333,7 @@ impl Shared {
         }
         let mut command = self.curl("DELETE");
         command
-            .args(["-o", "/dev/null", "--max-time", "10"])
+            .args(["--max-time", "10"])
             .arg(&self.bridge.url)
             .stdin(Stdio::null())
             .stdout(Stdio::null())

@@ -78,18 +78,7 @@ pub fn exec_server(spec_file: &Path) -> io::Error {
         Ok(command) => command,
         Err(e) => return e,
     };
-    #[cfg(unix)]
-    {
-        use std::os::unix::process::CommandExt;
-        command.exec()
-    }
-    #[cfg(not(unix))]
-    {
-        match command.status() {
-            Ok(status) => std::process::exit(status.code().unwrap_or(1)),
-            Err(e) => e,
-        }
-    }
+    harness_platform::process::replace_with(&mut command)
 }
 
 #[cfg(test)]

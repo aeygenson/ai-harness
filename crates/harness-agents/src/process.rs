@@ -1,6 +1,7 @@
 //! What every console agent adapter shares: a clean environment, starting the
 //! program with the prompt on standard input, the time-out, and the log.
 
+use std::io::ErrorKind;
 use std::path::Path;
 use std::process::{Command, ExitStatus, Stdio};
 use std::sync::mpsc::Sender;
@@ -24,13 +25,13 @@ pub fn base_command(program: &Path, project_dir: &Path) -> Command {
 }
 
 /// Starts `command`. A program file that another thread has just written can
-/// be «busy» for a moment (Linux `ETXTBSY`, seen when tests write fake
+/// be «busy» for a moment (`ETXTBSY` on Linux and macOS, seen when tests write fake
 /// programs in parallel); that is tried again a few times.
 pub fn spawn(command: &mut Command) -> std::io::Result<std::process::Child> {
     let mut tries = 0;
     loop {
         match command.spawn() {
-            Err(e) if e.raw_os_error() == Some(26) && tries < 20 => {
+            Err(e) if e.kind() == ErrorKind::ExecutableFileBusy && tries < 20 => {
                 tries += 1;
                 std::thread::sleep(Duration::from_millis(50));
             }
