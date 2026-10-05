@@ -316,7 +316,7 @@ impl SkillsTab {
         ])
         .areas(area);
 
-        let names: Vec<&str> = ROLES.iter().map(|r| role_name(*r)).collect();
+        let names: Vec<&str> = ROLES.iter().map(|r| r.as_str()).collect();
         selector(
             frame,
             top,
@@ -372,7 +372,7 @@ impl SkillsTab {
                 }
             })
             .collect();
-        let title = tr.f("skills.title", &[("role", &role_name(self.role()))]);
+        let title = tr.f("skills.title", &[("role", &self.role())]);
         let block = panel(&title, true);
         let inner = block.inner(left);
         let mut state = ListState::default().with_selected(Some(self.row));
@@ -419,10 +419,7 @@ impl SkillsTab {
                     } else {
                         "skills.agent_unused"
                     };
-                    let text = tr.f(
-                        key,
-                        &[("role", &role_name(self.role())), ("agent", &self.agent())],
-                    );
+                    let text = tr.f(key, &[("role", &self.role()), ("agent", &self.agent())]);
                     lines.push(Line::styled(text, dim));
                     lines.push(Line::default());
                 } else if skills::is_base(&skill.name) {
@@ -509,16 +506,6 @@ fn reflow(text: &str) -> Vec<String> {
         joinable = !code && (text_line || (item && !trimmed.starts_with("---")));
     }
     lines
-}
-
-pub fn role_name(role: Role) -> &'static str {
-    match role {
-        Role::Architect => "architect",
-        Role::Developer => "developer",
-        Role::Tester => "tester",
-        Role::Security => "security",
-        Role::Human => "human",
-    }
 }
 
 #[cfg(test)]

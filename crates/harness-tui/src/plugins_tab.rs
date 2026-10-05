@@ -41,7 +41,7 @@ use crate::plugin_catalog::{
     draw_catalog, draw_catalogs, unusable, CatalogView, CatalogsView, OFFICIAL,
 };
 use crate::roles_tab::RolesTab;
-use crate::skills_tab::{role_name, ROLES};
+use crate::skills_tab::ROLES;
 use crate::tasks::draw_list;
 use crate::theme;
 use crate::ui::{buttons, panel, selector, ButtonId, Hits, ListId};
@@ -400,7 +400,7 @@ impl PluginsTab {
         roles: &RolesTab,
     ) {
         let busy = self.busy.as_deref();
-        let role_label = role_name(self.role());
+        let role_label = self.role().as_str();
         if let Some(view) = &self.catalogs {
             draw_catalogs(view, frame, area, hits, tr, busy);
             return;
@@ -417,7 +417,7 @@ impl PluginsTab {
         ])
         .areas(area);
         let role = self.role();
-        let names: Vec<&str> = ROLES.iter().map(|r| role_name(*r)).collect();
+        let names: Vec<&str> = ROLES.iter().map(|r| r.as_str()).collect();
         selector(
             frame,
             top,
@@ -428,7 +428,7 @@ impl PluginsTab {
             ButtonId::PluginRole,
         );
         if let Some(settings) = roles.settings(role) {
-            let text = format!("{} · {} ", role_name(role), settings.agent);
+            let text = format!("{} · {} ", role.as_str(), settings.agent);
             let width = u16::try_from(text.chars().count()).unwrap_or(0);
             let x = top.right().saturating_sub(width);
             if x > top.x + 60 {
@@ -473,7 +473,7 @@ impl PluginsTab {
                 ]))
             })
             .collect();
-        let title = tr.f("plugins.title", &[("role", &role_name(role))]);
+        let title = tr.f("plugins.title", &[("role", &role)]);
         draw_list(
             frame,
             hits,
@@ -504,10 +504,8 @@ impl PluginsTab {
         );
 
         let toggle = match &current {
-            Some(name) if self.has(roles, name) => {
-                tr.f("plugins.take", &[("role", &role_name(role))])
-            }
-            _ => tr.f("plugins.give", &[("role", &role_name(role))]),
+            Some(name) if self.has(roles, name) => tr.f("plugins.take", &[("role", &role)]),
+            _ => tr.f("plugins.give", &[("role", &role)]),
         };
         let can = current
             .as_deref()
@@ -607,12 +605,12 @@ impl PluginsTab {
             let why = if agent == plugins::CLAUDE || agent == plugins::CODEX {
                 tr.f(
                     "plugins.other_agent_long",
-                    &[("role", &role_name(self.role())), ("agent", &agent)],
+                    &[("role", &self.role()), ("agent", &agent)],
                 )
             } else {
                 tr.f(
                     "plugins.agent_has_none_long",
-                    &[("role", &role_name(self.role())), ("agent", &agent)],
+                    &[("role", &self.role()), ("agent", &agent)],
                 )
             };
             lines.push(Line::styled(why, dim));
@@ -686,7 +684,7 @@ impl PluginsTab {
                     .settings(**r)
                     .is_some_and(|s| s.plugins.iter().any(|n| n == name))
             })
-            .map(|r| role_name(*r))
+            .map(|r| r.as_str())
             .collect();
         let users = if users.is_empty() {
             tr.t("plugins.no_roles").to_string()

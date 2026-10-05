@@ -246,14 +246,18 @@ enum TaskCommand {
 
 /// `architect`, `developer`, ... or `done`: the same words as in handoff.json.
 fn parse_next(text: &str) -> Result<NextStep, String> {
-    serde_json::from_value(serde_json::Value::String(text.to_string()))
+    if text == "done" {
+        return Ok(NextStep::Done);
+    }
+    text.parse()
+        .map(NextStep::To)
         .map_err(|_| format!("{text:?} is not a role or `done`"))
 }
 
 /// `architect`, `developer`, `tester` or `security`.
 fn parse_role(text: &str) -> Result<Role, String> {
-    match parse_next(text) {
-        Ok(NextStep::To(role)) if role != Role::Human => Ok(role),
+    match text.parse() {
+        Ok(role) if role != Role::Human => Ok(role),
         _ => Err(format!("{text:?} is not a role")),
     }
 }

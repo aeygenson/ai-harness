@@ -169,7 +169,7 @@ impl Proposal {
             if !config.roles.contains_key(&given.role) {
                 return Err(invalid(format!(
                     "harness.toml has no [roles.{}]",
-                    role_name(given.role)
+                    given.role.as_str()
                 )));
             }
         }
@@ -240,7 +240,7 @@ impl Proposal {
             };
             text.push_str(&format!(
                 "harness.toml: [roles.{}] {list} += \"{}\"{already}\n",
-                role_name(given.role),
+                given.role.as_str(),
                 self.skill
             ));
         }
@@ -280,13 +280,6 @@ pub fn line_diff(old: &str, new: &str) -> String {
         }
     }
     text
-}
-
-fn role_name(role: Role) -> String {
-    serde_json::to_value(role)
-        .ok()
-        .and_then(|v| v.as_str().map(str::to_string))
-        .unwrap_or_default()
 }
 
 #[cfg(test)]

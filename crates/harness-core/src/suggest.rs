@@ -165,7 +165,7 @@ pub fn prompt(
     for (role, settings) in &config.roles {
         text.push_str(&format!(
             "- {}: skills = {:?}, always_skills = {:?}\n",
-            role_name(*role),
+            role.as_str(),
             settings.skills,
             settings.always_skills
         ));
@@ -497,13 +497,6 @@ fn io_error(path: &Path, source: io::Error) -> SuggestError {
         path: path.to_path_buf(),
         source,
     }
-}
-
-fn role_name(role: Role) -> String {
-    serde_json::to_value(role)
-        .ok()
-        .and_then(|v| v.as_str().map(str::to_string))
-        .unwrap_or_default()
 }
 
 #[cfg(test)]
