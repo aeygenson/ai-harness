@@ -5,7 +5,8 @@
 //!   never reach the agent;
 //! - `CLAUDE_CONFIG_DIR` points to `<project>/.harness/agents/claude/`, so the
 //!   agent does not see `~/.claude` (plugins, MCP servers, hooks, memory);
-//! - login only through the token saved by the Agents tab («Sign in»);
+//! - login only through the token saved by the Agents tab («Sign in»); Claude
+//!   Code removes the token from every command it runs (see [`HIDE_TOKEN`]);
 //! - the role's tools and file rules are given as flags, and anything not
 //!   allowed is refused without asking (`--permission-mode dontAsk`).
 
@@ -24,6 +25,18 @@ use harness_core::plugins::Plugin;
 
 /// Where the agent's own settings live inside the project (ignored by git).
 pub const CONFIG_DIR: &str = ".harness/agents/claude";
+
+/// Claude Code needs its token in its environment, but with this variable set
+/// it removes the token from the environment of every command, hook and MCP
+/// server it starts. On Linux it also runs the commands so they cannot read
+/// other processes' environments. There it needs bubblewrap and does not
+/// start without it, so the variable is set only when bubblewrap is there
+/// ([`harness_platform::program::sandbox_ready`]).
+const HIDE_TOKEN: &str = "CLAUDE_CODE_SUBPROCESS_ENV_SCRUB";
+
+/// The line the role's log gets when the token cannot be hidden.
+const NO_SANDBOX_NOTE: &str = "note: bubblewrap (bwrap) is not installed, so the commands the \
+agent runs can see its Claude login; install the package «bubblewrap» to hide it\n";
 
 /// `--mcp-config` for a role without MCP servers.
 const NO_MCP_SERVERS: &str = r#"{"mcpServers":{}}"#;
@@ -130,6 +143,9 @@ impl ClaudeCode {
         if let Some(effort) = self.efforts.get(&job.role) {
             command.args(["--effort", effort]);
         }
+        if harness_platform::program::sandbox_ready() {
+            command.env(HIDE_TOKEN, "1");
+        }
         command
     }
 
@@ -202,6 +218,9 @@ impl ClaudeCode {
 impl AgentRunner for ClaudeCode {
     async fn run(&self, job: &RoleJob) -> AgentOutcome {
         let mut log = self.header(job);
+        if !harness_platform::program::sandbox_ready() {
+            log.push_str(NO_SANDBOX_NOTE);
+        }
         if let Err(e) = self.prepare_config_dir(job) {
             return failed(log, format!("cannot prepare {CONFIG_DIR}: {e}"));
         }
@@ -536,11 +555,26 @@ mod tests {
                 "CLAUDE_CONFIG_DIR",
                 "CLAUDE_CODE_OAUTH_TOKEN",
                 "DISABLE_AUTOUPDATER",
+                HIDE_TOKEN,
             ];
             assert!(
                 harness_platform::env::is_inherited(name) || ours.contains(&name.as_str()),
                 "{name} should not be passed"
             );
+        }
+    }
+
+    #[test]
+    fn the_token_is_hidden_from_the_agents_commands_where_possible() {
+        let command = ClaudeCode::new(Secret::new("t")).command(&job(Role::Developer));
+        let hide = command
+            .get_envs()
+            .find(|(name, _)| *name == HIDE_TOKEN)
+            .and_then(|(_, value)| value);
+        if harness_platform::program::sandbox_ready() {
+            assert_eq!(hide, Some(std::ffi::OsStr::new("1")));
+        } else {
+            assert_eq!(hide, None);
         }
     }
 

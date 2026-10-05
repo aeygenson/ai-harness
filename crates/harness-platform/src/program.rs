@@ -105,6 +105,12 @@ fn in_usual_places(name: &str, home: Option<&Path>) -> Option<PathBuf> {
     find_in(name, &places, &path_exts())
 }
 
+/// Can a program here run its commands in a sandbox? On Linux that takes
+/// bubblewrap (`bwrap`) in `PATH`; macOS and Windows need no extra program.
+pub fn sandbox_ready() -> bool {
+    !cfg!(target_os = "linux") || in_path("bwrap").is_some()
+}
+
 /// `unix` on Linux and macOS, `windows` on Windows: for things written
 /// differently per system, such as an installer command.
 pub fn on_this_system<T>(unix: T, windows: T) -> T {
@@ -179,6 +185,15 @@ pub fn find_in(name: &str, path: &OsStr, exts: &OsStr) -> Option<PathBuf> {
 mod tests {
     use super::*;
     use std::fs;
+
+    #[test]
+    fn only_linux_needs_bubblewrap_for_a_sandbox() {
+        if cfg!(target_os = "linux") {
+            assert_eq!(sandbox_ready(), in_path("bwrap").is_some());
+        } else {
+            assert!(sandbox_ready());
+        }
+    }
 
     #[test]
     fn a_program_is_found_with_its_windows_extension() {

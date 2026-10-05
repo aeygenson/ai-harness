@@ -188,9 +188,16 @@ This program starts AI agents with access to the user's files, so security rules
   use the helpers in `harness_platform::private` and `harness_core::secret`. Do not use
   `.env` files.
 - **Never pass a secret through an agent's environment**: agents can read their own
-  environment from shell commands. Use private temporary files outside the project.
+  environment from shell commands. Use private temporary files outside the project, deleted
+  when the role ends. The one exception is Claude Code, which takes its login only from
+  `CLAUDE_CODE_OAUTH_TOKEN`; there the harness sets `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB`, so
+  Claude Code removes the token from every command it runs (on Linux this needs bubblewrap).
 - Secrets are replaced with `***` in `agent.log`; keep it that way when adding new output.
-- Agents never see OAuth tokens or API keys of MCP servers; the harness bridge holds them.
+- MCP keys and OAuth tokens go only into the MCP server's own settings (a private temporary
+  file), never into the agent's environment, the project, git or a handoff.
+- Know the limit: an agent runs as the same user, so a role with a shell (Developer, Tester)
+  could still read a private file if it tried. Only an operating-system sandbox would stop
+  that; until there is one, do not claim that an agent cannot see a secret.
 - Never weaken the role permissions (`harness_core::permissions`, deny rules, temporary HOME
   for Antigravity) without discussing it.
 - Treat everything an agent or an MCP server returns as untrusted input: strip control
