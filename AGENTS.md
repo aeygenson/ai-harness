@@ -192,7 +192,8 @@ This program starts AI agents with access to the user's files, so security rules
   when the role ends. The one exception is Claude Code, which takes its login only from
   `CLAUDE_CODE_OAUTH_TOKEN`; there the harness sets `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB`, so
   Claude Code removes the token from every command it runs (on Linux this needs bubblewrap).
-- Secrets are replaced with `***` in `agent.log`; keep it that way when adding new output.
+- Secrets are replaced with `***` in `agent.log`, messages and the live log; keep it that way
+  when adding new output (`harness_core::secret::hide`; do not write another one).
 - MCP keys and OAuth tokens go only into the MCP server's own settings (a private temporary
   file), never into the agent's environment, the project, git or a handoff.
 - Know the limit: an agent runs as the same user, so a role with a shell (Developer, Tester)

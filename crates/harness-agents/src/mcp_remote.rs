@@ -133,18 +133,14 @@ impl Shared {
     /// The text without the secrets of the headers and without control
     /// characters.
     fn hide(&self, text: &str) -> String {
-        let mut text = safe_line(text, 300);
+        let mut secrets = Vec::new();
         for header in &self.bridge.headers {
             let value = header.split_once(':').map_or("", |(_, v)| v.trim());
-            if !value.is_empty() {
-                text = text.replace(value, "***");
-            }
+            secrets.push(value);
             // `Bearer <key>`: the key alone, too.
-            if let Some(key) = value.split_whitespace().last().filter(|k| k.len() >= 8) {
-                text = text.replace(key, "***");
-            }
+            secrets.extend(value.split_whitespace().last());
         }
-        text
+        harness_core::secret::hide(&safe_line(text, 300), &secrets)
     }
 
     fn curl(&self, method: &str) -> Command {

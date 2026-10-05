@@ -8,6 +8,7 @@ use std::sync::Mutex;
 use std::time::Duration;
 
 use harness_core::agent::AgentOutcome;
+use harness_core::secret;
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWriteExt, BufReader};
 
 /// `program`, started in the project folder with an empty environment plus
@@ -174,10 +175,7 @@ fn send_live(line: &[u8], secrets: &[&str]) {
     let Some(sink) = live.as_ref() else {
         return;
     };
-    let line = hide(
-        String::from_utf8_lossy(line).trim_end().to_string(),
-        secrets,
-    );
+    let line = secret::hide(String::from_utf8_lossy(line).trim_end(), secrets);
     if sink.send(line).is_err() {
         // Nobody listens any more.
         *live = None;
@@ -186,13 +184,6 @@ fn send_live(line: &[u8], secrets: &[&str]) {
 
 /// `text` with every secret replaced by `***`. A very short value would hide
 /// ordinary words too; real keys are long.
-fn hide(mut text: String, secrets: &[&str]) -> String {
-    for secret in secrets.iter().filter(|s| s.len() >= 8) {
-        text = text.replace(secret, "***");
-    }
-    text
-}
-
 /// Adds the agent's output to the log.
 pub fn append_output(log: &mut String, finished: &Finished) {
     log.push_str(&finished.stdout);
@@ -212,10 +203,10 @@ pub fn hide_secrets<'a>(
     let secrets: Vec<&str> = secrets.into_iter().collect();
     match &mut result {
         Ok(finished) => {
-            finished.stdout = hide(std::mem::take(&mut finished.stdout), &secrets);
-            finished.stderr = hide(std::mem::take(&mut finished.stderr), &secrets);
+            finished.stdout = secret::hide(&finished.stdout, &secrets);
+            finished.stderr = secret::hide(&finished.stderr, &secrets);
         }
-        Err(message) => *message = hide(std::mem::take(message), &secrets),
+        Err(message) => *message = secret::hide(message, &secrets),
     }
     result
 }

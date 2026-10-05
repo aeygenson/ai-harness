@@ -228,16 +228,13 @@ pub(crate) fn run_for(
     if status.success() {
         return Ok(stdout);
     }
-    let mut why = stderr
+    let why = stderr
         .lines()
         .chain(stdout.lines())
         .map(str::trim)
         .find(|l| !l.is_empty())
-        .unwrap_or("")
-        .to_string();
-    for secret in secrets.iter().filter(|s| !s.is_empty()) {
-        why = why.replace(secret, "***");
-    }
+        .unwrap_or("");
+    let why = harness_core::secret::hide(why, secrets);
     Err(format!("{program} ended with {status}: {why}"))
 }
 
