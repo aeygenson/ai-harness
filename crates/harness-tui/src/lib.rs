@@ -36,48 +36,21 @@ use ratatui::crossterm::event::{
 };
 use ratatui::crossterm::execute;
 
-mod agent_actions;
-mod agents_tab;
-mod background;
-mod draw;
-mod edits;
-mod forms;
-mod i18n;
-mod keyboard;
-mod keys;
-mod mcp;
-mod mcp_tab;
-mod mouse;
-mod picker;
-mod plugin_catalog;
-mod plugin_jobs;
-mod plugins;
-mod plugins_tab;
-mod press;
-mod project_actions;
-mod projects_tab;
-mod retro_actions;
-mod retro_tab;
-mod roles_tab;
-mod runner;
-mod skill_actions;
-mod skills_tab;
-mod tasks;
-mod terminal;
-mod theme;
+mod app;
+mod tabs;
 mod ui;
 
-use agents_tab::{AgentChecker, AgentsTab, Installer, JobEvent};
-use i18n::I18n;
-use mcp_tab::McpTab;
-use picker::Browser;
-use plugins_tab::PluginsTab;
-use projects_tab::{has_config, ProjectsTab};
-use retro_tab::{RetroBuilder, RetroTab};
-use roles_tab::RolesTab;
-use runner::Builder;
-use skills_tab::SkillsTab;
-use tasks::TasksTab;
+use tabs::agents::{AgentChecker, AgentsTab, Installer, JobEvent};
+use tabs::mcp::McpTab;
+use tabs::plugins::PluginsTab;
+use tabs::projects::picker::Browser;
+use tabs::projects::{has_config, ProjectsTab};
+use tabs::retro::{RetroBuilder, RetroTab};
+use tabs::roles::RolesTab;
+use tabs::skills::SkillsTab;
+use tabs::tasks::runner::Builder;
+use tabs::tasks::TasksTab;
+use ui::i18n::I18n;
 use ui::{Form, Hits, Target};
 
 /// Two clicks on the same thing within this time are a double click.
@@ -219,7 +192,7 @@ pub fn run(start: &Path) -> Result<()> {
     }));
     // A pasted text arrives as one event, so its line breaks do not send it.
     execute!(io::stdout(), EnableMouseCapture, EnableBracketedPaste)?;
-    let result = terminal::event_loop(&mut terminal, &mut app);
+    let result = app::terminal::event_loop(&mut terminal, &mut app);
     let _ = execute!(io::stdout(), DisableMouseCapture, DisableBracketedPaste);
     ratatui::restore();
     result
@@ -240,7 +213,7 @@ type McpChecker = fn(&McpServer, &Path) -> Result<Vec<Tool>, String>;
 
 /// The form for a new or changed MCP server.
 fn server_form(tr: &I18n, title: &str, text: &str, name: &str, server: &McpConfig) -> Form {
-    let [command, variables, sign_in] = mcp_tab::form_values(server);
+    let [command, variables, sign_in] = tabs::mcp::form_values(server);
     Form::new(title, text, tr.t("mcp.ok"))
         .field(tr.t("mcp.name"), name)
         .field(tr.t("mcp.command_field"), &command)
@@ -352,9 +325,9 @@ impl App {
             sign_in: None,
             projects: ProjectsTab::load(home),
             agents: AgentsTab::new(),
-            agent_checker: agents_tab::check,
+            agent_checker: tabs::agents::check,
             agent_check: None,
-            installer: agents_tab::install,
+            installer: tabs::agents::install,
             install_events: None,
             form: None,
             browser: None,
@@ -375,15 +348,15 @@ impl App {
             signer: sign_in,
             signing: None,
             plugin_job: None,
-            official_catalog: plugin_catalog::OFFICIAL.to_string(),
+            official_catalog: tabs::plugins::catalog::OFFICIAL.to_string(),
             quit_warned: false,
             quit: false,
         };
         let saved = app
             .home
             .as_deref()
-            .and_then(|home| i18n::saved_setting(home, "theme"));
-        theme::select(saved.as_deref().unwrap_or(theme::default_code()));
+            .and_then(|home| ui::i18n::saved_setting(home, "theme"));
+        ui::theme::select(saved.as_deref().unwrap_or(ui::theme::default_code()));
         let start = start.canonicalize().unwrap_or_else(|_| start.to_path_buf());
         let last = app.projects.list.last.clone();
         if has_config(&start) {

@@ -28,10 +28,10 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{ListItem, Paragraph, Wrap};
 use ratatui::Frame;
 
-use crate::i18n::I18n;
-use crate::roles_tab::RolesTab;
-use crate::tasks::draw_list;
-use crate::theme;
+use crate::tabs::roles::RolesTab;
+use crate::tabs::tasks::draw_list;
+use crate::ui::i18n::I18n;
+use crate::ui::theme;
 use crate::ui::{buttons, panel, selector, ButtonId, Hits, ListId};
 
 /// The catalog anyone starts with: Anthropic's plugins for Claude Code.

@@ -36,14 +36,14 @@ use ratatui::Frame;
 
 use harness_core::catalog::Entry;
 
-use crate::i18n::I18n;
-use crate::plugin_catalog::{
+use crate::tabs::plugins::catalog::{
     draw_catalog, draw_catalogs, unusable, CatalogView, CatalogsView, OFFICIAL,
 };
-use crate::roles_tab::RolesTab;
-use crate::skills_tab::ROLES;
-use crate::tasks::draw_list;
-use crate::theme;
+use crate::tabs::roles::RolesTab;
+use crate::tabs::skills::ROLES;
+use crate::tabs::tasks::draw_list;
+use crate::ui::i18n::I18n;
+use crate::ui::theme;
 use crate::ui::{buttons, panel, selector, ButtonId, Hits, ListId};
 
 /// What the tab asks the App to do.

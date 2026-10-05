@@ -37,10 +37,10 @@ use ratatui::widgets::{ListItem, Paragraph, Wrap};
 use ratatui::Frame;
 use tokio::sync::oneshot;
 
-use crate::i18n::I18n;
-use crate::runner::{push_line, readable, run_until_stopped, Background};
-use crate::tasks::draw_list;
-use crate::theme;
+use crate::tabs::tasks::draw_list;
+use crate::tabs::tasks::runner::{push_line, readable, run_until_stopped, Background};
+use crate::ui::i18n::I18n;
+use crate::ui::theme;
 use crate::ui::{buttons, panel, ButtonId, Hits, ListId};
 
 /// Builds the agent of `[retro]`: `retro_agent`, or a mock in tests.

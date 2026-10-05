@@ -8,9 +8,10 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Paragraph, Wrap};
 use ratatui::Frame;
 
-use crate::tasks::TasksTab;
+use crate::tabs::tasks::TasksTab;
+use crate::ui::{self, theme};
 use crate::ui::{buttons, panel, ButtonId, Target};
-use crate::{theme, ui, App, Tab, TABS};
+use crate::{App, Tab, TABS};
 
 impl App {
     /// Draws everything and registers every clickable place in the hit map.

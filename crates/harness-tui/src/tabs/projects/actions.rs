@@ -5,8 +5,8 @@ use std::path::{Path, PathBuf};
 use harness_core::projects::{self, name_of};
 use harness_platform::folder_dialog::{self, Native};
 
-use crate::picker::Browser;
-use crate::projects_tab::has_config;
+use crate::tabs::projects::has_config;
+use crate::tabs::projects::picker::Browser;
 use crate::ui::Form;
 use crate::{App, Pick, Purpose, Tab};
 

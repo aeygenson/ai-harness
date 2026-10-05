@@ -19,8 +19,8 @@ use std::path::Path;
 
 /// The built-in translations; English first, it is the default.
 const BUILT_IN: [(&str, &str); 2] = [
-    ("en", include_str!("../locales/en.toml")),
-    ("ru", include_str!("../locales/ru.toml")),
+    ("en", include_str!("../../locales/en.toml")),
+    ("ru", include_str!("../../locales/ru.toml")),
 ];
 pub const DEFAULT: &str = "en";
 /// `<home>/locales/<code>.toml` holds more languages.

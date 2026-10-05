@@ -5,13 +5,14 @@ use harness_core::git::Repo;
 use harness_core::handoff::Role;
 use harness_core::{config_edit, plugin_ops};
 
+use crate::tabs::plugins::catalog;
 use crate::ui::Form;
-use crate::{plugin_catalog, plugins_tab, App, EditJob, EditKind, PluginJob, Purpose};
+use crate::{App, EditJob, EditKind, PluginJob, Purpose};
 
 impl App {
     /// What the Plugins tab asks for.
-    pub(crate) fn plugin_action(&mut self, action: plugins_tab::Action) {
-        use plugins_tab::Action as A;
+    pub(crate) fn plugin_action(&mut self, action: super::Action) {
+        use super::Action as A;
         let tr = &self.tr;
         match action {
             A::None => {}
@@ -73,7 +74,7 @@ impl App {
             A::Add { entry, give } => self.add_plugin(entry, give),
             A::Update(name) => self.prepare_plugin_update(name),
             A::OpenCatalogs => {
-                let view = plugin_catalog::CatalogsView::load(self.home.as_deref());
+                let view = catalog::CatalogsView::load(self.home.as_deref());
                 if let Some(plugins) = &mut self.plugins {
                     plugins.catalogs = Some(view);
                 }
@@ -145,7 +146,7 @@ impl App {
                 .unwrap_or_default(),
             _ => return,
         };
-        let view = plugin_catalog::CatalogView::load(self.home.as_deref(), &agent);
+        let view = catalog::CatalogView::load(self.home.as_deref(), &agent);
         let none = self
             .home
             .as_deref()

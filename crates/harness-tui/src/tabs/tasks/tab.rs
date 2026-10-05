@@ -45,9 +45,9 @@ use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{List, ListItem, ListState, Paragraph, Wrap};
 use ratatui::Frame;
 
-use crate::i18n::I18n;
-use crate::runner::{push_line, Builder, Outcome, Request, RunChoice, Running};
-use crate::theme;
+use crate::tabs::tasks::runner::{push_line, Builder, Outcome, Request, RunChoice, Running};
+use crate::ui::i18n::I18n;
+use crate::ui::theme;
 use crate::ui::{buttons, panel, selected, ButtonId, Hits, ListId, Target};
 
 /// Whom the message goes to.
