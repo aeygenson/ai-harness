@@ -3,6 +3,7 @@ use std::fs;
 use super::*;
 use harness_core::git::Repo;
 use harness_core::handoff::{Handoff, Issue, NextStep, Role, Severity, Verdict};
+use harness_core::models;
 use harness_core::orchestrator;
 use harness_core::projects::Projects;
 use harness_core::store::TaskStore;
