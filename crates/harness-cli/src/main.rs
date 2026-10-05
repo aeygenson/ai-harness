@@ -328,7 +328,7 @@ async fn main() -> Result<()> {
             };
             new_task(project, &task_id, &description, allow_duplicate)
         }
-        Command::Run { task_id } => run(project, &task_id).await,
+        Command::Run { task_id } => until_ctrl_c(run(project, &task_id)).await,
         Command::Approve { task_id, to, notes } => {
             decide(project, &task_id, Verdict::Approved, to, &notes)
         }
@@ -339,7 +339,7 @@ async fn main() -> Result<()> {
         Command::Retro(args) => match args.command {
             Some(RetroCommand::Show { number }) => retro_show(project, &number),
             Some(RetroCommand::Apply { number, ids }) => retro_apply(project, &number, &ids),
-            None => retro(project, args.task_id.as_deref(), args.suggest).await,
+            None => until_ctrl_c(retro(project, args.task_id.as_deref(), args.suggest)).await,
         },
         Command::Models { refresh } => models(refresh),
         Command::Agents => {
@@ -791,6 +791,22 @@ fn new_task(project: &Path, task_id: &str, description: &str, allow_duplicate: b
         store.dir().display()
     );
     Ok(())
+}
+
+/// Waits for `work` (which runs agents) until it ends or Lisa presses Ctrl+C.
+///
+/// Each agent runs in its own process group, so the terminal's Ctrl+C reaches
+/// only the harness. Here the harness stops waiting, which drops `work`, and
+/// dropping it stops the running agent with everything it started (see
+/// `harness_agents::process::run`).
+async fn until_ctrl_c(work: impl std::future::Future<Output = Result<()>>) -> Result<()> {
+    // `select!` waits for whichever finishes first and drops the other one.
+    tokio::select! {
+        result = work => result,
+        _ = tokio::signal::ctrl_c() => {
+            bail!("stopped by Ctrl+C; the agent and everything it started were stopped")
+        }
+    }
 }
 
 async fn run(project: &Path, task_id: &str) -> Result<()> {

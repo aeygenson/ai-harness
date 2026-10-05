@@ -4,9 +4,10 @@
 //! prints comes back line by line for the live log.
 
 use std::collections::VecDeque;
-use std::path::Path;
+use std::future::Future;
+use std::path::{Path, PathBuf};
 use std::sync::mpsc::{channel, Receiver, Sender};
-use std::thread;
+use std::thread::{self, JoinHandle};
 
 use harness_agents::build::BuildError;
 use harness_agents::process;
@@ -18,6 +19,7 @@ use harness_core::orchestrator::{self, StopReason};
 use harness_core::skills::Skills;
 use harness_core::store::{next_task_id, TaskStore};
 use harness_core::text;
+use tokio::sync::oneshot;
 
 /// Builds the agents of the project: `build_team`, or mock agents in tests.
 pub type Builder = fn(&Config, &Path) -> Result<Team, BuildError>;
@@ -65,6 +67,68 @@ enum Event {
     Finished(Result<Outcome, String>),
 }
 
+/// A thread that runs agents. Dropping it (the TUI quits, the project is
+/// removed) stops the agents with everything they started, then waits for the
+/// thread, so no agent keeps working after the harness is gone.
+#[derive(Debug)]
+pub struct Background {
+    /// Dropping this sender is the stop signal (see [`run_until_stopped`]).
+    stop: Option<oneshot::Sender<()>>,
+    thread: Option<JoinHandle<()>>,
+}
+
+impl Background {
+    /// Starts `job` on a new thread. `job` gets the stop signal and passes it
+    /// to [`run_until_stopped`].
+    pub fn start(job: impl FnOnce(oneshot::Receiver<()>) + Send + 'static) -> Self {
+        let (stop, stop_rx) = oneshot::channel();
+        let thread = thread::spawn(move || job(stop_rx));
+        Self {
+            stop: Some(stop),
+            thread: Some(thread),
+        }
+    }
+}
+
+impl Drop for Background {
+    fn drop(&mut self) {
+        // `take` moves the sender out, and it is dropped right here.
+        drop(self.stop.take());
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
+        }
+    }
+}
+
+/// Runs `work` on a small tokio runtime of its own until it ends or `stop`
+/// fires. Stopping drops `work`, and with it the running agent, which stops
+/// everything the agent started (`harness_agents::process::run`).
+pub fn run_until_stopped<F: Future>(
+    work: F,
+    stop: oneshot::Receiver<()>,
+) -> Result<F::Output, String> {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|e| format!("cannot start the runtime: {e}"))?;
+    runtime.block_on(async {
+        // `select!` waits for whichever finishes first and drops the other.
+        // The stop signal finishes when its sender is dropped.
+        tokio::select! {
+            output = work => Ok(output),
+            _ = stop => Err("stopped".to_string()),
+        }
+    })
+}
+
+/// What one background run is asked to do.
+struct Job {
+    root: PathBuf,
+    request: Request,
+    choice: Option<RunChoice>,
+    builder: Builder,
+}
+
 /// Work in the background.
 #[derive(Debug)]
 pub struct Running {
@@ -72,9 +136,12 @@ pub struct Running {
     log: Receiver<String>,
     /// The task, once known.
     pub task: Option<String>,
+    /// Kept to stop the agents when this is dropped.
+    _background: Background,
 }
 
 impl Running {
+    /// Starts `request` on a background thread; [`Running::poll`] collects the results.
     pub fn start(
         root: &Path,
         request: Request,
@@ -83,10 +150,15 @@ impl Running {
     ) -> Self {
         let (events, events_rx) = channel();
         let (log, log_rx) = channel();
-        let root = root.to_path_buf();
-        thread::spawn(move || {
+        let job = Job {
+            root: root.to_path_buf(),
+            request,
+            choice,
+            builder,
+        };
+        let background = Background::start(move |stop| {
             process::set_live_log(Some(log));
-            let result = work(&root, request, choice, builder, &events);
+            let result = work(job, &events, stop);
             process::set_live_log(None);
             let _ = events.send(Event::Finished(result));
         });
@@ -94,6 +166,7 @@ impl Running {
             events: events_rx,
             log: log_rx,
             task: None,
+            _background: background,
         }
     }
 
@@ -123,13 +196,14 @@ pub fn push_line(log: &mut VecDeque<String>, line: String) {
     log.push_back(line);
 }
 
-fn work(
-    root: &Path,
-    request: Request,
-    choice: Option<RunChoice>,
-    builder: Builder,
-    events: &Sender<Event>,
-) -> Result<Outcome, String> {
+fn work(job: Job, events: &Sender<Event>, stop: oneshot::Receiver<()>) -> Result<Outcome, String> {
+    let Job {
+        root,
+        request,
+        choice,
+        builder,
+    } = job;
+    let root = root.as_path();
     let text = |e: &dyn std::fmt::Display| e.to_string();
     let repo = Repo::open(root).map_err(|e| text(&e))?;
     let harness_dir = root.join(HARNESS_DIR);
@@ -182,15 +256,11 @@ fn work(
     let Some((team, skills)) = agents else {
         return Ok(Outcome { task, stop: None });
     };
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .map_err(|e| format!("cannot start the runtime: {e}"))?;
-    let stop = runtime
-        .block_on(orchestrator::run_with_skills(
-            &repo, &store, &mut state, &team, &skills,
-        ))
-        .map_err(|e| text(&e))?;
+    let stop = run_until_stopped(
+        orchestrator::run_with_skills(&repo, &store, &mut state, &team, &skills),
+        stop,
+    )?
+    .map_err(|e| text(&e))?;
     Ok(Outcome {
         task,
         stop: Some(stop),
@@ -295,6 +365,27 @@ mod tests {
         assert_eq!(readable(event).unwrap(), "assistant      done");
         let long = "x".repeat(400);
         assert_eq!(readable(&long).unwrap().chars().count(), 301);
+    }
+
+    #[test]
+    fn dropping_a_background_job_stops_its_work_and_waits() {
+        let (sender, results) = channel();
+        // Work that would never end by itself, like an agent that hangs.
+        let background = Background::start(move |stop| {
+            let result = run_until_stopped(std::future::pending::<()>(), stop);
+            sender.send(result).unwrap();
+        });
+
+        drop(background);
+
+        // `drop` waited for the thread, so its answer is already there.
+        assert_eq!(results.try_recv().unwrap(), Err("stopped".to_string()));
+    }
+
+    #[test]
+    fn work_that_ends_by_itself_gives_its_result() {
+        let (_stop, stop_rx) = oneshot::channel::<()>();
+        assert_eq!(run_until_stopped(async { 42 }, stop_rx), Ok(42));
     }
 
     #[test]

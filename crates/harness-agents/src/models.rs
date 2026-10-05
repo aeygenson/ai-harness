@@ -177,6 +177,8 @@ pub(crate) fn run_for(
     limit: Duration,
 ) -> Result<String, String> {
     let program = command.get_program().to_string_lossy().into_owned();
+    // An agent asked for its models may start helpers; a time-out stops them too.
+    harness_platform::process::own_group(&mut command);
     command
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -213,13 +215,14 @@ pub(crate) fn run_for(
             Ok(Some(status)) => break status,
             Ok(None) if start.elapsed() < limit => thread::sleep(Duration::from_millis(100)),
             Ok(None) => {
-                let _ = child.kill();
-                let _ = child.wait();
+                harness_platform::process::kill_tree(&mut child);
                 return Err(format!("{program} did not answer in {} s", limit.as_secs()));
             }
             Err(e) => return Err(format!("{program}: {e}")),
         }
     };
+    // A helper left running could keep the output open and block the reading.
+    harness_platform::process::kill_tree_of(child.id());
     let stdout = stdout.join().unwrap_or_default();
     let stderr = stderr.join().unwrap_or_default();
     if status.success() {

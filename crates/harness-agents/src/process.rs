@@ -50,36 +50,50 @@ pub struct Finished {
 /// `timeout`. Each line the agent prints also goes to the live log (see
 /// [`set_live_log`]), with `secrets` hidden. `Err` holds a short explanation
 /// for Lisa.
+///
+/// The agent runs in its own process group. When it ends, times out, or the
+/// harness stops waiting (Ctrl+C), everything it started is stopped too: a
+/// test run, a build or a server it left in the background.
 pub async fn run(
-    command: Command,
+    mut command: Command,
     prompt: &str,
     timeout: Duration,
     secrets: &[&str],
 ) -> Result<Finished, String> {
     let program = command.get_program().to_string_lossy().into_owned();
+    harness_platform::process::own_group(&mut command);
     let mut command = tokio::process::Command::from(command);
     command
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
-        // If we stop waiting (time-out), the agent is killed too.
+        // A safety net: the agent itself is killed even if the tree kill fails.
         .kill_on_drop(true);
     let mut child = command
         .spawn()
         .map_err(|e| format!("cannot start {program}: {e}"))?;
-    if let Some(mut stdin) = child.stdin.take() {
-        // An agent may exit without reading everything; that is not our problem.
-        let _ = stdin.write_all(prompt.as_bytes()).await;
-    }
+    // From here on, leaving this function in any way stops the whole tree.
+    let tree = child.id().map(ProcessTree);
+    let stdin = child.stdin.take();
     let stdout = child.stdout.take();
     let stderr = child.stderr.take();
-    // Both streams are read line by line while the agent works, so the live
-    // log shows its progress and a full pipe never blocks it.
+    // The prompt is written, both streams are read and the agent is awaited
+    // all at the same time, and all inside the time limit: an agent that never
+    // reads a long prompt cannot block the harness.
     let work = async {
-        let (stdout, stderr, status) = tokio::join!(
+        let (_, stdout, stderr, status) = tokio::join!(
+            write_prompt(stdin, prompt),
             read_lines(stdout, secrets),
             read_lines(stderr, secrets),
-            child.wait()
+            async {
+                let status = child.wait().await;
+                // Something the agent left in the background may still hold
+                // its output open; stopping it lets the reading above finish.
+                if let Some(tree) = &tree {
+                    tree.stop();
+                }
+                status
+            }
         );
         Ok::<_, std::io::Error>((stdout?, stderr?, status?))
     };
@@ -94,6 +108,32 @@ pub async fn run(
             "timed out after {} s; the agent was stopped",
             timeout.as_secs()
         )),
+    }
+}
+
+/// The process group of a running agent. Dropping it stops the whole group,
+/// so it is stopped on every way out of [`run`], including when the caller
+/// stops waiting (the future is dropped).
+struct ProcessTree(u32);
+
+impl ProcessTree {
+    fn stop(&self) {
+        harness_platform::process::kill_tree_of(self.0);
+    }
+}
+
+impl Drop for ProcessTree {
+    fn drop(&mut self) {
+        self.stop();
+    }
+}
+
+/// Writes the prompt and closes standard input, so the agent knows it is all.
+async fn write_prompt(stdin: Option<tokio::process::ChildStdin>, prompt: &str) {
+    if let Some(mut stdin) = stdin {
+        // An agent may exit without reading everything; that is not our problem.
+        let _ = stdin.write_all(prompt.as_bytes()).await;
+        // `stdin` is dropped here, which closes the pipe.
     }
 }
 
@@ -255,6 +295,102 @@ mod tests {
             .collect();
         ours.sort();
         assert_eq!(ours, ["live-test err", "live-test hello ***"]);
+    }
+
+    /// Is the process with the id written in `pid_file` still running? A
+    /// stopped process can take a moment to disappear, so this waits a little.
+    #[cfg(unix)]
+    fn still_running(pid_file: &Path) -> bool {
+        let pid = std::fs::read_to_string(pid_file).unwrap();
+        for _ in 0..40 {
+            let alive = Command::new("kill")
+                .args(["-0", pid.trim()])
+                .stderr(Stdio::null())
+                .status()
+                .unwrap()
+                .success();
+            if !alive {
+                return false;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        true
+    }
+
+    /// An agent that starts `sleep 30` in the background and writes its id.
+    #[cfg(unix)]
+    fn agent_with_a_helper(pid_file: &Path, then: &str) -> Command {
+        let mut command = Command::new("sh");
+        let script = format!("sleep 30 & echo $! > '{}'; {then}", pid_file.display());
+        command.args(["-c", &script]);
+        command
+    }
+
+    #[cfg(unix)] // `sh` stands in for an agent
+    #[tokio::test]
+    async fn what_a_finished_agent_left_running_is_stopped() {
+        let dir = tempfile::tempdir().unwrap();
+        let pid_file = dir.path().join("pid");
+        let command = agent_with_a_helper(&pid_file, "echo done");
+        let start = std::time::Instant::now();
+
+        // The helper keeps the agent's output open; without stopping it the
+        // reading would wait for the whole time limit.
+        let finished = run(command, "", Duration::from_secs(20), &[])
+            .await
+            .unwrap();
+
+        assert_eq!(finished.stdout, "done\n");
+        assert!(start.elapsed() < Duration::from_secs(10));
+        assert!(!still_running(&pid_file));
+    }
+
+    #[cfg(unix)] // `sh` stands in for an agent
+    #[tokio::test]
+    async fn a_slow_agent_is_stopped_with_everything_it_started() {
+        let dir = tempfile::tempdir().unwrap();
+        let pid_file = dir.path().join("pid");
+        let command = agent_with_a_helper(&pid_file, "wait");
+
+        let error = run(command, "", Duration::from_millis(500), &[])
+            .await
+            .unwrap_err();
+
+        assert!(error.contains("timed out"), "{error}");
+        assert!(!still_running(&pid_file));
+    }
+
+    #[cfg(unix)] // `sh` stands in for an agent
+    #[tokio::test]
+    async fn when_the_harness_stops_waiting_the_agent_is_stopped() {
+        let dir = tempfile::tempdir().unwrap();
+        let pid_file = dir.path().join("pid");
+        let command = agent_with_a_helper(&pid_file, "wait");
+
+        // Like Ctrl+C in the command line: the run is dropped half-way.
+        tokio::select! {
+            _ = run(command, "", Duration::from_secs(20), &[]) => panic!("ended by itself"),
+            _ = tokio::time::sleep(Duration::from_millis(500)) => {}
+        }
+
+        assert!(!still_running(&pid_file));
+    }
+
+    #[cfg(unix)] // `sh` stands in for an agent
+    #[tokio::test]
+    async fn a_long_prompt_the_agent_never_reads_does_not_block() {
+        let mut command = Command::new("sh");
+        command.args(["-c", "sleep 30"]);
+        // Far more than a pipe holds (64 KB on Linux).
+        let prompt = "x".repeat(1_000_000);
+        let start = std::time::Instant::now();
+
+        let error = run(command, &prompt, Duration::from_millis(300), &[])
+            .await
+            .unwrap_err();
+
+        assert!(error.contains("timed out"), "{error}");
+        assert!(start.elapsed() < Duration::from_secs(10));
     }
 
     #[cfg(unix)] // `sh` stands in for an agent
