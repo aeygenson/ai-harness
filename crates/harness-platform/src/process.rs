@@ -21,10 +21,25 @@ pub fn own_group(command: &mut Command) -> &mut Command {
 /// Stops `child` and everything it started (for a child started with
 /// [`own_group`]), then waits for it so no finished process is left behind.
 pub fn kill_tree(child: &mut Child) {
-    let pid = child.id().to_string();
+    kill_tree_of(child.id());
+    let _ = child.kill();
+    let _ = child.wait();
+}
+
+/// Stops the program with process id `pid` and everything it started (for a
+/// program started with [`own_group`]). Unlike [`kill_tree`] it needs only the
+/// id, so it also works for programs started through `tokio`. A program that
+/// has already ended is not an error.
+///
+/// On Linux and macOS this stops the whole process group, even the processes
+/// whose parent has already ended. On Windows `taskkill /T` follows the
+/// parent-child links, so it finds only the processes still linked to `pid`.
+pub fn kill_tree_of(pid: u32) {
+    let pid = pid.to_string();
     #[cfg(unix)]
     let mut killer = {
         let mut killer = Command::new("kill");
+        // `-pid` means "the process group pid", not one process.
         killer.args(["-KILL", "--", &format!("-{pid}")]);
         killer
     };
@@ -39,8 +54,6 @@ pub fn kill_tree(child: &mut Child) {
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .status();
-    let _ = child.kill();
-    let _ = child.wait();
 }
 
 #[cfg(test)]

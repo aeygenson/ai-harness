@@ -20,7 +20,6 @@
 use std::collections::{BTreeSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{channel, Receiver};
-use std::thread;
 
 use harness_agents::build::BuildError;
 use harness_agents::{process, AnyAgent};
@@ -36,9 +35,10 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{ListItem, Paragraph, Wrap};
 use ratatui::Frame;
+use tokio::sync::oneshot;
 
 use crate::i18n::I18n;
-use crate::runner::{push_line, readable};
+use crate::runner::{push_line, readable, run_until_stopped, Background};
 use crate::tasks::draw_list;
 use crate::theme;
 use crate::ui::{buttons, panel, ButtonId, Hits, ListId};
@@ -71,6 +71,8 @@ pub enum Focus {
 struct Generating {
     log: Receiver<String>,
     done: Receiver<Result<String, String>>,
+    /// Kept to stop the agent when this is dropped.
+    _background: Background,
 }
 
 #[derive(Debug)]
@@ -286,9 +288,9 @@ impl RetroTab {
         let (log, log_rx) = channel();
         let (done, done_rx) = channel();
         let (root, language) = (self.root.clone(), language.to_string());
-        thread::spawn(move || {
+        let background = Background::start(move |stop| {
             process::set_live_log(Some(log));
-            let result = generate(&root, builder, &language);
+            let result = generate(&root, builder, &language, stop);
             process::set_live_log(None);
             let _ = done.send(result);
         });
@@ -297,6 +299,7 @@ impl RetroTab {
         self.generating = Some(Generating {
             log: log_rx,
             done: done_rx,
+            _background: background,
         });
     }
 
@@ -524,7 +527,12 @@ impl RetroTab {
 
 /// «Generate»: the statistics of every task, then the agent's lessons and
 /// proposals. Returns the number of the new retrospective.
-fn generate(root: &Path, builder: RetroBuilder, language: &str) -> Result<String, String> {
+fn generate(
+    root: &Path,
+    builder: RetroBuilder,
+    language: &str,
+    stop: oneshot::Receiver<()>,
+) -> Result<String, String> {
     let text = |e: &dyn std::fmt::Display| e.to_string();
     let repo = Repo::open(root).map_err(|e| text(&e))?;
     let config = Config::load(&root.join(HARNESS_DIR)).map_err(|e| text(&e))?;
@@ -537,14 +545,10 @@ fn generate(root: &Path, builder: RetroBuilder, language: &str) -> Result<String
         .unwrap_or_default()
         .to_string_lossy()
         .into_owned();
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .map_err(|e| format!("cannot start the runtime: {e}"))?;
-    runtime
-        .block_on(suggest::suggest(
-            &repo, &dir, &stats, &config, &agent, language,
-        ))
-        .map_err(|e| text(&e))?;
+    run_until_stopped(
+        suggest::suggest(&repo, &dir, &stats, &config, &agent, language),
+        stop,
+    )?
+    .map_err(|e| text(&e))?;
     Ok(number)
 }
