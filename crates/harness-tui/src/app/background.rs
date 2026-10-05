@@ -6,7 +6,7 @@
 
 use std::sync::mpsc;
 
-use crate::agents_tab::{self, JobEvent};
+use crate::tabs::agents::{self, JobEvent};
 use crate::{App, Tab};
 
 /// What came from a background thread since the last look.
@@ -73,7 +73,7 @@ impl App {
         let (tx, rx) = mpsc::channel();
         let (installer, line) = (self.installer, command.clone());
         std::thread::spawn(move || installer(&line, tx));
-        self.agents.job = Some(agents_tab::Job {
+        self.agents.job = Some(agents::Job {
             name,
             action,
             command,

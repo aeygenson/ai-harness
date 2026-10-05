@@ -5,14 +5,13 @@ use std::fs;
 use harness_core::git::Repo;
 use harness_core::skills::{self};
 
-use crate::skills_tab;
 use crate::ui::Form;
 use crate::{skill_path, App, EditJob, EditKind, Purpose};
 
 impl App {
     /// What the Skills tab asks for.
-    pub(crate) fn skill_action(&mut self, action: skills_tab::Action) {
-        use skills_tab::Action as A;
+    pub(crate) fn skill_action(&mut self, action: super::Action) {
+        use super::Action as A;
         let Some(root) = self.project.clone() else {
             return;
         };

@@ -37,9 +37,9 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{List, ListItem, ListState, Paragraph, Wrap};
 use ratatui::Frame;
 
-use crate::i18n::I18n;
-use crate::roles_tab::RolesTab;
-use crate::theme;
+use crate::tabs::roles::RolesTab;
+use crate::ui::i18n::I18n;
+use crate::ui::theme;
 use crate::ui::{buttons, panel, selected, selector, ButtonId, Hits, ListId, Target};
 
 /// The roles the selector offers, in the order of the flow.

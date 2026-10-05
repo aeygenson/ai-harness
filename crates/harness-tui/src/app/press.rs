@@ -3,11 +3,13 @@
 
 use harness_agents::credentials;
 
-use crate::projects_tab::has_config;
-use crate::roles_tab::Action;
-use crate::tasks::Menu;
+use crate::tabs::plugins;
+use crate::tabs::projects::has_config;
+use crate::tabs::roles::Action;
+use crate::tabs::tasks::Menu;
+use crate::ui::{i18n, theme};
 use crate::ui::{ButtonId, Form};
-use crate::{i18n, plugins_tab, theme, App, Pick, Purpose};
+use crate::{App, Pick, Purpose};
 
 impl App {
     /// A button, clicked or chosen with its key.
@@ -70,7 +72,7 @@ impl App {
                     }
                 }
             }
-            ButtonId::PluginCatalog => self.plugin_action(plugins_tab::Action::OpenCatalog),
+            ButtonId::PluginCatalog => self.plugin_action(plugins::Action::OpenCatalog),
             ButtonId::PluginFilter(_)
             | ButtonId::PluginSearch
             | ButtonId::PluginAdd

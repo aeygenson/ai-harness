@@ -6,7 +6,7 @@ use std::time::Instant;
 
 use ratatui::crossterm::event::{KeyCode, MouseButton, MouseEvent, MouseEventKind};
 
-use crate::retro_tab;
+use crate::tabs::retro;
 use crate::ui::{ButtonId, Hits, ListId, Target};
 use crate::{App, Tab, DOUBLE_CLICK, TABS};
 
@@ -88,9 +88,9 @@ impl App {
                     (Tab::Retro, Some((list @ (ListId::Retros | ListId::RetroProposals), _))) => {
                         if let Some(retro) = &mut self.retro {
                             retro.focus = if list == ListId::Retros {
-                                retro_tab::Focus::Retros
+                                retro::Focus::Retros
                             } else {
-                                retro_tab::Focus::Proposals
+                                retro::Focus::Proposals
                             };
                             retro.move_by(if down { 1 } else { -1 });
                         }

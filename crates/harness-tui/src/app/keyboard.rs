@@ -2,11 +2,11 @@
 
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-use crate::keys;
-use crate::mcp_tab::McpTab;
-use crate::plugins_tab::PluginsTab;
-use crate::roles_tab::RolesTab;
-use crate::tasks::TasksTab;
+use crate::tabs::mcp::McpTab;
+use crate::tabs::plugins::PluginsTab;
+use crate::tabs::roles::RolesTab;
+use crate::tabs::tasks::TasksTab;
+use crate::ui::keys;
 use crate::ui::ButtonId;
 use crate::{App, Tab, TABS};
 

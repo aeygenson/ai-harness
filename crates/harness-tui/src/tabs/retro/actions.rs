@@ -6,15 +6,14 @@ use std::path::Path;
 use harness_core::git::{Repo, HARNESS_DIR};
 use harness_core::projects::name_of;
 
-use crate::retro_tab;
-use crate::tasks::TasksTab;
+use crate::tabs::tasks::TasksTab;
 use crate::ui::Form;
 use crate::{App, EditJob, EditKind, Purpose};
 
 impl App {
     /// What the Retro tab asks for.
-    pub(crate) fn retro_action(&mut self, action: retro_tab::Action) {
-        use retro_tab::Action as A;
+    pub(crate) fn retro_action(&mut self, action: super::Action) {
+        use super::Action as A;
         match action {
             A::None => {}
             A::Say(key) => self.message = Some((self.tr.t(key).to_string(), true)),

@@ -17,7 +17,7 @@ use ratatui::crossterm::terminal::{enable_raw_mode, Clear, ClearType, EnterAlter
 use ratatui::prelude::CrosstermBackend;
 use ratatui::{DefaultTerminal, Terminal};
 
-use crate::i18n::I18n;
+use crate::ui::i18n::I18n;
 use crate::App;
 
 /// How often the open project is read again.

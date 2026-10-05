@@ -698,7 +698,10 @@ fn the_to_list_offers_the_roles_and_finishing() {
         .unwrap()
         .0
         .contains("waits for your answer"));
-    assert_eq!(app.tasks.as_ref().unwrap().choice, tasks::Choice::NewTask);
+    assert_eq!(
+        app.tasks.as_ref().unwrap().choice,
+        tabs::tasks::Choice::NewTask
+    );
 
     app.tasks.as_mut().unwrap().paste("Line one\nLine two");
     let text = screen(&mut app);
@@ -2306,7 +2309,7 @@ fn the_same_task_sent_twice_is_not_started_again() {
 
     // The same text again as a new task: refused, the text stays in the box.
     let tasks = app.tasks.as_mut().unwrap();
-    tasks.choice = tasks::Choice::NewTask;
+    tasks.choice = tabs::tasks::Choice::NewTask;
     tasks.focus_input();
     type_text(&mut app, "Fix  the\ndemo ");
     send(&mut app);
@@ -2401,8 +2404,8 @@ fn the_agents_tab_shows_the_catalog_with_what_is_installed() {
 }
 
 /// Prints two lines and succeeds.
-fn fake_installer(command: &str, tx: mpsc::Sender<agents_tab::JobEvent>) {
-    use agents_tab::JobEvent;
+fn fake_installer(command: &str, tx: mpsc::Sender<tabs::agents::JobEvent>) {
+    use tabs::agents::JobEvent;
     let _ = tx.send(JobEvent::Line(format!("running {command}")));
     let _ = tx.send(JobEvent::Line("added 1 package".into()));
     let _ = tx.send(JobEvent::Done(Ok(())));

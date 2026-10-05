@@ -8,8 +8,7 @@ use harness_core::config::McpConfig;
 use harness_core::config_edit;
 use harness_core::mcp_tools::{self, Tool, ToolList};
 
-use crate::mcp_tab;
-use crate::roles_tab::RolesTab;
+use crate::tabs::roles::RolesTab;
 use crate::ui::Form;
 use crate::{server_form, App, Purpose};
 
@@ -136,8 +135,8 @@ impl App {
     }
 
     /// What the MCP tab asks for.
-    pub(crate) fn mcp_action(&mut self, action: mcp_tab::Action) {
-        use mcp_tab::Action as A;
+    pub(crate) fn mcp_action(&mut self, action: super::Action) {
+        use super::Action as A;
         let tr = &self.tr;
         let servers = self.roles.as_ref().map(RolesTab::servers);
         self.form = match action {
@@ -225,7 +224,7 @@ impl App {
     /// OK in the server form.
     pub(crate) fn save_mcp(&mut self, old: Option<String>, form: &Form) -> Result<(), String> {
         let name = form.value(0).to_string();
-        let server = mcp_tab::server_from(form.value(1), form.value(2), form.value(3))?;
+        let server = super::server_from(form.value(1), form.value(2), form.value(3))?;
         harness_core::mcp::check_server(&name, &server).map_err(|e| e.to_string())?;
         self.save_settings(|text| {
             config_edit::set_mcp(text, old.as_deref(), &name, &server).map_err(|e| e.to_string())

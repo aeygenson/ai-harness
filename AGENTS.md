@@ -26,7 +26,7 @@ purpose. Where a rule below differs from common Rust advice, the reason is given
 | `harness-platform` | Everything that differs between Linux, macOS and Windows. No dependencies, except `crossterm` on Windows for typing a secret. |
 | `harness-core` | The engine: config, handoffs, routes, git, skills, MCP config, retro. No `tokio`, no UI. |
 | `harness-agents` | Adapters that start each agent; process control; MCP check/OAuth/bridge. |
-| `harness-tui` | The full-screen Ratatui interface. |
+| `harness-tui` | The full-screen Ratatui interface: `app/` (event loop, keyboard, mouse, forms, drawing), `tabs/` (one module or folder per tab), `ui/` (shared widgets, themes, translations). |
 | `harness-cli` | The `harness` program (`clap`). |
 
 - Put OS-specific code (`#[cfg(unix)]`, `#[cfg(windows)]`) in `harness-platform`. Outside it,
@@ -35,6 +35,8 @@ purpose. Where a rule below differs from common Rust advice, the reason is given
   an agent (the `AgentRunner` trait and the run loop in `orchestrator`); everything else in
   it is synchronous. Code that needs a runtime, timers or processes goes in
   `harness-agents`, `harness-tui` or `harness-cli`.
+- Group files by topic in folders (a folder with `mod.rs`) once a crate has many files; put a
+  new file next to the code it belongs with.
 - The built-in role skills are `crates/harness-core/skills/*.md` (embedded with
   `include_str!`).
 
@@ -98,7 +100,7 @@ These are what the project already uses; prefer them over alternatives.
   - **Always account for scrolling offsets** when turning a click position into a list row.
     Register clickable areas through the TUI's existing hit map rather than computing
     positions by hand.
-  - Every visible string goes through the translation in `i18n.rs` (English and Russian).
+  - Every visible string goes through the translation in `ui/i18n.rs` (English and Russian).
   - Check new screens against all five themes.
 - `tokio` only in the async crates, with the smallest feature set that works.
 - `tempfile` for temporary files and folders in code and tests.

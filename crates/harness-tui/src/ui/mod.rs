@@ -1,12 +1,14 @@
 //! Pieces every tab uses: clickable areas, panels, buttons and a text form.
 
+pub(crate) mod i18n;
+pub(crate) mod keys;
+pub(crate) mod theme;
+
 use ratatui::layout::{Constraint, Flex, Layout, Rect};
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Clear, Paragraph, Wrap};
 use ratatui::Frame;
-
-use crate::theme;
 
 /// Something on the screen that reacts to a click.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -92,8 +94,8 @@ pub enum ButtonId {
     /// A link in «Files» of the step on the Tasks tab.
     TaskFile(usize),
     /// The title of a window of the Tasks tab: over the whole tab, or back.
-    TaskZoom(crate::tasks::Zoom),
-    /// A role of the MCP tab's selector, an index into `skills_tab::ROLES`.
+    TaskZoom(crate::tabs::tasks::Zoom),
+    /// A role of the MCP tab's selector, an index into `tabs::skills::ROLES`.
     McpRole(usize),
     /// Gives the selected MCP server to the role, or takes it away.
     McpToggle,
