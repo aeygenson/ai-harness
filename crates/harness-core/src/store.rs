@@ -27,6 +27,7 @@ use serde::{de::DeserializeOwned, Serialize};
 
 use crate::handoff::{Handoff, Role};
 use crate::task::{TaskState, TransitionError};
+use crate::text;
 
 const STATE_FILE: &str = "state.json";
 const TASK_FILE: &str = "task.md";
@@ -178,8 +179,8 @@ impl TaskStore {
     /// or invalid handoff is not.
     pub fn read_inbox(&self) -> Result<(Handoff, String), StoreError> {
         let inbox = self.dir.join(INBOX_DIR);
-        let handoff = read_json(&inbox.join(HANDOFF_FILE))?;
-        let notes = fs::read_to_string(inbox.join(NOTES_FILE)).unwrap_or_default();
+        let handoff = read_handoff(&inbox.join(HANDOFF_FILE))?;
+        let notes = read_notes(&inbox.join(NOTES_FILE));
         Ok((handoff, notes))
     }
 
@@ -197,8 +198,8 @@ impl TaskStore {
         });
         for round_dir in rounds {
             for step_dir in sorted_subdirs(&round_dir)? {
-                let handoff = read_json(&step_dir.join(HANDOFF_FILE))?;
-                let notes = fs::read_to_string(step_dir.join(NOTES_FILE)).unwrap_or_default();
+                let handoff = read_handoff(&step_dir.join(HANDOFF_FILE))?;
+                let notes = read_notes(&step_dir.join(NOTES_FILE));
                 steps.push(Step {
                     dir: step_dir,
                     handoff,
@@ -342,6 +343,18 @@ fn to_json<T: Serialize>(path: &Path, value: &T) -> Result<String, StoreError> {
     })
 }
 
+/// A handoff written by an agent, with its texts made safe to show.
+fn read_handoff(path: &Path) -> Result<Handoff, StoreError> {
+    let mut handoff: Handoff = read_json(path)?;
+    handoff.make_text_safe();
+    Ok(handoff)
+}
+
+/// The agent's `notes.md`, safe to show; missing notes are an empty text.
+fn read_notes(path: &Path) -> String {
+    text::safe(&fs::read_to_string(path).unwrap_or_default())
+}
+
 fn write_json_new<T: Serialize>(path: &Path, value: &T) -> Result<(), StoreError> {
     write_new(path, &to_json(path, value)?)
 }
@@ -447,6 +460,27 @@ mod tests {
             fs::read_to_string(step_dir.join("notes.md")).unwrap(),
             "Design is ready."
         );
+    }
+
+    #[test]
+    fn saved_steps_are_read_back_safe_to_show() {
+        let runs = tempfile::tempdir().unwrap();
+        let (store, mut state) = new_task(runs.path());
+        let mut h = handoff(
+            Role::Architect,
+            1,
+            Verdict::Approved,
+            NextStep::To(Role::Human),
+        );
+        h.summary = "Ready\u{1b}[2J.".to_string();
+
+        store
+            .record(&mut state, &h, "Notes\u{1b}]0;title\u{7} here.")
+            .unwrap();
+
+        let steps = store.steps().unwrap();
+        assert_eq!(steps[0].handoff.summary, "Ready.");
+        assert_eq!(steps[0].notes, "Notes here.");
     }
 
     #[test]

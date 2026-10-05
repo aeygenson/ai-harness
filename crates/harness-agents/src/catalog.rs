@@ -511,26 +511,7 @@ fn with_local_bin() -> Option<std::ffi::OsString> {
 pub fn clean_line(line: &str) -> String {
     let line = line.trim_end_matches(['\r', '\n']);
     let line = line.rsplit('\r').next().unwrap_or(line);
-    let mut out = String::new();
-    let mut chars = line.chars().peekable();
-    while let Some(c) = chars.next() {
-        if c == '\u{1b}' {
-            // ESC [ … letter, or ESC and one more character.
-            if chars.peek() == Some(&'[') {
-                chars.next();
-                for c in chars.by_ref() {
-                    if c.is_ascii_alphabetic() {
-                        break;
-                    }
-                }
-            } else {
-                chars.next();
-            }
-        } else if !c.is_control() || c == '\t' {
-            out.push(c);
-        }
-    }
-    out.trim_end().to_string()
+    harness_core::text::safe(line).trim_end().to_string()
 }
 
 /// Checks every agent of the catalog on this computer, all at once.

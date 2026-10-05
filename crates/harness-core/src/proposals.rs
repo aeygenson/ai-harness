@@ -32,6 +32,7 @@ use serde::{Deserialize, Serialize};
 use crate::config::Config;
 use crate::handoff::Role;
 use crate::skills::{self, SKILLS_DIR};
+use crate::text;
 
 /// A skill file bigger than this is refused: a skill is a short note.
 pub const MAX_SKILL_BYTES: usize = 20_000;
@@ -95,10 +96,21 @@ pub enum FileChange {
 }
 
 impl ProposalsFile {
+    /// Removes terminal control characters from the texts shown to Lisa (see
+    /// [`crate::text::safe`]). The skill file `content` stays as written: it is
+    /// saved to a file, not printed.
+    pub fn make_text_safe(&mut self) {
+        for proposal in &mut self.proposals {
+            proposal.summary = text::safe(&proposal.summary);
+            proposal.reason = text::safe(&proposal.reason);
+        }
+    }
+
     /// Reads and checks the agent's `proposals.json` against the project as it is now.
     pub fn parse(text: &str, harness_dir: &Path, config: &Config) -> Result<Self, ProposalError> {
-        let file: Self =
+        let mut file: Self =
             serde_json::from_str(text).map_err(|e| ProposalError::Format(e.to_string()))?;
+        file.make_text_safe();
         let mut ids = BTreeSet::new();
         for proposal in &file.proposals {
             if !ids.insert(proposal.id) {
@@ -335,6 +347,18 @@ mod tests {
         assert_eq!(file.proposals.len(), 2);
         assert_eq!(file.get(1).unwrap().roles, [DEVELOPER, TESTER_ALWAYS]);
         assert!(ProposalsFile::parse(r#"{"proposals": []}"#, dir.path(), &config).is_ok());
+    }
+
+    #[test]
+    fn summary_and_reason_lose_terminal_control_characters() {
+        let (dir, config) = project();
+        let text = r#"{"proposals": [
+            {"id": 1, "summary": "add\u001b[2J a skill", "reason": "seen\u0007 twice",
+             "skill": "style", "roles": [{"role": "tester", "list": "skills"}]}
+        ]}"#;
+        let file = ProposalsFile::parse(text, dir.path(), &config).unwrap();
+        assert_eq!(file.proposals[0].summary, "add a skill");
+        assert_eq!(file.proposals[0].reason, "seen twice");
     }
 
     #[test]

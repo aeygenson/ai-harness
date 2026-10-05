@@ -158,7 +158,8 @@ This program starts AI agents with access to the user's files, so security rules
 - Never weaken the role permissions (`harness_core::permissions`, deny rules, temporary HOME
   for Antigravity) without discussing it.
 - Treat everything an agent or an MCP server returns as untrusted input: strip control
-  characters before showing it, validate `handoff.json` before using it.
+  characters before showing it (`harness_core::text::safe` / `safe_line`; do not write
+  another cleaning helper), validate `handoff.json` before using it.
 
 ## Testing
 

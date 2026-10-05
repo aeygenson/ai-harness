@@ -3,6 +3,8 @@
 use serde::de::IntoDeserializer;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
+use crate::text;
+
 /// Who wrote a handoff: one of the four AI roles, or Lisa's own decision.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -110,8 +112,30 @@ pub struct Handoff {
 
 impl Handoff {
     /// Reads a handoff from JSON text, rejecting anything that does not match the format.
+    /// The agent's texts come back without terminal control characters.
     pub fn from_json(text: &str) -> Result<Self, serde_json::Error> {
-        serde_json::from_str(text)
+        let mut handoff: Self = serde_json::from_str(text)?;
+        handoff.make_text_safe();
+        Ok(handoff)
+    }
+
+    /// Removes terminal control characters from every text the agent wrote, so
+    /// the handoff is safe to show (see [`crate::text::safe`]).
+    pub fn make_text_safe(&mut self) {
+        self.summary = text::safe(&self.summary);
+        for skill in &mut self.skills_used {
+            *skill = text::safe(skill);
+        }
+        for file in &mut self.files {
+            file.path = text::safe(&file.path);
+        }
+        for issue in &mut self.issues {
+            issue.description = text::safe(&issue.description);
+            // `as_mut` gives a `&mut String` inside the `Option` without taking it out.
+            if let Some(location) = issue.location.as_mut() {
+                *location = text::safe(location);
+            }
+        }
     }
 
     /// Writes the handoff as nicely indented JSON.
@@ -162,6 +186,19 @@ mod tests {
         for example in examples {
             Handoff::from_json(example).unwrap();
         }
+    }
+
+    #[test]
+    fn agent_texts_lose_terminal_control_characters() {
+        let tricky = TESTER_EXAMPLE
+            .replace("Panics when input", "Panics\\u001b[2J when input")
+            .replace("src/parser.rs:42", "src/parser.rs:42\\u202e");
+        let handoff = Handoff::from_json(&tricky).unwrap();
+        assert_eq!(handoff.issues[0].description, "Panics when input is empty.");
+        assert_eq!(
+            handoff.issues[0].location.as_deref(),
+            Some("src/parser.rs:42")
+        );
     }
 
     #[test]
