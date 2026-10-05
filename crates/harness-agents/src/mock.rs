@@ -27,6 +27,8 @@ pub enum MockStep {
     WriteFilesOnly(Vec<(String, String)>),
     /// Make a git commit itself, which agents must never do.
     GitCommit,
+    /// Add a setting to `.git/config`, which agents must never change.
+    ChangeGitConfig,
     /// Write a `handoff.json` that is not valid.
     WriteGarbage,
     /// Pretend the subscription limit was hit.
@@ -144,6 +146,18 @@ impl AgentRunner for MockAgent {
                 log,
                 message: String::new(),
             },
+            MockStep::ChangeGitConfig => {
+                let changed = Command::new("git")
+                    .current_dir(&job.project_dir)
+                    .args(["config", "core.fsmonitor", "agent-watcher"])
+                    .status();
+                AgentOutcome {
+                    success: changed.is_ok_and(|status| status.success()),
+                    usage_limit_reached: false,
+                    log,
+                    message: String::new(),
+                }
+            }
             MockStep::GitCommit => {
                 let committed = Command::new("git")
                     .current_dir(&job.project_dir)

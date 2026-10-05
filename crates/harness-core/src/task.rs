@@ -4,7 +4,7 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
-use crate::handoff::{Handoff, NextStep, Role, Verdict};
+use crate::handoff::{Handoff, NextStep, Role, Verdict, SCHEMA_VERSION};
 use crate::routes;
 
 /// Default limit on how many rounds a task may take before Lisa must step in.
@@ -45,6 +45,13 @@ pub struct TaskState {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TransitionError {
     TaskAlreadyDone,
+    /// The handoff says it is written in a format version this harness does not know.
+    UnknownSchemaVersion(u32),
+    /// A text in the handoff is longer than the format allows.
+    TooLong {
+        field: &'static str,
+        max_chars: usize,
+    },
     WrongAuthor {
         expected: Role,
         got: Role,
@@ -69,6 +76,14 @@ impl fmt::Display for TransitionError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::TaskAlreadyDone => write!(f, "the task is already done"),
+            Self::UnknownSchemaVersion(version) => write!(
+                f,
+                "schema_version is {version}, but this harness knows only {SCHEMA_VERSION}"
+            ),
+            Self::TooLong { field, max_chars } => write!(
+                f,
+                "{field} is longer than {max_chars} characters; keep it short and put details in notes.md"
+            ),
             Self::WrongAuthor { expected, got } => {
                 write!(
                     f,
@@ -126,6 +141,14 @@ impl TaskState {
         let expected = self
             .expected_author()
             .ok_or(TransitionError::TaskAlreadyDone)?;
+        if handoff.schema_version != SCHEMA_VERSION {
+            return Err(TransitionError::UnknownSchemaVersion(
+                handoff.schema_version,
+            ));
+        }
+        if let Some((field, max_chars)) = handoff.too_long_field() {
+            return Err(TransitionError::TooLong { field, max_chars });
+        }
         if handoff.role != expected {
             return Err(TransitionError::WrongAuthor {
                 expected,
@@ -399,5 +422,41 @@ mod tests {
         let json = serde_json::to_string_pretty(&task).unwrap();
         let again: TaskState = serde_json::from_str(&json).unwrap();
         assert_eq!(task, again);
+    }
+
+    #[test]
+    fn a_handoff_in_an_unknown_format_version_is_refused() {
+        let mut task = new_task();
+        let mut h = handoff(
+            Role::Architect,
+            1,
+            Verdict::Approved,
+            NextStep::To(Role::Human),
+        );
+        h.schema_version = 2;
+        assert_eq!(
+            task.apply(&h),
+            Err(TransitionError::UnknownSchemaVersion(2))
+        );
+        assert_eq!(task.stage, Stage::Working(Role::Architect));
+    }
+
+    #[test]
+    fn a_handoff_with_a_huge_summary_is_refused() {
+        let mut task = new_task();
+        let mut h = handoff(
+            Role::Architect,
+            1,
+            Verdict::Approved,
+            NextStep::To(Role::Human),
+        );
+        h.summary = "x".repeat(crate::handoff::MAX_TEXT_CHARS + 1);
+        assert_eq!(
+            task.apply(&h),
+            Err(TransitionError::TooLong {
+                field: "summary",
+                max_chars: crate::handoff::MAX_TEXT_CHARS
+            })
+        );
     }
 }

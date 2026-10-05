@@ -504,3 +504,18 @@ async fn an_agent_that_commits_by_itself_is_stopped() {
 
     assert_eq!(stop, StopReason::AgentCommitted(Role::Architect));
 }
+
+#[tokio::test]
+async fn an_agent_that_changes_the_git_settings_is_stopped_and_they_are_put_back() {
+    let (_dir, repo) = new_project();
+    let (store, mut state) = new_task(&repo);
+    let before = repo.local_config().unwrap();
+    let agent = MockAgent::new().then(Role::Architect, MockStep::ChangeGitConfig);
+
+    let stop = orchestrator::run(&repo, &store, &mut state, &agent)
+        .await
+        .unwrap();
+
+    assert_eq!(stop, StopReason::GitConfigChanged(Role::Architect));
+    assert_eq!(repo.local_config().unwrap(), before);
+}
