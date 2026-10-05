@@ -24,15 +24,17 @@ purpose. Where a rule below differs from common Rust advice, the reason is given
 | Crate | What lives there |
 |---|---|
 | `harness-platform` | Everything that differs between Linux, macOS and Windows. No dependencies. |
-| `harness-core` | The engine: config, handoffs, routes, git, skills, MCP config, retro. **Synchronous** (no `tokio`). |
+| `harness-core` | The engine: config, handoffs, routes, git, skills, MCP config, retro. No `tokio`, no UI. |
 | `harness-agents` | Adapters that start each agent; process control; MCP check/OAuth/bridge. |
 | `harness-tui` | The full-screen Ratatui interface. |
 | `harness-cli` | The `harness` program (`clap`). |
 
 - Put OS-specific code (`#[cfg(unix)]`, `#[cfg(windows)]`) in `harness-platform`. Outside it,
   `#[cfg(...)]` is fine only in tests (for example a shell script standing in for an agent).
-- Keep `harness-core` free of async and of UI. New async code goes in `harness-agents`,
-  `harness-tui` or `harness-cli`.
+- Keep `harness-core` free of `tokio` and of UI. It may declare `async fn` that only wait for
+  an agent (the `AgentRunner` trait and the run loop in `orchestrator`); everything else in
+  it is synchronous. Code that needs a runtime, timers or processes goes in
+  `harness-agents`, `harness-tui` or `harness-cli`.
 - The built-in role skills are `crates/harness-core/skills/*.md` (embedded with
   `include_str!`).
 
@@ -58,6 +60,30 @@ others change between versions. When the **Context7** MCP server is available, u
 first `resolve-library-id` (for example `ratatui`), then `query-docs` with the exact
 question. Check the version in the crate's `Cargo.toml` and ask for docs of that version.
 Without Context7, read the docs on docs.rs for the version in `Cargo.lock`.
+
+## Microsoft Pragmatic Rust Guidelines
+
+`docs/rust-guidelines.md` is a copy of Microsoft's Pragmatic Rust Guidelines (MIT license).
+Follow them where they fit this project; where they differ from this file, **this file
+wins**. In short:
+
+- **Follow**: M-DESIGN-FOR-AI, M-APP-ERROR, M-FIRST-DOC-SENTENCE, M-MODULE-DOCS,
+  M-DOCUMENTED-MAGIC, M-LINT-OVERRIDE-EXPECT, M-PANIC-IS-STOP, M-PANIC-ON-BUG,
+  M-PUBLIC-DEBUG, M-PUBLIC-DISPLAY, M-CONCISE-NAMES, M-STATIC-VERIFICATION,
+  M-UPSTREAM-GUIDELINES, M-UNSAFE, M-UNSOUND, M-AVOID-STATICS, M-STRONG-TYPES,
+  M-NO-GLOB-REEXPORTS, M-ESSENTIAL-FN-INHERENT, M-REGULAR-FN, M-SIMPLE-ABSTRACTIONS,
+  M-AVOID-WRAPPERS, M-DI-HIERARCHY, M-INIT-BUILDER, M-TEST-UTIL.
+- **Replaced by this file**:
+  - M-CANONICAL-DOCS: `# Errors` / `# Panics` sections only for complex functions (see
+    Documentation).
+  - M-ERRORS-CANONICAL-STRUCTS: errors are `thiserror` enums; matching on variants is easier
+    for a learner than an error struct with a `kind()`.
+  - M-LOG-STRUCTURED: `tracing` is not used yet.
+  - M-MIMALLOC-APPS: the harness waits for agents, it does not compute; no new allocator.
+- **Not relevant here**: FFI and `-sys` crates, rules for published libraries and their
+  feature flags, and the performance rules (M-HOTPATH, M-THROUGHPUT, M-YIELD-POINTS).
+- Lint overrides use `#[expect(lint, reason = "...")]`, not `#[allow(...)]`: the build then
+  says when the override is no longer needed.
 
 ## Preferred tools and libraries
 
@@ -101,6 +127,10 @@ These are what the project already uses; prefer them over alternatives.
 - `# Arguments` / `# Returns` / `# Errors` sections and examples are welcome for complex
   functions, but not required for simple ones. A long template on a three-line function hurts
   readability more than it helps.
+- The first sentence of a `///` comment fits on one line (about 15 words): it is what lists
+  and tooltips show.
+- Magic values (a size limit, an error code, a width) are named constants with a comment
+  saying why that value.
 - When you change behaviour, update the comment, `docs/` and the help text in the same PR.
 
 ## Types and error handling
@@ -132,13 +162,19 @@ These are what the project already uses; prefer them over alternatives.
   handled).
 - Use iterators and adapters (`map`, `filter`, `enumerate`) when they are clearer than a loop;
   a plain `for` loop is fine when it reads better for a learner.
-- Derive `Debug`, `Clone`, `PartialEq` (and `Default` where sensible) where they make sense.
+- Every public type implements `Debug` (types holding secrets write their own that prints
+  `***`). Types shown to the user implement `Display` instead of being printed with `{:?}`.
+- Derive `Clone`, `PartialEq` (and `Default` where sensible) where they make sense.
+- Avoid global state (`static` with a `Mutex` inside): pass what a function needs.
+- **File size**: at most about 300 lines of production code per file. Unit tests inside the
+  file (`#[cfg(test)] mod tests`) do not count. When a file grows past that, split it by
+  topic into modules; the file must stay quick to read.
 - Avoid unnecessary allocations (`&str` over `String`, `Vec::with_capacity` when the size is
   known), but do not trade readability for micro-optimisations.
 
 ## Concurrency
 
-- Async with `tokio` for running agents and other processes; the core stays synchronous.
+- Async with `tokio` for running agents and other processes; the core does not use `tokio`.
 - Stop child processes together with everything they started (see
   `harness_platform::process`); never leave an agent running after the harness stops.
 - Prefer message passing (channels) over shared mutable state.
