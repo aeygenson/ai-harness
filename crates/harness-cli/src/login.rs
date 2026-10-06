@@ -154,7 +154,7 @@ mod tests {
     #[test]
     fn a_deepseek_key_pasted_twice_is_refused() {
         let key = "sk-0123456789abcdef0123456789abcdef";
-        assert!(check_deepseek_key(key).is_ok());
+        check_deepseek_key(key).unwrap();
         let twice = format!("{key}{key}");
         let error = check_deepseek_key(&twice).unwrap_err().to_string();
         assert!(error.contains("2 times"), "{error}");

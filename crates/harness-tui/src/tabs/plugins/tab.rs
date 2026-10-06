@@ -188,7 +188,7 @@ impl PluginsTab {
         let agent = self.agent(roles);
         let listed = roles
             .settings(self.role())
-            .map_or(&[][..], |s| &s.plugins[..]);
+            .map_or(&[][..], |s| s.plugins.as_slice());
         let mut names: Vec<String> = roles
             .plugins()
             .iter()

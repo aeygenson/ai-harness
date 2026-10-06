@@ -212,7 +212,10 @@ impl CatalogsView {
 }
 
 /// «From catalog»: the plugins found on the left, the chosen one on the right.
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the catalog view draws with the same inputs as the rest of the Plugins tab"
+)]
 pub fn draw_catalog(
     view: &CatalogView,
     frame: &mut Frame,

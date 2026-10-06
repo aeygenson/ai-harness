@@ -77,7 +77,7 @@ pub(super) fn read_manifest(
     agent: AgentKind,
 ) -> Result<serde_json::Value, PluginError> {
     let manifest_path = path.join(manifest(agent));
-    let text = fs::read_to_string(&manifest_path).map_err(|_| PluginError::NoManifest {
+    let text = fs::read_to_string(&manifest_path).map_err(|_missing| PluginError::NoManifest {
         name: name.to_string(),
         path: path.display().to_string(),
         manifest: manifest(agent),

@@ -55,7 +55,7 @@ impl std::fmt::Debug for Bridge {
 impl Bridge {
     /// The bridge the harness described in the variables.
     pub fn from_env() -> Result<Self, String> {
-        let url = std::env::var(BRIDGE_URL).map_err(|_| format!("{BRIDGE_URL} is not set"))?;
+        let url = std::env::var(BRIDGE_URL).map_err(|_unset| format!("{BRIDGE_URL} is not set"))?;
         if !is_allowed_url(&url) {
             return Err(format!("{url:?} is not an address the bridge may use"));
         }
@@ -336,9 +336,9 @@ mod tests {
     struct Output(Arc<Mutex<Vec<u8>>>);
 
     impl Write for Output {
-        fn write(&mut self, data: &[u8]) -> io::Result<usize> {
-            self.0.lock().unwrap().extend_from_slice(data);
-            Ok(data.len())
+        fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(buf);
+            Ok(buf.len())
         }
         fn flush(&mut self) -> io::Result<()> {
             Ok(())

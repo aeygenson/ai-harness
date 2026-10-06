@@ -135,8 +135,8 @@ pub(super) fn register(
             said(&answer.body)
         ));
     }
-    let client: Value =
-        serde_json::from_str(&answer.body).map_err(|_| "the registration answer is not JSON")?;
+    let client: Value = serde_json::from_str(&answer.body)
+        .map_err(|error| format!("the registration answer is not JSON: {error}"))?;
     let id = client["client_id"]
         .as_str()
         .filter(|id| !id.is_empty())

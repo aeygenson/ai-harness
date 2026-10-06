@@ -218,7 +218,7 @@ mod tests {
         } else if cfg!(windows) {
             assert_eq!(args(&fallback.unwrap()), ["notepad", "/p/skill.md"]);
         } else {
-            assert!(fallback.is_err());
+            fallback.unwrap_err();
         }
         let command = command_with(file, &places, &vim).unwrap();
         assert_eq!(args(&command), ["vim", "-n", "/p/skill.md"]);

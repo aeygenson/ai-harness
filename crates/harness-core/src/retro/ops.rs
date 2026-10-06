@@ -121,7 +121,7 @@ fn info(repo: &Repo, n: u32, dir: PathBuf) -> RetroInfo {
 pub fn dir(repo: &Repo, number: &str) -> Result<PathBuf, OpsError> {
     let n: u32 = number
         .parse()
-        .map_err(|_| OpsError::BadNumber(number.to_string()))?;
+        .map_err(|_not_a_number| OpsError::BadNumber(number.to_string()))?;
     let dir = repo
         .root()
         .join(HARNESS_DIR)
@@ -193,7 +193,7 @@ pub fn apply(repo: &Repo, dir: &Path, ids: &[u32]) -> Result<Vec<u32>, OpsError>
         .unwrap_or_default()
         .to_string_lossy()
         .into_owned();
-    let found = suggest::load(dir).map_err(|_| OpsError::NoProposals(number.clone()))?;
+    let found = suggest::load(dir).map_err(|_unreadable| OpsError::NoProposals(number.clone()))?;
     let applied = Applied::load(dir);
     let mut chosen: Vec<u32> = Vec::new();
     for &id in ids {
