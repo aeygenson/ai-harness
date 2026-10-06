@@ -18,28 +18,40 @@ use crate::task::store::StoreError;
 const STATS_MD: &str = "stats.md";
 const STATS_JSON: &str = "stats.json";
 
+/// What can go wrong while saving, listing or applying a retrospective.
 #[derive(Debug, thiserror::Error)]
 pub enum OpsError {
+    /// The project has no tasks to count.
     #[error("there are no tasks yet; a retrospective is made from their history")]
     NoTasks,
+    /// The task id given does not exist or cannot be read.
     #[error("cannot open task {0}: {1}")]
     NoTask(String, StoreError),
+    /// The text given is not a number such as `004`.
     #[error("{0:?} is not a retrospective number, such as 004")]
     BadNumber(String),
+    /// There is no `retros/<NNN>/` folder with this number.
     #[error("there is no retrospective {0}")]
     NoRetro(String),
+    /// The retrospective's `retro.md` or `proposals.json` is missing or unreadable.
     #[error("retrospective {0} has no proposals")]
     NoProposals(String),
+    /// Files that must be committed first have uncommitted changes.
     #[error("these files have uncommitted changes; commit or remove them first: {}", .0.join(", "))]
     Dirty(Vec<String>),
+    /// The task history could not be read.
     #[error(transparent)]
     Store(#[from] StoreError),
+    /// The statistics could not be saved.
     #[error(transparent)]
     Retro(#[from] RetroError),
+    /// Running the Retrospective agent failed.
     #[error(transparent)]
     Suggest(#[from] suggest::SuggestError),
+    /// A proposal could not be applied.
     #[error(transparent)]
     Apply(#[from] ApplyError),
+    /// A git command failed.
     #[error(transparent)]
     Git(#[from] GitError),
 }
@@ -49,6 +61,7 @@ pub enum OpsError {
 pub struct RetroInfo {
     /// `003`.
     pub number: String,
+    /// The folder `.harness/retros/<NNN>`.
     pub dir: PathBuf,
     /// What it looked at; `None` when `stats.json` cannot be read.
     pub scope: Option<Scope>,
@@ -56,6 +69,7 @@ pub struct RetroInfo {
     pub date: Option<String>,
     /// What the agent wrote (and Lisa may have edited), if it ran.
     pub retro: Option<String>,
+    /// The text of `stats.md`; `None` when it cannot be read.
     pub stats: Option<String>,
     /// The proposals, or why they cannot be read; `None` without any.
     pub proposals: Option<Result<ProposalsFile, String>>,

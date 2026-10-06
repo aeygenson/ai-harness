@@ -28,14 +28,18 @@ pub fn inspect(path: &Path, name: &str, agent: AgentKind) -> Result<Contents, Pl
 /// What the Plugins tab shows about a plugin folder.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Details {
+    /// Whether it has hooks, its own servers or apps.
     pub contents: Contents,
     /// `description` and `version` from its manifest.
     pub description: Option<String>,
+    /// The plugin's version text; `None` when the manifest has none.
     pub version: Option<String>,
     /// Skills (`skills/<name>/SKILL.md`), commands (`commands/*.md`) and
     /// subagents (`agents/*.md`).
     pub skills: usize,
+    /// How many command files (`commands/*.md`) it has.
     pub commands: usize,
+    /// How many subagent files (`agents/*.md`) it has.
     pub agents: usize,
 }
 

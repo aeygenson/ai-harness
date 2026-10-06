@@ -30,53 +30,85 @@ const ADDING_DIR: &str = ".adding";
 /// Plugins that live in other repositories are downloaded here.
 const DOWNLOADS_DIR: &str = ".downloads";
 
+/// Why adding, updating or removing a plugin or a catalog failed.
 #[derive(Debug, thiserror::Error)]
 pub enum OpsError {
+    /// harness.toml has no plugin with this name.
     #[error("harness.toml has no [plugins.{0}]")]
     NoPlugin(String),
+    /// The plugin's name is not a simple lowercase name the project can use.
     #[error(
         "plugin name {0:?} cannot be used in a project; the harness needs lowercase \
          letters, digits, '-' and '_'"
     )]
     BadName(String),
+    /// The plugin's folder is already in the project; holds its path.
     #[error("{0} already exists")]
     Exists(String),
+    /// The catalog source is neither a folder, `owner/repo` nor a git address.
     #[error("{0:?} is not a folder, `owner/repo` on GitHub or a git address")]
     BadSource(String),
+    /// A catalog with this name is already added.
     #[error("a catalog named {0:?} is already added")]
     CatalogExists(String),
+    /// No catalog with this name is added.
     #[error("no catalog named {0:?}")]
     NoCatalog(String),
+    /// The catalog the plugin came from was removed since.
     #[error("plugin {name} came from catalog {catalog:?}, which is not added any more")]
-    CatalogGone { name: String, catalog: String },
+    CatalogGone {
+        /// The plugin's name in harness.toml.
+        name: String,
+        /// The catalog named in the plugin's `source`.
+        catalog: String,
+    },
+    /// The plugin has no `source` in harness.toml, so there is nothing to update from.
     #[error(
         "plugin {0} was not added from a catalog (it has no `source`), so it cannot be updated"
     )]
     NoSource(String),
+    /// The catalog no longer offers the plugin.
     #[error("catalog {catalog} no longer lists {name}")]
-    NotListed { catalog: String, name: String },
+    NotListed {
+        /// The catalog named in the plugin's `source`.
+        catalog: String,
+        /// The plugin's name in that catalog.
+        name: String,
+    },
+    /// Downloading a catalog with git failed.
     #[error("cannot download {what}: {source}")]
     Download {
+        /// What was being downloaded, ready for the message (for example `catalog <name>`).
         what: String,
+        /// The git error that stopped the download.
         #[source]
         source: GitError,
     },
+    /// The catalog could not be read.
     #[error(transparent)]
     Catalog(#[from] CatalogError),
+    /// The plugin could not be fetched or copied.
     #[error(transparent)]
     Install(#[from] InstallError),
+    /// The plugin failed the checks a run would make.
     #[error("{0}")]
     Plugin(#[from] PluginError),
+    /// harness.toml could not be changed.
     #[error(transparent)]
     Edit(#[from] EditError),
+    /// harness.toml could not be parsed.
     #[error("harness.toml is not valid: {0}")]
     Toml(#[from] toml::de::Error),
+    /// Reading or writing a file or folder failed.
     #[error("cannot change {path}: {source}")]
     Io {
+        /// The file or folder that could not be changed.
         path: PathBuf,
+        /// The underlying file system error.
         #[source]
         source: std::io::Error,
     },
+    /// A git command (such as the commit) failed.
     #[error(transparent)]
     Git(#[from] GitError),
 }
@@ -159,13 +191,17 @@ pub fn add(
 /// A new version of a plugin, downloaded and ready next to the old one.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Prepared {
+    /// The plugin's name in harness.toml.
     pub name: String,
     /// `<catalog>/<plugin>`.
     pub id: String,
     target: PathBuf,
     staged: PathBuf,
+    /// The git commit of the new version; `None` when it is not known.
     pub commit: Option<String>,
+    /// Files that differ between the installed version and the new one.
     pub changes: Changes,
+    /// What the new version brings that runs by itself.
     pub contents: Contents,
 }
 

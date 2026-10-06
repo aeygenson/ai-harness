@@ -24,27 +24,52 @@ use crate::plugins::{self, manifest, Contents, PluginError};
 /// Catalog fields that describe the listing, not the plugin.
 const LISTING_ONLY: &[&str] = &["source", "strict", "category", "tags"];
 
+/// Why a plugin could not be fetched from its catalog or copied into the project.
 #[derive(Debug, thiserror::Error)]
 pub enum InstallError {
+    /// The catalog lists the plugin with a source kind the harness cannot download.
     #[error("plugin {name:?} comes from {kind:?}, which the harness cannot fetch yet")]
-    Unsupported { name: String, kind: String },
+    Unsupported {
+        /// The plugin's name in the catalog.
+        name: String,
+        /// The catalog's `source` kind, such as `npm` (`none` when it has no source).
+        kind: String,
+    },
+    /// The plugin's path points outside the catalog or the downloaded repository.
     #[error("plugin {name:?}: its path {path:?} leaves its repository")]
-    BadPath { name: String, path: String },
+    BadPath {
+        /// The plugin's name in the catalog.
+        name: String,
+        /// The path as the catalog gives it.
+        path: String,
+    },
+    /// The plugin's path is not a folder, or does not exist.
     #[error("plugin {name:?}: {path} is not a folder")]
-    NotAFolder { name: String, path: String },
+    NotAFolder {
+        /// The plugin's name in the catalog.
+        name: String,
+        /// The full path that was checked.
+        path: String,
+    },
+    /// Downloading the plugin's git repository failed.
     #[error("plugin {name:?}: cannot download it: {source}")]
     Fetch {
+        /// The plugin's name in the catalog.
         name: String,
+        /// The git error that stopped the download.
         #[source]
         source: GitError,
     },
+    /// The copied plugin failed the checks a run would make.
     #[error(transparent)]
     Plugin(#[from] PluginError),
+    /// A Codex plugin brings apps, which the harness refuses; holds the plugin name.
     #[error(
         "plugin {0:?} has apps (ChatGPT connectors), which reach services outside the \
          project; the harness does not support them"
     )]
     Apps(String),
+    /// Reading or writing the plugin's files failed.
     #[error("cannot copy the plugin: {0}")]
     Io(#[from] io::Error),
 }
@@ -52,6 +77,7 @@ pub enum InstallError {
 /// The plugin's files, ready to be copied.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Fetched {
+    /// The folder holding the plugin's files, inside the catalog or the download.
     pub dir: PathBuf,
     /// The git commit they are from, if known.
     pub commit: Option<String>,
@@ -153,12 +179,16 @@ pub fn put_in_place(staged: &Path, target: &Path) -> io::Result<()> {
 /// Files that differ between two versions of a plugin folder.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Changes {
+    /// Files only in the new version, as paths relative to the plugin folder with `/`.
     pub added: Vec<String>,
+    /// Files only in the old version, as paths relative to the plugin folder with `/`.
     pub removed: Vec<String>,
+    /// Files in both versions whose bytes differ, as relative paths with `/`.
     pub changed: Vec<String>,
 }
 
 impl Changes {
+    /// Returns `true` when the two versions have exactly the same files.
     pub fn is_empty(&self) -> bool {
         self.added.is_empty() && self.removed.is_empty() && self.changed.is_empty()
     }

@@ -22,6 +22,7 @@ pub struct CatalogConfig {
 /// `~/.harness/marketplaces.toml`: the catalogs Lisa added, by name.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Registry {
+    /// The `[marketplaces.<name>]` tables: each catalog's name and how it was added.
     #[serde(default)]
     pub marketplaces: BTreeMap<String, CatalogConfig>,
 }
@@ -44,6 +45,7 @@ impl Registry {
         }
     }
 
+    /// Writes the list to `marketplaces.toml`, creating `harness_home` if needed.
     pub fn save(&self, harness_home: &Path) -> Result<(), CatalogError> {
         let path = harness_home.join(REGISTRY_FILE);
         let io = |source| CatalogError::Io {

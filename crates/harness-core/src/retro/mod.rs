@@ -38,16 +38,22 @@ pub const RETROS_DIR: &str = "retros";
 const STATS_MD: &str = "stats.md";
 const STATS_JSON: &str = "stats.json";
 
+/// The ways counting or saving a retrospective can fail.
 #[derive(Debug, thiserror::Error)]
 pub enum RetroError {
+    /// The task history could not be read.
     #[error(transparent)]
     Store(#[from] StoreError),
+    /// A file or folder of the retrospective could not be written.
     #[error("cannot write {path}: {source}")]
     Io {
+        /// The file or folder that could not be written.
         path: PathBuf,
+        /// The error from the operating system.
         #[source]
         source: io::Error,
     },
+    /// The statistics could not be turned into JSON.
     #[error("cannot write stats.json: {0}")]
     Json(#[from] serde_json::Error),
 }
@@ -55,13 +61,16 @@ pub enum RetroError {
 /// One task as it is saved on disk.
 #[derive(Debug, Clone)]
 pub struct TaskHistory {
+    /// The task's saved state: its id, current round, stage and round limit.
     pub state: TaskState,
+    /// Every saved handoff of the task, in the order they happened.
     pub handoffs: Vec<Handoff>,
     /// Failed attempts: (round, role).
     pub failures: Vec<(u32, Role)>,
 }
 
 impl TaskHistory {
+    /// Reads one task's state, handoffs and failed attempts from `runs_dir`.
     pub fn load(runs_dir: &Path, task_id: &str) -> Result<Self, StoreError> {
         let (store, state) = TaskStore::open(runs_dir, task_id)?;
         Ok(Self {
@@ -127,11 +136,15 @@ impl From<Scope> for String {
 /// Everything the retrospective counted. Saved as `stats.json`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Stats {
+    /// Which tasks were counted: all of them or one.
     pub scope: Scope,
+    /// One summary per counted task.
     pub tasks: Vec<TaskSummary>,
+    /// What each role did, summed over all counted tasks.
     pub roles: BTreeMap<Role, RoleStats>,
     /// Work sent back, most frequent first.
     pub returns: Vec<Return>,
+    /// How many problems the handoffs listed, by severity.
     pub issues: SeverityCounts,
     /// Problems with the same description found more than once.
     pub repeated_issues: Vec<RepeatedIssue>,
@@ -139,42 +152,63 @@ pub struct Stats {
     pub skills: Vec<SkillUse>,
 }
 
+/// The numbers for one task, as one row of the task table.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct TaskSummary {
+    /// The task id, such as `task-001`.
     pub task_id: String,
+    /// The round the task reached, starting at 1.
     pub rounds: u32,
+    /// The round limit of the task; past it the task waits for Lisa.
     pub max_rounds: u32,
     /// Where the task is now, e.g. `done` or `waiting: approve design`.
     pub stage: String,
     /// Saved handoffs, Lisa's decisions included.
     pub steps: usize,
+    /// How many of those handoffs are Lisa's own decisions.
     pub human_decisions: usize,
+    /// How many times a role's run failed in this task.
     pub failed_attempts: usize,
 }
 
+/// What one role did across the counted tasks.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub struct RoleStats {
+    /// How many handoffs the role saved.
     pub steps: usize,
+    /// Handoffs with the verdict `approved`.
     pub approved: usize,
+    /// Handoffs with the verdict `rejected`.
     pub rejected: usize,
+    /// Handoffs with the verdict `needs_human`: the role asked Lisa to decide.
     pub needs_human: usize,
+    /// How many times the role's run failed.
     pub failed_attempts: usize,
+    /// How many problems the role listed in the `issues` of its handoffs.
     pub issues_found: usize,
 }
 
 /// `from` rejected the work and sent it to `to`, `count` times.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Return {
+    /// The role that rejected the work.
     pub from: Role,
+    /// The role the work was sent back to.
     pub to: Role,
+    /// How many times this happened.
     pub count: usize,
 }
 
+/// How many problems were found at each severity.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub struct SeverityCounts {
+    /// Problems marked `low`.
     pub low: usize,
+    /// Problems marked `medium`.
     pub medium: usize,
+    /// Problems marked `high`.
     pub high: usize,
+    /// Problems marked `critical`.
     pub critical: usize,
 }
 
@@ -188,19 +222,24 @@ impl SeverityCounts {
         }
     }
 
+    /// All problems, whatever their severity.
     pub fn total(&self) -> usize {
         self.low + self.medium + self.high + self.critical
     }
 }
 
+/// A problem described the same way more than once (case and spaces ignored).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct RepeatedIssue {
     /// The description as it was first written.
     pub description: String,
+    /// How many times it was found.
     pub count: usize,
     /// The highest severity it was given.
     pub severity: Severity,
+    /// The roles that found it, in the order they first did.
     pub roles: Vec<Role>,
+    /// The ids of the tasks it was found in.
     pub tasks: Vec<String>,
 }
 
@@ -218,10 +257,14 @@ pub enum SkillSetting {
     NotConfigured,
 }
 
+/// One skill of one role: how it is configured and how often it was used.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct SkillUse {
+    /// The role the skill belongs to (or that reported using it).
     pub role: Role,
+    /// The skill name; a plugin's skill is written `<plugin>:<skill>`.
     pub skill: String,
+    /// How the skill is given to the role in harness.toml.
     pub setting: SkillSetting,
     /// In how many handoffs of this role the skill was listed in `skills_used`.
     /// The role reports this itself, so it is what the role says it used.
