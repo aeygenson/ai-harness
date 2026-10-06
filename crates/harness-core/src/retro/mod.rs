@@ -18,16 +18,17 @@ pub mod ops;
 pub mod proposals;
 pub mod suggest;
 
-use std::collections::{BTreeMap, BTreeSet};
-use std::fmt::Write as _;
+mod collect;
+mod markdown;
+
+use std::collections::BTreeMap;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 
-use crate::config::Config;
-use crate::task::handoff::{Handoff, NextStep, Role, Severity, Verdict};
+use crate::task::handoff::{Handoff, Role, Severity};
 use crate::task::store::{self, StoreError, TaskStore};
 use crate::task::{Stage, TaskState, WaitReason};
 
@@ -184,226 +185,11 @@ pub struct SkillUse {
 }
 
 impl Stats {
-    /// Counts everything in `tasks`. `config` is the current harness.toml,
-    /// used to find skills that were configured but never used.
-    pub fn collect(scope: &str, tasks: &[TaskHistory], config: Option<&Config>) -> Self {
-        let mut roles: BTreeMap<Role, RoleStats> = BTreeMap::new();
-        let mut returns: BTreeMap<(Role, Role), usize> = BTreeMap::new();
-        let mut issues = SeverityCounts::default();
-        let mut repeated: BTreeMap<String, RepeatedIssue> = BTreeMap::new();
-        let mut used: BTreeMap<(Role, String), usize> = BTreeMap::new();
-        let mut summaries = Vec::new();
-
-        for task in tasks {
-            for handoff in &task.handoffs {
-                let role = roles.entry(handoff.role).or_default();
-                role.steps += 1;
-                match handoff.verdict {
-                    Verdict::Approved => role.approved += 1,
-                    Verdict::Rejected => role.rejected += 1,
-                    Verdict::NeedsHuman => role.needs_human += 1,
-                }
-                role.issues_found += handoff.issues.len();
-
-                if let (Verdict::Rejected, NextStep::To(to)) = (handoff.verdict, handoff.next_role)
-                {
-                    if to != handoff.role {
-                        *returns.entry((handoff.role, to)).or_default() += 1;
-                    }
-                }
-
-                for issue in &handoff.issues {
-                    issues.add(issue.severity);
-                    let entry = repeated
-                        .entry(normalize(&issue.description))
-                        .or_insert_with(|| RepeatedIssue {
-                            description: issue.description.trim().to_string(),
-                            count: 0,
-                            severity: issue.severity,
-                            roles: Vec::new(),
-                            tasks: Vec::new(),
-                        });
-                    entry.count += 1;
-                    if rank(issue.severity) > rank(entry.severity) {
-                        entry.severity = issue.severity;
-                    }
-                    push_new(&mut entry.roles, handoff.role);
-                    push_new(&mut entry.tasks, task.state.task_id.clone());
-                }
-
-                // A skill listed twice in one handoff is one use.
-                let skills: BTreeSet<&str> = handoff.skills_used.iter().map(|s| s.trim()).collect();
-                for skill in skills.into_iter().filter(|s| !s.is_empty()) {
-                    *used.entry((handoff.role, skill.to_string())).or_default() += 1;
-                }
-            }
-            for &(_, role) in &task.failures {
-                roles.entry(role).or_default().failed_attempts += 1;
-            }
-            summaries.push(TaskSummary {
-                task_id: task.state.task_id.clone(),
-                rounds: task.state.round,
-                max_rounds: task.state.max_rounds,
-                stage: stage_text(task.state.stage),
-                steps: task.handoffs.len(),
-                human_decisions: task
-                    .handoffs
-                    .iter()
-                    .filter(|h| h.role == Role::Human)
-                    .count(),
-                failed_attempts: task.failures.len(),
-            });
-        }
-
-        let mut returns: Vec<Return> = returns
-            .into_iter()
-            .map(|((from, to), count)| Return { from, to, count })
-            .collect();
-        returns.sort_by_key(|a| std::cmp::Reverse(a.count));
-
-        let mut repeated: Vec<RepeatedIssue> =
-            repeated.into_values().filter(|i| i.count > 1).collect();
-        repeated.sort_by(|a, b| {
-            b.count
-                .cmp(&a.count)
-                .then(rank(b.severity).cmp(&rank(a.severity)))
-        });
-
-        Self {
-            scope: scope.to_string(),
-            tasks: summaries,
-            roles,
-            returns,
-            issues,
-            repeated_issues: repeated,
-            skills: config.map(|c| skill_uses(c, &used)).unwrap_or_default(),
-        }
-    }
-
     /// Skills configured for a role but never listed in its `skills_used`.
     pub fn unused_skills(&self) -> impl Iterator<Item = &SkillUse> {
         self.skills
             .iter()
             .filter(|s| s.used == 0 && s.setting != SkillSetting::NotConfigured)
-    }
-
-    /// The statistics as Markdown, for the terminal and `stats.md`.
-    pub fn to_markdown(&self) -> String {
-        let mut md = String::new();
-        let _ = writeln!(md, "# Retrospective: {}\n", self.scope);
-
-        md.push_str("## Tasks\n\n");
-        md.push_str("| Task | Rounds | Stage | Steps | Lisa's decisions | Failed attempts |\n");
-        md.push_str("|---|---|---|---|---|---|\n");
-        for t in &self.tasks {
-            let _ = writeln!(
-                md,
-                "| {} | {} of {} | {} | {} | {} | {} |",
-                t.task_id,
-                t.rounds,
-                t.max_rounds,
-                t.stage,
-                t.steps,
-                t.human_decisions,
-                t.failed_attempts
-            );
-        }
-
-        md.push_str("\n## Roles\n\n");
-        if self.roles.is_empty() {
-            md.push_str("No role has finished a step yet.\n");
-        } else {
-            md.push_str("| Role | Steps | Approved | Rejected | Needs human | Failed attempts | Issues found |\n");
-            md.push_str("|---|---|---|---|---|---|---|\n");
-            for (role, r) in &self.roles {
-                let _ = writeln!(
-                    md,
-                    "| {} | {} | {} | {} | {} | {} | {} |",
-                    role.as_str(),
-                    r.steps,
-                    r.approved,
-                    r.rejected,
-                    r.needs_human,
-                    r.failed_attempts,
-                    r.issues_found
-                );
-            }
-        }
-
-        md.push_str("\n## Work sent back\n\n");
-        if self.returns.is_empty() {
-            md.push_str("Nothing was sent back.\n");
-        }
-        for r in &self.returns {
-            let _ = writeln!(
-                md,
-                "- {} -> {}: {} {}",
-                r.from.as_str(),
-                r.to.as_str(),
-                r.count,
-                times(r.count)
-            );
-        }
-
-        md.push_str("\n## Issues\n\n");
-        let i = &self.issues;
-        let _ = writeln!(
-            md,
-            "{} in total: critical {}, high {}, medium {}, low {}.",
-            i.total(),
-            i.critical,
-            i.high,
-            i.medium,
-            i.low
-        );
-        if !self.repeated_issues.is_empty() {
-            md.push_str("\nFound more than once:\n\n");
-        }
-        for issue in &self.repeated_issues {
-            let roles: Vec<&str> = issue.roles.iter().map(|r| r.as_str()).collect();
-            let _ = writeln!(
-                md,
-                "- {} {}, {}: {} (by {}; in {})",
-                issue.count,
-                times(issue.count),
-                severity_name(issue.severity),
-                issue.description,
-                roles.join(", "),
-                issue.tasks.join(", ")
-            );
-        }
-
-        md.push_str("\n## Skills\n\n");
-        if self.skills.is_empty() {
-            md.push_str("No skills configured or used.\n");
-        } else {
-            md.push_str("| Role | Skill | Setting | Listed in skills_used |\n");
-            md.push_str("|---|---|---|---|\n");
-            for s in &self.skills {
-                let setting = match s.setting {
-                    SkillSetting::OnDemand => "skills",
-                    SkillSetting::Always => "always_skills",
-                    SkillSetting::Plugin => "plugin",
-                    SkillSetting::NotConfigured => "not configured",
-                };
-                let _ = writeln!(
-                    md,
-                    "| {} | {} | {} | {} |",
-                    s.role.as_str(),
-                    s.skill,
-                    setting,
-                    s.used
-                );
-            }
-            let unused: Vec<String> = self
-                .unused_skills()
-                .map(|s| format!("{} ({})", s.skill, s.role.as_str()))
-                .collect();
-            if !unused.is_empty() {
-                let _ = writeln!(md, "\nConfigured but never used: {}.", unused.join(", "));
-            }
-        }
-        md
     }
 
     /// Saves `stats.md` and `stats.json` in a new `retros/<NNN>/` folder
@@ -422,44 +208,6 @@ impl Stats {
     }
 }
 
-/// One line per (role, skill): every configured skill and every used one.
-fn skill_uses(config: &Config, used: &BTreeMap<(Role, String), usize>) -> Vec<SkillUse> {
-    let mut rows: BTreeMap<(Role, String), SkillSetting> = BTreeMap::new();
-    for (&role, settings) in &config.roles {
-        for skill in &settings.skills {
-            rows.insert((role, skill.clone()), SkillSetting::OnDemand);
-        }
-        for skill in &settings.always_skills {
-            rows.insert((role, skill.clone()), SkillSetting::Always);
-        }
-    }
-    for (role, skill) in used.keys() {
-        let from_plugin = skill.split_once(':').is_some_and(|(plugin, _)| {
-            config
-                .roles
-                .get(role)
-                .is_some_and(|r| r.plugins.iter().any(|p| p == plugin))
-        });
-        rows.entry((*role, skill.clone()))
-            .or_insert(if from_plugin {
-                SkillSetting::Plugin
-            } else {
-                SkillSetting::NotConfigured
-            });
-    }
-    rows.into_iter()
-        .map(|((role, skill), setting)| {
-            let used = used.get(&(role, skill.clone())).copied().unwrap_or(0);
-            SkillUse {
-                role,
-                skill,
-                setting,
-                used,
-            }
-        })
-        .collect()
-}
-
 /// The next free number in `retros/`: one more than the highest `NNN` folder.
 fn next_number(retros: &Path) -> Result<u32, RetroError> {
     let mut highest = 0;
@@ -470,48 +218,6 @@ fn next_number(retros: &Path) -> Result<u32, RetroError> {
         }
     }
     Ok(highest + 1)
-}
-
-/// Descriptions that differ only in case, spaces or a final dot are the same.
-fn normalize(description: &str) -> String {
-    description
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ")
-        .trim_end_matches('.')
-        .to_lowercase()
-}
-
-fn push_new<T: PartialEq>(list: &mut Vec<T>, item: T) {
-    if !list.contains(&item) {
-        list.push(item);
-    }
-}
-
-fn rank(severity: Severity) -> u8 {
-    match severity {
-        Severity::Low => 0,
-        Severity::Medium => 1,
-        Severity::High => 2,
-        Severity::Critical => 3,
-    }
-}
-
-fn severity_name(severity: Severity) -> &'static str {
-    match severity {
-        Severity::Low => "low",
-        Severity::Medium => "medium",
-        Severity::High => "high",
-        Severity::Critical => "critical",
-    }
-}
-
-fn times(count: usize) -> &'static str {
-    if count == 1 {
-        "time"
-    } else {
-        "times"
-    }
 }
 
 /// Where a task is, in words: `done`, `working: tester`, `waiting: approve design`.
@@ -539,7 +245,9 @@ fn io_error(path: &Path, source: io::Error) -> RetroError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::Config;
     use crate::task::handoff::Issue;
+    use crate::task::handoff::{NextStep, Verdict};
 
     fn handoff(role: Role, verdict: Verdict, next: NextStep) -> Handoff {
         Handoff {

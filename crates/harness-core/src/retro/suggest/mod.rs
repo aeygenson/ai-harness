@@ -10,21 +10,26 @@
 //! `crate::retro::proposals`). Nothing changes until Lisa picks proposals with
 //! `harness retro apply <NNN> <ids>`; applied ids are kept in `applied.json`.
 
+mod apply;
+mod prompt;
+
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use crate::config::edit::{self, EditError};
+use crate::config::edit::EditError;
 use crate::config::{Config, ConfigError, CONFIG_FILE};
-use crate::git::{GitError, Repo, HARNESS_DIR};
-use crate::retro::proposals::{FileChange, ProposalError, ProposalsFile, SkillList};
+use crate::git::{GitError, Repo};
+use crate::retro::proposals::{ProposalError, ProposalsFile};
 use crate::retro::Stats;
-use crate::skills::{SkillError, Skills, SKILLS_DIR};
+use crate::skills::SkillError;
 use crate::task::agent::{AgentRunner, RoleJob};
 use crate::task::handoff::Role;
 use crate::text;
+pub use apply::apply;
+pub use prompt::{past_settings, prompt};
 
 pub const RETRO_MD: &str = "retro.md";
 pub const PROPOSALS_JSON: &str = "proposals.json";
@@ -101,138 +106,6 @@ pub struct PastSettings {
     pub tasks: Vec<String>,
     pub text: String,
 }
-
-/// For each task, harness.toml at the task's last commit; tasks with the same
-/// settings are grouped, and settings equal to `current` are left out.
-pub fn past_settings(repo: &Repo, stats: &Stats, current: &str) -> Vec<PastSettings> {
-    let mut past: Vec<PastSettings> = Vec::new();
-    for task in &stats.tasks {
-        let folder = format!("{HARNESS_DIR}/runs/{}", task.task_id);
-        let file = format!("{HARNESS_DIR}/{CONFIG_FILE}");
-        let Some(text) = repo.file_at_last_change(&folder, &file) else {
-            continue;
-        };
-        if text.trim_end() == current.trim_end() {
-            continue;
-        }
-        match past.iter_mut().find(|p| p.text == text) {
-            Some(same) => same.tasks.push(task.task_id.clone()),
-            None => past.push(PastSettings {
-                tasks: vec![task.task_id.clone()],
-                text,
-            }),
-        }
-    }
-    past
-}
-
-/// The prompt for the Retrospective.
-pub fn prompt(
-    stats: &Stats,
-    runs_dir: &Path,
-    harness_dir: &Path,
-    config: &Config,
-    past: &[PastSettings],
-    output_dir: &Path,
-    language: &str,
-) -> String {
-    let tasks: Vec<&str> = stats.tasks.iter().map(|t| t.task_id.as_str()).collect();
-    let mut text = format!(
-        "You are the Retrospective of a team of AI roles: architect, developer, \
-         tester and security; \"human\" is Lisa, who leads the team. Your job is to \
-         learn from finished work and propose better skills for the roles.\n\n\
-         Statistics the harness counted for {scope}:\n\n{stats}\n\
-         The full history is in {runs}/<task>/ for {tasks}: task.md is the task; \
-         round-NN/NN-<role>/ has each step's handoff.json, notes.md and agent.log; \
-         failures/ has logs of failed attempts. Read the notes and handoffs to \
-         find what went wrong and why.\n\n",
-        scope = stats.scope,
-        stats = stats.to_markdown(),
-        runs = runs_dir.display(),
-        tasks = tasks.join(", "),
-    );
-
-    let skills_dir = harness_dir.join(SKILLS_DIR);
-    text.push_str(&format!(
-        "Skills are files {dir}/<name>.md that start with\n---\n\
-         description: one line about the skill\n---\n\
-         followed by the instructions. Names use lowercase letters, digits and '-'.\n\
-         A role gets a skill in harness.toml: in `skills` it sees the description and \
-         reads the file when needed; in `always_skills` the whole file is in its prompt.\n\
-         The roles now have:\n",
-        dir = skills_dir.display()
-    ));
-    for (role, settings) in &config.roles {
-        text.push_str(&format!(
-            "- {}: skills = {:?}, always_skills = {:?}\n",
-            role.as_str(),
-            settings.skills,
-            settings.always_skills
-        ));
-    }
-    if past.is_empty() {
-        text.push_str("The tasks ran with these same settings.\n");
-    } else {
-        text.push_str(
-            "These are the current settings. They changed after some tasks ran, so \
-             judge each task by the settings it ran with, not by the current ones:\n",
-        );
-        for settings in past {
-            text.push_str(&format!(
-                "harness.toml when {} finished:\n```toml\n{}\n```\n",
-                settings.tasks.join(", "),
-                settings.text.trim_end()
-            ));
-        }
-    }
-    let files = skill_files(&skills_dir);
-    if files.is_empty() {
-        text.push_str("There are no skill files yet.\n");
-    } else {
-        text.push_str(&format!(
-            "Skill files: {}. Read a file before you propose to change it.\n",
-            files.join(", ")
-        ));
-    }
-
-    text.push_str(&format!(
-        "\nYou may propose only skills: a new skill file, a new text for an existing \
-         one, and giving a skill to a role. You cannot propose changes to role \
-         prompts, permissions, agents, models, MCP servers or plugins; write such \
-         ideas in retro.md. Every proposal must say what in the history it is based \
-         on. Few good proposals are better than many; propose nothing if nothing is \
-         needed. A skill should be short and concrete.\n\n\
-         Do not change any file of the project. Write exactly two files into {out}:\n\
-         - {RETRO_MD}: a short retrospective for Lisa: what went well, what went \
-         badly, repeated problems, and ideas that are not skills.\n\
-         - {PROPOSALS_JSON}: your proposals, exactly in this format (JSON, these \
-         fields only):\n{example}\n\
-         Fields: id (1, 2, ...), summary (one line: what changes), reason (what in \
-         the history it is based on), skill (the skill name), content (optional: \
-         the whole new text of the skill file; leave it out to keep the file as it \
-         is), roles (optional: roles that get the skill, list \"skills\" or \
-         \"always_skills\"). Use {{\"proposals\": []}} if you propose nothing.\n\
-         Write retro.md, and the summary and reason of each proposal, in \
-         {language}; skill files stay in English.\n\
-         Do not commit to git; the harness does that.\n",
-        out = output_dir.display(),
-        example = EXAMPLE,
-    ));
-    text
-}
-
-const EXAMPLE: &str = r#"{
-  "proposals": [
-    {
-      "id": 1,
-      "summary": "Teach the developer to handle empty input",
-      "reason": "The tester rejected task-003 twice because the parser panicked on empty input.",
-      "skill": "empty-input",
-      "content": "---\ndescription: Check empty and missing input before using it.\n---\nEvery function that parses input must handle an empty string...\n",
-      "roles": [{ "role": "developer", "list": "skills" }]
-    }
-  ]
-}"#;
 
 /// Runs the Retrospective for the statistics already saved and committed in
 /// `retro_dir`, then saves and commits what it wrote.
@@ -392,102 +265,6 @@ impl Applied {
     }
 }
 
-/// Applies the chosen proposals: writes the skill files and adds the skills to
-/// the roles in harness.toml. If the result does not load, everything is put
-/// back. Returns the changed files.
-pub fn apply(
-    harness_dir: &Path,
-    proposals: &ProposalsFile,
-    ids: &[u32],
-) -> Result<Vec<PathBuf>, ApplyError> {
-    let config_path = harness_dir.join(CONFIG_FILE);
-    let old_config = fs::read_to_string(&config_path).map_err(|source| ApplyError::Io {
-        path: config_path.clone(),
-        source,
-    })?;
-    let config = Config::load(harness_dir)?;
-
-    // Check everything before changing anything.
-    let mut chosen = Vec::new();
-    for &id in ids {
-        let proposal = proposals.get(id).ok_or(ApplyError::UnknownId(id))?;
-        proposal.check(harness_dir, &config)?;
-        chosen.push(proposal);
-    }
-    let mut text = old_config.clone();
-    for proposal in &chosen {
-        for given in proposal.missing_roles(&config) {
-            let always = given.list == SkillList::AlwaysSkills;
-            text = edit::add_role_skill(&text, given.role, &proposal.skill, always)?;
-        }
-    }
-
-    // (path, old text or None if the file is new), to undo a failed change.
-    let mut backups: Vec<(PathBuf, Option<String>)> = Vec::new();
-    let mut result = Ok(());
-    for proposal in &chosen {
-        let path = proposal.skill_path(harness_dir);
-        let (FileChange::New | FileChange::Changed { .. }, Some(content)) =
-            (proposal.file_change(harness_dir), &proposal.content)
-        else {
-            continue;
-        };
-        if backups.iter().any(|(p, _)| p == &path) {
-            // Two chosen proposals write the same file: the later one wins.
-        } else {
-            backups.push((path.clone(), fs::read_to_string(&path).ok()));
-        }
-        let written = path
-            .parent()
-            .map_or(Ok(()), fs::create_dir_all)
-            .and_then(|()| fs::write(&path, content));
-        if let Err(source) = written {
-            result = Err(ApplyError::Io { path, source });
-            break;
-        }
-    }
-    if result.is_ok() && text != old_config {
-        backups.push((config_path.clone(), Some(old_config)));
-        if let Err(source) = fs::write(&config_path, &text) {
-            result = Err(ApplyError::Io {
-                path: config_path.clone(),
-                source,
-            });
-        }
-    }
-    if result.is_ok() {
-        result = Config::load(harness_dir)
-            .map_err(ApplyError::from)
-            .and_then(|config| Skills::load(harness_dir, &config).map_err(ApplyError::from))
-            .map(|_| ());
-    }
-    if let Err(error) = result {
-        for (path, old) in backups {
-            let _ = match old {
-                Some(text) => fs::write(&path, text),
-                None => fs::remove_file(&path),
-            };
-        }
-        return Err(error);
-    }
-    Ok(backups.into_iter().map(|(path, _)| path).collect())
-}
-
-/// The names of the skill files, without `.md`, sorted.
-fn skill_files(dir: &Path) -> Vec<String> {
-    let mut names: Vec<String> = fs::read_dir(dir)
-        .into_iter()
-        .flatten()
-        .flatten()
-        .filter_map(|entry| {
-            let name = entry.file_name().to_string_lossy().into_owned();
-            name.strip_suffix(".md").map(str::to_string)
-        })
-        .collect();
-    names.sort();
-    names
-}
-
 fn write(path: &Path, text: &str) -> Result<(), SuggestError> {
     fs::write(path, text).map_err(|e| io_error(path, e))
 }
@@ -502,8 +279,10 @@ fn io_error(path: &Path, source: io::Error) -> SuggestError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::retro::proposals::SkillList;
     use crate::retro::proposals::{Proposal, RoleSkill};
     use crate::retro::TaskHistory;
+    use crate::skills::SKILLS_DIR;
     use crate::task::agent::AgentOutcome;
     use std::future::Future;
 
