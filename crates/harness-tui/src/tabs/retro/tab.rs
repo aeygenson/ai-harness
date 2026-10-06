@@ -19,31 +19,19 @@
 
 use std::collections::{BTreeSet, VecDeque};
 use std::path::{Path, PathBuf};
-use std::sync::mpsc::{channel, Receiver};
+use std::sync::mpsc::Receiver;
+
+use ratatui::crossterm::event::KeyCode;
 
 use harness_agents::build::BuildError;
-use harness_agents::{process, AnyAgent};
-use harness_core::config::projects::name_of;
+use harness_agents::AnyAgent;
 use harness_core::config::Config;
 use harness_core::git::{Repo, HARNESS_DIR};
 use harness_core::retro::ops::{self, RetroInfo};
 use harness_core::retro::proposals::Proposal;
-use harness_core::retro::suggest::{self, RETRO_MD};
-use harness_core::retro::Scope;
-use ratatui::crossterm::event::KeyCode;
-use ratatui::layout::{Constraint, Layout, Rect};
-use ratatui::style::{Modifier, Style};
-use ratatui::text::{Line, Span};
-use ratatui::widgets::{ListItem, Paragraph, Wrap};
-use ratatui::Frame;
-use tokio::sync::oneshot;
+use harness_core::retro::suggest::RETRO_MD;
 
-use crate::tabs::tasks::draw_list;
-use crate::tabs::tasks::runner::{push_line, readable, run_until_stopped, Background};
-use crate::ui::i18n::I18n;
-use crate::ui::message::Message;
-use crate::ui::theme;
-use crate::ui::{buttons, panel, ButtonId, Hits, ListId};
+use crate::tabs::tasks::runner::Background;
 
 /// Builds the agent of `[retro]`: `retro_agent`, or a mock in tests.
 pub type RetroBuilder = fn(&Config) -> Result<AnyAgent, BuildError>;
@@ -83,16 +71,16 @@ pub enum Focus {
 
 /// «Generate», while the agent works.
 #[derive(Debug)]
-struct Generating {
-    log: Receiver<String>,
-    done: Receiver<Result<String, String>>,
+pub(super) struct Generating {
+    pub(super) log: Receiver<String>,
+    pub(super) done: Receiver<Result<String, String>>,
     /// Kept to stop the agent when this is dropped.
-    _background: Background,
+    pub(super) _background: Background,
 }
 
 #[derive(Debug)]
 pub struct RetroTab {
-    root: PathBuf,
+    pub(super) root: PathBuf,
     pub(crate) list: Vec<RetroInfo>,
     /// The selected retrospective.
     pub(crate) row: usize,
@@ -103,10 +91,10 @@ pub struct RetroTab {
     pub(crate) chosen: BTreeSet<u32>,
     pub(crate) scroll: u16,
     /// harness.toml, to show what a proposal changes.
-    config: Option<Config>,
-    generating: Option<Generating>,
+    pub(super) config: Option<Config>,
+    pub(super) generating: Option<Generating>,
     /// What the agent printed during the last «Generate».
-    log: VecDeque<String>,
+    pub(super) log: VecDeque<String>,
 }
 
 impl RetroTab {
@@ -160,18 +148,18 @@ impl RetroTab {
     }
 
     /// The proposals of the selected retrospective that could be read.
-    fn proposals(&self) -> &[Proposal] {
+    pub(super) fn proposals(&self) -> &[Proposal] {
         match self.current().and_then(|r| r.proposals.as_ref()) {
             Some(Ok(file)) => &file.proposals,
             _ => &[],
         }
     }
 
-    fn current_proposal(&self) -> Option<&Proposal> {
+    pub(super) fn current_proposal(&self) -> Option<&Proposal> {
         self.proposals().get(self.proposal)
     }
 
-    fn applied(&self, id: u32) -> bool {
+    pub(super) fn applied(&self, id: u32) -> bool {
         self.current().is_some_and(|r| r.applied.contains(&id))
     }
 
@@ -295,299 +283,5 @@ impl RetroTab {
                 None => Action::None,
             },
         }
-    }
-
-    /// Starts «Generate» in the background; the agent writes in `language`.
-    pub fn generate(&mut self, builder: RetroBuilder, language: &str) {
-        if self.generating.is_some() {
-            return;
-        }
-        let (log, log_rx) = channel();
-        let (done, done_rx) = channel();
-        let (root, language) = (self.root.clone(), language.to_string());
-        let background = Background::start(move |stop| {
-            process::set_live_log(Some(log));
-            let result = generate(&root, builder, &language, stop);
-            process::set_live_log(None);
-            let _ = done.send(result);
-        });
-        self.log.clear();
-        self.scroll = 0;
-        self.generating = Some(Generating {
-            log: log_rx,
-            done: done_rx,
-            _background: background,
-        });
-    }
-
-    /// Takes what the agent printed; once it is done, the message to show.
-    pub fn tick(&mut self, tr: &I18n) -> Option<Message> {
-        let generating = self.generating.as_ref()?;
-        for line in generating.log.try_iter() {
-            if let Some(line) = readable(&line) {
-                push_line(&mut self.log, line);
-            }
-        }
-        let result = match generating.done.try_recv() {
-            Ok(result) => result,
-            Err(std::sync::mpsc::TryRecvError::Empty) => return None,
-            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                Err(tr.t("errors.retro_stopped").to_string())
-            }
-        };
-        self.generating = None;
-        self.reload();
-        // The newest one is shown, whether the agent managed or not.
-        if let Some(newest) = self.list.first().map(|r| r.number.clone()) {
-            self.select_number(&newest);
-        }
-        self.focus = Focus::Retros;
-        Some(match result {
-            Ok(number) => Message::info(tr.f("retro.generated", &[("number", &number)])),
-            Err(error) => Message::error(tr.f("retro.failed", &[("error", &error)])),
-        })
-    }
-
-    pub fn draw(&self, frame: &mut Frame, area: Rect, hits: &mut Hits, tr: &I18n) {
-        let [main, bottom] =
-            Layout::vertical([Constraint::Min(0), Constraint::Length(1)]).areas(area);
-        let [left, right] =
-            Layout::horizontal([Constraint::Percentage(40), Constraint::Percentage(60)])
-                .areas(main);
-        let [retros_area, proposals_area] =
-            Layout::vertical([Constraint::Percentage(40), Constraint::Percentage(60)]).areas(left);
-        let dim = theme::dim();
-
-        let items: Vec<ListItem> = self
-            .list
-            .iter()
-            .map(|retro| {
-                let scope = scope_text(retro, tr);
-                let mut spans = vec![Span::raw(format!("{}  ", retro.number))];
-                spans.push(Span::raw(format!(
-                    "{:<11}",
-                    retro.date.clone().unwrap_or_default()
-                )));
-                spans.push(Span::styled(scope, dim));
-                if retro.retro.is_none() {
-                    spans.push(Span::styled(
-                        format!(" · {}", tr.t("retro.stats_only")),
-                        dim,
-                    ));
-                }
-                ListItem::new(Line::from(spans))
-            })
-            .collect();
-        draw_list(
-            frame,
-            hits,
-            retros_area,
-            ListId::Retros,
-            &tr.f("retro.list", &[("name", &name_of(&self.root))]),
-            items,
-            self.row,
-            self.focus == Focus::Retros,
-        );
-
-        self.draw_proposals(frame, proposals_area, hits, tr);
-
-        let (title, lines) = self.text(tr);
-        frame.render_widget(
-            Paragraph::new(lines)
-                .block(panel(&title, false))
-                .wrap(Wrap { trim: false })
-                .scroll((self.scroll, 0)),
-            right,
-        );
-
-        self.draw_buttons(frame, bottom, hits, tr);
-    }
-
-    /// The proposals of the selected retrospective, or why there are none.
-    fn draw_proposals(&self, frame: &mut Frame, area: Rect, hits: &mut Hits, tr: &I18n) {
-        let dim = theme::dim();
-        let green = theme::ok();
-        let proposals = self.proposals();
-        let items: Vec<ListItem> = proposals
-            .iter()
-            .map(|p| {
-                let (mark, style) = if self.applied(p.id) {
-                    ("✓  ", green)
-                } else if self.chosen.contains(&p.id) {
-                    ("[x]", Style::new())
-                } else {
-                    ("[ ]", Style::new())
-                };
-                ListItem::new(Line::styled(
-                    format!("{mark} {} {}", p.id, p.summary),
-                    style,
-                ))
-            })
-            .collect();
-        let empty = items.is_empty();
-        draw_list(
-            frame,
-            hits,
-            area,
-            ListId::RetroProposals,
-            tr.t("retro.proposals"),
-            items,
-            self.proposal,
-            self.focus == Focus::Proposals,
-        );
-        if empty {
-            let note = match self.current().and_then(|r| r.proposals.as_ref()) {
-                Some(Err(error)) => error.clone(),
-                None if self.current().is_some_and(|r| r.retro.is_none()) => {
-                    tr.t("retro.no_agent").to_string()
-                }
-                Some(Ok(_)) | None => tr.t("retro.no_proposals").to_string(),
-            };
-            let inner = panel("", false).inner(area);
-            frame.render_widget(
-                Paragraph::new(Line::styled(note, dim)).wrap(Wrap { trim: false }),
-                inner,
-            );
-        }
-    }
-
-    /// «Generate», «Open», «Choose» and «Apply».
-    fn draw_buttons(&self, frame: &mut Frame, bottom: Rect, hits: &mut Hits, tr: &I18n) {
-        let generating = self.generating.is_some();
-        let has_text = self.current().is_some_and(|r| r.retro.is_some());
-        let can_choose = self.current_proposal().is_some_and(|p| !self.applied(p.id));
-        let choose = match self.current_proposal() {
-            Some(p) if self.chosen.contains(&p.id) => tr.t("retro.unchoose"),
-            _ => tr.t("retro.choose"),
-        };
-        let apply = tr.f("retro.apply", &[("count", &self.chosen.len())]);
-        buttons(
-            frame,
-            bottom,
-            hits,
-            &[
-                (
-                    tr.t("retro.generate"),
-                    ButtonId::Retro(RetroButton::Generate),
-                    !generating,
-                ),
-                (
-                    tr.t("retro.open"),
-                    ButtonId::Retro(RetroButton::Open),
-                    has_text,
-                ),
-                (choose, ButtonId::Retro(RetroButton::Toggle), can_choose),
-                (
-                    &apply,
-                    ButtonId::Retro(RetroButton::Apply),
-                    !self.chosen.is_empty(),
-                ),
-            ],
-        );
-    }
-
-    /// The right side: the live log while generating, a proposal with what
-    /// it changes, or the retrospective with its statistics.
-    fn text(&self, tr: &I18n) -> (String, Vec<Line<'static>>) {
-        let dim = theme::dim();
-        let bold = Style::new().add_modifier(Modifier::BOLD);
-        if self.generating.is_some() || (self.list.is_empty() && !self.log.is_empty()) {
-            let mut lines = vec![Line::styled(tr.t("retro.generating").to_string(), dim)];
-            lines.extend(self.log.iter().map(|l| Line::from(l.clone())));
-            return (format!(" {} ", tr.t("retro.agent")), lines);
-        }
-        let Some(retro) = self.current() else {
-            let lines = tr
-                .t("retro.empty")
-                .lines()
-                .map(|l| Line::from(l.to_string()))
-                .collect();
-            return (String::new(), lines);
-        };
-        if self.focus == Focus::Proposals {
-            if let Some(proposal) = self.current_proposal() {
-                let harness_dir = self.root.join(HARNESS_DIR);
-                // After applying, the files already look like the proposal:
-                // a diff would only say "already like this".
-                let text = match &self.config {
-                    _ if self.applied(proposal.id) => format!(
-                        "{}\n{}\n\n✓ {}\n",
-                        proposal.summary,
-                        proposal.reason,
-                        tr.f("retro.was_applied", &[("name", &proposal.skill)])
-                    ),
-                    Some(config) => proposal.describe(&harness_dir, config),
-                    None => format!("{}\n{}\n", proposal.summary, proposal.reason),
-                };
-                let lines = text
-                    .lines()
-                    .map(|line| {
-                        let style = if line.starts_with("+ ") {
-                            theme::ok()
-                        } else if line.starts_with("- ") {
-                            theme::bad()
-                        } else {
-                            Style::new()
-                        };
-                        Line::styled(line.to_string(), style)
-                    })
-                    .collect();
-                return (
-                    format!(" {} {} ", tr.t("retro.proposal"), proposal.id),
-                    lines,
-                );
-            }
-        }
-        let scope = scope_text(retro, tr);
-        let title = match &retro.date {
-            Some(date) => format!(" {} · {scope} · {date} ", retro.number),
-            None => format!(" {} · {scope} ", retro.number),
-        };
-        let mut lines: Vec<Line<'static>> = match &retro.retro {
-            Some(text) => text.lines().map(|l| Line::from(l.to_string())).collect(),
-            None => vec![Line::styled(tr.t("retro.no_agent").to_string(), dim)],
-        };
-        if let Some(stats) = &retro.stats {
-            lines.push(Line::default());
-            lines.push(Line::styled(format!("── {} ──", tr.t("retro.stats")), bold));
-            lines.extend(stats.lines().map(|l| Line::styled(l.to_string(), dim)));
-        }
-        (title, lines)
-    }
-}
-
-/// «Generate»: the statistics of every task, then the agent's lessons and
-/// proposals. Returns the number of the new retrospective.
-fn generate(
-    root: &Path,
-    builder: RetroBuilder,
-    language: &str,
-    stop: oneshot::Receiver<()>,
-) -> Result<String, String> {
-    let text = |e: &dyn std::fmt::Display| e.to_string();
-    let repo = Repo::open(root).map_err(|e| text(&e))?;
-    let config = Config::load(&root.join(HARNESS_DIR)).map_err(|e| text(&e))?;
-    // Everything the agent needs is checked before anything is saved.
-    ops::check_clean(&repo).map_err(|e| text(&e))?;
-    let agent = builder(&config).map_err(|e| text(&e))?;
-    let (dir, stats) = ops::save_stats(&repo, None, Some(&config)).map_err(|e| text(&e))?;
-    let number = dir
-        .file_name()
-        .unwrap_or_default()
-        .to_string_lossy()
-        .into_owned();
-    run_until_stopped(
-        suggest::suggest(&repo, &dir, &stats, &config, &agent, language),
-        stop,
-    )?
-    .map_err(|e| text(&e))?;
-    Ok(number)
-}
-/// What `retro` looked at, in Lisa's language: «all tasks» or the task id.
-fn scope_text(retro: &RetroInfo, tr: &I18n) -> String {
-    match &retro.scope {
-        Some(Scope::All) => tr.t("retro.all").to_string(),
-        Some(Scope::Task(id)) => id.clone(),
-        None => String::new(),
     }
 }
