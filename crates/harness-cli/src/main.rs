@@ -60,69 +60,11 @@ async fn main() -> Result<()> {
     match cli.command {
         Command::Init => init(project),
         Command::Login { agent } => login(&agent),
-        Command::Secret {
-            command: SecretCommand::Set { name },
-        } => set_secret(&name),
-        Command::Secret {
-            command: SecretCommand::List,
-        } => list_secrets(),
-        Command::Mcp {
-            command: McpCommand::Login { name },
-        } => mcp_login(project, &name),
-        Command::Mcp {
-            command: McpCommand::Logout { name },
-        } => {
-            let dir = credentials::default_dir().context("no home folder found")?;
-            harness_agents::mcp::oauth::logout(&dir, &name)?;
-            println!("Forgot the sign-in of {name}.");
-            Ok(())
-        }
-        Command::Marketplace { command } => match command {
-            MarketplaceCommand::Add { source, name } => {
-                catalogs::marketplace_add(&source, name.as_deref())
-            }
-            MarketplaceCommand::List => catalogs::marketplace_list(),
-            MarketplaceCommand::Update { name } => catalogs::marketplace_update(name.as_deref()),
-            MarketplaceCommand::Remove { name } => catalogs::marketplace_remove(&name),
-        },
-        Command::Plugin { command } => match command {
-            PluginCommand::List { agent } => catalogs::plugin_list(project, agent),
-            PluginCommand::Add {
-                name,
-                agent,
-                role,
-                allow_hooks,
-                allow_mcp,
-            } => catalogs::plugin_add(
-                project,
-                &name,
-                &catalogs::AddOptions {
-                    agent,
-                    role,
-                    allow_hooks,
-                    allow_mcp,
-                },
-            ),
-            PluginCommand::Update { name } => catalogs::plugin_update(project, &name),
-            PluginCommand::Remove { name } => catalogs::plugin_remove(project, &name),
-        },
-        Command::Task {
-            command:
-                TaskCommand::New {
-                    task_id,
-                    description,
-                    file,
-                    allow_duplicate,
-                },
-        } => {
-            let description = match (description, file) {
-                (Some(text), _) => text,
-                (None, Some(file)) => fs::read_to_string(&file)
-                    .with_context(|| format!("cannot read {}", file.display()))?,
-                (None, None) => bail!("give a description or --file"),
-            };
-            new_task(project, &task_id, &description, allow_duplicate)
-        }
+        Command::Secret { command } => secret(command),
+        Command::Mcp { command } => mcp(project, command),
+        Command::Marketplace { command } => marketplace(command),
+        Command::Plugin { command } => plugin(project, command),
+        Command::Task { command } => task(project, command),
         Command::Run { task_id } => until_ctrl_c(run(project, &task_id)).await,
         Command::Approve { task_id, to, notes } => {
             decide(project, &task_id, Verdict::Approved, to, &notes)
@@ -156,6 +98,84 @@ async fn main() -> Result<()> {
         }
         Command::McpRemote => {
             harness_agents::mcp::remote::run_from_env().map_err(anyhow::Error::msg)
+        }
+    }
+}
+
+/// `harness secret ...`: saves a secret or lists the saved names.
+fn secret(command: SecretCommand) -> Result<()> {
+    match command {
+        SecretCommand::Set { name } => set_secret(&name),
+        SecretCommand::List => list_secrets(),
+    }
+}
+
+/// `harness mcp ...`: signs in to a web MCP server, or forgets the sign-in.
+fn mcp(project: &Path, command: McpCommand) -> Result<()> {
+    match command {
+        McpCommand::Login { name } => mcp_login(project, &name),
+        McpCommand::Logout { name } => {
+            let dir = credentials::default_dir().context("no home folder found")?;
+            harness_agents::mcp::oauth::logout(&dir, &name)?;
+            println!("Forgot the sign-in of {name}.");
+            Ok(())
+        }
+    }
+}
+
+/// `harness marketplace ...`: adds, lists, updates or removes plugin catalogs.
+fn marketplace(command: MarketplaceCommand) -> Result<()> {
+    match command {
+        MarketplaceCommand::Add { source, name } => {
+            catalogs::marketplace_add(&source, name.as_deref())
+        }
+        MarketplaceCommand::List => catalogs::marketplace_list(),
+        MarketplaceCommand::Update { name } => catalogs::marketplace_update(name.as_deref()),
+        MarketplaceCommand::Remove { name } => catalogs::marketplace_remove(&name),
+    }
+}
+
+/// `harness plugin ...`: lists plugins, or adds, updates or removes one in the project.
+fn plugin(project: &Path, command: PluginCommand) -> Result<()> {
+    match command {
+        PluginCommand::List { agent } => catalogs::plugin_list(project, agent),
+        PluginCommand::Add {
+            name,
+            agent,
+            role,
+            allow_hooks,
+            allow_mcp,
+        } => catalogs::plugin_add(
+            project,
+            &name,
+            &catalogs::AddOptions {
+                agent,
+                role,
+                allow_hooks,
+                allow_mcp,
+            },
+        ),
+        PluginCommand::Update { name } => catalogs::plugin_update(project, &name),
+        PluginCommand::Remove { name } => catalogs::plugin_remove(project, &name),
+    }
+}
+
+/// `harness task new`: creates a task from text or from a file.
+fn task(project: &Path, command: TaskCommand) -> Result<()> {
+    match command {
+        TaskCommand::New {
+            task_id,
+            description,
+            file,
+            allow_duplicate,
+        } => {
+            let description = match (description, file) {
+                (Some(text), _) => text,
+                (None, Some(file)) => fs::read_to_string(&file)
+                    .with_context(|| format!("cannot read {}", file.display()))?,
+                (None, None) => bail!("give a description or --file"),
+            };
+            new_task(project, &task_id, &description, allow_duplicate)
         }
     }
 }

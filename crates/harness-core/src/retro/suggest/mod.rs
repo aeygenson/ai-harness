@@ -156,11 +156,7 @@ pub async fn suggest<A: AgentRunner>(
         .and_then(Path::parent)
         .unwrap_or(repo.root())
         .to_path_buf();
-    let inbox = retro_dir.join(INBOX_DIR);
-    if inbox.exists() {
-        fs::remove_dir_all(&inbox).map_err(|e| io_error(&inbox, e))?;
-    }
-    fs::create_dir_all(&inbox).map_err(|e| io_error(&inbox, e))?;
+    let inbox = fresh_inbox(retro_dir)?;
 
     let number = retro_dir
         .file_name()
@@ -206,16 +202,8 @@ pub async fn suggest<A: AgentRunner>(
         )?;
         Err(error)
     };
-    match &outcome.end {
-        RunEnd::Succeeded => {}
-        RunEnd::UsageLimit => {
-            return failed(SuggestError::AgentFailed(
-                "the usage limit was reached".to_string(),
-            ));
-        }
-        RunEnd::Failed(message) => {
-            return failed(SuggestError::AgentFailed(text::safe_line(message, 500)));
-        }
+    if let Some(error) = run_error(&outcome.end) {
+        return failed(error);
     }
     let Ok(retro) = fs::read_to_string(inbox.join(RETRO_MD)) else {
         return failed(SuggestError::Missing(RETRO_MD));
@@ -252,6 +240,27 @@ pub async fn suggest<A: AgentRunner>(
         ),
     )?;
     Ok(Suggestions { retro, proposals })
+}
+
+/// Makes an empty inbox folder in `retro_dir` for the agent, removing an old one.
+fn fresh_inbox(retro_dir: &Path) -> Result<PathBuf, SuggestError> {
+    let inbox = retro_dir.join(INBOX_DIR);
+    if inbox.exists() {
+        fs::remove_dir_all(&inbox).map_err(|e| io_error(&inbox, e))?;
+    }
+    fs::create_dir_all(&inbox).map_err(|e| io_error(&inbox, e))?;
+    Ok(inbox)
+}
+
+/// The error for an agent run that did not succeed, or `None` when it did.
+fn run_error(end: &RunEnd) -> Option<SuggestError> {
+    match end {
+        RunEnd::Succeeded => None,
+        RunEnd::UsageLimit => Some(SuggestError::AgentFailed(
+            "the usage limit was reached".to_string(),
+        )),
+        RunEnd::Failed(message) => Some(SuggestError::AgentFailed(text::safe_line(message, 500))),
+    }
 }
 
 /// Reads `retro.md` and `proposals.json` of a saved retrospective.
@@ -612,5 +621,28 @@ mod tests {
             broken
         );
         assert!(!harness.join("skills/empty-input.md").exists());
+    }
+
+    #[test]
+    fn only_a_run_that_did_not_succeed_is_an_error() {
+        assert!(run_error(&RunEnd::Succeeded).is_none());
+        assert!(matches!(
+            run_error(&RunEnd::Failed("crashed".to_string())),
+            Some(SuggestError::AgentFailed(message)) if message == "crashed"
+        ));
+        assert!(matches!(
+            run_error(&RunEnd::UsageLimit),
+            Some(SuggestError::AgentFailed(_))
+        ));
+    }
+
+    #[test]
+    fn a_fresh_inbox_is_empty() {
+        let dir = tempfile::tempdir().unwrap();
+        let old = dir.path().join(INBOX_DIR).join("old.md");
+        fs::create_dir_all(old.parent().unwrap()).unwrap();
+        fs::write(&old, "old").unwrap();
+        let inbox = fresh_inbox(dir.path()).unwrap();
+        assert_eq!(fs::read_dir(inbox).unwrap().count(), 0);
     }
 }
