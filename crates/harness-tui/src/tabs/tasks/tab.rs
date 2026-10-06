@@ -225,12 +225,14 @@ impl TasksTab {
                 for (role, settings) in &config.roles {
                     self.roles.push((
                         Some(*role),
-                        agent_line(role.as_str(), settings.agent, &settings.model),
+                        agent_line(role.as_str(), settings.agent, settings.model.as_deref()),
                     ));
                 }
                 if let Some(retro) = &config.retro {
-                    self.roles
-                        .push((None, agent_line("retro", retro.agent, &retro.model)));
+                    self.roles.push((
+                        None,
+                        agent_line("retro", retro.agent, retro.model.as_deref()),
+                    ));
                 }
             }
             Err(error) => problems.push(error.to_string()),
@@ -251,13 +253,12 @@ impl TasksTab {
             .collect();
         let at = selected.and_then(|id| self.tasks.iter().position(|t| t.id == id));
         self.task = at.unwrap_or(0);
-        self.step = match at {
-            Some(_) => self.step.min(self.last_step()),
-            None => {
-                // Another task is shown now: at its latest step.
-                self.scroll = 0;
-                self.last_step()
-            }
+        self.step = if at.is_some() {
+            self.step.min(self.last_step())
+        } else {
+            // Another task is shown now: at its latest step.
+            self.scroll = 0;
+            self.last_step()
         };
         self.sync_choice();
     }
@@ -510,8 +511,10 @@ impl TasksTab {
     fn cycle_choice(&mut self, delta: isize) {
         let options = self.options();
         let at = options.iter().position(|c| *c == self.choice).unwrap_or(0);
-        let len = options.len() as isize;
-        let next = (at as isize + delta).rem_euclid(len.max(1)) as usize;
+        // `try_from` instead of `as`: a list this short always fits in `isize`.
+        let len = isize::try_from(options.len()).unwrap_or(isize::MAX);
+        let at = isize::try_from(at).unwrap_or(0);
+        let next = (at + delta).rem_euclid(len.max(1)) as usize;
         if let Some(choice) = options.get(next) {
             self.set_choice(*choice);
         }
@@ -1435,7 +1438,7 @@ fn load_task(runs: &Path, id: &str) -> Result<TaskView> {
     })
 }
 
-fn agent_line(who: &str, agent: AgentKind, model: &Option<String>) -> String {
+fn agent_line(who: &str, agent: AgentKind, model: Option<&str>) -> String {
     match model {
         Some(model) => format!("{who:<10} {agent} ({model})"),
         None => format!("{who:<10} {agent}"),
@@ -1489,7 +1492,7 @@ fn step_text(step: &Step, files: &[Artifact], tr: &I18n) -> (Text<'static>, Vec<
             ]));
         }
     }
-    let mut links = Vec::new();
+    let mut link_rows = Vec::new();
     if !files.is_empty() {
         lines.push(Line::default());
         lines.push(Line::styled(tr.t("tasks.files").to_string(), bold));
@@ -1500,7 +1503,7 @@ fn step_text(step: &Step, files: &[Artifact], tr: &I18n) -> (Text<'static>, Vec<
             } else {
                 theme::accent().add_modifier(Modifier::UNDERLINED)
             };
-            links.push(lines.len());
+            link_rows.push(lines.len());
             lines.push(Line::from(vec![
                 Span::styled(format!("  {} ", file.mark), theme::dim()),
                 Span::styled(file.shown.clone(), look),
@@ -1519,5 +1522,5 @@ fn step_text(step: &Step, files: &[Artifact], tr: &I18n) -> (Text<'static>, Vec<
         lines.push(Line::styled(tr.t("tasks.notes").to_string(), bold));
         lines.extend(step.notes.lines().map(|l| Line::from(l.to_string())));
     }
-    (Text::from(lines), links)
+    (Text::from(lines), link_rows)
 }

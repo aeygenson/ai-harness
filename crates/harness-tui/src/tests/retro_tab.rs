@@ -3,6 +3,10 @@
 use super::*;
 
 /// The retrospective's agent: it writes its lessons and one proposal.
+#[expect(
+    clippy::unnecessary_wraps,
+    reason = "a fake must match the `RetroBuilder` function type"
+)]
 fn mock_retro(
     _: &harness_core::config::Config,
 ) -> Result<harness_agents::AnyAgent, harness_agents::build::BuildError> {
@@ -97,7 +101,7 @@ fn a_retrospective_is_generated_edited_and_its_proposals_applied() {
         app.message.as_ref().unwrap().text,
         "Retrospective 001 is ready"
     );
-    assert!(repo.changed_files().unwrap().is_empty());
+    assert_eq!(repo.changed_files().unwrap(), Vec::<String>::new());
     let text = screen(&mut app);
     assert!(text.contains("001  "), "{text}");
     assert!(text.contains("whole project"), "{text}");
@@ -133,7 +137,7 @@ fn a_retrospective_is_generated_edited_and_its_proposals_applied() {
     assert!(config(&root).roles[&Role::Developer]
         .skills
         .contains(&"empty-input".to_string()));
-    assert!(repo.changed_files().unwrap().is_empty());
+    assert_eq!(repo.changed_files().unwrap(), Vec::<String>::new());
     let text = screen(&mut app);
     assert!(text.contains("✓   1 Teach"), "{text}");
     assert!(text.contains("✓ Applied: the skill empty-input"), "{text}");
@@ -155,7 +159,7 @@ fn a_retrospective_is_generated_edited_and_its_proposals_applied() {
         app.message.as_ref().unwrap().text,
         "Retrospective 001 saved and committed"
     );
-    assert!(repo.changed_files().unwrap().is_empty());
+    assert_eq!(repo.changed_files().unwrap(), Vec::<String>::new());
     click(&mut app, "001  ");
     assert!(screen(&mut app).contains("Lesson: write tests first."));
 }

@@ -368,8 +368,8 @@ mod tests {
         assert_eq!(context7.args, ["-y", "@upstash/context7-mcp"]);
         assert_eq!(context7.env["CONTEXT7_API_KEY"].expose(), "ctx-secret");
         assert_eq!(context7.env["MODE"].expose(), "fast");
-        assert!(servers.for_role(Role::Tester).is_empty());
-        assert!(servers.for_role(Role::Security).is_empty());
+        assert_eq!(servers.for_role(Role::Tester), Vec::<McpServer>::new());
+        assert_eq!(servers.for_role(Role::Security), Vec::<McpServer>::new());
         // The secret never shows in a debug print.
         assert!(!format!("{servers:?}").contains("ctx-secret"));
     }

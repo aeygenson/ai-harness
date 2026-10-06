@@ -324,6 +324,10 @@ impl RolesTab {
         rows
     }
 
+    #[expect(
+        clippy::match_same_arms,
+        reason = "the arms form a key table: one arm per key and focus"
+    )]
     pub fn on_key(&mut self, key: KeyCode, tr: &I18n) -> Action {
         let rows = self.rows().len();
         match (key, self.focus) {
@@ -332,11 +336,11 @@ impl RolesTab {
                 self.focus = Focus::List;
             }
             (KeyCode::Up | KeyCode::Char('k'), Focus::List) => {
-                self.select(self.selected.saturating_sub(1))
+                self.select(self.selected.saturating_sub(1));
             }
             (KeyCode::Down | KeyCode::Char('j'), Focus::List) => self.select(self.selected + 1),
             (KeyCode::Up | KeyCode::Char('k'), Focus::Details) => {
-                self.row = self.row.saturating_sub(1)
+                self.row = self.row.saturating_sub(1);
             }
             (KeyCode::Down | KeyCode::Char('j'), Focus::Details) => {
                 self.row = (self.row + 1).min(rows.saturating_sub(1));
@@ -434,49 +438,46 @@ impl RolesTab {
     }
 
     fn set_agent(&mut self, agent: AgentKind, tr: &I18n) -> Action {
-        match self.who() {
-            Some(role) => {
-                let first = self.first_choice(agent);
-                let settings = self.roles.entry(role).or_insert_with(|| RoleConfig {
-                    agent,
-                    model: None,
-                    effort: None,
-                    skills: Vec::new(),
-                    always_skills: Vec::new(),
-                    mcp: Vec::new(),
-                    plugins: Vec::new(),
-                });
-                if settings.agent == agent {
-                    return Action::None;
-                }
-                // A model belongs to one agent: take the new agent's.
-                (settings.model, settings.effort) = first;
-                settings.agent = agent;
-                // Plugins are made for one kind of agent.
-                let plugins = &self.saved.plugins;
-                let (keep, drop): (Vec<String>, Vec<String>) = settings
-                    .plugins
-                    .drain(..)
-                    .partition(|name| plugins.get(name).is_some_and(|p| p.agent == agent));
-                settings.plugins = keep;
-                if !drop.is_empty() {
-                    return Action::Say(tr.f(
-                        "roles.plugins_dropped",
-                        &[("plugins", &drop.join(", ")), ("agent", &agent)],
-                    ));
-                }
+        if let Some(role) = self.who() {
+            let first = self.first_choice(agent);
+            let settings = self.roles.entry(role).or_insert_with(|| RoleConfig {
+                agent,
+                model: None,
+                effort: None,
+                skills: Vec::new(),
+                always_skills: Vec::new(),
+                mcp: Vec::new(),
+                plugins: Vec::new(),
+            });
+            if settings.agent == agent {
+                return Action::None;
             }
-            None => {
-                if self.retro.as_ref().is_some_and(|r| r.agent == agent) {
-                    return Action::None;
-                }
-                let (model, effort) = self.first_choice(agent);
-                self.retro = Some(RetroConfig {
-                    agent,
-                    model,
-                    effort,
-                });
+            // A model belongs to one agent: take the new agent's.
+            (settings.model, settings.effort) = first;
+            settings.agent = agent;
+            // Plugins are made for one kind of agent.
+            let plugins = &self.saved.plugins;
+            let (keep, drop): (Vec<String>, Vec<String>) = settings
+                .plugins
+                .drain(..)
+                .partition(|name| plugins.get(name).is_some_and(|p| p.agent == agent));
+            settings.plugins = keep;
+            if !drop.is_empty() {
+                return Action::Say(tr.f(
+                    "roles.plugins_dropped",
+                    &[("plugins", &drop.join(", ")), ("agent", &agent)],
+                ));
             }
+        } else {
+            if self.retro.as_ref().is_some_and(|r| r.agent == agent) {
+                return Action::None;
+            }
+            let (model, effort) = self.first_choice(agent);
+            self.retro = Some(RetroConfig {
+                agent,
+                model,
+                effort,
+            });
         }
         Action::None
     }

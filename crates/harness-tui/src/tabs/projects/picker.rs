@@ -209,7 +209,7 @@ impl Browser {
                 message,
             ),
             (None, Some(error)) => {
-                frame.render_widget(Span::styled(error.clone(), theme::bad()), message)
+                frame.render_widget(Span::styled(error.clone(), theme::bad()), message);
             }
             (None, None) => {}
         }
@@ -296,7 +296,7 @@ mod tests {
         browser.move_by(1);
         browser.open_selected();
         assert_eq!(browser.dir, root.join("beta"));
-        assert!(browser.folders.is_empty());
+        assert_eq!(browser.folders, Vec::<String>::new());
 
         browser.naming = Some("new-app".into());
         browser.create(&tr);

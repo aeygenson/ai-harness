@@ -43,6 +43,10 @@ fn set_mode(path: &Path, mode: u32) -> io::Result<()> {
 }
 
 #[cfg(not(unix))]
+#[expect(
+    clippy::unnecessary_wraps,
+    reason = "the same signature as the Unix version, so callers need no `cfg`"
+)]
 fn set_mode(_path: &Path, _mode: u32) -> io::Result<()> {
     Ok(())
 }

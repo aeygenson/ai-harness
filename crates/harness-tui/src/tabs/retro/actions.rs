@@ -1,10 +1,12 @@
 //! The Retro tab's work: generating a retrospective and applying the proposals
 //! Lisa accepted.
 
+use std::fmt::Write as _;
 use std::path::Path;
 
 use harness_core::config::projects::name_of;
 use harness_core::git::{Repo, HARNESS_DIR};
+use harness_core::retro::proposals::FileChange;
 
 use crate::tabs::tasks::TasksTab;
 use crate::ui::message::Message;
@@ -61,15 +63,15 @@ impl App {
                     let Some(proposal) = found.as_ref().and_then(|f| f.proposals.get(*id)) else {
                         continue;
                     };
-                    text.push_str(&format!("\n{id}. {}", proposal.summary));
-                    use harness_core::retro::proposals::FileChange;
+                    // Writing into a `String` cannot fail, so `let _ =` ignores the `Result`.
+                    let _ = write!(text, "\n{id}. {}", proposal.summary);
                     let file = match (proposal.file_change(&harness_dir), &proposal.content) {
                         (FileChange::New, Some(_)) => Some("retro.new_skill"),
                         (FileChange::Changed { .. }, Some(_)) => Some("retro.changed_skill"),
                         _ => None,
                     };
                     if let Some(key) = file {
-                        text.push_str(&format!("\n   {}", tr.f(key, &[("name", &proposal.skill)])));
+                        let _ = write!(text, "\n   {}", tr.f(key, &[("name", &proposal.skill)]));
                     }
                     let roles: Vec<&str> = config
                         .as_ref()
@@ -79,13 +81,14 @@ impl App {
                         .map(|given| given.role.as_str())
                         .collect();
                     if !roles.is_empty() {
-                        text.push_str(&format!(
+                        let _ = write!(
+                            text,
                             "\n   {}",
                             tr.f(
                                 "retro.given_to",
                                 &[("name", &proposal.skill), ("roles", &roles.join(", "))]
                             )
-                        ));
+                        );
                     }
                 }
                 self.form = Some((

@@ -439,7 +439,7 @@ mod tests {
         write(&repo, "a.txt", "a");
         assert!(repo.commit_all("add a").unwrap());
         assert_ne!(repo.head().unwrap(), before);
-        assert!(repo.changed_files().unwrap().is_empty());
+        assert_eq!(repo.changed_files().unwrap(), Vec::<String>::new());
     }
 
     #[test]
@@ -476,11 +476,11 @@ mod tests {
     fn harness_ignores_hide_the_inbox_and_agent_settings() {
         let (_dir, repo) = new_repo();
         repo.ensure_harness_ignores().unwrap();
-        assert!(repo.changed_files().unwrap().is_empty());
+        assert_eq!(repo.changed_files().unwrap(), Vec::<String>::new());
 
         write(&repo, ".harness/runs/task-001/inbox/handoff.json", "{}");
         write(&repo, ".harness/agents/claude/settings.json", "{}");
-        assert!(repo.changed_files().unwrap().is_empty());
+        assert_eq!(repo.changed_files().unwrap(), Vec::<String>::new());
 
         // Running it again changes nothing and makes no new commit.
         let head = repo.head().unwrap();

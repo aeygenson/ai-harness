@@ -143,7 +143,11 @@ fn screen_of_width(app: &mut App, width: u16) -> String {
     buffer
         .content
         .chunks(width)
-        .map(|row| row.iter().map(|cell| cell.symbol()).collect::<String>())
+        .map(|row| {
+            row.iter()
+                .map(ratatui::buffer::Cell::symbol)
+                .collect::<String>()
+        })
         .collect::<Vec<_>>()
         .join("\n")
 }
@@ -221,13 +225,17 @@ fn model(id: &str, efforts: &[&str], default_effort: Option<&str>, default: bool
     models::Model {
         id: id.into(),
         name: None,
-        efforts: efforts.iter().map(|e| e.to_string()).collect(),
+        efforts: efforts.iter().map(ToString::to_string).collect(),
         default_effort: default_effort.map(Into::into),
         default,
     }
 }
 
 /// Scripted agents: the architect finishes a design, the others approve.
+#[expect(
+    clippy::unnecessary_wraps,
+    reason = "a fake must match the `Builder` function type"
+)]
 fn mock_team(
     _: &harness_core::config::Config,
     _: &Path,

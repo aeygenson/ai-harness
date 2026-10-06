@@ -260,7 +260,7 @@ mod tests {
         assert_eq!(models[0].name.as_deref(), Some("Sonnet · claude-sonnet-5"));
         assert_eq!(models[1].efforts, ["low", "high", "xhigh"]);
         assert_eq!(models[1].default_effort.as_deref(), Some("high"));
-        assert!(models[2].efforts.is_empty());
+        assert_eq!(models[2].efforts, Vec::<String>::new());
         parse_claude("{\"type\":\"result\"}").unwrap_err();
     }
 

@@ -25,7 +25,7 @@ impl App {
             }
             Purpose::NewSkill => self.create_skill(&form),
             Purpose::RestoreSkill(name) => self.restore_skill(&name.clone()),
-            Purpose::McpServer(old) => self.save_mcp(old.clone(), &form),
+            Purpose::McpServer(old) => self.save_mcp(old.as_deref(), &form),
             Purpose::RemoveMcp(name) => self.remove_mcp(&name.clone()),
             Purpose::Secret => self.save_secret(&form),
             Purpose::McpSearch => {

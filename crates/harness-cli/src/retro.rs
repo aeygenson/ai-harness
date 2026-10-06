@@ -167,7 +167,7 @@ mod tests {
         assert!(retros.join("001/stats.md").exists());
         let json = fs::read_to_string(retros.join("002/stats.json")).unwrap();
         assert!(json.contains("\"scope\": \"all\""), "{json}");
-        assert!(repo.changed_files().unwrap().is_empty());
+        assert_eq!(repo.changed_files().unwrap(), Vec::<String>::new());
     }
 
     #[tokio::test(flavor = "current_thread")]
@@ -197,7 +197,7 @@ mod tests {
         assert!(retro_apply(dir.path(), "1", &[2]).is_err());
 
         retro_apply(dir.path(), "1", &[1]).unwrap();
-        assert!(repo.changed_files().unwrap().is_empty());
+        assert_eq!(repo.changed_files().unwrap(), Vec::<String>::new());
         let harness = dir.path().join(".harness");
         let config = Config::load(&harness).unwrap();
         assert_eq!(config.roles[&Role::Developer].skills, ["empty-input"]);

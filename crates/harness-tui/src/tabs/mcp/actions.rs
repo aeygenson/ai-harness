@@ -1,6 +1,7 @@
 //! The MCP tab's work: checking a server, signing in, searching the registry,
 //! and saving servers and their secrets to `harness.toml`.
 
+use std::collections::BTreeMap;
 use std::sync::mpsc;
 
 use harness_agents::install::credentials;
@@ -171,8 +172,10 @@ impl App {
             A::Use(offer) => {
                 // A name harness.toml does not use yet.
                 let taken = |name: &str| servers.is_some_and(|s| s.contains_key(name));
+                // With `count` servers, one of these `count + 1` names is free.
+                let count = servers.map_or(0, BTreeMap::len);
                 let name = std::iter::once(offer.name.clone())
-                    .chain((2..).map(|n| format!("{}-{n}", offer.name)))
+                    .chain((2..=count + 1).map(|n| format!("{}-{n}", offer.name)))
                     .find(|n| !taken(n))
                     .unwrap_or_default();
                 let text = format!("{}\n{}", tr.t("mcp.from_catalog"), tr.t("mcp.form_text"));
@@ -232,13 +235,13 @@ impl App {
     }
 
     /// OK in the server form.
-    pub(crate) fn save_mcp(&mut self, old: Option<String>, form: &Form) -> Result<(), String> {
+    pub(crate) fn save_mcp(&mut self, old: Option<&str>, form: &Form) -> Result<(), String> {
         let name = form.value(0).to_string();
         let server = super::server_from(form.value(1), form.value(2), form.is_checked(3))
             .map_err(|problem| problem.text(&self.tr))?;
         harness_core::mcp::check_server(&name, &server).map_err(|e| e.to_string())?;
         self.save_settings(|text| {
-            config::edit::set_mcp(text, old.as_deref(), &name, &server).map_err(|e| e.to_string())
+            config::edit::set_mcp(text, old, &name, &server).map_err(|e| e.to_string())
         })?;
         if let (Some(mcp), Some(roles)) = (&mut self.mcp, &self.roles) {
             // A server from the catalog is now in the list.

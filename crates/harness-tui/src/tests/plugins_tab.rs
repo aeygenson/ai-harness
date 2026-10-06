@@ -91,7 +91,7 @@ fn the_plugins_tab_gives_allows_and_removes_plugins() {
     key(&mut app, KeyCode::Char(' '));
     key(&mut app, KeyCode::Char('s'));
     assert_eq!(config(&root).roles[&Role::Architect].plugins, ["review"]);
-    assert!(repo.changed_files().unwrap().is_empty());
+    assert_eq!(repo.changed_files().unwrap(), Vec::<String>::new());
 
     // Forbidding hooks the architect needs is refused, and nothing changes.
     click(&mut app, " Forbid hooks ");
@@ -139,7 +139,7 @@ fn the_plugins_tab_gives_allows_and_removes_plugins() {
         .unwrap()
         .text
         .contains("changes committed"));
-    assert!(repo.changed_files().unwrap().is_empty());
+    assert_eq!(repo.changed_files().unwrap(), Vec::<String>::new());
     assert!(screen(&mut app).contains("2 commands"));
 
     // Removing asks first; the folder and the settings go in one commit.
@@ -149,7 +149,7 @@ fn the_plugins_tab_gives_allows_and_removes_plugins() {
     key(&mut app, KeyCode::Enter);
     assert!(!config(&root).plugins.contains_key("lint"));
     assert!(!root.join(".harness/plugins/lint").exists());
-    assert!(repo.changed_files().unwrap().is_empty());
+    assert_eq!(repo.changed_files().unwrap(), Vec::<String>::new());
     let text = screen(&mut app);
     assert!(
         !text.contains("] lint") && text.contains("Plugin lint removed"),
@@ -252,7 +252,7 @@ fn plugins_come_from_the_catalog_and_are_updated() {
         Some("official/review")
     );
     assert_eq!(saved.roles[&Role::Architect].plugins, ["review"]);
-    assert!(repo.changed_files().unwrap().is_empty());
+    assert_eq!(repo.changed_files().unwrap(), Vec::<String>::new());
     let text = screen(&mut app);
     assert!(text.contains("▶ [x] review"), "{text}");
 
@@ -266,7 +266,7 @@ fn plugins_come_from_the_catalog_and_are_updated() {
     assert!(root
         .join(".harness/plugins/review/commands/fix.md")
         .is_file());
-    assert!(repo.changed_files().unwrap().is_empty());
+    assert_eq!(repo.changed_files().unwrap(), Vec::<String>::new());
     key(&mut app, KeyCode::Char('U'));
     wait_job(&mut app);
     assert!(app
@@ -284,7 +284,7 @@ fn plugins_come_from_the_catalog_and_are_updated() {
     assert!(!root
         .join(".harness/plugins/review/commands/more.md")
         .exists());
-    assert!(repo.changed_files().unwrap().is_empty());
+    assert_eq!(repo.changed_files().unwrap(), Vec::<String>::new());
 
     // «Catalogs» lists it; removing it keeps the plugin.
     key(&mut app, KeyCode::Char('f'));

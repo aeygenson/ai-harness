@@ -201,7 +201,7 @@ mod tests {
         init(dir.path()).unwrap(); // a second time changes nothing
         new_task(dir.path(), "task-001", "Build a parser", false).unwrap();
 
-        assert!(repo.changed_files().unwrap().is_empty());
+        assert_eq!(repo.changed_files().unwrap(), Vec::<String>::new());
         let (_, state) = open_task(&repo, "task-001").unwrap();
         assert_eq!(state.stage, Stage::Working(Role::Architect));
     }

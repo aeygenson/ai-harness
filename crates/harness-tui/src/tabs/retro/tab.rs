@@ -253,9 +253,9 @@ impl RetroTab {
             KeyCode::Down | KeyCode::Char('j') => self.move_by(1),
             KeyCode::Tab | KeyCode::Left | KeyCode::Right | KeyCode::Char('h' | 'l') => {
                 self.focus = match self.focus {
-                    Focus::Proposals => Focus::Retros,
                     Focus::Retros if !self.proposals().is_empty() => Focus::Proposals,
-                    Focus::Retros => Focus::Retros,
+                    // Without proposals the focus stays on «Retros».
+                    Focus::Proposals | Focus::Retros => Focus::Retros,
                 };
                 self.scroll = 0;
             }
@@ -421,11 +421,10 @@ impl RetroTab {
         if empty {
             let note = match self.current().and_then(|r| r.proposals.as_ref()) {
                 Some(Err(error)) => error.clone(),
-                Some(Ok(_)) => tr.t("retro.no_proposals").to_string(),
                 None if self.current().is_some_and(|r| r.retro.is_none()) => {
                     tr.t("retro.no_agent").to_string()
                 }
-                None => tr.t("retro.no_proposals").to_string(),
+                Some(Ok(_)) | None => tr.t("retro.no_proposals").to_string(),
             };
             let inner = panel("", false).inner(proposals_area);
             frame.render_widget(

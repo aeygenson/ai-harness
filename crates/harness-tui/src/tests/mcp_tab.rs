@@ -95,7 +95,7 @@ fn the_mcp_tab_gives_servers_to_roles() {
     key(&mut app, KeyCode::Char('s'));
     let saved = config(&root);
     assert_eq!(saved.roles[&Role::Developer].mcp, ["context7", "fetch"]);
-    assert!(saved.roles[&Role::Tester].mcp.is_empty());
+    assert_eq!(saved.roles[&Role::Tester].mcp, Vec::<String>::new());
 }
 
 #[test]
@@ -188,7 +188,7 @@ fn mcp_servers_are_added_changed_and_removed_and_secrets_saved() {
     key(&mut app, KeyCode::Enter);
     let saved = config(&root);
     assert!(saved.mcp.is_empty());
-    assert!(saved.roles[&Role::Developer].mcp.is_empty());
+    assert_eq!(saved.roles[&Role::Developer].mcp, Vec::<String>::new());
     assert!(file.is_file());
 }
 
@@ -422,6 +422,10 @@ fn a_web_server_is_written_and_changed_in_the_form() {
     assert!(!text.contains("auth"), "{text}");
 }
 
+#[expect(
+    clippy::unnecessary_wraps,
+    reason = "a fake must match the `McpChecker` function type"
+)]
 fn fake_web_check(
     server: &harness_core::mcp::McpServer,
     _: &Path,
@@ -480,6 +484,10 @@ fn a_web_server_shows_its_address_and_is_checked_through_the_bridge() {
     assert!(!text.contains("web-key"), "{text}");
 }
 
+#[expect(
+    clippy::unnecessary_wraps,
+    reason = "a fake must match the `McpSigner` function type"
+)]
 fn fake_sign_in(dir: &Path, name: &str, url: &str) -> Result<(), String> {
     // As a real sign-in would leave it.
     let file = harness_agents::mcp::oauth::path(dir, name);

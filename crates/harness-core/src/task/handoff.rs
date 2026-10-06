@@ -318,7 +318,7 @@ mod tests {
             .map(|block| block.split("```").next().unwrap())
             .filter(|block| block.contains("\"schema_version\""))
             .collect();
-        assert!(!examples.is_empty());
+        assert_ne!(examples, Vec::<&str>::new());
         for example in examples {
             Handoff::from_json(example).unwrap();
         }

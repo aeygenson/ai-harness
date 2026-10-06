@@ -217,7 +217,7 @@ fn quitting_waits_for_the_running_roles() {
     send(&mut app);
     key(&mut app, KeyCode::Char('q'));
     assert!(!app.quit);
-    assert!(app.message.as_ref().unwrap().kind == MessageKind::Error);
+    assert_eq!(app.message.as_ref().unwrap().kind, MessageKind::Error);
     wait(&mut app);
     key(&mut app, KeyCode::Char('q'));
     assert!(app.quit);

@@ -172,13 +172,12 @@ impl App {
         if let Some((_, form)) = &mut self.form {
             match hit {
                 Some((Target::Button(ButtonId::Ok), _)) => self.submit(),
-                Some((Target::Button(ButtonId::Cancel), _)) => self.close_form(),
                 Some((Target::Field(i), _)) if i < form.fields.len() => {
                     form.focus = i;
                     form.switch(i);
                 }
                 Some((Target::Field(_) | Target::Window, _)) => {}
-                // A click outside the window closes it.
+                // «Cancel», or a click outside the window, closes it.
                 _ => self.close_form(),
             }
             return;
@@ -274,8 +273,7 @@ impl App {
                 }
                 // Clicks in the folder browser and the «To» menu are handled
                 // above, while they are open.
-                Some((ListId::Folders | ListId::Choices, _)) => {}
-                None => {}
+                Some((ListId::Folders | ListId::Choices, _)) | None => {}
             },
             Target::Row(index) => {
                 if let Some(roles) = &mut self.roles {

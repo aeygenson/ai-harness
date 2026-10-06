@@ -94,7 +94,7 @@ async fn a_well_behaved_agent_finishes_the_role() {
     assert!(log.contains("\"result\":\"Done.\""));
     assert!(!log.contains("tok-123"));
     // Committed, and the agent's own settings folder stays out of git.
-    assert!(s.repo.changed_files().unwrap().is_empty());
+    assert_eq!(s.repo.changed_files().unwrap(), Vec::<String>::new());
     assert!(s
         .repo
         .root()

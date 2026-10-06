@@ -350,12 +350,18 @@ mod tests {
             vec![("app".to_string(), 130)]
         );
         // Many small parts: the change as a whole is too big.
-        assert!(oversized_changes(dir.path(), &files[..4], 150).is_empty());
+        assert_eq!(
+            oversized_changes(dir.path(), &files[..4], 150),
+            Vec::<(String, u64)>::new()
+        );
         assert_eq!(
             oversized_changes(dir.path(), &files[..4], 135),
             vec![(".".to_string(), 140)]
         );
-        assert!(oversized_changes(dir.path(), &files, 1000).is_empty());
+        assert_eq!(
+            oversized_changes(dir.path(), &files, 1000),
+            Vec::<(String, u64)>::new()
+        );
     }
 
     #[test]

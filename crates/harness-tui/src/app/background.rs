@@ -73,7 +73,7 @@ impl App {
         }
         let (tx, rx) = mpsc::channel();
         let (installer, line) = (self.installer, command.clone());
-        std::thread::spawn(move || installer(&line, tx));
+        std::thread::spawn(move || installer(&line, &tx));
         self.agents.job = Some(agents::Job {
             name,
             action,
