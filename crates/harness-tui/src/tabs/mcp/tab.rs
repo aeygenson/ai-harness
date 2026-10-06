@@ -449,6 +449,44 @@ impl McpTab {
             Constraint::Length(1),
         ])
         .areas(area);
+        self.draw_role_line(frame, top, hits, tr, roles);
+
+        let [left, right] =
+            Layout::horizontal([Constraint::Percentage(35), Constraint::Percentage(65)])
+                .areas(main);
+        self.draw_server_list(frame, left, hits, tr, roles);
+
+        let current = self.current(roles);
+        let (title, lines) = match &current {
+            Some(name) => (format!(" {name} "), self.details(roles, name, tr)),
+            None => (
+                String::new(),
+                tr.t("mcp.empty")
+                    .lines()
+                    .map(|l| Line::from(l.to_string()))
+                    .collect(),
+            ),
+        };
+        frame.render_widget(
+            Paragraph::new(lines)
+                .block(panel(&title, false))
+                .wrap(Wrap { trim: false }),
+            right,
+        );
+
+        self.draw_role_buttons(frame, bottom, hits, tr, roles);
+        self.draw_server_buttons(frame, servers_row, hits, tr, roles);
+    }
+
+    /// The role selector, with the role's agent and model on the right when there is room.
+    fn draw_role_line(
+        &self,
+        frame: &mut Frame,
+        top: Rect,
+        hits: &mut Hits,
+        tr: &I18n,
+        roles: &RolesTab,
+    ) {
         let role = self.role();
         let names: Vec<&str> = ROLES.iter().map(|r| r.as_str()).collect();
         selector(
@@ -475,10 +513,18 @@ impl McpTab {
                 );
             }
         }
+    }
 
-        let [left, right] =
-            Layout::horizontal([Constraint::Percentage(35), Constraint::Percentage(65)])
-                .areas(main);
+    /// The servers the role can have, marked when it has them.
+    fn draw_server_list(
+        &self,
+        frame: &mut Frame,
+        left: Rect,
+        hits: &mut Hits,
+        tr: &I18n,
+        roles: &RolesTab,
+    ) {
+        let role = self.role();
         let dim = theme::dim();
         let red = theme::bad();
         let servers = Self::names(roles);
@@ -517,25 +563,19 @@ impl McpTab {
             self.at(roles),
             true,
         );
+    }
 
+    /// «Give» or «Take», «Save» and «Undo»: they change the role.
+    fn draw_role_buttons(
+        &self,
+        frame: &mut Frame,
+        bottom: Rect,
+        hits: &mut Hits,
+        tr: &I18n,
+        roles: &RolesTab,
+    ) {
+        let role = self.role();
         let current = self.current(roles);
-        let (title, lines) = match &current {
-            Some(name) => (format!(" {name} "), self.details(roles, name, tr)),
-            None => (
-                String::new(),
-                tr.t("mcp.empty")
-                    .lines()
-                    .map(|l| Line::from(l.to_string()))
-                    .collect(),
-            ),
-        };
-        frame.render_widget(
-            Paragraph::new(lines)
-                .block(panel(&title, false))
-                .wrap(Wrap { trim: false }),
-            right,
-        );
-
         let toggle = match &current {
             Some(name) if self.has(roles, name) => tr.f("mcp.take", &[("role", &role)]),
             _ => tr.f("mcp.give", &[("role", &role)]),
@@ -563,7 +603,18 @@ impl McpTab {
                 Rect::new(x.max(bottom.x), bottom.y, width.min(bottom.width), 1),
             );
         }
-        // The servers themselves: they change harness.toml at once.
+    }
+
+    /// The buttons for the servers themselves; they change harness.toml at once.
+    fn draw_server_buttons(
+        &self,
+        frame: &mut Frame,
+        servers_row: Rect,
+        hits: &mut Hits,
+        tr: &I18n,
+        roles: &RolesTab,
+    ) {
+        let current = self.current(roles);
         let described = current
             .as_deref()
             .and_then(|name| roles.servers().get(name));
@@ -681,44 +732,7 @@ impl McpTab {
         if let Some(url) = &server.url {
             self.web_details(name, server, url, tr, &mut lines);
         } else {
-            let command = server
-                .command
-                .iter()
-                .chain(&server.args)
-                .map(|part| {
-                    if part.contains(char::is_whitespace) || part.is_empty() {
-                        format!("{part:?}")
-                    } else {
-                        part.clone()
-                    }
-                })
-                .collect::<Vec<_>>()
-                .join(" ");
-            lines.push(Line::from(vec![
-                Span::styled(format!("{} ", tr.t("mcp.command")), bold),
-                Span::raw(command),
-            ]));
-            lines.push(Line::default());
-            if server.env.is_empty() {
-                lines.push(Line::styled(tr.t("mcp.no_variables").to_string(), dim));
-            } else {
-                lines.push(Line::styled(tr.t("mcp.variables").to_string(), bold));
-                for (variable, value) in &server.env {
-                    let mut spans = vec![Span::raw(format!("  {variable} = {value}"))];
-                    if let Some(secret) = value.strip_prefix(SECRET_PREFIX) {
-                        let secret = secret.trim();
-                        spans.push(if self.secrets.iter().any(|s| s == secret) {
-                            Span::styled(format!("  {}", tr.t("mcp.secret_saved")), green)
-                        } else {
-                            Span::styled(
-                                format!("  {}", tr.f("mcp.secret_missing", &[("name", &secret)])),
-                                red,
-                            )
-                        });
-                    }
-                    lines.push(Line::from(spans));
-                }
-            }
+            self.command_details(server, tr, &mut lines);
         }
 
         // Which agents can start it; the role's own agent in bold.
@@ -746,6 +760,86 @@ impl McpTab {
         lines.push(Line::styled(tr.t("mcp.agents_hint").to_string(), dim));
 
         // The tools, as the server said when it was checked last.
+        self.tools_details(name, server, tr, &mut lines);
+
+        lines.push(Line::default());
+        let users: Vec<&str> = ROLES
+            .iter()
+            .filter(|r| {
+                roles
+                    .settings(**r)
+                    .is_some_and(|s| s.mcp.iter().any(|n| n == name))
+            })
+            .map(|r| r.as_str())
+            .collect();
+        let users = if users.is_empty() {
+            tr.t("mcp.no_roles").to_string()
+        } else {
+            users.join(", ")
+        };
+        lines.push(Line::from(vec![
+            Span::styled(format!("{} ", tr.t("mcp.roles")), bold),
+            Span::raw(users),
+        ]));
+        lines
+    }
+
+    /// The command and the variables of a server started on this computer.
+    fn command_details(&self, server: &McpConfig, tr: &I18n, lines: &mut Vec<Line<'static>>) {
+        let dim = theme::dim();
+        let red = theme::bad();
+        let green = theme::ok();
+        let bold = Style::new().add_modifier(Modifier::BOLD);
+        let command = server
+            .command
+            .iter()
+            .chain(&server.args)
+            .map(|part| {
+                if part.contains(char::is_whitespace) || part.is_empty() {
+                    format!("{part:?}")
+                } else {
+                    part.clone()
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(" ");
+        lines.push(Line::from(vec![
+            Span::styled(format!("{} ", tr.t("mcp.command")), bold),
+            Span::raw(command),
+        ]));
+        lines.push(Line::default());
+        if server.env.is_empty() {
+            lines.push(Line::styled(tr.t("mcp.no_variables").to_string(), dim));
+        } else {
+            lines.push(Line::styled(tr.t("mcp.variables").to_string(), bold));
+            for (variable, value) in &server.env {
+                let mut spans = vec![Span::raw(format!("  {variable} = {value}"))];
+                if let Some(secret) = value.strip_prefix(SECRET_PREFIX) {
+                    let secret = secret.trim();
+                    spans.push(if self.secrets.iter().any(|s| s == secret) {
+                        Span::styled(format!("  {}", tr.t("mcp.secret_saved")), green)
+                    } else {
+                        Span::styled(
+                            format!("  {}", tr.f("mcp.secret_missing", &[("name", &secret)])),
+                            red,
+                        )
+                    });
+                }
+                lines.push(Line::from(spans));
+            }
+        }
+    }
+
+    /// The server's tools, as it said when it was checked last.
+    fn tools_details(
+        &self,
+        name: &str,
+        server: &McpConfig,
+        tr: &I18n,
+        lines: &mut Vec<Line<'static>>,
+    ) {
+        let dim = theme::dim();
+        let bold = Style::new().add_modifier(Modifier::BOLD);
         lines.push(Line::default());
         let saved = self
             .home
@@ -772,27 +866,6 @@ impl McpTab {
                 lines.push(Line::styled(tr.t("mcp.tools_unknown").to_string(), dim));
             }
         }
-
-        lines.push(Line::default());
-        let users: Vec<&str> = ROLES
-            .iter()
-            .filter(|r| {
-                roles
-                    .settings(**r)
-                    .is_some_and(|s| s.mcp.iter().any(|n| n == name))
-            })
-            .map(|r| r.as_str())
-            .collect();
-        let users = if users.is_empty() {
-            tr.t("mcp.no_roles").to_string()
-        } else {
-            users.join(", ")
-        };
-        lines.push(Line::from(vec![
-            Span::styled(format!("{} ", tr.t("mcp.roles")), bold),
-            Span::raw(users),
-        ]));
-        lines
     }
 }
 
@@ -811,27 +884,8 @@ fn draw_catalog(
         Constraint::Length(1),
     ])
     .areas(area);
-    let dim = theme::dim();
-    let red = theme::bad();
     let bold = Style::new().add_modifier(Modifier::BOLD);
-    let status = if catalog.searching {
-        Span::styled(tr.f("mcp.searching", &[("query", &catalog.query)]), dim)
-    } else if let Some(error) = &catalog.error {
-        Span::styled(tr.f("mcp.search_failed", &[("error", &error)]), red)
-    } else if catalog.query.is_empty() {
-        Span::styled(
-            tr.f("mcp.found_all", &[("count", &catalog.entries.len())]),
-            dim,
-        )
-    } else {
-        Span::styled(
-            tr.f(
-                "mcp.found",
-                &[("count", &catalog.entries.len()), ("query", &catalog.query)],
-            ),
-            dim,
-        )
-    };
+    let status = catalog_status(catalog, tr);
     frame.render_widget(
         Line::from(vec![
             Span::styled(format!("{} ", tr.t("mcp.catalog_title")), bold),
@@ -842,34 +896,7 @@ fn draw_catalog(
 
     let [left, right] =
         Layout::horizontal([Constraint::Percentage(35), Constraint::Percentage(65)]).areas(main);
-    let items: Vec<ListItem> = catalog
-        .entries
-        .iter()
-        .map(|entry| {
-            let shown = entry
-                .offer
-                .as_ref()
-                .map_or_else(|| short_name(&entry.name), |o| o.name.clone());
-            let added = entry
-                .offer
-                .as_ref()
-                .is_some_and(|o| roles.servers().contains_key(&o.name));
-            let style = if entry.offer.is_some() {
-                Style::new()
-            } else {
-                dim
-            };
-            let mut spans = vec![Span::styled(format!("{shown:<20} "), style)];
-            if added {
-                spans.push(Span::styled(tr.t("mcp.already_added").to_string(), dim));
-            } else if let Some(offer) = &entry.offer {
-                spans.push(Span::styled(offer.kind.clone(), dim));
-            } else {
-                spans.push(Span::styled(tr.t("mcp.web_only").to_string(), dim));
-            }
-            ListItem::new(Line::from(spans))
-        })
-        .collect();
+    let items = catalog_items(catalog, roles, tr);
     draw_list(
         frame,
         hits,
@@ -921,6 +948,63 @@ fn draw_catalog(
             ),
         ],
     );
+}
+
+/// The line above the catalog: searching, the error, or how many servers were found.
+fn catalog_status(catalog: &Catalog, tr: &I18n) -> Span<'static> {
+    let dim = theme::dim();
+    let red = theme::bad();
+    if catalog.searching {
+        Span::styled(tr.f("mcp.searching", &[("query", &catalog.query)]), dim)
+    } else if let Some(error) = &catalog.error {
+        Span::styled(tr.f("mcp.search_failed", &[("error", &error)]), red)
+    } else if catalog.query.is_empty() {
+        Span::styled(
+            tr.f("mcp.found_all", &[("count", &catalog.entries.len())]),
+            dim,
+        )
+    } else {
+        Span::styled(
+            tr.f(
+                "mcp.found",
+                &[("count", &catalog.entries.len()), ("query", &catalog.query)],
+            ),
+            dim,
+        )
+    }
+}
+
+/// The rows of the catalog: the name it would get, and its kind or why it cannot be used.
+fn catalog_items(catalog: &Catalog, roles: &RolesTab, tr: &I18n) -> Vec<ListItem<'static>> {
+    let dim = theme::dim();
+    catalog
+        .entries
+        .iter()
+        .map(|entry| {
+            let shown = entry
+                .offer
+                .as_ref()
+                .map_or_else(|| short_name(&entry.name), |o| o.name.clone());
+            let added = entry
+                .offer
+                .as_ref()
+                .is_some_and(|o| roles.servers().contains_key(&o.name));
+            let style = if entry.offer.is_some() {
+                Style::new()
+            } else {
+                dim
+            };
+            let mut spans = vec![Span::styled(format!("{shown:<20} "), style)];
+            if added {
+                spans.push(Span::styled(tr.t("mcp.already_added").to_string(), dim));
+            } else if let Some(offer) = &entry.offer {
+                spans.push(Span::styled(offer.kind.clone(), dim));
+            } else {
+                spans.push(Span::styled(tr.t("mcp.web_only").to_string(), dim));
+            }
+            ListItem::new(Line::from(spans))
+        })
+        .collect()
 }
 
 /// What the catalog shows about one registry server.
