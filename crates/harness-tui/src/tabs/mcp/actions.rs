@@ -234,7 +234,7 @@ impl App {
     /// OK in the server form.
     pub(crate) fn save_mcp(&mut self, old: Option<String>, form: &Form) -> Result<(), String> {
         let name = form.value(0).to_string();
-        let server = super::server_from(form.value(1), form.value(2), form.value(3))?;
+        let server = super::server_from(form.value(1), form.value(2), form.is_checked(3))?;
         harness_core::mcp::check_server(&name, &server).map_err(|e| e.to_string())?;
         self.save_settings(|text| {
             config::edit::set_mcp(text, old.as_deref(), &name, &server).map_err(|e| e.to_string())

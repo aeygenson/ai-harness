@@ -173,7 +173,10 @@ impl App {
             match hit {
                 Some((Target::Button(ButtonId::Ok), _)) => self.submit(),
                 Some((Target::Button(ButtonId::Cancel), _)) => self.close_form(),
-                Some((Target::Field(i), _)) if i < form.fields.len() => form.focus = i,
+                Some((Target::Field(i), _)) if i < form.fields.len() => {
+                    form.focus = i;
+                    form.switch(i);
+                }
                 Some((Target::Field(_) | Target::Window, _)) => {}
                 // A click outside the window closes it.
                 _ => self.close_form(),

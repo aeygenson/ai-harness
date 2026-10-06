@@ -393,7 +393,11 @@ fn a_web_server_is_written_and_changed_in_the_form() {
     type_text(&mut app, "https://mcp.notion.com/mcp");
     key(&mut app, KeyCode::Tab);
     key(&mut app, KeyCode::Tab);
-    fill(&mut app, "да");
+    // The sign-in is a box: Space ticks it, typed letters do nothing.
+    type_text(&mut app, "yes");
+    assert!(!app.form.as_ref().unwrap().1.is_checked(3));
+    key(&mut app, KeyCode::Char(' '));
+    assert!(screen(&mut app).contains("[x]"));
     key(&mut app, KeyCode::Enter);
     assert!(app.form.is_none(), "{:?}", app.form);
     let notion = &config(&root).mcp["notion"];
@@ -403,12 +407,13 @@ fn a_web_server_is_written_and_changed_in_the_form() {
 
     // Changed back to a key in a header, in the same form.
     key(&mut app, KeyCode::Char('e'));
-    assert_eq!(app.form.as_ref().unwrap().1.value(3), "yes");
+    assert!(app.form.as_ref().unwrap().1.is_checked(3));
     key(&mut app, KeyCode::Tab);
     key(&mut app, KeyCode::Tab);
     fill(&mut app, "Authorization=\"Bearer secret:notion\"");
-    key(&mut app, KeyCode::Tab);
-    fill(&mut app, "");
+    // A click on the box takes the tick away.
+    click(&mut app, "[x]");
+    assert!(!app.form.as_ref().unwrap().1.is_checked(3));
     key(&mut app, KeyCode::Enter);
     let notion = &config(&root).mcp["notion"];
     assert!(notion.auth.is_none());

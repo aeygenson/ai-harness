@@ -214,12 +214,12 @@ type McpChecker = fn(&McpServer, &Path) -> Result<Vec<Tool>, String>;
 
 /// The form for a new or changed MCP server.
 fn server_form(tr: &I18n, title: &str, text: &str, name: &str, server: &McpConfig) -> Form {
-    let [command, variables, sign_in] = tabs::mcp::form_values(server);
+    let (command, variables, sign_in) = tabs::mcp::form_values(server);
     Form::new(title, text, tr.t("mcp.ok"))
         .field(tr.t("mcp.name"), name)
         .field(tr.t("mcp.command_field"), &command)
         .field(tr.t("mcp.variables_field"), &variables)
-        .field(tr.t("mcp.sign_in_field"), &sign_in)
+        .check(tr.t("mcp.sign_in_field"), sign_in)
 }
 
 /// Searches the MCP registry.
