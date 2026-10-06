@@ -13,6 +13,7 @@ use ratatui::Frame;
 
 use crate::tabs::mcp::{McpButton, McpCatalogButton};
 use crate::tabs::plugins::{PluginButton, PluginCatalogButton};
+use crate::tabs::projects::picker::FolderButton;
 use crate::tabs::retro::RetroButton;
 use crate::tabs::skills::SkillButton;
 
@@ -81,14 +82,8 @@ pub enum ButtonId {
     Undo,
     /// «Refresh models» on the Roles tab.
     RefreshModels,
-    Choose,
-    Up,
-    NewFolder,
-    /// Creates the folder whose name is being typed in the folder browser.
-    CreateFolder,
-    /// Stops naming a new folder; the browser stays open.
-    StopNaming,
-    ToggleHidden,
+    /// A button of the folder browser.
+    Folder(crate::tabs::projects::picker::FolderButton),
     /// The message field of the Tasks tab.
     Input,
     /// «To ▾», «Model ▾» and «Level ▾» on the Tasks tab; model and level
@@ -182,8 +177,7 @@ fn is_primary(id: ButtonId) -> bool {
             | ButtonId::Send
             | ButtonId::Save
             | ButtonId::UseProject
-            | ButtonId::Choose
-            | ButtonId::CreateFolder
+            | ButtonId::Folder(FolderButton::Choose | FolderButton::CreateFolder)
             | ButtonId::Retro(RetroButton::Generate | RetroButton::Apply)
             | ButtonId::Plugin(PluginButton::OpenCatalog)
             | ButtonId::PluginCatalog(PluginCatalogButton::Add)

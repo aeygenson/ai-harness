@@ -15,6 +15,23 @@ use crate::ui::i18n::I18n;
 use crate::ui::theme;
 use crate::ui::{self, buttons, panel, ButtonId, Hits, ListId, Target};
 
+/// A button of the folder browser, clicked or chosen with a key.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FolderButton {
+    /// Takes the marked folder, or the open one, and closes the browser.
+    Choose,
+    /// Goes to the parent folder.
+    Up,
+    /// Starts typing the name of a new folder.
+    NewFolder,
+    /// Creates the folder whose name is being typed.
+    CreateFolder,
+    /// Stops naming a new folder; the browser stays open.
+    StopNaming,
+    /// Shows or hides folders whose names start with a dot.
+    ToggleHidden,
+}
+
 /// A folder browser inside the TUI.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Browser {
@@ -34,6 +51,19 @@ pub struct Browser {
 }
 
 impl Browser {
+    /// What a button of the browser does to it.
+    pub fn press(&mut self, button: FolderButton, tr: &I18n) {
+        match button {
+            // `App` handles it, because choosing also closes the browser.
+            FolderButton::Choose => {}
+            FolderButton::Up => self.up(),
+            FolderButton::NewFolder => self.naming = Some(String::new()),
+            FolderButton::CreateFolder => self.create(tr),
+            FolderButton::StopNaming => self.naming = None,
+            FolderButton::ToggleHidden => self.toggle_hidden(),
+        }
+    }
+
     pub fn new(title: &str, start: &Path) -> Self {
         let mut browser = Self {
             title: title.to_string(),
@@ -233,10 +263,14 @@ impl Browser {
                 &[
                     (
                         tr.t("picker.create"),
-                        ButtonId::CreateFolder,
+                        ButtonId::Folder(FolderButton::CreateFolder),
                         !name.is_empty(),
                     ),
-                    (tr.t("form.cancel"), ButtonId::StopNaming, true),
+                    (
+                        tr.t("form.cancel"),
+                        ButtonId::Folder(FolderButton::StopNaming),
+                        true,
+                    ),
                 ],
             );
             return;
@@ -246,10 +280,22 @@ impl Browser {
             bar,
             hits,
             &[
-                (tr.t("picker.choose"), ButtonId::Choose, true),
-                (tr.t("picker.up"), ButtonId::Up, self.dir.parent().is_some()),
-                (tr.t("picker.new_folder"), ButtonId::NewFolder, true),
-                (hidden, ButtonId::ToggleHidden, true),
+                (
+                    tr.t("picker.choose"),
+                    ButtonId::Folder(FolderButton::Choose),
+                    true,
+                ),
+                (
+                    tr.t("picker.up"),
+                    ButtonId::Folder(FolderButton::Up),
+                    self.dir.parent().is_some(),
+                ),
+                (
+                    tr.t("picker.new_folder"),
+                    ButtonId::Folder(FolderButton::NewFolder),
+                    true,
+                ),
+                (hidden, ButtonId::Folder(FolderButton::ToggleHidden), true),
                 (tr.t("form.cancel"), ButtonId::Cancel, true),
             ],
         );
@@ -311,5 +357,24 @@ mod tests {
         browser.up();
         assert_eq!(browser.dir, root);
         assert_eq!(browser.folders[browser.selected], "beta");
+    }
+
+    #[test]
+    fn the_browser_buttons_work_like_their_keys() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().canonicalize().unwrap();
+        fs::create_dir(root.join("app")).unwrap();
+        fs::create_dir(root.join(".hidden")).unwrap();
+        let tr = I18n::load(None);
+        let mut browser = Browser::new("Pick", &root.join("app"));
+
+        browser.press(FolderButton::Up, &tr);
+        assert_eq!(browser.dir, root);
+        browser.press(FolderButton::ToggleHidden, &tr);
+        assert_eq!(browser.folders, [".hidden", "app"]);
+        browser.press(FolderButton::NewFolder, &tr);
+        assert_eq!(browser.naming.as_deref(), Some(""));
+        browser.press(FolderButton::StopNaming, &tr);
+        assert_eq!(browser.naming, None);
     }
 }

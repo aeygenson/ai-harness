@@ -1,5 +1,7 @@
 //! What happens when a form is sent (Enter or its OK button) or closed.
 
+use std::path::Path;
+
 use harness_core::config::projects;
 use harness_core::plugins;
 
@@ -62,21 +64,7 @@ impl App {
                     Ok(())
                 }
             }
-            Purpose::RemoveCatalog(name) => {
-                let name = name.clone();
-                self.home
-                    .clone()
-                    .ok_or_else(|| self.tr.t("errors.no_home").to_string())
-                    .and_then(|home| {
-                        plugins::ops::remove_catalog(&home, &name).map_err(|e| e.to_string())
-                    })
-                    .map(|()| {
-                        self.reload_catalog_views();
-                        self.message = Some(Message::info(
-                            self.tr.f("plugins.catalog_removed", &[("name", &name)]),
-                        ));
-                    })
-            }
+            Purpose::RemoveCatalog(name) => self.remove_catalog(&name.clone()),
             Purpose::ApplyUpdate(prepared) => {
                 self.apply_plugin_update(prepared);
                 Ok(())
@@ -94,22 +82,7 @@ impl App {
                 self.run_agent_command(name, *action, command.clone());
                 Ok(())
             }
-            Purpose::Remove(path) => {
-                let path = path.clone();
-                let result = self.projects.update(|list| list.remove(&path), &self.tr);
-                if self.project.as_deref() == Some(path.as_path()) {
-                    self.project = None;
-                    self.tasks = None;
-                    self.roles = None;
-                    self.skills = None;
-                    self.mcp = None;
-                    self.plugins = None;
-                    self.retro = None;
-                }
-                result.map(|()| {
-                    self.message = Some(Message::info(self.tr.t("projects.removed")));
-                })
-            }
+            Purpose::Remove(path) => self.remove_project(&path.clone()),
         };
         if let Err(error) = result {
             // Keep the form open with the problem, so nothing typed is lost.
@@ -117,6 +90,37 @@ impl App {
             form.error = Some(error);
             self.form = Some((purpose, form));
         }
+    }
+
+    /// Forgets the plugin catalog `name` and refreshes the views that show catalogs.
+    fn remove_catalog(&mut self, name: &str) -> Result<(), String> {
+        let home = self
+            .home
+            .clone()
+            .ok_or_else(|| self.tr.t("errors.no_home").to_string())?;
+        plugins::ops::remove_catalog(&home, name).map_err(|e| e.to_string())?;
+        self.reload_catalog_views();
+        self.message = Some(Message::info(
+            self.tr.f("plugins.catalog_removed", &[("name", &name)]),
+        ));
+        Ok(())
+    }
+
+    /// Removes `path` from the project list; when it is the open project, closes it.
+    fn remove_project(&mut self, path: &Path) -> Result<(), String> {
+        let result = self.projects.update(|list| list.remove(path), &self.tr);
+        if self.project.as_deref() == Some(path) {
+            self.project = None;
+            self.tasks = None;
+            self.roles = None;
+            self.skills = None;
+            self.mcp = None;
+            self.plugins = None;
+            self.retro = None;
+        }
+        result?;
+        self.message = Some(Message::info(self.tr.t("projects.removed")));
+        Ok(())
     }
 
     /// Closes the open form without its OK; a new plugin version that was

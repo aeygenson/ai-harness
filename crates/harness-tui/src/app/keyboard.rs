@@ -4,6 +4,7 @@ use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use crate::tabs::mcp::{McpButton, McpTab};
 use crate::tabs::plugins::{PluginButton, PluginsTab};
+use crate::tabs::projects::picker::FolderButton;
 use crate::tabs::roles::RolesTab;
 use crate::tabs::tasks::TasksTab;
 use crate::ui::keys;
@@ -38,15 +39,8 @@ impl App {
             self.browser_key(key.code);
             return;
         }
-        if let Some((_, form)) = &mut self.form {
-            match key.code {
-                KeyCode::Esc => self.close_form(),
-                KeyCode::Enter => self.submit(),
-                KeyCode::Tab | KeyCode::Down => form.next_field(),
-                KeyCode::Backspace => form.backspace(),
-                KeyCode::Char(c) => form.key_char(c),
-                _ => {}
-            }
+        if self.form.is_some() {
+            self.form_key(key.code);
             return;
         }
         // Writing the message: every key is text, except these.
@@ -134,114 +128,137 @@ impl App {
                 let index = usize::from(c as u8 - b'1');
                 self.show(TABS[index].0);
             }
-            KeyCode::Char('r') | KeyCode::F(5) => {
+            KeyCode::Char('r') | KeyCode::F(5) => self.reload_all(),
+            code => self.tab_key(code),
+        }
+    }
+
+    /// Keys while a form is open: Esc closes it, Enter sends it, others are typing.
+    fn form_key(&mut self, code: KeyCode) {
+        let Some((_, form)) = &mut self.form else {
+            return;
+        };
+        match code {
+            KeyCode::Esc => self.close_form(),
+            KeyCode::Enter => self.submit(),
+            KeyCode::Tab | KeyCode::Down => form.next_field(),
+            KeyCode::Backspace => form.backspace(),
+            KeyCode::Char(c) => form.key_char(c),
+            _ => {}
+        }
+    }
+
+    /// Reads every open tab again from disk (r or F5).
+    fn reload_all(&mut self) {
+        if let Some(tasks) = &mut self.tasks {
+            tasks.reload();
+        }
+        // Unsaved changes are not thrown away by a reload.
+        if let Some(roles) = self.roles.as_mut().filter(|r| !r.changed()) {
+            roles.reload();
+        }
+        if let Some(skills) = &mut self.skills {
+            skills.reload();
+        }
+        if let Some(retro) = self.retro.as_mut().filter(|r| !r.is_generating()) {
+            retro.reload();
+        }
+        if let Some(mcp) = &mut self.mcp {
+            mcp.reload();
+        }
+        if let (Some(plugins), Some(roles)) = (&mut self.plugins, &self.roles) {
+            plugins.reload(roles);
+        }
+        self.reload_catalog_views();
+        self.projects.reload(&self.tr);
+    }
+
+    /// A key that no hot key took: the open tab handles it.
+    fn tab_key(&mut self, code: KeyCode) {
+        match self.tab {
+            Tab::Tasks => {
                 if let Some(tasks) = &mut self.tasks {
-                    tasks.reload();
+                    tasks.on_key(code);
                 }
-                // Unsaved changes are not thrown away by a reload.
-                if let Some(roles) = self.roles.as_mut().filter(|r| !r.changed()) {
-                    roles.reload();
-                }
-                if let Some(skills) = &mut self.skills {
-                    skills.reload();
-                }
-                if let Some(retro) = self.retro.as_mut().filter(|r| !r.is_generating()) {
-                    retro.reload();
-                }
-                if let Some(mcp) = &mut self.mcp {
-                    mcp.reload();
-                }
-                if let (Some(plugins), Some(roles)) = (&mut self.plugins, &self.roles) {
-                    plugins.reload(roles);
-                }
-                self.reload_catalog_views();
-                self.projects.reload(&self.tr);
             }
-            code => match self.tab {
-                Tab::Tasks => {
-                    if let Some(tasks) = &mut self.tasks {
-                        tasks.on_key(code);
+            Tab::Roles => match code {
+                KeyCode::Char('s') => self.press(ButtonId::Save),
+                KeyCode::Char('u') => self.press(ButtonId::Undo),
+                code => {
+                    if let Some(roles) = &mut self.roles {
+                        let action = roles.on_key(code, &self.tr);
+                        self.act(action);
                     }
                 }
-                Tab::Roles => match code {
-                    KeyCode::Char('s') => self.press(ButtonId::Save),
-                    KeyCode::Char('u') => self.press(ButtonId::Undo),
-                    code => {
-                        if let Some(roles) = &mut self.roles {
-                            let action = roles.on_key(code, &self.tr);
-                            self.act(action);
-                        }
+            },
+            Tab::Skills => match code {
+                KeyCode::Char('s') => self.press(ButtonId::Save),
+                KeyCode::Char('u') => self.press(ButtonId::Undo),
+                code => {
+                    if let Some(skills) = &mut self.skills {
+                        let action = skills.on_key(code);
+                        self.skill_action(action);
                     }
-                },
-                Tab::Skills => match code {
-                    KeyCode::Char('s') => self.press(ButtonId::Save),
-                    KeyCode::Char('u') => self.press(ButtonId::Undo),
-                    code => {
-                        if let Some(skills) = &mut self.skills {
-                            let action = skills.on_key(code);
-                            self.skill_action(action);
-                        }
-                    }
-                },
-                Tab::Mcp if self.mcp.as_ref().is_some_and(McpTab::in_catalog) => {
-                    if let Some(mcp) = &mut self.mcp {
-                        let action = mcp.catalog_key(code);
+                }
+            },
+            Tab::Mcp if self.mcp.as_ref().is_some_and(McpTab::in_catalog) => {
+                if let Some(mcp) = &mut self.mcp {
+                    let action = mcp.catalog_key(code);
+                    self.mcp_action(action);
+                }
+            }
+            Tab::Mcp => match code {
+                KeyCode::Char('s') => self.press(ButtonId::Save),
+                KeyCode::Char('u') => self.press(ButtonId::Undo),
+                KeyCode::Char(' ') | KeyCode::Enter => {
+                    self.press(ButtonId::Mcp(McpButton::Toggle));
+                }
+                KeyCode::Char('c') => self.press(ButtonId::Mcp(McpButton::Check)),
+                code => {
+                    if let (Some(mcp), Some(roles)) = (&mut self.mcp, &mut self.roles) {
+                        let action = mcp.on_key(code, roles);
                         self.mcp_action(action);
                     }
                 }
-                Tab::Mcp => match code {
-                    KeyCode::Char('s') => self.press(ButtonId::Save),
-                    KeyCode::Char('u') => self.press(ButtonId::Undo),
-                    KeyCode::Char(' ') | KeyCode::Enter => {
-                        self.press(ButtonId::Mcp(McpButton::Toggle));
-                    }
-                    KeyCode::Char('c') => self.press(ButtonId::Mcp(McpButton::Check)),
-                    code => {
-                        if let (Some(mcp), Some(roles)) = (&mut self.mcp, &mut self.roles) {
-                            let action = mcp.on_key(code, roles);
-                            self.mcp_action(action);
-                        }
-                    }
-                },
-                Tab::Plugins if self.plugins.as_ref().is_some_and(PluginsTab::in_catalog) => {
-                    if let Some(plugins) = &mut self.plugins {
-                        let action = plugins.catalog_key(code);
+            },
+            Tab::Plugins if self.plugins.as_ref().is_some_and(PluginsTab::in_catalog) => {
+                if let Some(plugins) = &mut self.plugins {
+                    let action = plugins.catalog_key(code);
+                    self.plugin_action(action);
+                }
+            }
+            Tab::Plugins => match code {
+                KeyCode::Char('s') => self.press(ButtonId::Save),
+                KeyCode::Char('u') => self.press(ButtonId::Undo),
+                KeyCode::Char(' ') | KeyCode::Enter => {
+                    self.press(ButtonId::Plugin(PluginButton::Toggle));
+                }
+                code => {
+                    if let (Some(plugins), Some(roles)) = (&mut self.plugins, &mut self.roles) {
+                        let action = plugins.on_key(code, roles);
                         self.plugin_action(action);
                     }
                 }
-                Tab::Plugins => match code {
-                    KeyCode::Char('s') => self.press(ButtonId::Save),
-                    KeyCode::Char('u') => self.press(ButtonId::Undo),
-                    KeyCode::Char(' ') | KeyCode::Enter => {
-                        self.press(ButtonId::Plugin(PluginButton::Toggle));
-                    }
-                    code => {
-                        if let (Some(plugins), Some(roles)) = (&mut self.plugins, &mut self.roles) {
-                            let action = plugins.on_key(code, roles);
-                            self.plugin_action(action);
-                        }
-                    }
-                },
-                Tab::Retro => {
-                    if let Some(retro) = &mut self.retro {
-                        let action = retro.on_key(code);
-                        self.retro_action(action);
-                    }
+            },
+            Tab::Retro => {
+                if let Some(retro) = &mut self.retro {
+                    let action = retro.on_key(code);
+                    self.retro_action(action);
                 }
-                Tab::Agents => match code {
-                    KeyCode::Char('c') => self.press(ButtonId::AgentsCheck),
-                    KeyCode::Char('i') | KeyCode::Enter => self.press(ButtonId::AgentRun),
-                    KeyCode::Delete => self.press(ButtonId::AgentRemove),
-                    KeyCode::Char('l') => self.press(ButtonId::AgentSignIn),
-                    code => self.agents.on_key(code),
-                },
-                Tab::Projects => match code {
-                    KeyCode::Enter => self.press(ButtonId::UseProject),
-                    KeyCode::Char('n') => self.press(ButtonId::NewProject),
-                    KeyCode::Char('o') => self.press(ButtonId::OpenFolder),
-                    KeyCode::Delete => self.press(ButtonId::RemoveProject),
-                    code => self.projects.on_key(code),
-                },
+            }
+            Tab::Agents => match code {
+                KeyCode::Char('c') => self.press(ButtonId::AgentsCheck),
+                KeyCode::Char('i') | KeyCode::Enter => self.press(ButtonId::AgentRun),
+                KeyCode::Delete => self.press(ButtonId::AgentRemove),
+                KeyCode::Char('l') => self.press(ButtonId::AgentSignIn),
+                code => self.agents.on_key(code),
+            },
+            Tab::Projects => match code {
+                KeyCode::Enter => self.press(ButtonId::UseProject),
+                KeyCode::Char('n') => self.press(ButtonId::NewProject),
+                KeyCode::Char('o') => self.press(ButtonId::OpenFolder),
+                KeyCode::Delete => self.press(ButtonId::RemoveProject),
+                code => self.projects.on_key(code),
             },
         }
     }
@@ -273,7 +290,7 @@ impl App {
             KeyCode::Backspace | KeyCode::Left => browser.up(),
             KeyCode::Char('n') => browser.naming = Some(String::new()),
             KeyCode::Char('.') => browser.toggle_hidden(),
-            KeyCode::Char('c') => self.press(ButtonId::Choose),
+            KeyCode::Char('c') => self.press(ButtonId::Folder(FolderButton::Choose)),
             _ => {}
         }
     }

@@ -30,95 +30,99 @@ impl App {
                 self.click(hit, double);
             }
             MouseEventKind::ScrollDown | MouseEventKind::ScrollUp => {
-                let down = mouse.kind == MouseEventKind::ScrollDown;
-                if let Some((_, browser)) = &mut self.browser {
-                    browser.move_by(if down { 1 } else { -1 });
-                    return;
+                self.wheel(hit, mouse.kind == MouseEventKind::ScrollDown);
+            }
+            _ => {}
+        }
+    }
+
+    /// A wheel turn over `hit`: scrolls the list or text under the mouse.
+    fn wheel(&mut self, hit: Option<(Target, u16)>, down: bool) {
+        if let Some((_, browser)) = &mut self.browser {
+            browser.move_by(if down { 1 } else { -1 });
+            return;
+        }
+        if self.form.is_some() {
+            return;
+        }
+        match (self.tab, hit.and_then(|(t, r)| Hits::row(t, r))) {
+            (Tab::Tasks, Some((list, _))) => {
+                if let Some(tasks) = &mut self.tasks {
+                    tasks.on_click_list(list);
+                    tasks.on_key(if down { KeyCode::Down } else { KeyCode::Up });
                 }
-                if self.form.is_some() {
-                    return;
+            }
+            (Tab::Tasks, None) => {
+                if let Some(tasks) = &mut self.tasks {
+                    tasks.on_wheel(down);
                 }
-                match (self.tab, hit.and_then(|(t, r)| Hits::row(t, r))) {
-                    (Tab::Tasks, Some((list, _))) => {
-                        if let Some(tasks) = &mut self.tasks {
-                            tasks.on_click_list(list);
-                            tasks.on_key(if down { KeyCode::Down } else { KeyCode::Up });
-                        }
-                    }
-                    (Tab::Tasks, None) => {
-                        if let Some(tasks) = &mut self.tasks {
-                            tasks.on_wheel(down);
-                        }
-                    }
-                    (Tab::Projects, _) => {
-                        self.projects
-                            .on_key(if down { KeyCode::Down } else { KeyCode::Up });
-                    }
-                    (Tab::Agents, _) => self.agents.move_by(if down { 1 } else { -1 }),
-                    (Tab::Roles, Some((ListId::Roles, _))) => {
-                        if let Some(roles) = &mut self.roles {
-                            let next = if down {
-                                roles.selected + 1
-                            } else {
-                                roles.selected.saturating_sub(1)
-                            };
-                            roles.select(next);
-                        }
-                    }
-                    (Tab::Roles, _) => {
-                        if let Some(roles) = &mut self.roles {
-                            roles.on_wheel(down);
-                        }
-                    }
-                    (Tab::Skills, Some((ListId::Skills, _))) => {
-                        if let Some(skills) = &mut self.skills {
-                            skills.move_by(if down { 1 } else { -1 });
-                        }
-                    }
-                    (Tab::Skills, _) => {
-                        if let Some(skills) = &mut self.skills {
-                            skills.on_wheel(down);
-                        }
-                    }
-                    (Tab::Mcp, _) => {
-                        if let (Some(mcp), Some(roles)) = (&mut self.mcp, &self.roles) {
-                            if mcp.in_catalog() {
-                                mcp.move_found(if down { 1 } else { -1 });
-                            } else {
-                                mcp.move_by(if down { 1 } else { -1 }, roles);
-                            }
-                        }
-                    }
-                    (Tab::Retro, Some((list @ (ListId::Retros | ListId::RetroProposals), _))) => {
-                        if let Some(retro) = &mut self.retro {
-                            retro.focus = if list == ListId::Retros {
-                                retro::Focus::Retros
-                            } else {
-                                retro::Focus::Proposals
-                            };
-                            retro.move_by(if down { 1 } else { -1 });
-                        }
-                    }
-                    (Tab::Retro, _) => {
-                        if let Some(retro) = &mut self.retro {
-                            retro.on_wheel(down);
-                        }
-                    }
-                    (Tab::Plugins, _) => {
-                        let delta = if down { 1 } else { -1 };
-                        if let (Some(plugins), Some(roles)) = (&mut self.plugins, &self.roles) {
-                            if let Some(view) = &mut plugins.catalogs {
-                                view.move_by(delta);
-                            } else if let Some(view) = &mut plugins.catalog {
-                                view.move_by(delta);
-                            } else {
-                                plugins.move_by(delta, roles);
-                            }
-                        }
+            }
+            (Tab::Projects, _) => {
+                self.projects
+                    .on_key(if down { KeyCode::Down } else { KeyCode::Up });
+            }
+            (Tab::Agents, _) => self.agents.move_by(if down { 1 } else { -1 }),
+            (Tab::Roles, Some((ListId::Roles, _))) => {
+                if let Some(roles) = &mut self.roles {
+                    let next = if down {
+                        roles.selected + 1
+                    } else {
+                        roles.selected.saturating_sub(1)
+                    };
+                    roles.select(next);
+                }
+            }
+            (Tab::Roles, _) => {
+                if let Some(roles) = &mut self.roles {
+                    roles.on_wheel(down);
+                }
+            }
+            (Tab::Skills, Some((ListId::Skills, _))) => {
+                if let Some(skills) = &mut self.skills {
+                    skills.move_by(if down { 1 } else { -1 });
+                }
+            }
+            (Tab::Skills, _) => {
+                if let Some(skills) = &mut self.skills {
+                    skills.on_wheel(down);
+                }
+            }
+            (Tab::Mcp, _) => {
+                if let (Some(mcp), Some(roles)) = (&mut self.mcp, &self.roles) {
+                    if mcp.in_catalog() {
+                        mcp.move_found(if down { 1 } else { -1 });
+                    } else {
+                        mcp.move_by(if down { 1 } else { -1 }, roles);
                     }
                 }
             }
-            _ => {}
+            (Tab::Retro, Some((list @ (ListId::Retros | ListId::RetroProposals), _))) => {
+                if let Some(retro) = &mut self.retro {
+                    retro.focus = if list == ListId::Retros {
+                        retro::Focus::Retros
+                    } else {
+                        retro::Focus::Proposals
+                    };
+                    retro.move_by(if down { 1 } else { -1 });
+                }
+            }
+            (Tab::Retro, _) => {
+                if let Some(retro) = &mut self.retro {
+                    retro.on_wheel(down);
+                }
+            }
+            (Tab::Plugins, _) => {
+                let delta = if down { 1 } else { -1 };
+                if let (Some(plugins), Some(roles)) = (&mut self.plugins, &self.roles) {
+                    if let Some(view) = &mut plugins.catalogs {
+                        view.move_by(delta);
+                    } else if let Some(view) = &mut plugins.catalog {
+                        view.move_by(delta);
+                    } else {
+                        plugins.move_by(delta, roles);
+                    }
+                }
+            }
         }
     }
 
@@ -188,93 +192,11 @@ impl App {
         match target {
             Target::Tab(index) => self.show(TABS[index].0),
             Target::Button(id) => self.press(id),
-            Target::List { .. } => match Hits::row(target, row) {
-                Some((ListId::Projects, index)) => {
-                    if index < self.projects.list.projects.len() {
-                        self.projects.selected = index;
-                        if double {
-                            self.press(ButtonId::UseProject);
-                        }
-                    }
+            Target::List { .. } => {
+                if let Some((list, index)) = Hits::row(target, row) {
+                    self.click_list(list, index, double);
                 }
-                Some((ListId::Roles, index)) => {
-                    if let Some(roles) = &mut self.roles {
-                        roles.select(index);
-                    }
-                }
-                Some((ListId::Agents, index)) => self.agents.select(index),
-                Some((ListId::Skills, index)) => {
-                    if let Some(skills) = &mut self.skills {
-                        skills.select(index);
-                    }
-                    if double {
-                        self.press(ButtonId::Skill(SkillButton::Edit));
-                    }
-                }
-                Some((ListId::Mcp, index)) => {
-                    if let (Some(mcp), Some(roles)) = (&mut self.mcp, &self.roles) {
-                        mcp.select(index, roles);
-                    }
-                    if double {
-                        self.press(ButtonId::Mcp(McpButton::Toggle));
-                    }
-                }
-                Some((ListId::Plugins, index)) => {
-                    if let (Some(plugins), Some(roles)) = (&mut self.plugins, &self.roles) {
-                        plugins.select(index, roles);
-                    }
-                    if double {
-                        self.press(ButtonId::Plugin(PluginButton::Toggle));
-                    }
-                }
-                Some((ListId::PluginCatalog, index)) => {
-                    if let Some(view) = self.plugins.as_mut().and_then(|p| p.catalog.as_mut()) {
-                        view.select(index);
-                    }
-                    if double {
-                        self.press(ButtonId::PluginCatalog(PluginCatalogButton::Add));
-                    }
-                }
-                Some((ListId::PluginCatalogs, index)) => {
-                    if let Some(view) = self.plugins.as_mut().and_then(|p| p.catalogs.as_mut()) {
-                        view.select(index);
-                    }
-                }
-                Some((ListId::Retros, index)) => {
-                    if let Some(retro) = &mut self.retro {
-                        retro.select(index);
-                    }
-                }
-                Some((ListId::RetroProposals, index)) => {
-                    if let Some(retro) = &mut self.retro {
-                        retro.select_proposal(index);
-                    }
-                    if double {
-                        self.press(ButtonId::Retro(RetroButton::Toggle));
-                    }
-                }
-                Some((ListId::McpCatalog, index)) => {
-                    if let Some(mcp) = &mut self.mcp {
-                        mcp.select_found(index);
-                    }
-                    if double {
-                        self.press(ButtonId::McpCatalog(McpCatalogButton::Use));
-                    }
-                }
-                Some((ListId::RoleFilter, index)) => {
-                    if let Some(tasks) = &mut self.tasks {
-                        tasks.toggle_filter(index);
-                    }
-                }
-                Some((list @ (ListId::Tasks | ListId::Steps), index)) => {
-                    if let Some(tasks) = &mut self.tasks {
-                        tasks.on_click(list, index);
-                    }
-                }
-                // Clicks in the folder browser and the «To» menu are handled
-                // above, while they are open.
-                Some((ListId::Folders | ListId::Choices, _)) | None => {}
-            },
+            }
             Target::Row(index) => {
                 if let Some(roles) = &mut self.roles {
                     let action = roles.activate(index, &self.tr);
@@ -282,6 +204,97 @@ impl App {
                 }
             }
             Target::Field(_) | Target::Window => {}
+        }
+    }
+
+    /// A click on row `index` of `list`: selects it; a double click also opens or toggles it.
+    fn click_list(&mut self, list: ListId, index: usize, double: bool) {
+        match list {
+            ListId::Projects => {
+                if index < self.projects.list.projects.len() {
+                    self.projects.selected = index;
+                    if double {
+                        self.press(ButtonId::UseProject);
+                    }
+                }
+            }
+            ListId::Roles => {
+                if let Some(roles) = &mut self.roles {
+                    roles.select(index);
+                }
+            }
+            ListId::Agents => self.agents.select(index),
+            ListId::Skills => {
+                if let Some(skills) = &mut self.skills {
+                    skills.select(index);
+                }
+                if double {
+                    self.press(ButtonId::Skill(SkillButton::Edit));
+                }
+            }
+            ListId::Mcp => {
+                if let (Some(mcp), Some(roles)) = (&mut self.mcp, &self.roles) {
+                    mcp.select(index, roles);
+                }
+                if double {
+                    self.press(ButtonId::Mcp(McpButton::Toggle));
+                }
+            }
+            ListId::Plugins => {
+                if let (Some(plugins), Some(roles)) = (&mut self.plugins, &self.roles) {
+                    plugins.select(index, roles);
+                }
+                if double {
+                    self.press(ButtonId::Plugin(PluginButton::Toggle));
+                }
+            }
+            ListId::PluginCatalog => {
+                if let Some(view) = self.plugins.as_mut().and_then(|p| p.catalog.as_mut()) {
+                    view.select(index);
+                }
+                if double {
+                    self.press(ButtonId::PluginCatalog(PluginCatalogButton::Add));
+                }
+            }
+            ListId::PluginCatalogs => {
+                if let Some(view) = self.plugins.as_mut().and_then(|p| p.catalogs.as_mut()) {
+                    view.select(index);
+                }
+            }
+            ListId::Retros => {
+                if let Some(retro) = &mut self.retro {
+                    retro.select(index);
+                }
+            }
+            ListId::RetroProposals => {
+                if let Some(retro) = &mut self.retro {
+                    retro.select_proposal(index);
+                }
+                if double {
+                    self.press(ButtonId::Retro(RetroButton::Toggle));
+                }
+            }
+            ListId::McpCatalog => {
+                if let Some(mcp) = &mut self.mcp {
+                    mcp.select_found(index);
+                }
+                if double {
+                    self.press(ButtonId::McpCatalog(McpCatalogButton::Use));
+                }
+            }
+            ListId::RoleFilter => {
+                if let Some(tasks) = &mut self.tasks {
+                    tasks.toggle_filter(index);
+                }
+            }
+            list @ (ListId::Tasks | ListId::Steps) => {
+                if let Some(tasks) = &mut self.tasks {
+                    tasks.on_click(list, index);
+                }
+            }
+            // Clicks in the folder browser and the «To» menu are handled in
+            // `click`, while they are open.
+            ListId::Folders | ListId::Choices => {}
         }
     }
 }

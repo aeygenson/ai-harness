@@ -30,6 +30,19 @@ impl App {
         .areas(frame.area());
         self.draw_tabs(frame, top);
 
+        self.draw_open_tab(frame, main);
+        self.draw_footer(frame, footer);
+
+        if let Some((_, form)) = &self.form {
+            form.draw(frame, &mut self.hits, self.tr.t("form.cancel"));
+        }
+        if let Some((_, browser)) = &self.browser {
+            browser.draw(frame, &mut self.hits, &self.tr);
+        }
+    }
+
+    /// The open tab, or a placeholder when it needs a project and none is open.
+    fn draw_open_tab(&mut self, frame: &mut Frame, main: Rect) {
         match self.tab {
             Tab::Tasks => match &self.tasks {
                 Some(tasks) => tasks.draw(frame, main, &mut self.hits, &self.tr),
@@ -100,7 +113,10 @@ impl App {
                 );
             }
         }
+    }
 
+    /// The bottom line: the latest message or problem, then the hot keys.
+    fn draw_footer(&self, frame: &mut Frame, footer: Rect) {
         // The latest result or problem first, so a narrow window still shows it.
         let mut spans = Vec::new();
         let problem = self
@@ -138,13 +154,6 @@ impl App {
             theme::dim(),
         ));
         frame.render_widget(Line::from(spans), footer);
-
-        if let Some((_, form)) = &self.form {
-            form.draw(frame, &mut self.hits, self.tr.t("form.cancel"));
-        }
-        if let Some((_, browser)) = &self.browser {
-            browser.draw(frame, &mut self.hits, &self.tr);
-        }
     }
 
     /// The top line: project name, the tabs and the buttons on the right.
