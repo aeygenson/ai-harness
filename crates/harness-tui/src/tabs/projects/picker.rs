@@ -5,7 +5,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use ratatui::layout::{Constraint, Flex, Layout};
+use ratatui::layout::{Constraint, Flex, Layout, Rect};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::ListItem;
 use ratatui::Frame;
@@ -249,12 +249,16 @@ impl Browser {
             tr.t("picker.hint")
         };
         frame.render_widget(Span::styled(hint_text.to_string(), theme::dim()), hint);
+        self.draw_buttons(frame, bar, hits, tr);
+    }
+
+    /// The buttons at the bottom; while a new folder is named, only its own two.
+    fn draw_buttons(&self, frame: &mut Frame, bar: Rect, hits: &mut Hits, tr: &I18n) {
         let hidden = if self.hidden {
             tr.t("picker.hide_hidden")
         } else {
             tr.t("picker.show_hidden")
         };
-        // While a new folder is named, only its own buttons are shown.
         if let Some(name) = &self.naming {
             buttons(
                 frame,

@@ -354,11 +354,9 @@ impl RetroTab {
         let [left, right] =
             Layout::horizontal([Constraint::Percentage(40), Constraint::Percentage(60)])
                 .areas(main);
-        let proposals = self.proposals();
         let [retros_area, proposals_area] =
             Layout::vertical([Constraint::Percentage(40), Constraint::Percentage(60)]).areas(left);
         let dim = theme::dim();
-        let green = theme::ok();
 
         let items: Vec<ListItem> = self
             .list
@@ -391,6 +389,25 @@ impl RetroTab {
             self.focus == Focus::Retros,
         );
 
+        self.draw_proposals(frame, proposals_area, hits, tr);
+
+        let (title, lines) = self.text(tr);
+        frame.render_widget(
+            Paragraph::new(lines)
+                .block(panel(&title, false))
+                .wrap(Wrap { trim: false })
+                .scroll((self.scroll, 0)),
+            right,
+        );
+
+        self.draw_buttons(frame, bottom, hits, tr);
+    }
+
+    /// The proposals of the selected retrospective, or why there are none.
+    fn draw_proposals(&self, frame: &mut Frame, area: Rect, hits: &mut Hits, tr: &I18n) {
+        let dim = theme::dim();
+        let green = theme::ok();
+        let proposals = self.proposals();
         let items: Vec<ListItem> = proposals
             .iter()
             .map(|p| {
@@ -411,7 +428,7 @@ impl RetroTab {
         draw_list(
             frame,
             hits,
-            proposals_area,
+            area,
             ListId::RetroProposals,
             tr.t("retro.proposals"),
             items,
@@ -426,22 +443,16 @@ impl RetroTab {
                 }
                 Some(Ok(_)) | None => tr.t("retro.no_proposals").to_string(),
             };
-            let inner = panel("", false).inner(proposals_area);
+            let inner = panel("", false).inner(area);
             frame.render_widget(
                 Paragraph::new(Line::styled(note, dim)).wrap(Wrap { trim: false }),
                 inner,
             );
         }
+    }
 
-        let (title, lines) = self.text(tr);
-        frame.render_widget(
-            Paragraph::new(lines)
-                .block(panel(&title, false))
-                .wrap(Wrap { trim: false })
-                .scroll((self.scroll, 0)),
-            right,
-        );
-
+    /// «Generate», «Open», «Choose» and «Apply».
+    fn draw_buttons(&self, frame: &mut Frame, bottom: Rect, hits: &mut Hits, tr: &I18n) {
         let generating = self.generating.is_some();
         let has_text = self.current().is_some_and(|r| r.retro.is_some());
         let can_choose = self.current_proposal().is_some_and(|p| !self.applied(p.id));
