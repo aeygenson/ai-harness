@@ -5,6 +5,7 @@
 use std::fs;
 
 use super::*;
+use crate::tabs::projects::has_config;
 use crate::ui::message::{Message, MessageKind};
 use crate::ui::ButtonId;
 use harness_core::config::projects::Projects;
