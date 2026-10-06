@@ -37,7 +37,7 @@ use ratatui::Frame;
 use harness_core::plugins::catalog::Entry;
 
 use crate::tabs::plugins::catalog::{
-    draw_catalog, draw_catalogs, unusable, CatalogView, CatalogsView, OFFICIAL,
+    draw_catalog, draw_catalogs, unusable, CatalogView, CatalogsView, Unusable, OFFICIAL,
 };
 use crate::tabs::roles::RolesTab;
 use crate::tabs::skills::ROLES;
@@ -110,7 +110,7 @@ pub enum Action {
         give: bool,
     },
     /// The chosen catalog plugin cannot be added; why.
-    Unusable(String),
+    Unusable(Unusable),
     /// Download the newest version of this plugin and show what changes.
     Update(String),
     /// Open «Catalogs».

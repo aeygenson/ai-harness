@@ -71,7 +71,8 @@ impl App {
             "" => name_of(&path),
             name => name.to_string(),
         };
-        self.projects.update(|list| list.add(&name, &path))?;
+        self.projects
+            .update(|list| list.add(&name, &path), &self.tr)?;
         self.open(&path);
         // A new project starts with choosing the agents.
         self.tab = Tab::Roles;

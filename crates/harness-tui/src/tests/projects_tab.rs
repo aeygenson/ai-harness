@@ -20,7 +20,7 @@ fn starts_with_a_project_folder_and_shows_its_tasks() {
         "architect  claude",
         "r1 architect  approved → human",
         "▶ r1 tester",
-        "high     src/parser.rs:42  Panics on empty input",
+        "high      src/parser.rs:42  Panics on empty input",
         "· notes.md",
         "q quit",
     ] {
@@ -71,9 +71,16 @@ fn a_new_project_is_created_in_a_folder_chosen_in_the_browser() {
     click(&mut app, "work/");
     click(&mut app, "work/");
     assert!(screen(&mut app).contains("No folders inside"));
+    // Naming can be dropped with the mouse; the browser stays open.
+    click(&mut app, " New folder ");
+    click(&mut app, " Cancel ");
+    assert!(app
+        .browser
+        .as_ref()
+        .is_some_and(|(_, b)| b.naming.is_none()));
     click(&mut app, " New folder ");
     type_text(&mut app, "fresh");
-    key(&mut app, KeyCode::Enter);
+    click(&mut app, " Create ");
     let root = env.path("work/fresh");
     assert!(root.is_dir());
     click(&mut app, " Choose this folder ");

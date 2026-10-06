@@ -71,6 +71,7 @@ impl App {
                 ));
             }
             A::Unusable(why) => {
+                let why = why.text(tr);
                 self.message = Some(Message::error(tr.f("plugins.cannot_add", &[("why", &why)])));
             }
             A::Add { entry, give } => self.add_plugin(entry, give),

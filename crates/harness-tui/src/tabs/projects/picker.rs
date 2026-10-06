@@ -224,6 +224,23 @@ impl Browser {
         } else {
             tr.t("picker.show_hidden")
         };
+        // While a new folder is named, only its own buttons are shown.
+        if let Some(name) = &self.naming {
+            buttons(
+                frame,
+                bar,
+                hits,
+                &[
+                    (
+                        tr.t("picker.create"),
+                        ButtonId::CreateFolder,
+                        !name.is_empty(),
+                    ),
+                    (tr.t("form.cancel"), ButtonId::StopNaming, true),
+                ],
+            );
+            return;
+        }
         buttons(
             frame,
             bar,

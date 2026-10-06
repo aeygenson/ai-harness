@@ -33,8 +33,7 @@ use anyhow::Result;
 use harness_core::config::{AgentKind, Config, RoleConfig};
 use harness_core::git::{Repo, HARNESS_DIR};
 use harness_core::models::{self, ModelList};
-use harness_core::retro::stage_text;
-use harness_core::task::handoff::{FileAction, NextStep, Role, Severity, Verdict};
+use harness_core::task::handoff::{FileAction, NextStep, Role, Verdict};
 use harness_core::task::orchestrator::{self, StopReason};
 use harness_core::task::store::{self, Step, TaskStore};
 use harness_core::task::{Stage, TaskState, WaitReason};
@@ -45,6 +44,9 @@ use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{List, ListItem, ListState, Paragraph, Wrap};
 use ratatui::Frame;
 
+use crate::tabs::tasks::labels::{
+    next_name, severity_label, short_stage, stage_label, verdict_span,
+};
 use crate::tabs::tasks::runner::{push_line, Builder, Outcome, Request, RunChoice, Running};
 use crate::ui::i18n::I18n;
 use crate::ui::message::Message;
@@ -548,11 +550,13 @@ impl TasksTab {
                 return Err(tr.t("tasks.need_text").to_string())
             }
             // The same text sent twice does not start a second task.
-            (Choice::NewTask, _) if self.same_task(&notes).is_some() => {
-                let (task, stage) = self.same_task(&notes).unwrap_or_default();
-                return Err(tr.f("tasks.duplicate", &[("task", &task), ("stage", &stage)]));
-            }
-            (Choice::NewTask, _) => Request::New(notes),
+            (Choice::NewTask, _) => match self.same_task(&notes) {
+                Some((task, stage)) => {
+                    let stage = stage_label(stage, tr);
+                    return Err(tr.f("tasks.duplicate", &[("task", &task), ("stage", &stage)]));
+                }
+                None => Request::New(notes),
+            },
             (_, None) => return Err(tr.t("tasks.no_task").to_string()),
             (Choice::Role(role), Some((task, stage))) => {
                 // Sending the design back to the architect rejects it.
@@ -630,12 +634,12 @@ impl TasksTab {
 
     /// The unfinished task whose text is `text` (spaces and line breaks do
     /// not count), and its stage.
-    fn same_task(&self, text: &str) -> Option<(String, String)> {
+    fn same_task(&self, text: &str) -> Option<(String, Stage)> {
         let wanted = orchestrator::words(text);
         self.all
             .iter()
             .find(|t| t.state.stage != Stage::Done && orchestrator::words(&t.description) == wanted)
-            .map(|t| (t.id.clone(), stage_text(t.state.stage)))
+            .map(|t| (t.id.clone(), t.state.stage))
     }
 
     /// The stage of the task at `index`.
@@ -901,7 +905,7 @@ impl TasksTab {
                 };
                 ListItem::new(Line::from(vec![
                     Span::raw(format!("{}  ", t.id)),
-                    Span::styled(format!("{mark} {}", short_stage(&t.state)), style),
+                    Span::styled(format!("{mark} {}", short_stage(t.state.stage, tr)), style),
                 ]))
             })
             .collect();
@@ -944,12 +948,12 @@ impl TasksTab {
                 ("task", &task.id),
                 ("round", &task.state.round),
                 ("max", &task.state.max_rounds),
-                ("stage", &stage_text(task.state.stage)),
+                ("stage", &stage_label(task.state.stage, tr)),
                 ("failures", &failures),
             ],
         );
         let title = self.zoom_title(Zoom::Steps, &title, steps_area, hits);
-        let items: Vec<ListItem> = task.steps.iter().map(step_item).collect();
+        let items: Vec<ListItem> = task.steps.iter().map(|s| step_item(s, tr)).collect();
         draw_list(
             frame,
             hits,
@@ -1435,16 +1439,7 @@ fn agent_line(who: &str, agent: AgentKind, model: &Option<String>) -> String {
     }
 }
 
-/// `done`, `working`, `waiting`: short enough for the task list.
-fn short_stage(state: &TaskState) -> String {
-    stage_text(state.stage)
-        .split(':')
-        .next()
-        .unwrap_or_default()
-        .to_string()
-}
-
-fn step_item(step: &Step) -> ListItem<'static> {
+fn step_item(step: &Step, tr: &I18n) -> ListItem<'static> {
     let h = &step.handoff;
     let next = match h.next_role {
         NextStep::To(role) => theme::role(role),
@@ -1453,9 +1448,9 @@ fn step_item(step: &Step) -> ListItem<'static> {
     ListItem::new(Line::from(vec![
         Span::raw(format!("r{} ", h.round)),
         Span::styled(format!("{:<10} ", h.role.as_str()), theme::role(h.role)),
-        verdict_span(h.verdict),
+        verdict_span(h.verdict, tr),
         Span::styled(" → ", theme::dim()),
-        Span::styled(format!("{:<10}", next_name(h.next_role)), next),
+        Span::styled(format!("{:<10}", next_name(h.next_role, tr)), next),
         Span::raw(format!(" {}", h.summary)),
     ]))
 }
@@ -1467,8 +1462,8 @@ fn step_text(step: &Step, files: &[Artifact], tr: &I18n) -> (Text<'static>, Vec<
     let mut lines = vec![
         Line::from(vec![
             Span::raw(tr.t("tasks.verdict").to_string()),
-            verdict_span(h.verdict),
-            Span::raw(format!(" → {}", next_name(h.next_role))),
+            verdict_span(h.verdict, tr),
+            Span::raw(format!(" → {}", next_name(h.next_role, tr))),
         ]),
         Line::from(h.summary.clone()),
     ];
@@ -1476,13 +1471,7 @@ fn step_text(step: &Step, files: &[Artifact], tr: &I18n) -> (Text<'static>, Vec<
         lines.push(Line::default());
         lines.push(Line::styled(tr.t("tasks.issues").to_string(), bold));
         for issue in &h.issues {
-            let theme = theme::current();
-            let (name, color) = match issue.severity {
-                Severity::Low => ("low", theme.dim),
-                Severity::Medium => ("medium", theme.warn),
-                Severity::High => ("high", theme.bad),
-                Severity::Critical => ("critical", theme.bad),
-            };
+            let (name, color) = severity_label(issue.severity, tr);
             let location = issue
                 .location
                 .as_deref()
@@ -1490,7 +1479,7 @@ fn step_text(step: &Step, files: &[Artifact], tr: &I18n) -> (Text<'static>, Vec<
                 .unwrap_or_default();
             lines.push(Line::from(vec![
                 Span::styled(
-                    format!("  {name:<8} "),
+                    format!("  {name:<9} "),
                     Style::new().fg(color).add_modifier(Modifier::BOLD),
                 ),
                 Span::raw(format!("{location}{}", issue.description)),
@@ -1528,19 +1517,4 @@ fn step_text(step: &Step, files: &[Artifact], tr: &I18n) -> (Text<'static>, Vec<
         lines.extend(step.notes.lines().map(|l| Line::from(l.to_string())));
     }
     (Text::from(lines), links)
-}
-
-fn verdict_span(verdict: Verdict) -> Span<'static> {
-    match verdict {
-        Verdict::Approved => Span::styled("approved", theme::ok()),
-        Verdict::Rejected => Span::styled("rejected", theme::bad()),
-        Verdict::NeedsHuman => Span::styled("needs_human", theme::warn()),
-    }
-}
-
-fn next_name(next: NextStep) -> &'static str {
-    match next {
-        NextStep::To(role) => role.as_str(),
-        NextStep::Done => "done",
-    }
 }

@@ -4,6 +4,8 @@
 //! files add the work behind it to `App`.
 
 mod actions;
+mod form;
 mod tab;
 
-pub(crate) use tab::{form_values, server_from, Action, McpButton, McpCatalogButton, McpTab};
+pub(crate) use form::{form_values, server_from};
+pub(crate) use tab::{Action, McpButton, McpCatalogButton, McpTab};

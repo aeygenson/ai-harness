@@ -3,6 +3,7 @@
 //! `tab.rs` holds the tab itself (its state, keys and drawing); `runner.rs`
 //! runs the roles in the background while the tab keeps working.
 
+mod labels;
 pub(crate) mod runner;
 mod tab;
 

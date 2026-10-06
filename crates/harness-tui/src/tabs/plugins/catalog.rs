@@ -138,11 +138,30 @@ impl CatalogView {
     }
 }
 
+/// Why a catalog plugin cannot be added yet.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Unusable {
+    /// It comes from a kind of source the harness cannot download.
+    Source(String),
+    /// Its name could not be a folder name.
+    Name,
+}
+
+impl Unusable {
+    /// What is not supported, in Lisa's language.
+    pub fn text(&self, tr: &I18n) -> String {
+        match self {
+            Unusable::Source(kind) => tr.f("plugins.unusable_source", &[("kind", kind)]),
+            Unusable::Name => tr.t("plugins.unusable_name").to_string(),
+        }
+    }
+}
+
 /// Why an entry cannot be added, if it cannot.
-pub fn unusable(entry: &Entry) -> Option<String> {
+pub fn unusable(entry: &Entry) -> Option<Unusable> {
     match &entry.source {
-        Source::Unsupported(kind) => Some(format!("from {kind}")),
-        _ if !harness_core::mcp::is_simple_name(&entry.name) => Some("its name".to_string()),
+        Source::Unsupported(kind) => Some(Unusable::Source(kind.to_string())),
+        _ if !harness_core::mcp::is_simple_name(&entry.name) => Some(Unusable::Name),
         _ => None,
     }
 }
@@ -373,7 +392,7 @@ fn entry_details(entry: &Entry, roles: &RolesTab, tr: &I18n) -> Vec<Line<'static
     lines.push(Line::default());
     if let Some(why) = unusable(entry) {
         lines.push(Line::styled(
-            tr.f("plugins.cannot_add", &[("why", &why)]),
+            tr.f("plugins.cannot_add", &[("why", &why.text(tr))]),
             red,
         ));
         return lines;

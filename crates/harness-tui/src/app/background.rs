@@ -105,7 +105,7 @@ impl App {
                     }
                     Err(mpsc::TryRecvError::Empty) => break,
                     Err(mpsc::TryRecvError::Disconnected) => {
-                        finished = Some(Err("the command stopped".into()));
+                        finished = Some(Err(self.tr.t("errors.command_stopped").to_string()));
                         break;
                     }
                 }
@@ -170,7 +170,7 @@ impl App {
         }
         match done {
             Some(done) => self.plugin_job_done(done),
-            None => self.message = Some(Message::error("the download stopped")),
+            None => self.message = Some(Message::error(self.tr.t("errors.download_stopped"))),
         }
     }
 
@@ -213,7 +213,8 @@ impl App {
     /// An MCP server has listed its tools (or failed to start).
     fn take_mcp_check(&mut self) {
         let rx = self.checking.as_ref().map(|(_, _, rx)| rx);
-        let Some(answer) = look(rx).answer_or(Err("the check stopped".into())) else {
+        let Some(answer) = look(rx).answer_or(Err(self.tr.t("errors.check_stopped").to_string()))
+        else {
             return;
         };
         if let Some((name, server, _)) = self.checking.take() {
@@ -223,7 +224,7 @@ impl App {
 
     /// The search in the MCP registry has answered.
     fn take_registry_search(&mut self) {
-        let stopped = Err("the search stopped".into());
+        let stopped = Err(self.tr.t("errors.search_stopped").to_string());
         let Some(answer) = look(self.searching.as_ref()).answer_or(stopped) else {
             return;
         };
@@ -236,7 +237,8 @@ impl App {
     /// The browser sign-in to an MCP server has finished.
     fn take_mcp_sign_in(&mut self) {
         let rx = self.signing.as_ref().map(|(_, rx)| rx);
-        let Some(answer) = look(rx).answer_or(Err("the sign-in stopped".into())) else {
+        let Some(answer) = look(rx).answer_or(Err(self.tr.t("errors.sign_in_stopped").to_string()))
+        else {
             return;
         };
         let Some((name, _)) = self.signing.take() else {
