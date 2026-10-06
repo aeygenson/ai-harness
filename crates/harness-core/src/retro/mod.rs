@@ -582,11 +582,11 @@ mod tests {
         assert_eq!(tasks[0].handoffs, [design]);
         assert_eq!(tasks[0].failures, [(1, Role::Architect)]);
 
-        let stats = Stats::collect(Scope::All, &tasks, None);
-        let first = stats.save(harness).unwrap();
+        let task_stats = Stats::collect(Scope::All, &tasks, None);
+        let first = task_stats.save(harness).unwrap();
         assert!(first.ends_with("retros/001"));
         fs::create_dir(harness.join("retros/notes")).unwrap();
-        let second = stats.save(harness).unwrap();
+        let second = task_stats.save(harness).unwrap();
         assert!(second.ends_with("retros/002"));
 
         let json: serde_json::Value =
@@ -595,7 +595,7 @@ mod tests {
         assert_eq!(json["roles"]["architect"]["failed_attempts"], 1);
         assert_eq!(
             fs::read_to_string(first.join("stats.md")).unwrap(),
-            stats.to_markdown()
+            task_stats.to_markdown()
         );
     }
 }

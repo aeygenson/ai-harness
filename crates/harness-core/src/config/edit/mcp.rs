@@ -50,7 +50,7 @@ pub fn set_mcp(
             }
         });
     }
-    finish(doc)
+    finish(&doc)
 }
 
 /// `key = { NAME = "value", ... }`, left as it is when it already says that,
@@ -88,5 +88,5 @@ pub fn remove_mcp(text: &str, name: &str) -> Result<String, EditError> {
     for_role_lists(&mut doc, "mcp", |list| {
         list.retain(|item| item.as_str() != Some(name));
     });
-    finish(doc)
+    finish(&doc)
 }

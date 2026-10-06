@@ -98,7 +98,7 @@ pub fn add_plugin(text: &str, plugin: &NewPlugin, role: Option<Role>) -> Result<
             list.push(plugin.name);
         }
     }
-    finish(doc)
+    finish(&doc)
 }
 
 /// Sets `commit` of an existing `[plugins.<name>]`.
@@ -109,7 +109,7 @@ pub fn set_plugin_commit(text: &str, name: &str, commit: &str) -> Result<String,
         .and_then(Item::as_table_mut)
         .ok_or_else(|| EditError::NoPlugin(name.to_string()))?;
     entry.insert("commit", value(commit));
-    finish(doc)
+    finish(&doc)
 }
 
 /// Sets `allow_hooks` and `allow_mcp` of an existing `[plugins.<name>]`; a
@@ -132,7 +132,7 @@ pub fn set_plugin_allow(
             entry.remove(key);
         }
     }
-    finish(doc)
+    finish(&doc)
 }
 
 /// Adds `skill` to a role's `skills` list, or to `always_skills` if `always`.
@@ -157,7 +157,7 @@ pub fn add_role_skill(
     if !list.iter().any(|item| item.as_str() == Some(skill)) {
         list.push(skill);
     }
-    finish(doc)
+    finish(&doc)
 }
 
 /// Sets everything of `[roles.<role>]`: agent, model and the four lists.
@@ -180,7 +180,7 @@ pub fn set_role(text: &str, role: Role, settings: &RoleConfig) -> Result<String,
     set_list(role_table, "always_skills", &settings.always_skills);
     set_list(role_table, "mcp", &settings.mcp);
     set_list(role_table, "plugins", &settings.plugins);
-    finish(doc)
+    finish(&doc)
 }
 
 /// Sets `[retro]`: the agent and model of `harness retro --suggest`.
@@ -195,7 +195,7 @@ pub fn set_retro(text: &str, retro: &RetroConfig) -> Result<String, EditError> {
     set_text(retro_table, "agent", Some(retro.agent.as_str()));
     set_text(retro_table, "model", retro.model.as_deref());
     set_text(retro_table, "effort", retro.effort.as_deref());
-    finish(doc)
+    finish(&doc)
 }
 
 /// Sets `key` to `text`, or removes it for `None`. An unchanged value is left
@@ -248,7 +248,7 @@ pub fn remove_plugin(text: &str, name: &str) -> Result<String, EditError> {
     for_role_lists(&mut doc, "plugins", |list| {
         list.retain(|item| item.as_str() != Some(name));
     });
-    finish(doc)
+    finish(&doc)
 }
 
 /// Calls `change` with the list `key` of every role that has one.
@@ -277,7 +277,7 @@ fn table<'a>(doc: &'a mut DocumentMut, key: &str) -> Result<&'a mut Table, EditE
         .ok_or_else(|| EditError::NotATable(key.to_string()))
 }
 
-fn finish(doc: DocumentMut) -> Result<String, EditError> {
+fn finish(doc: &DocumentMut) -> Result<String, EditError> {
     let text = doc.to_string();
     Config::parse(&text)?;
     Ok(text)
@@ -470,7 +470,7 @@ mod tests {
                     args = [\"-y\", \"docs-mcp\"]\n";
         let server = |command: &str, args: &[&str], env: &[(&str, &str)]| McpConfig {
             command: Some(command.into()),
-            args: args.iter().map(|a| a.to_string()).collect(),
+            args: args.iter().map(ToString::to_string).collect(),
             env: env
                 .iter()
                 .map(|(k, v)| (k.to_string(), v.to_string()))

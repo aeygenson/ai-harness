@@ -7,12 +7,14 @@ use harness_core::config::{projects, AgentKind};
 /// `harness models`: the saved lists, after asking the agents again with
 /// `--refresh`.
 pub(crate) fn models(refresh: bool) -> Result<()> {
+    use harness_agents::install::models::Programs;
     use harness_core::models;
     let home = projects::harness_home().context("no home folder found")?;
     if refresh {
         let dir = credentials::default_dir().context("no home folder found")?;
         println!("Asking the agents with a saved login…");
-        for (agent, result) in harness_agents::install::models::ask_all(&dir, &Default::default()) {
+        for (agent, result) in harness_agents::install::models::ask_all(&dir, &Programs::default())
+        {
             match result {
                 Ok(list) => {
                     models::save(&home, &list)

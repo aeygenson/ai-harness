@@ -6,6 +6,7 @@
 //! needs, including the exact `handoff.json` format: a first live run showed that
 //! an agent told to "see docs/handoff-format.md" invents its own fields.
 
+use std::fmt::Write as _;
 use std::path::Path;
 
 use crate::skills::RoleSkills;
@@ -33,19 +34,38 @@ pub fn build(
     );
     if let Some(previous) = previous {
         let json = serde_json::to_string_pretty(previous).unwrap_or_default();
-        prompt.push_str(&format!(
+        // Writing into a `String` cannot fail, so `let _ =` ignores the `Result`.
+        let _ = write!(
+            prompt,
             "The previous step was done by the {:?}. Its handoff:\n{json}\n\n",
             previous.role
-        ));
+        );
     }
     if let Some(task_dir) = output_dir.parent() {
-        prompt.push_str(&format!(
+        let _ = write!(
+            prompt,
             "Notes and handoffs of earlier steps are in {}/round-XX/NN-role/ \
              (notes.md, handoff.json); read them if you need more context.\n\n",
             task_dir.display()
-        ));
+        );
     }
-    prompt.push_str(&match permissions::rule_for(role) {
+    prompt.push_str(&write_rule_text(role));
+    prompt.push_str(&skills_text(skills));
+    let _ = write!(
+        prompt,
+        "\nWhen you finish, write two files into {dir}:\n\
+         - notes.md: short notes for Lisa.\n\
+         - handoff.json: your result, exactly in the format below.\n\
+         Do not commit to git; the harness does that.\n\n",
+        dir = output_dir.display(),
+    );
+    prompt.push_str(&handoff_format(role, state));
+    prompt
+}
+
+/// What the role may change in the project, as one line of the prompt.
+fn write_rule_text(role: Role) -> String {
+    match permissions::rule_for(role) {
         WriteRule::Anything => {
             "You may change any project file except .harness/ and agent settings.\n".to_string()
         }
@@ -60,17 +80,7 @@ pub fn build(
             files.join(", ")
         ),
         WriteRule::Nothing => "Do not change any project files; only read them.\n".to_string(),
-    });
-    prompt.push_str(&skills_text(skills));
-    prompt.push_str(&format!(
-        "\nWhen you finish, write two files into {dir}:\n\
-         - notes.md: short notes for Lisa.\n\
-         - handoff.json: your result, exactly in the format below.\n\
-         Do not commit to git; the harness does that.\n\n",
-        dir = output_dir.display(),
-    ));
-    prompt.push_str(&handoff_format(role, state));
-    prompt
+    }
 }
 
 /// The role's skills: its base and the always-on ones in full, the others as
@@ -78,23 +88,25 @@ pub fn build(
 fn skills_text(skills: &RoleSkills) -> String {
     let mut text = String::new();
     for skill in &skills.base {
-        text.push_str(&format!("\n{}\n", skill.body));
+        let _ = write!(text, "\n{}\n", skill.body);
     }
     for skill in &skills.always {
-        text.push_str(&format!(
+        let _ = write!(
+            text,
             "\nAlways follow the skill \"{}\":\n{}\n",
             skill.name, skill.body
-        ));
+        );
     }
     if !skills.on_demand.is_empty() {
         text.push_str("\nSkills you can use: read a skill's file when it fits your work.\n");
         for skill in &skills.on_demand {
-            text.push_str(&format!(
-                "- {}: {} (file {})\n",
+            let _ = writeln!(
+                text,
+                "- {}: {} (file {})",
                 skill.name,
                 skill.description,
                 skill.path.display()
-            ));
+            );
         }
     }
     if !skills.is_empty() {
@@ -131,10 +143,10 @@ fn handoff_format(role: Role, state: &TaskState) -> String {
                 .collect::<Vec<_>>()
                 .join(" or ")
         };
-        text.push_str(&format!("- verdict {}: {names}\n", quoted_verdict(verdict)));
+        let _ = writeln!(text, "- verdict {}: {names}", quoted_verdict(verdict));
     }
     let json = serde_json::to_string_pretty(&example(role, state)).unwrap_or_default();
-    text.push_str(&format!("\nExample:\n{json}\n"));
+    let _ = write!(text, "\nExample:\n{json}\n");
     text
 }
 

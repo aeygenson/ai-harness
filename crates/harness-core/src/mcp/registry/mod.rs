@@ -3,7 +3,7 @@
 //!
 //! The asking is in `harness_agents::mcp::registry`; here the answer is read
 //! and an entry becomes a server for `harness.toml`. Only servers the agents
-//! can start as a program (`stdio`) from npm (`npx`), PyPI (`uvx`) or a
+//! can start as a program (`stdio`) from npm (`npx`), `PyPI` (`uvx`) or a
 //! container image (`docker`) can be used; servers that exist only on the web
 //! are listed but cannot be chosen yet. The version is pinned, and a variable
 //! the registry marks secret becomes `secret:<name>`, so no key is ever taken

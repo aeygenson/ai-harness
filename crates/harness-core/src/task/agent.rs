@@ -1,5 +1,5 @@
 //! The interface every agent adapter implements: Claude Code, Codex, Antigravity CLI,
-//! DeepSeek Harness (dsh) and the mock.
+//! `DeepSeek` Harness (dsh) and the mock.
 
 use std::future::Future;
 use std::path::PathBuf;

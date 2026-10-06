@@ -6,6 +6,7 @@
 //! A plugin is always copied into the project (`.harness/plugins/<name>/`) and
 //! committed, so the agents only ever see what is in the project's git.
 
+use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context, Result};
@@ -140,13 +141,15 @@ pub fn plugin_list(project: &Path, agent: Option<AgentKind>) -> Result<()> {
             Source::Unsupported(kind) => format!("  (from {kind}: not supported yet)"),
             _ => String::new(),
         };
-        out.push_str(&format!(
+        // Writing into a `String` cannot fail, so `let _ =` ignores the `Result`.
+        let _ = write!(
+            out,
             "{}@{}  ({}){mark}{note}\n    {}\n",
             entry.name,
             entry.catalog,
             entry.agent,
             first_line(&entry.description, 100)
-        ));
+        );
     }
     // A long list is often piped to `head` or `less`; a closed pipe is not an error.
     let _ = std::io::Write::write_all(&mut std::io::stdout(), out.as_bytes());

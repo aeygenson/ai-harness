@@ -6,6 +6,10 @@
 use crate::task::handoff::{NextStep, Role, Verdict};
 
 /// Every place the work may go after `role` gives `verdict`.
+#[expect(
+    clippy::match_same_arms,
+    reason = "a routing table: one arm per role and verdict is easier to check than merged arms"
+)]
 pub fn allowed_next(role: Role, verdict: Verdict) -> &'static [NextStep] {
     use NextStep as N;
 

@@ -72,9 +72,9 @@ pub fn rule_for(role: Role) -> WriteRule {
             folders: &["tests"],
             files: TEST_FILE_NAMES,
         },
-        Role::Security => WriteRule::Nothing,
-        // Lisa's decisions are written by the harness itself, never by an agent.
-        Role::Human => WriteRule::Nothing,
+        // Security only reads. Lisa's decisions are written by the harness itself,
+        // never by an agent.
+        Role::Security | Role::Human => WriteRule::Nothing,
     }
 }
 

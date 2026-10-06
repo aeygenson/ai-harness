@@ -1,4 +1,4 @@
-//! What one registry entry offers to start: a package on npm, PyPI or a
+//! What one registry entry offers to start: a package on npm, `PyPI` or a
 //! container image, or an address on the web.
 
 use std::collections::BTreeMap;

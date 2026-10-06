@@ -10,7 +10,11 @@ use crate::plugins::catalog::{self, Catalog, CatalogConfig, Entry, Registry};
 
 /// `owner/repo` means GitHub; anything that looks like a git address is used as it is.
 pub fn clone_url(source: &str) -> Result<String, OpsError> {
-    if source.contains("://") || source.starts_with("git@") || source.ends_with(".git") {
+    // Compared without caring about case, so `.GIT` counts too.
+    let ends_with_git = Path::new(source)
+        .extension()
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("git"));
+    if source.contains("://") || source.starts_with("git@") || ends_with_git {
         return Ok(source.to_string());
     }
     let parts: Vec<&str> = source.split('/').collect();

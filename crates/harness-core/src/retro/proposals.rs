@@ -24,6 +24,7 @@
 //! the file stays as it is. Nothing changes until Lisa runs `harness retro apply`.
 
 use std::collections::BTreeSet;
+use std::fmt::Write as _;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -161,29 +162,26 @@ impl Proposal {
             return Err(invalid("the summary is empty".into()));
         }
         skills::check_name(&self.skill).map_err(|e| invalid(e.to_string()))?;
-        match &self.content {
-            Some(text) => {
-                if text.len() > MAX_SKILL_BYTES {
-                    return Err(invalid(format!(
-                        "the skill text is longer than {MAX_SKILL_BYTES} bytes"
-                    )));
-                }
-                if skills::split_header(text).is_none() {
-                    return Err(invalid(
-                        "the skill text must start with ---, description: ..., ---".into(),
-                    ));
-                }
+        if let Some(text) = &self.content {
+            if text.len() > MAX_SKILL_BYTES {
+                return Err(invalid(format!(
+                    "the skill text is longer than {MAX_SKILL_BYTES} bytes"
+                )));
             }
-            None => {
-                if !self.skill_path(harness_dir).is_file() {
-                    return Err(invalid(format!(
-                        "skill {} does not exist and the proposal has no content",
-                        self.skill
-                    )));
-                }
-                if self.roles.is_empty() {
-                    return Err(invalid("it changes nothing".into()));
-                }
+            if skills::split_header(text).is_none() {
+                return Err(invalid(
+                    "the skill text must start with ---, description: ..., ---".into(),
+                ));
+            }
+        } else {
+            if !self.skill_path(harness_dir).is_file() {
+                return Err(invalid(format!(
+                    "skill {} does not exist and the proposal has no content",
+                    self.skill
+                )));
+            }
+            if self.roles.is_empty() {
+                return Err(invalid("it changes nothing".into()));
             }
         }
         for given in &self.roles {
@@ -243,12 +241,15 @@ impl Proposal {
         let file = format!(".harness/{SKILLS_DIR}/{}.md", self.skill);
         match (self.file_change(harness_dir), &self.content) {
             (FileChange::New, Some(new)) => {
-                text.push_str(&format!("New file {file}:\n{}", line_diff("", new)));
+                // Writing into a `String` cannot fail, so `let _ =` ignores the `Result`.
+                let _ = write!(text, "New file {file}:\n{}", line_diff("", new));
             }
             (FileChange::Changed { old }, Some(new)) => {
-                text.push_str(&format!("Changes {file}:\n{}", line_diff(&old, new)));
+                let _ = write!(text, "Changes {file}:\n{}", line_diff(&old, new));
             }
-            (_, Some(_)) => text.push_str(&format!("{file} is already like this.\n")),
+            (_, Some(_)) => {
+                let _ = writeln!(text, "{file} is already like this.");
+            }
             (_, None) => {}
         }
         let missing = self.missing_roles(config);
@@ -262,11 +263,12 @@ impl Proposal {
             } else {
                 " (already there)"
             };
-            text.push_str(&format!(
-                "harness.toml: [roles.{}] {list} += \"{}\"{already}\n",
+            let _ = writeln!(
+                text,
+                "harness.toml: [roles.{}] {list} += \"{}\"{already}",
                 given.role.as_str(),
                 self.skill
-            ));
+            );
         }
         text
     }
@@ -291,15 +293,15 @@ pub fn line_diff(old: &str, new: &str) -> String {
     let (mut i, mut j) = (0, 0);
     while i < old.len() || j < new.len() {
         if i < old.len() && j < new.len() && old[i] == new[j] {
-            text.push_str(&format!("  {}\n", old[i]));
+            let _ = writeln!(text, "  {}", old[i]);
             i += 1;
             j += 1;
         } else if i < old.len() && (j == new.len() || lcs[i + 1][j] >= lcs[i][j + 1]) {
             // Removed lines come before added ones, as in `git diff`.
-            text.push_str(&format!("- {}\n", old[i]));
+            let _ = writeln!(text, "- {}", old[i]);
             i += 1;
         } else {
-            text.push_str(&format!("+ {}\n", new[j]));
+            let _ = writeln!(text, "+ {}", new[j]);
             j += 1;
         }
     }
