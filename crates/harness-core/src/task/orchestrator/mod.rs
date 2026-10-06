@@ -9,17 +9,23 @@
 //! 3. If the role's work is accepted, everything is committed:
 //!    `task-001 round 2: tester (rejected) - ...`. A failed attempt is thrown away.
 
-use std::collections::BTreeMap;
-use std::fs;
+mod create;
+mod human;
+mod size;
+
+pub use create::{create_task, create_task_anyway, same_task, words};
+pub use human::record_human_decision;
+pub use size::oversized_changes;
+
 use std::path::{Path, PathBuf};
 
 use crate::git::{GitError, Repo};
 use crate::skills::Skills;
 use crate::task::agent::{AgentRunner, RoleJob};
-use crate::task::handoff::{Handoff, NextStep, Role, Verdict};
+use crate::task::handoff::{Handoff, Role, Verdict};
 use crate::task::permissions;
 use crate::task::prompt;
-use crate::task::store::{self, StoreError, TaskStore};
+use crate::task::store::{StoreError, TaskStore};
 use crate::task::{Stage, TaskState, WaitReason};
 use crate::text;
 
@@ -84,69 +90,6 @@ pub enum RunError {
         "{task} already has this text and is not done ({stage}); continue it or change the text"
     )]
     SameTask { task: String, stage: String },
-}
-
-/// Creates a new task in `<project>/.harness/runs/` and commits it. If an
-/// unfinished task already has the same text (a message sent twice), nothing
-/// is created and the error names that task.
-pub fn create_task(
-    repo: &Repo,
-    task_id: &str,
-    description: &str,
-    max_rounds: u32,
-) -> Result<(TaskStore, TaskState), RunError> {
-    if let Some((task, stage)) = same_task(&repo.runs_dir(), description)? {
-        return Err(RunError::SameTask {
-            task,
-            stage: crate::retro::stage_text(stage),
-        });
-    }
-    create_task_anyway(repo, task_id, description, max_rounds)
-}
-
-/// Like [`create_task`], but also when an unfinished task has the same text.
-pub fn create_task_anyway(
-    repo: &Repo,
-    task_id: &str,
-    description: &str,
-    max_rounds: u32,
-) -> Result<(TaskStore, TaskState), RunError> {
-    repo.ensure_harness_ignores()?;
-    let runs = repo.runs_dir();
-    std::fs::create_dir_all(&runs).map_err(|source| StoreError::Io {
-        path: runs.clone(),
-        source,
-    })?;
-    let (store, state) = TaskStore::create(&runs, task_id, description, max_rounds)?;
-    repo.commit_paths(&[store.dir()], &format!("{task_id}: new task"))?;
-    Ok((store, state))
-}
-
-/// The unfinished task whose text is `description`, and its stage. Spaces
-/// and line breaks do not count: a pasted copy of the same text matches.
-pub fn same_task(runs: &Path, description: &str) -> Result<Option<(String, Stage)>, StoreError> {
-    if !runs.is_dir() {
-        return Ok(None);
-    }
-    let wanted = words(description);
-    for id in store::task_ids(runs)? {
-        // A task that cannot be read is no reason to refuse a new one.
-        let Ok((task, state)) = TaskStore::open(runs, &id) else {
-            continue;
-        };
-        let Ok(text) = task.description() else {
-            continue;
-        };
-        if state.stage != Stage::Done && words(&text) == wanted {
-            return Ok(Some((id, state.stage)));
-        }
-    }
-    Ok(None)
-}
-
-/// The words of `text`, so that only spaces and line breaks may differ.
-pub fn words(text: &str) -> Vec<&str> {
-    text.split_whitespace().collect()
 }
 
 /// Runs roles until the task is done or someone has to look at it.
@@ -261,99 +204,6 @@ pub async fn run_with_skills<A: AgentRunner>(
     Ok(StopReason::StepLimitReached)
 }
 
-/// The changed paths (as `git status` lists them, relative to `root`) that
-/// are bigger than `limit`, with their sizes. A folder counts the files under
-/// it; only the most exact path is named: `app/node_modules`, not `app` too.
-/// `.` stands for the change as a whole, when no single part is too big.
-pub fn oversized_changes(root: &Path, files: &[String], limit: u64) -> Vec<(String, u64)> {
-    // The size of every changed path and of every folder above it; "" is the
-    // whole change.
-    let mut sizes: BTreeMap<String, u64> = BTreeMap::new();
-    for file in files {
-        let size = size_of(&root.join(file));
-        if size == 0 {
-            continue;
-        }
-        let path = file.trim_end_matches('/');
-        *sizes.entry(String::new()).or_default() += size;
-        for (i, c) in path.char_indices() {
-            if c == '/' {
-                *sizes.entry(path[..i].to_string()).or_default() += size;
-            }
-        }
-        *sizes.entry(path.to_string()).or_default() += size;
-    }
-    let over: Vec<&String> = sizes
-        .iter()
-        .filter(|(_, size)| **size > limit)
-        .map(|(path, _)| path)
-        .collect();
-    let inside = |inner: &str, outer: &str| {
-        outer.is_empty() && !inner.is_empty() || inner.starts_with(&format!("{outer}/"))
-    };
-    over.iter()
-        .filter(|outer| !over.iter().any(|inner| inside(inner, outer)))
-        .map(|path| {
-            let name = if path.is_empty() { "." } else { path.as_str() };
-            (name.to_string(), sizes[*path])
-        })
-        .collect()
-}
-
-/// Bytes in a file, or in all files under a folder. Links are not followed.
-fn size_of(path: &Path) -> u64 {
-    match fs::symlink_metadata(path) {
-        Ok(meta) if meta.is_dir() => fs::read_dir(path)
-            .map(|entries| entries.flatten().map(|e| size_of(&e.path())).sum())
-            .unwrap_or(0),
-        Ok(meta) => meta.len(),
-        Err(_) => 0,
-    }
-}
-
-/// Lisa's decision (approve the design, send work back, answer a question),
-/// saved like any other handoff with role `human`.
-pub fn record_human_decision(
-    repo: &Repo,
-    store: &TaskStore,
-    state: &mut TaskState,
-    verdict: Verdict,
-    next: NextStep,
-    notes: &str,
-) -> Result<PathBuf, RunError> {
-    let summary = notes
-        .lines()
-        .next()
-        .filter(|line| !line.trim().is_empty())
-        .unwrap_or("Lisa's decision")
-        .to_string();
-    let issues = if verdict == Verdict::Rejected {
-        vec![crate::task::handoff::Issue {
-            severity: crate::task::handoff::Severity::Medium,
-            location: None,
-            description: summary.clone(),
-        }]
-    } else {
-        vec![]
-    };
-    let handoff = Handoff {
-        schema_version: crate::task::handoff::SCHEMA_VERSION,
-        task_id: state.task_id.clone(),
-        round: state.round,
-        role: Role::Human,
-        verdict,
-        next_role: next,
-        summary,
-        skills_used: vec![],
-        files: vec![],
-        issues,
-    };
-    let step_dir = store.record(state, &handoff, notes)?;
-    // Commit only the task folder: code Lisa changed herself is hers to commit.
-    repo.commit_paths(&[store.dir()], &commit_message(&handoff))?;
-    Ok(step_dir)
-}
-
 /// Commits only the failure logs (nothing an agent wrote), so the next run
 /// starts with a clean project.
 fn commit_failure_logs(
@@ -434,6 +284,8 @@ fn commit_message(handoff: &Handoff) -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
+
     use super::*;
 
     #[test]

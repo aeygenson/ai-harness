@@ -34,6 +34,14 @@
 //! Lisa changes one. Its header remembers which built-in text it was copied
 //! from (`builtin: <hash>`), so a newer built-in text can be pointed out.
 
+mod built_ins;
+mod library;
+
+pub use built_ins::{
+    agent_note, base_names, built_in, built_in_names, copy_of_built_in, fingerprint, is_base,
+};
+pub use library::{header_value, library, split_header, LibrarySkill};
+
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -43,95 +51,6 @@ use crate::task::handoff::Role;
 
 /// The folder with the skills, inside `.harness/`.
 pub const SKILLS_DIR: &str = "skills";
-
-/// The built-in skills: name and text.
-const BUILT_IN: [(&str, &str); 12] = [
-    ("common", include_str!("../skills/common.md")),
-    ("architect", include_str!("../skills/architect.md")),
-    ("developer", include_str!("../skills/developer.md")),
-    ("tester", include_str!("../skills/tester.md")),
-    ("security", include_str!("../skills/security.md")),
-    ("agent-claude", include_str!("../skills/agent-claude.md")),
-    ("agent-codex", include_str!("../skills/agent-codex.md")),
-    (
-        "agent-antigravity",
-        include_str!("../skills/agent-antigravity.md"),
-    ),
-    ("agent-dsh", include_str!("../skills/agent-dsh.md")),
-    (
-        "filesystem-attacks",
-        include_str!("../skills/filesystem-attacks.md"),
-    ),
-    (
-        "crash-recovery",
-        include_str!("../skills/crash-recovery.md"),
-    ),
-    (
-        "protocol-attacks",
-        include_str!("../skills/protocol-attacks.md"),
-    ),
-];
-
-/// The text of the built-in skill `name`.
-pub fn built_in(name: &str) -> Option<&'static str> {
-    BUILT_IN
-        .iter()
-        .find(|(n, _)| *n == name)
-        .map(|(_, text)| *text)
-}
-
-/// The names of all built-in skills.
-pub fn built_in_names() -> impl Iterator<Item = &'static str> {
-    BUILT_IN.iter().map(|(name, _)| *name)
-}
-
-/// The note for the agent a role runs on.
-pub fn agent_note(agent: &str) -> Option<&'static str> {
-    match agent {
-        "claude" => Some("agent-claude"),
-        "codex" => Some("agent-codex"),
-        "antigravity" => Some("agent-antigravity"),
-        "dsh" => Some("agent-dsh"),
-        _ => None,
-    }
-}
-
-/// The base of a role on `agent`: always in its prompt, never chosen.
-pub fn base_names(role: Role, agent: &str) -> Vec<&'static str> {
-    // Each AI role's base skill has the role's own name; Lisa has none.
-    let own = (role != Role::Human).then(|| role.as_str());
-    ["common"]
-        .into_iter()
-        .chain(own)
-        .chain(agent_note(agent))
-        .collect()
-}
-
-/// Is `name` part of some role's base (not an optional skill)?
-pub fn is_base(name: &str) -> bool {
-    matches!(
-        name,
-        "common" | "architect" | "developer" | "tester" | "security"
-    ) || name.starts_with("agent-")
-}
-
-/// A short fingerprint of a built-in text (FNV-1a), kept in a copy's header.
-pub fn fingerprint(text: &str) -> String {
-    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
-    for byte in text.bytes() {
-        hash ^= u64::from(byte);
-        hash = hash.wrapping_mul(0x0100_0000_01b3);
-    }
-    format!("{hash:016x}")
-}
-
-/// The built-in skill `name` as a project file to edit: its text with the
-/// fingerprint in the header.
-pub fn copy_of_built_in(name: &str) -> Option<String> {
-    let text = built_in(name)?;
-    let rest = text.strip_prefix("---\n")?;
-    Some(format!("---\nbuiltin: {}\n{rest}", fingerprint(text)))
-}
 
 /// Where a skill comes from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -322,112 +241,9 @@ fn source_of(name: &str, text: &str) -> Source {
     }
 }
 
-/// Every skill a project can use: the built-in ones and its own files,
-/// sorted by name. A file that cannot be read is listed with its problem.
-pub fn library(harness_dir: &Path) -> Vec<LibrarySkill> {
-    let dir = harness_dir.join(SKILLS_DIR);
-    let mut names: Vec<String> = built_in_names().map(str::to_string).collect();
-    if let Ok(entries) = fs::read_dir(&dir) {
-        for path in entries.filter_map(Result::ok).map(|e| e.path()) {
-            let name = path
-                .file_stem()
-                .map(|s| s.to_string_lossy().into_owned())
-                .unwrap_or_default();
-            if path.extension().is_some_and(|e| e == "md")
-                && check_name(&name).is_ok()
-                && !names.contains(&name)
-            {
-                names.push(name);
-            }
-        }
-    }
-    names.sort();
-    names
-        .into_iter()
-        .map(|name| {
-            let path = dir.join(format!("{name}.md"));
-            let (text, source) = match fs::read_to_string(&path) {
-                Ok(text) => {
-                    let source = source_of(&name, &text);
-                    (text, source)
-                }
-                Err(_) => (
-                    built_in(&name).unwrap_or_default().to_string(),
-                    Source::BuiltIn,
-                ),
-            };
-            let description = split_header(&text).map(|(d, _)| d);
-            LibrarySkill {
-                name,
-                description,
-                path,
-                text,
-                source,
-            }
-        })
-        .collect()
-}
-
-/// A skill as the Skills tab shows it.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct LibrarySkill {
-    pub name: String,
-    /// `None` when the header is broken.
-    pub description: Option<String>,
-    /// The project file (it exists unless the skill is built-in and unchanged).
-    pub path: PathBuf,
-    /// The whole text, header included.
-    pub text: String,
-    pub source: Source,
-}
-
-/// The value of `key` in a skill's header, such as `builtin`.
-pub fn header_value(text: &str, key: &str) -> Option<String> {
-    let mut lines = text.lines();
-    if lines.next()?.trim() != "---" {
-        return None;
-    }
-    for line in lines {
-        let line = line.trim();
-        if line == "---" {
-            return None;
-        }
-        if let Some(value) = line
-            .strip_prefix(key)
-            .and_then(|rest| rest.strip_prefix(':'))
-        {
-            return Some(value.trim().trim_matches('"').trim().to_string());
-        }
-    }
-    None
-}
-
-/// Splits `---\ndescription: ...\n---\nbody` into the description and the body.
-pub fn split_header(text: &str) -> Option<(String, String)> {
-    let mut lines = text.lines();
-    if lines.next()?.trim() != "---" {
-        return None;
-    }
-    let mut description = None;
-    for line in lines.by_ref() {
-        let line = line.trim();
-        if line == "---" {
-            let body: Vec<&str> = lines.collect();
-            let description: String = description?;
-            return Some((description, body.join("\n").trim().to_string()));
-        }
-        if let Some(value) = line.strip_prefix("description:") {
-            let value = value.trim().trim_matches('"').trim();
-            if !value.is_empty() {
-                description = Some(value.to_string());
-            }
-        }
-    }
-    None
-}
-
 #[cfg(test)]
 mod tests {
+    use super::built_ins::BUILT_IN;
     use super::*;
 
     fn project(files: &[(&str, &str)], toml: &str) -> (tempfile::TempDir, Config) {

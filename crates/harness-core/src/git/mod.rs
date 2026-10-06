@@ -4,6 +4,11 @@
 //! in the terminal and in RustRover, so the harness sees exactly what she sees,
 //! and there is no extra dependency to learn.
 
+mod history;
+mod remote;
+
+pub use remote::{fetch, head_commit};
+
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -75,64 +80,6 @@ impl Repo {
 
     pub fn root(&self) -> &Path {
         &self.root
-    }
-
-    /// The text of `file` in the last commit that changed `changed` (both
-    /// relative to the project, with `/`). `None` if there is no such commit
-    /// or the file did not exist in it.
-    pub fn file_at_last_change(&self, changed: &str, file: &str) -> Option<String> {
-        let commit = self
-            .git_literal(&["log", "-1", "--format=%H", "--", changed])
-            .ok()?;
-        let commit = commit.trim();
-        if commit.is_empty() {
-            return None;
-        }
-        self.git(&["show", &format!("{commit}:{file}")]).ok()
-    }
-
-    /// The files of the commit that added `added` (relative to the project,
-    /// with `/`), each with how it changed: `A` added, `M` changed, `D`
-    /// deleted. `None` if no commit added it. Renames count as a deleted
-    /// and an added file.
-    pub fn files_of_commit_adding(&self, added: &str) -> Option<Vec<(char, String)>> {
-        let commit = self
-            .git_literal(&["log", "-1", "--diff-filter=A", "--format=%H", "--", added])
-            .ok()?;
-        let commit = commit.trim();
-        if commit.is_empty() {
-            return None;
-        }
-        let out = self
-            .git(&[
-                "show",
-                "--no-renames",
-                "--name-status",
-                "-z",
-                "--format=",
-                commit,
-            ])
-            .ok()?;
-        // `-z` gives "status\0path\0" pairs and never quotes paths.
-        let mut parts = out
-            .split('\0')
-            .map(str::trim_start)
-            .filter(|p| !p.is_empty());
-        let mut files = Vec::new();
-        while let (Some(status), Some(path)) = (parts.next(), parts.next()) {
-            files.push((status.chars().next().unwrap_or('M'), path.to_string()));
-        }
-        Some(files)
-    }
-
-    /// The day of the last commit that changed `path` (relative to the
-    /// project), as `2026-10-02`; `None` if it was never committed.
-    pub fn last_change_date(&self, path: &str) -> Option<String> {
-        let day = self
-            .git_literal(&["log", "-1", "--format=%cs", "--", path])
-            .ok()?;
-        let day = day.trim();
-        (!day.is_empty()).then(|| day.to_string())
     }
 
     /// Where task folders live: `<project>/.harness/runs`.
@@ -285,12 +232,12 @@ impl Repo {
         Ok(true)
     }
 
-    fn git(&self, args: &[&str]) -> Result<String, GitError> {
+    pub(super) fn git(&self, args: &[&str]) -> Result<String, GitError> {
         self.run(args, false)
     }
 
     /// Like `git`, but paths are taken literally: a file named `*.rs` means only that file.
-    fn git_literal(&self, args: &[&str]) -> Result<String, GitError> {
+    pub(super) fn git_literal(&self, args: &[&str]) -> Result<String, GitError> {
         self.run(args, true)
     }
 
@@ -323,61 +270,6 @@ impl Repo {
                 stderr: String::from_utf8_lossy(&output.stderr).trim().to_string(),
             })
         }
-    }
-}
-
-/// Makes `into` hold `revision` (a branch, tag or commit; the default branch
-/// if `None`) of the repository at `url`, and returns the commit. Used for
-/// plugin catalogs and plugins: only the newest state is downloaded, and a
-/// second call updates the same folder.
-pub fn fetch(url: &str, revision: Option<&str>, into: &Path) -> Result<String, GitError> {
-    fs::create_dir_all(into).map_err(|source| GitError::Io {
-        path: into.to_path_buf(),
-        source,
-    })?;
-    if !into.join(".git").exists() {
-        outside_git(into, &["init", "--quiet"])?;
-        outside_git(into, &["remote", "add", "origin", url])?;
-    } else {
-        outside_git(into, &["remote", "set-url", "origin", url])?;
-    }
-    let revision = revision.unwrap_or("HEAD");
-    outside_git(
-        into,
-        &["fetch", "--quiet", "--depth", "1", "origin", revision],
-    )?;
-    outside_git(into, &["checkout", "--quiet", "--force", "FETCH_HEAD"])?;
-    outside_git(into, &["clean", "--quiet", "-dxff"])?;
-    head_commit(into).ok_or_else(|| GitError::NotARepo(into.to_path_buf()))
-}
-
-/// The commit a folder's repository is at, if it is one.
-pub fn head_commit(dir: &Path) -> Option<String> {
-    outside_git(dir, &["rev-parse", "HEAD"])
-        .ok()
-        .map(|out| out.trim().to_string())
-}
-
-/// Git for repositories other than the project: no password prompts (a wrong
-/// address fails instead of waiting), no hooks, no user settings needed.
-fn outside_git(dir: &Path, args: &[&str]) -> Result<String, GitError> {
-    let output = Command::new("git")
-        .current_dir(dir)
-        .env("GIT_TERMINAL_PROMPT", "0")
-        .args(["-c", "core.hooksPath=/dev/null"])
-        .args(["-c", "core.fsmonitor=false"])
-        .args(["-c", "advice.detachedHead=false"])
-        .args(["-c", "core.autocrlf=false"])
-        .args(args)
-        .output()
-        .map_err(GitError::CannotRun)?;
-    if output.status.success() {
-        Ok(String::from_utf8_lossy(&output.stdout).into_owned())
-    } else {
-        Err(GitError::Failed {
-            command: args.join(" "),
-            stderr: String::from_utf8_lossy(&output.stderr).trim().to_string(),
-        })
     }
 }
 
