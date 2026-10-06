@@ -422,7 +422,10 @@ mod tests {
         let (_dir, repo, retro_dir, stats, config) = project();
         let harness = repo.root().join(".harness");
         let current = fs::read_to_string(harness.join(CONFIG_FILE)).unwrap();
-        assert!(past_settings(&repo, &stats, &current).is_empty());
+        assert_eq!(
+            past_settings(&repo, &stats, &current),
+            Vec::<PastSettings>::new()
+        );
         let text = prompt(
             &stats,
             &repo.runs_dir(),
@@ -501,7 +504,7 @@ mod tests {
             fs::read_to_string(retro_dir.join(AGENT_LOG)).unwrap(),
             "agent talked"
         );
-        assert!(repo.changed_files().unwrap().is_empty());
+        assert_eq!(repo.changed_files().unwrap(), Vec::<String>::new());
     }
 
     #[test]
@@ -532,7 +535,7 @@ mod tests {
         let bad = FakeAgent::writing("x", r#"{"proposals": [{"id": 1}]}"#);
         assert!(matches!(run(bad), Err(SuggestError::Proposals(_))));
         assert!(retro_dir.join("proposals.rejected.json").exists());
-        assert!(repo.changed_files().unwrap().is_empty());
+        assert_eq!(repo.changed_files().unwrap(), Vec::<String>::new());
 
         let mut sneaky = FakeAgent::writing("x", "{\"proposals\": []}");
         sneaky.also_write = Some(".harness/skills/style.md");
@@ -571,14 +574,20 @@ mod tests {
             config.roles[&Role::Developer].skills,
             ["style", "empty-input"]
         );
-        assert!(config.roles[&Role::Tester].always_skills.is_empty());
+        assert_eq!(
+            config.roles[&Role::Tester].always_skills,
+            Vec::<String>::new()
+        );
         assert_eq!(
             fs::read_to_string(harness.join("skills/empty-input.md")).unwrap(),
             NEW_SKILL
         );
 
         // Applying again changes nothing.
-        assert!(apply(&harness, &found.proposals, &[1]).unwrap().is_empty());
+        assert_eq!(
+            apply(&harness, &found.proposals, &[1]).unwrap(),
+            Vec::<PathBuf>::new()
+        );
 
         Applied::add(&retro_dir, &[2, 1]).unwrap();
         Applied::add(&retro_dir, &[1]).unwrap();

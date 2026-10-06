@@ -3,6 +3,7 @@
 
 use std::collections::{HashMap, VecDeque};
 use std::fs;
+use std::future::Future;
 use std::path::Path;
 use std::process::Command;
 use std::sync::Mutex;
@@ -118,10 +119,9 @@ impl MockAgent {
             .and_then(VecDeque::pop_front)
             .unwrap_or(MockStep::WriteNothing)
     }
-}
 
-impl AgentRunner for MockAgent {
-    async fn run(&self, job: &RoleJob) -> AgentOutcome {
+    /// Does the next scripted step for `job.role` and reports how it ended.
+    fn outcome(&self, job: &RoleJob) -> AgentOutcome {
         self.calls.lock().unwrap().push(job.role);
         let log = format!("mock {:?}, round {}", job.role, job.round);
 
@@ -184,6 +184,14 @@ impl AgentRunner for MockAgent {
                 }
             }
         }
+    }
+}
+
+impl AgentRunner for MockAgent {
+    // The mock does its work at once and has nothing to wait for, so it returns
+    // a future that is already finished (`ready`) instead of using `async fn`.
+    fn run(&self, job: &RoleJob) -> impl Future<Output = AgentOutcome> + Send {
+        std::future::ready(self.outcome(job))
     }
 }
 

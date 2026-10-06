@@ -152,7 +152,7 @@ mod tests {
         assert_eq!(settings.model(Role::Tester), None);
         assert_eq!(settings.servers(Role::Developer).len(), 0);
         assert_eq!(settings.server_secrets(Role::Tester), ["key-12345678"]);
-        assert!(settings.plugins(Role::Tester).is_empty());
+        assert_eq!(settings.plugins(Role::Tester), []);
         assert_eq!(settings.timeout(), DEFAULT_TIMEOUT);
         assert_eq!(
             settings.header(AgentKind::Codex, &job(Role::Developer)),

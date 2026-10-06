@@ -315,7 +315,7 @@ mod tests {
 
         // There is no file to read, so the built-in skill is in the prompt.
         let tester = skills.for_role(Role::Tester);
-        assert!(tester.on_demand.is_empty());
+        assert_eq!(tester.on_demand, Vec::<Skill>::new());
         assert_eq!(tester.always[0].name, "crash-recovery");
         assert_eq!(tester.base[2].name, "agent-claude");
     }

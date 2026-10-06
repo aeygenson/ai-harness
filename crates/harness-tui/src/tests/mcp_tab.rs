@@ -95,7 +95,7 @@ fn the_mcp_tab_gives_servers_to_roles() {
     key(&mut app, KeyCode::Char('s'));
     let saved = config(&root);
     assert_eq!(saved.roles[&Role::Developer].mcp, ["context7", "fetch"]);
-    assert!(saved.roles[&Role::Tester].mcp.is_empty());
+    assert_eq!(saved.roles[&Role::Tester].mcp, Vec::<String>::new());
 }
 
 #[test]
@@ -188,7 +188,7 @@ fn mcp_servers_are_added_changed_and_removed_and_secrets_saved() {
     key(&mut app, KeyCode::Enter);
     let saved = config(&root);
     assert!(saved.mcp.is_empty());
-    assert!(saved.roles[&Role::Developer].mcp.is_empty());
+    assert_eq!(saved.roles[&Role::Developer].mcp, Vec::<String>::new());
     assert!(file.is_file());
 }
 

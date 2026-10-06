@@ -234,7 +234,7 @@ mod tests {
         let config = Config::load(&root.join(HARNESS_DIR)).unwrap();
         assert!(config.retro.is_some());
         let repo = Repo::open(&root).unwrap();
-        assert!(repo.changed_files().unwrap().is_empty());
+        assert_eq!(repo.changed_files().unwrap(), Vec::<String>::new());
 
         // A second time nothing is created.
         assert_eq!(init(&root).unwrap(), Initialized::default());

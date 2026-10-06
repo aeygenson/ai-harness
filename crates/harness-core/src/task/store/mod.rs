@@ -391,13 +391,16 @@ mod tests {
     #[test]
     fn failures_and_task_ids_are_listed() {
         let runs = tempfile::tempdir().unwrap();
-        assert!(task_ids(&runs.path().join("missing")).unwrap().is_empty());
+        assert_eq!(
+            task_ids(&runs.path().join("missing")).unwrap(),
+            Vec::<String>::new()
+        );
         let (store, _) = new_task(runs.path());
         TaskStore::create(runs.path(), "task-002", "x", 5).unwrap();
         fs::create_dir(runs.path().join("not-a-task")).unwrap();
         assert_eq!(task_ids(runs.path()).unwrap(), ["task-001", "task-002"]);
 
-        assert!(store.failures().unwrap().is_empty());
+        assert_eq!(store.failures().unwrap(), Vec::<(u32, Role)>::new());
         store.save_failure_log(1, Role::Architect, "boom").unwrap();
         store.save_failure_log(2, Role::Tester, "boom").unwrap();
         store.save_failure_log(1, Role::Architect, "again").unwrap();

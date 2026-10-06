@@ -243,7 +243,7 @@ mod tests {
             save_stats(&repo, None, None),
             Err(OpsError::NoTasks)
         ));
-        assert!(list(&repo).is_empty());
+        assert_eq!(list(&repo), Vec::<RetroInfo>::new());
 
         crate::task::orchestrator::create_task(&repo, "task-001", "Build a parser", 5).unwrap();
         assert!(matches!(
@@ -308,6 +308,6 @@ mod tests {
         assert!(toml.contains("empty-input"), "{toml}");
         assert_eq!(list(&repo)[0].applied, [1]);
         // Applied once only.
-        assert!(apply(&repo, &second, &[1]).unwrap().is_empty());
+        assert_eq!(apply(&repo, &second, &[1]).unwrap(), Vec::<u32>::new());
     }
 }

@@ -114,7 +114,7 @@ async fn a_well_behaved_agy_finishes_the_role_in_a_throwaway_home() {
         log.starts_with("agent: antigravity, model: default"),
         "{log}"
     );
-    assert!(s.repo.changed_files().unwrap().is_empty());
+    assert_eq!(s.repo.changed_files().unwrap(), Vec::<String>::new());
 }
 
 #[tokio::test]

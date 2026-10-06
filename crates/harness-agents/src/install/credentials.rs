@@ -139,7 +139,7 @@ mod tests {
     #[test]
     fn secrets_are_saved_one_file_each_and_listed_by_name() {
         let dir = tempfile::tempdir().unwrap();
-        assert!(secret_names(dir.path()).unwrap().is_empty());
+        assert_eq!(secret_names(dir.path()).unwrap(), Vec::<String>::new());
         let path = save_secret(dir.path(), "context7", &Secret::new("ctx-1\n")).unwrap();
         save_secret(dir.path(), "github", &Secret::new("gh-2")).unwrap();
         assert_eq!(

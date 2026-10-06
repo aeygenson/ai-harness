@@ -364,7 +364,7 @@ mod tests {
         assert_eq!(security.len(), 1);
         assert_eq!(security[0].path, dir.path().join(".harness/plugins/review"));
         assert!(!security[0].allow_hooks);
-        assert!(plugins.for_role(Role::Tester).is_empty());
+        assert_eq!(plugins.for_role(Role::Tester), Vec::<Plugin>::new());
     }
 
     #[test]

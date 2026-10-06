@@ -459,7 +459,7 @@ mod tests {
         let text = remove_plugin(TOML, "old").unwrap();
         let config = Config::parse(&text).unwrap();
         assert!(config.plugins.is_empty());
-        assert!(config.roles[&Role::Developer].plugins.is_empty());
+        assert_eq!(config.roles[&Role::Developer].plugins, Vec::<String>::new());
         assert!(text.contains("agent = \"codex\" # fast"), "{text}");
     }
 
@@ -516,7 +516,7 @@ mod tests {
         let removed = remove_mcp(text, "docs").unwrap();
         let config = Config::parse(&removed).unwrap();
         assert!(config.mcp.is_empty());
-        assert!(config.roles[&Role::Developer].mcp.is_empty());
+        assert_eq!(config.roles[&Role::Developer].mcp, Vec::<String>::new());
         assert!(matches!(remove_mcp(text, "nope"), Err(EditError::NoMcp(_))));
     }
 

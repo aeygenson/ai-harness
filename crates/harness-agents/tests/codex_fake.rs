@@ -107,7 +107,7 @@ async fn a_well_behaved_codex_finishes_the_role_and_keeps_a_refreshed_login() {
 
     let log = fs::read_to_string(store.dir().join("round-01/01-architect/agent.log")).unwrap();
     assert!(log.starts_with("agent: codex, model: default"), "{log}");
-    assert!(s.repo.changed_files().unwrap().is_empty());
+    assert_eq!(s.repo.changed_files().unwrap(), Vec::<String>::new());
 }
 
 #[tokio::test]

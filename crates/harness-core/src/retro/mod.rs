@@ -467,7 +467,7 @@ mod tests {
         assert_eq!(stats.tasks[0].failed_attempts, 1);
         assert_eq!(stats.tasks[0].stage, "done");
         assert_eq!(stats.tasks[1].stage, "waiting: approve design");
-        assert!(stats.skills.is_empty());
+        assert_eq!(stats.skills, Vec::<SkillUse>::new());
     }
 
     #[test]

@@ -7,7 +7,7 @@ use std::process::Command;
 
 use harness_agents::{MockAgent, MockStep};
 use harness_core::git::Repo;
-use harness_core::task::handoff::{NextStep, Role, Verdict};
+use harness_core::task::handoff::{Handoff, NextStep, Role, Verdict};
 use harness_core::task::orchestrator::{
     self, create_task, record_human_decision, StopReason, ATTEMPTS_PER_ROLE, MAX_CHANGE_BYTES,
 };
@@ -112,7 +112,7 @@ async fn happy_path_with_lisa_approving_the_design() {
             "first commit",
         ]
     );
-    assert!(repo.changed_files().unwrap().is_empty());
+    assert_eq!(repo.changed_files().unwrap(), Vec::<String>::new());
 }
 
 #[tokio::test]
@@ -179,12 +179,12 @@ async fn a_role_that_keeps_failing_stops_the_task() {
     ));
     assert_eq!(agent.calls().len(), ATTEMPTS_PER_ROLE as usize);
     assert_eq!(state, before);
-    assert!(store.history().unwrap().is_empty());
+    assert_eq!(store.history().unwrap(), Vec::<Handoff>::new());
     // Both failed attempts keep their logs, committed, so the next run can start.
     let failures = store.dir().join("failures");
     assert!(failures.join("round-01-architect-1.log").exists());
     assert!(failures.join("round-01-architect-2.log").exists());
-    assert!(repo.changed_files().unwrap().is_empty());
+    assert_eq!(repo.changed_files().unwrap(), Vec::<String>::new());
 }
 
 #[tokio::test]
@@ -290,7 +290,7 @@ async fn the_work_of_each_role_is_committed_with_its_handoff() {
         .await
         .unwrap();
 
-    assert!(repo.changed_files().unwrap().is_empty());
+    assert_eq!(repo.changed_files().unwrap(), Vec::<String>::new());
     let show = Command::new("git")
         .current_dir(repo.root())
         .args(["show", "--name-only", "--format=%s", "HEAD~1"])
@@ -334,7 +334,7 @@ async fn an_architect_changing_code_is_stopped_and_the_change_is_kept() {
         }
     );
     assert_eq!(state, before);
-    assert!(store.history().unwrap().is_empty());
+    assert_eq!(store.history().unwrap(), Vec::<Handoff>::new());
     // Left for Lisa to look at.
     assert!(repo.root().join("src/main.rs").exists());
 
@@ -472,7 +472,7 @@ async fn a_failed_attempt_is_rolled_back_before_the_retry() {
     let readme = fs::read_to_string(repo.root().join("README.md")).unwrap();
     assert_eq!(readme, "A parser\n");
     assert!(repo.root().join("src/parser.rs").exists());
-    assert!(repo.changed_files().unwrap().is_empty());
+    assert_eq!(repo.changed_files().unwrap(), Vec::<String>::new());
 }
 
 #[tokio::test]
@@ -490,7 +490,7 @@ async fn uncommitted_changes_stop_the_run_before_any_role() {
         stop,
         StopReason::DirtyWorkingTree(vec!["README.md".to_string()])
     );
-    assert!(agent.calls().is_empty());
+    assert_eq!(agent.calls(), Vec::<Role>::new());
 }
 
 #[tokio::test]

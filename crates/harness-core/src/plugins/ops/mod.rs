@@ -443,7 +443,7 @@ mod tests {
         .unwrap_err();
         assert!(err.to_string().contains("hooks"), "{err}");
         assert!(!project.path().join(PLUGINS_DIR).join("review").exists());
-        assert!(repo.changed_files().unwrap().is_empty());
+        assert_eq!(repo.changed_files().unwrap(), Vec::<String>::new());
         // Without a role it is added, and says what it brings.
         let added = add(&repo, home.path(), &entry("review"), None, false, false).unwrap();
         assert!(added.contents.hooks);
@@ -463,7 +463,7 @@ mod tests {
             Some("mine/notes")
         );
         assert_eq!(config.roles[&Role::Tester].plugins, ["notes"]);
-        assert!(repo.changed_files().unwrap().is_empty());
+        assert_eq!(repo.changed_files().unwrap(), Vec::<String>::new());
         assert!(matches!(
             add(&repo, home.path(), &entry("notes"), None, false, false),
             Err(OpsError::Exists(_))
@@ -483,14 +483,14 @@ mod tests {
             .unwrap();
         assert_eq!(prepared.changes.added, ["commands/more.md"]);
         discard(&prepared);
-        assert!(repo.changed_files().unwrap().is_empty());
+        assert_eq!(repo.changed_files().unwrap(), Vec::<String>::new());
         let prepared = prepare_update(&repo, home.path(), "notes")
             .unwrap()
             .unwrap();
         apply_update(&repo, &prepared).unwrap();
         let folder = project.path().join(PLUGINS_DIR).join("notes");
         assert!(folder.join("commands/more.md").is_file());
-        assert!(repo.changed_files().unwrap().is_empty());
+        assert_eq!(repo.changed_files().unwrap(), Vec::<String>::new());
 
         // Removing the catalog keeps the plugins in the project.
         remove_catalog(home.path(), "mine").unwrap();
@@ -523,7 +523,7 @@ mod tests {
         assert!(!config.plugins.contains_key("review"));
         assert!(config.roles.values().all(|r| r.plugins.is_empty()));
         assert!(!folder.exists());
-        assert!(repo.changed_files().unwrap().is_empty());
+        assert_eq!(repo.changed_files().unwrap(), Vec::<String>::new());
         assert!(matches!(
             remove(&repo, "review"),
             Err(OpsError::NoPlugin(_))
