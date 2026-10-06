@@ -200,8 +200,13 @@ hint = "Enter or double click: go in · Backspace: up · c: choose · n: new fol
 naming_hint = "Type the name · Enter: create · Esc: cancel"
 new_name = "New folder name:"
 bad_name = "A folder name cannot be empty or contain /"
+create = "Create"
 
 [mcp]
+form_open_quote = "A quote \" is not closed"
+form_not_pair = "{word} is not NAME=value"
+form_address_spaces = "An address has no spaces"
+form_sign_in_address = "A sign-in through the browser is only for an address (https://...)"
 title = " MCP servers of the {role} "
 empty = "No MCP servers yet.\n\nThey are described in .harness/harness.toml as [mcp.<name>] with command, args and env; add one with «New server» or pick one «From catalog»."
 give = "Give to the {role}"
@@ -289,6 +294,8 @@ search_field = "Search"
 from_catalog = "From the MCP registry: read the command before saving, and fill in the empty values and <...> placeholders."
 
 [plugins]
+unusable_source = "a plugin from {kind}"
+unusable_name = "its name"
 title = " Plugins of the {role} "
 empty = "No plugins in this project yet.\n\nA plugin is a pack of skills, commands and subagents for one agent: Claude Code or Codex. It is kept in .harness/plugins/<name>/ and committed with the project. Take one with «From catalog» (f)."
 give = "Give to the {role}"
@@ -501,3 +508,32 @@ sign_in_back = "Press Enter to come back to harness…"
 signed_in = "{name}: login saved"
 sign_in_failed = "{name}: no login saved ({error})"
 job_removed = "{name} removed"
+
+[errors]
+no_home = "HOME is not set, so the harness cannot find ~/.harness"
+command_stopped = "The command stopped before it finished"
+download_stopped = "The download stopped before it finished"
+check_stopped = "The check stopped before it finished"
+search_stopped = "The search stopped before it finished"
+sign_in_stopped = "The sign-in stopped before it finished"
+retro_stopped = "The retrospective stopped before it finished"
+
+[stage]
+working = "working: {role}"
+approve_design = "waiting: approve the design"
+asked_for_help = "waiting: {role} asked for help"
+round_limit = "waiting: round limit reached"
+done = "done"
+short_working = "working"
+short_waiting = "waiting"
+
+[verdict]
+approved = "approved"
+rejected = "rejected"
+needs_human = "needs_human"
+
+[severity]
+low = "low"
+medium = "medium"
+high = "high"
+critical = "critical"

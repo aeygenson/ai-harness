@@ -86,7 +86,7 @@ impl App {
                         ),
                         Err(error) => Message::error(error.to_string()),
                     },
-                    None => Message::error("HOME is not set"),
+                    None => Message::error(self.tr.t("errors.no_home")),
                 }
             }
             Err(error) => Message::error(error),
@@ -234,7 +234,8 @@ impl App {
     /// OK in the server form.
     pub(crate) fn save_mcp(&mut self, old: Option<String>, form: &Form) -> Result<(), String> {
         let name = form.value(0).to_string();
-        let server = super::server_from(form.value(1), form.value(2), form.is_checked(3))?;
+        let server = super::server_from(form.value(1), form.value(2), form.is_checked(3))
+            .map_err(|problem| problem.text(&self.tr))?;
         harness_core::mcp::check_server(&name, &server).map_err(|e| e.to_string())?;
         self.save_settings(|text| {
             config::edit::set_mcp(text, old.as_deref(), &name, &server).map_err(|e| e.to_string())
@@ -266,7 +267,7 @@ impl App {
             return Err(self.tr.t("mcp.empty_secret").to_string());
         }
         let Some(home) = &self.home else {
-            return Err("HOME is not set".into());
+            return Err(self.tr.t("errors.no_home").to_string());
         };
         credentials::save_secret(
             &home.join("credentials"),

@@ -155,7 +155,7 @@ impl App {
                     plugins.reload(roles);
                 }
                 self.reload_catalog_views();
-                self.projects.reload();
+                self.projects.reload(&self.tr);
             }
             code => match self.tab {
                 Tab::Tasks => {

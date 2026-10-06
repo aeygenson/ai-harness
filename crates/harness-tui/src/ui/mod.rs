@@ -84,6 +84,10 @@ pub enum ButtonId {
     Choose,
     Up,
     NewFolder,
+    /// Creates the folder whose name is being typed in the folder browser.
+    CreateFolder,
+    /// Stops naming a new folder; the browser stays open.
+    StopNaming,
     ToggleHidden,
     /// The message field of the Tasks tab.
     Input,
@@ -179,6 +183,7 @@ fn is_primary(id: ButtonId) -> bool {
             | ButtonId::Save
             | ButtonId::UseProject
             | ButtonId::Choose
+            | ButtonId::CreateFolder
             | ButtonId::Retro(RetroButton::Generate | RetroButton::Apply)
             | ButtonId::Plugin(PluginButton::OpenCatalog)
             | ButtonId::PluginCatalog(PluginCatalogButton::Add)

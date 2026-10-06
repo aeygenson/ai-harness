@@ -332,7 +332,7 @@ impl RetroTab {
             Ok(result) => result,
             Err(std::sync::mpsc::TryRecvError::Empty) => return None,
             Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                Err("the retrospective stopped".into())
+                Err(tr.t("errors.retro_stopped").to_string())
             }
         };
         self.generating = None;

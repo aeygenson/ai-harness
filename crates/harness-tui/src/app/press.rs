@@ -121,6 +121,16 @@ impl App {
                     browser.naming = Some(String::new());
                 }
             }
+            ButtonId::CreateFolder => {
+                if let Some((_, browser)) = &mut self.browser {
+                    browser.create(&self.tr);
+                }
+            }
+            ButtonId::StopNaming => {
+                if let Some((_, browser)) = &mut self.browser {
+                    browser.naming = None;
+                }
+            }
             ButtonId::ToggleHidden => {
                 if let Some((_, browser)) = &mut self.browser {
                     browser.toggle_hidden();

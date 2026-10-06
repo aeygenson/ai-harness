@@ -311,9 +311,11 @@ struct App {
 
 impl App {
     fn new(home: Option<PathBuf>, start: &Path) -> Self {
+        let tr = I18n::load(home.as_deref());
         let mut app = Self {
             tab: Tab::Projects,
-            tr: I18n::load(home.as_deref()),
+            projects: ProjectsTab::load(home.clone(), &tr),
+            tr,
             home: home.clone(),
             project: None,
             tasks: None,
@@ -324,7 +326,6 @@ impl App {
             retro: None,
             edit: None,
             sign_in: None,
-            projects: ProjectsTab::load(home),
             agents: AgentsTab::new(),
             agent_checker: tabs::agents::check,
             agent_check: None,
@@ -390,12 +391,15 @@ impl App {
         self.mcp = Some(McpTab::load(self.home.as_deref()));
         self.project = Some(root.to_path_buf());
         self.tab = Tab::Tasks;
-        let saved = self.projects.update(|list| {
-            if !list.projects.iter().any(|p| p.path == root) {
-                list.add(&name_of(root), root);
-            }
-            list.last = Some(root.to_path_buf());
-        });
+        let saved = self.projects.update(
+            |list| {
+                if !list.projects.iter().any(|p| p.path == root) {
+                    list.add(&name_of(root), root);
+                }
+                list.last = Some(root.to_path_buf());
+            },
+            &self.tr,
+        );
         self.message = Some(match saved {
             Ok(()) => Message::info(self.tr.f("projects.opened", &[("name", &name_of(root))])),
             Err(error) => Message::error(self.tr.f("projects.not_saved", &[("error", &error)])),

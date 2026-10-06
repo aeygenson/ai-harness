@@ -193,8 +193,13 @@ hint = "Enter или двойной клик: войти · Backspace: ввер�
 naming_hint = "Введите имя · Enter: создать · Esc: отмена"
 new_name = "Имя новой папки:"
 bad_name = "Имя папки не может быть пустым или содержать /"
+create = "Создать"
 
 [mcp]
+form_open_quote = "Кавычка \" не закрыта"
+form_not_pair = "{word} — это не ИМЯ=значение"
+form_address_spaces = "В адресе не бывает пробелов"
+form_sign_in_address = "Вход через браузер бывает только для адреса (https://...)"
 title = " MCP-серверы роли {role} "
 empty = "MCP-серверов пока нет.\n\nОни описываются в .harness/harness.toml как [mcp.<имя>] с command, args и env; добавьте сервер кнопкой «Новый сервер» или выберите «Из каталога»."
 give = "Дать роли {role}"
@@ -282,6 +287,8 @@ search_field = "Искать"
 from_catalog = "Из реестра MCP: прочитайте команду перед сохранением и заполните пустые значения и подсказки <...>."
 
 [plugins]
+unusable_source = "плагин из {kind}"
+unusable_name = "его имя"
 title = " Плагины роли {role} "
 empty = "В проекте пока нет плагинов.\n\nПлагин — набор навыков, команд и субагентов для одного агента: Claude Code или Codex. Он лежит в .harness/plugins/<имя>/ и коммитится вместе с проектом. Возьмите плагин кнопкой «Из каталога» (f)."
 give = "Дать роли {role}"
@@ -493,3 +500,32 @@ sign_in_back = "Нажмите Enter, чтобы вернуться в harness�
 signed_in = "{name}: вход сохранён"
 sign_in_failed = "{name}: вход не сохранён ({error})"
 job_removed = "{name} удалён"
+
+[errors]
+no_home = "Не задана переменная HOME, поэтому harness не находит ~/.harness"
+command_stopped = "Команда остановилась, не закончив работу"
+download_stopped = "Загрузка остановилась, не закончившись"
+check_stopped = "Проверка остановилась, не закончившись"
+search_stopped = "Поиск остановился, не закончившись"
+sign_in_stopped = "Вход остановился, не закончившись"
+retro_stopped = "Ретроспектива остановилась, не закончившись"
+
+[stage]
+working = "работает: {role}"
+approve_design = "ждёт: одобрите проект"
+asked_for_help = "ждёт: {role} просит помощи"
+round_limit = "ждёт: достигнут предел раундов"
+done = "готово"
+short_working = "работает"
+short_waiting = "ждёт"
+
+[verdict]
+approved = "одобрено"
+rejected = "отклонено"
+needs_human = "нужен человек"
+
+[severity]
+low = "низкая"
+medium = "средняя"
+high = "высокая"
+critical = "критичная"

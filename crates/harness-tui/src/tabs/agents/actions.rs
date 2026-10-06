@@ -101,7 +101,7 @@ impl App {
                 let count = list.models.len();
                 match &self.home {
                     Some(home) => models::save(home, &list).map_err(|e| e.to_string()),
-                    None => Err("HOME is not set".into()),
+                    None => Err(self.tr.t("errors.no_home").to_string()),
                 }
                 .map(|()| count)
             });

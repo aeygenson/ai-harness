@@ -66,7 +66,7 @@ impl App {
                 let name = name.clone();
                 self.home
                     .clone()
-                    .ok_or_else(|| "HOME is not set".to_string())
+                    .ok_or_else(|| self.tr.t("errors.no_home").to_string())
                     .and_then(|home| {
                         plugins::ops::remove_catalog(&home, &name).map_err(|e| e.to_string())
                     })
@@ -96,7 +96,7 @@ impl App {
             }
             Purpose::Remove(path) => {
                 let path = path.clone();
-                let result = self.projects.update(|list| list.remove(&path));
+                let result = self.projects.update(|list| list.remove(&path), &self.tr);
                 if self.project.as_deref() == Some(path.as_path()) {
                     self.project = None;
                     self.tasks = None;

@@ -31,25 +31,26 @@ pub fn has_config(root: &Path) -> bool {
 }
 
 impl ProjectsTab {
-    pub fn load(home: Option<PathBuf>) -> Self {
+    pub fn load(home: Option<PathBuf>, tr: &I18n) -> Self {
         let mut tab = Self {
             home,
             list: Projects::default(),
             selected: 0,
             problem: None,
         };
-        tab.reload();
+        tab.reload(tr);
         tab
     }
 
-    pub fn reload(&mut self) {
+    /// Reads the list again from `~/.harness/projects.toml`.
+    pub fn reload(&mut self, tr: &I18n) {
         self.problem = None;
         match &self.home {
             Some(home) => match Projects::load(home) {
                 Ok(list) => self.list = list,
                 Err(error) => self.problem = Some(error.to_string()),
             },
-            None => self.problem = Some("HOME is not set".into()),
+            None => self.problem = Some(tr.t("errors.no_home").to_string()),
         }
         self.selected = self
             .selected
@@ -57,9 +58,9 @@ impl ProjectsTab {
     }
 
     /// Changes the list with `change` and saves it.
-    pub fn update(&mut self, change: impl FnOnce(&mut Projects)) -> Result<(), String> {
+    pub fn update(&mut self, change: impl FnOnce(&mut Projects), tr: &I18n) -> Result<(), String> {
         let Some(home) = &self.home else {
-            return Err("HOME is not set".into());
+            return Err(tr.t("errors.no_home").to_string());
         };
         change(&mut self.list);
         self.list.save(home).map_err(|e| e.to_string())?;
