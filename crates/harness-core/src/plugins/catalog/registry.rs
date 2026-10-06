@@ -46,6 +46,10 @@ impl Registry {
     }
 
     /// Writes the list to `marketplaces.toml`, creating `harness_home` if needed.
+    ///
+    /// # Panics
+    ///
+    /// Only on a bug: the list holds plain strings, which TOML can always write.
     pub fn save(&self, harness_home: &Path) -> Result<(), CatalogError> {
         let path = harness_home.join(REGISTRY_FILE);
         let io = |source| CatalogError::Io {

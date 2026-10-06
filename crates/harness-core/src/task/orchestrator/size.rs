@@ -47,9 +47,10 @@ pub fn oversized_changes(root: &Path, files: &[String], limit: u64) -> Vec<(Stri
 /// Bytes in a file, or in all files under a folder. Links are not followed.
 pub(super) fn size_of(path: &Path) -> u64 {
     match fs::symlink_metadata(path) {
-        Ok(meta) if meta.is_dir() => fs::read_dir(path)
-            .map(|entries| entries.flatten().map(|e| size_of(&e.path())).sum())
-            .unwrap_or(0),
+        // A folder that cannot be read counts as empty.
+        Ok(meta) if meta.is_dir() => fs::read_dir(path).map_or(0, |entries| {
+            entries.flatten().map(|e| size_of(&e.path())).sum()
+        }),
         Ok(meta) => meta.len(),
         Err(_) => 0,
     }

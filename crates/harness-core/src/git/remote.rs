@@ -16,11 +16,11 @@ pub fn fetch(url: &str, revision: Option<&str>, into: &Path) -> Result<String, G
         path: into.to_path_buf(),
         source,
     })?;
-    if !into.join(".git").exists() {
+    if into.join(".git").exists() {
+        outside_git(into, &["remote", "set-url", "origin", url])?;
+    } else {
         outside_git(into, &["init", "--quiet"])?;
         outside_git(into, &["remote", "add", "origin", url])?;
-    } else {
-        outside_git(into, &["remote", "set-url", "origin", url])?;
     }
     let revision = revision.unwrap_or("HEAD");
     outside_git(

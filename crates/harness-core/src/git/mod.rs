@@ -1,7 +1,7 @@
 //! The few git operations the harness needs, done by running the `git` program.
 //!
 //! Why the `git` program and not a Rust git library? It is the same git Lisa uses
-//! in the terminal and in RustRover, so the harness sees exactly what she sees,
+//! in the terminal and in `RustRover`, so the harness sees exactly what she sees,
 //! and there is no extra dependency to learn.
 
 mod history;

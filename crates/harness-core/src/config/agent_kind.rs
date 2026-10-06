@@ -19,7 +19,7 @@ pub enum AgentKind {
     Codex,
     /// Antigravity CLI (`agy`).
     Antigravity,
-    /// DeepSeek Harness (`dsh`).
+    /// `DeepSeek` Harness (`dsh`).
     Dsh,
 }
 
@@ -43,7 +43,7 @@ impl AgentKind {
     }
 
     /// Whose login the agent needs, the folder name in `~/.harness/credentials/`:
-    /// DeepSeek Harness uses the DeepSeek key.
+    /// `DeepSeek` Harness uses the `DeepSeek` key.
     pub fn login_name(self) -> &'static str {
         match self {
             AgentKind::Dsh => "deepseek",
@@ -71,7 +71,7 @@ impl fmt::Display for AgentKind {
 /// The error when a text is not one of the agent names.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum UnknownAgent {
-    /// The old DeepSeek-inside-Codex agent, replaced by DeepSeek Harness.
+    /// The old DeepSeek-inside-Codex agent, replaced by `DeepSeek` Harness.
     #[error(
         "agent \"codex+deepseek\" was removed; use \"dsh\" (DeepSeek Harness, \
          with the same DeepSeek key)"

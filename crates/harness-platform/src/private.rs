@@ -52,7 +52,10 @@ pub fn is_private(path: &Path) -> io::Result<bool> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        Ok(fs::metadata(path)?.permissions().mode() & 0o077 == 0)
+        // The read, write and run bits of the group and of all other users:
+        // a private file has none of them set.
+        const GROUP_AND_OTHER_BITS: u32 = 0o077;
+        Ok(fs::metadata(path)?.permissions().mode() & GROUP_AND_OTHER_BITS == 0)
     }
     #[cfg(not(unix))]
     {

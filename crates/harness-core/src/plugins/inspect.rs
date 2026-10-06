@@ -14,7 +14,7 @@ pub struct Contents {
     pub hooks: bool,
     /// Its own MCP or LSP servers.
     pub servers: bool,
-    /// Codex apps (ChatGPT connectors).
+    /// Codex apps (`ChatGPT` connectors).
     pub apps: bool,
 }
 

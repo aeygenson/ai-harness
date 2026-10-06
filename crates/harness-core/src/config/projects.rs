@@ -178,9 +178,10 @@ pub fn init(root: &Path) -> Result<Initialized, ProjectError> {
 
 /// A project name from its folder: `~/code/harness-test` -> `harness-test`.
 pub fn name_of(path: &Path) -> String {
-    path.file_name()
-        .map(|n| n.to_string_lossy().into_owned())
-        .unwrap_or_else(|| path.display().to_string())
+    match path.file_name() {
+        Some(name) => name.to_string_lossy().into_owned(),
+        None => path.display().to_string(),
+    }
 }
 
 #[cfg(test)]

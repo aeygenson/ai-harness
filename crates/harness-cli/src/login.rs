@@ -47,7 +47,7 @@ fn login_claude(dir: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Saves the DeepSeek API key like the Claude token: in
+/// Saves the `DeepSeek` API key like the Claude token: in
 /// `~/.harness/credentials/deepseek/`, readable only by Lisa. The key is typed
 /// without showing it on the screen.
 fn login_deepseek(dir: &Path) -> Result<()> {
@@ -64,7 +64,7 @@ fn login_deepseek(dir: &Path) -> Result<()> {
     Ok(())
 }
 
-/// A DeepSeek key is `sk-` and letters or digits, with no spaces. Pasting it
+/// A `DeepSeek` key is `sk-` and letters or digits, with no spaces. Pasting it
 /// twice into the hidden prompt is easy, because nothing shows up.
 fn check_deepseek_key(key: &str) -> Result<()> {
     let copies = key.matches("sk-").count();

@@ -106,7 +106,7 @@ mod tests {
         Model {
             id: id.into(),
             name: None,
-            efforts: efforts.iter().map(|e| e.to_string()).collect(),
+            efforts: efforts.iter().map(ToString::to_string).collect(),
             default_effort: default_effort.map(Into::into),
             default,
         }

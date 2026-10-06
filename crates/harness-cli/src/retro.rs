@@ -1,6 +1,7 @@
 //! `harness retro ...`: statistics of finished tasks, the retro agent's
 //! proposals, and applying the ones Lisa picks.
 
+use std::fmt::Write as _;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
@@ -101,11 +102,13 @@ pub(crate) fn retro_show(project: &Path, number: &str) -> Result<()> {
         } else {
             ""
         };
-        text.push_str(&format!(
+        // Writing into a `String` cannot fail, so `let _ =` ignores the `Result`.
+        let _ = write!(
+            text,
             "\n{}.{mark} {}",
             proposal.id,
             proposal.describe(&harness_dir, &config)
-        ));
+        );
     }
     let _ = io::stdout().write_all(text.as_bytes());
     Ok(())

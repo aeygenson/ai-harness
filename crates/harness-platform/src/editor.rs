@@ -2,7 +2,7 @@
 //! or only to look at it (Zed opens it and the TUI goes on).
 //!
 //! Zed first (`zed --wait`), then `$VISUAL`, `$EDITOR`, and last the
-//! system's own editor: KDE's `kate --block` on Linux, TextEdit on macOS
+//! system's own editor: KDE's `kate --block` on Linux, `TextEdit` on macOS
 //! (`open -W -t`, which waits until it is closed), Notepad on Windows. The TUI gives the
 //! terminal back while the editor is open, so a terminal editor such as vim
 //! works too.

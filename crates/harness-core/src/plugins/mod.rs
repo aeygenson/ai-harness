@@ -20,7 +20,7 @@
 //! Two parts of a plugin run programs by themselves: hooks (commands on
 //! events) and MCP or LSP servers. They could get around the harness's own
 //! rules, so a plugin that has them is refused unless its settings allow them.
-//! A Codex plugin with apps (`.app.json`, ChatGPT connectors) is always
+//! A Codex plugin with apps (`.app.json`, `ChatGPT` connectors) is always
 //! refused: apps reach services outside the project.
 //!
 //! The folder also holds `catalog` (plugin catalogs), `install` (copying a

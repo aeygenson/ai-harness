@@ -1,6 +1,7 @@
 //! The task text for the Retrospective agent: the statistics, earlier settings, the
 //! current skills and an example of the answer it must write.
 
+use std::fmt::Write as _;
 use std::fs;
 use std::path::Path;
 
@@ -61,7 +62,9 @@ pub fn prompt(
     );
 
     let skills_dir = harness_dir.join(SKILLS_DIR);
-    text.push_str(&format!(
+    // Writing into a `String` cannot fail, so `let _ =` ignores the `Result`.
+    let _ = write!(
+        text,
         "Skills are files {dir}/<name>.md that start with\n---\n\
          description: one line about the skill\n---\n\
          followed by the instructions. Names use lowercase letters, digits and '-'.\n\
@@ -69,14 +72,15 @@ pub fn prompt(
          reads the file when needed; in `always_skills` the whole file is in its prompt.\n\
          The roles now have:\n",
         dir = skills_dir.display()
-    ));
+    );
     for (role, settings) in &config.roles {
-        text.push_str(&format!(
-            "- {}: skills = {:?}, always_skills = {:?}\n",
+        let _ = writeln!(
+            text,
+            "- {}: skills = {:?}, always_skills = {:?}",
             role.as_str(),
             settings.skills,
             settings.always_skills
-        ));
+        );
     }
     if past.is_empty() {
         text.push_str("The tasks ran with these same settings.\n");
@@ -86,24 +90,27 @@ pub fn prompt(
              judge each task by the settings it ran with, not by the current ones:\n",
         );
         for settings in past {
-            text.push_str(&format!(
+            let _ = write!(
+                text,
                 "harness.toml when {} finished:\n```toml\n{}\n```\n",
                 settings.tasks.join(", "),
                 settings.text.trim_end()
-            ));
+            );
         }
     }
     let files = skill_files(&skills_dir);
     if files.is_empty() {
         text.push_str("There are no skill files yet.\n");
     } else {
-        text.push_str(&format!(
-            "Skill files: {}. Read a file before you propose to change it.\n",
+        let _ = writeln!(
+            text,
+            "Skill files: {}. Read a file before you propose to change it.",
             files.join(", ")
-        ));
+        );
     }
 
-    text.push_str(&format!(
+    let _ = write!(
+        text,
         "\nYou may propose only skills: a new skill file, a new text for an existing \
          one, and giving a skill to a role. You cannot propose changes to role \
          prompts, permissions, agents, models, MCP servers or plugins; write such \
@@ -125,7 +132,7 @@ pub fn prompt(
          Do not commit to git; the harness does that.\n",
         out = output_dir.display(),
         example = EXAMPLE,
-    ));
+    );
     text
 }
 

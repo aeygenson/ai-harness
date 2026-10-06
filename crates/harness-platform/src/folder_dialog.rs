@@ -35,7 +35,7 @@ fn native_command(
     }
 }
 
-/// macOS: AppleScript's «choose folder», run by `osascript`, which comes
+/// macOS: `AppleScript`'s «choose folder», run by `osascript`, which comes
 /// with every Mac. The title and the folder are passed as arguments, never
 /// written into the script, so quotes in them cannot change it. Cancel ends
 /// it with an error (exit code 1).
