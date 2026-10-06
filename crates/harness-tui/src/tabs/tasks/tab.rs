@@ -897,35 +897,7 @@ impl TasksTab {
         };
         self.draw_log(frame, log_area, hits, tr);
 
-        let items: Vec<ListItem> = self
-            .tasks
-            .iter()
-            .map(|t| {
-                let (mark, style) = match t.state.stage {
-                    Stage::Done => ("✓", theme::ok()),
-                    Stage::Working(_) => ("●", theme::running()),
-                    Stage::WaitingForHuman(_) => ("◆", theme::warn()),
-                };
-                ListItem::new(Line::from(vec![
-                    Span::raw(format!("{}  ", t.id)),
-                    Span::styled(format!("{mark} {}", short_stage(t.state.stage, tr)), style),
-                ]))
-            })
-            .collect();
-        let title = match self.filter {
-            Some(role) => tr.f("tasks.title_filtered", &[("role", &role)]),
-            None => tr.t("tasks.title").to_string(),
-        };
-        draw_list(
-            frame,
-            hits,
-            tasks_area,
-            ListId::Tasks,
-            &title,
-            items,
-            self.task,
-            self.focus == Focus::Tasks,
-        );
+        self.draw_tasks(frame, tasks_area, hits, tr);
         self.draw_roles(frame, roles_area, hits, tr);
 
         let Some(task) = self.current() else {
@@ -968,6 +940,52 @@ impl TasksTab {
             self.focus == Focus::Steps,
         );
 
+        self.draw_step(frame, task, detail_area, hits, tr);
+        self.draw_input(frame, input_area, hits, tr);
+    }
+
+    /// The list of tasks, each with a mark for where it stands.
+    fn draw_tasks(&self, frame: &mut Frame, area: Rect, hits: &mut Hits, tr: &I18n) {
+        let items: Vec<ListItem> = self
+            .tasks
+            .iter()
+            .map(|t| {
+                let (mark, style) = match t.state.stage {
+                    Stage::Done => ("✓", theme::ok()),
+                    Stage::Working(_) => ("●", theme::running()),
+                    Stage::WaitingForHuman(_) => ("◆", theme::warn()),
+                };
+                ListItem::new(Line::from(vec![
+                    Span::raw(format!("{}  ", t.id)),
+                    Span::styled(format!("{mark} {}", short_stage(t.state.stage, tr)), style),
+                ]))
+            })
+            .collect();
+        let title = match self.filter {
+            Some(role) => tr.f("tasks.title_filtered", &[("role", &role)]),
+            None => tr.t("tasks.title").to_string(),
+        };
+        draw_list(
+            frame,
+            hits,
+            area,
+            ListId::Tasks,
+            &title,
+            items,
+            self.task,
+            self.focus == Focus::Tasks,
+        );
+    }
+
+    /// The selected step (or the task description), with its file links clickable.
+    fn draw_step(
+        &self,
+        frame: &mut Frame,
+        task: &TaskView,
+        area: Rect,
+        hits: &mut Hits,
+        tr: &I18n,
+    ) {
         let (title, text, links) = match task.steps.get(self.step) {
             Some(step) => {
                 let (text, links) = step_text(step, &self.artifacts(step), tr);
@@ -983,9 +1001,9 @@ impl TasksTab {
                 Vec::new(),
             ),
         };
-        let title = self.zoom_title(Zoom::Step, &title, detail_area, hits);
+        let title = self.zoom_title(Zoom::Step, &title, area, hits);
         let block = panel(&title, false);
-        let inner = block.inner(detail_area);
+        let inner = block.inner(area);
         // Where each link is on the screen, after wrapping and scrolling.
         for (index, &line) in links.iter().enumerate() {
             let before = Paragraph::new(Text::from(text.lines[..line].to_vec()))
@@ -1007,9 +1025,8 @@ impl TasksTab {
                 .block(block)
                 .wrap(Wrap { trim: false })
                 .scroll((self.scroll, 0)),
-            detail_area,
+            area,
         );
-        self.draw_input(frame, input_area, hits, tr);
     }
 
     /// The agents of the roles; a click on a role filters the tasks.

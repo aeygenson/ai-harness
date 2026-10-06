@@ -691,57 +691,16 @@ impl RolesTab {
         let (mut skills_seen, mut mcp_seen, mut plugins_seen) = (false, false, false);
         for (index, row) in self.rows().into_iter().enumerate() {
             let line = match row {
-                Row::Agent(name) => {
-                    let mark = if agent == Some(name) { "(•)" } else { "( )" };
-                    let mut spans = vec![Span::raw(format!("  {mark} {name:<16}"))];
-                    if !self.is_ready(name) {
-                        spans.push(Span::styled(
-                            tr.t("roles.not_ready").to_string(),
-                            theme::bad(),
-                        ));
-                    }
-                    Line::from(spans)
-                }
+                Row::Agent(name) => self.agent_line(name, agent, tr),
                 Row::Model(None) => {
                     lines.push((None, Line::default()));
                     lines.push(heading("roles.model"));
                     let mark = if model.is_none() { "(•)" } else { "( )" };
                     Line::from(format!("  {mark} {}", tr.t("roles.default_model")))
                 }
-                Row::Model(Some(id)) => {
-                    let mark = if model == Some(id.as_str()) {
-                        "(•)"
-                    } else {
-                        "( )"
-                    };
-                    let about = list
-                        .and_then(|l| l.find(&id))
-                        .map(|m| {
-                            let default = if m.default {
-                                format!("{} ", tr.t("roles.agents_default"))
-                            } else {
-                                String::new()
-                            };
-                            format!("{default}{}", m.name.clone().unwrap_or_default())
-                        })
-                        .unwrap_or_default();
-                    Line::from(vec![
-                        Span::raw(format!("  {mark} {id:<24} ")),
-                        Span::styled(about, dim),
-                    ])
-                }
+                Row::Model(Some(id)) => self.model_line(&id, model, tr),
                 Row::OtherModel => {
-                    let typed = model.filter(|m| list.is_none_or(|l| l.find(m).is_none()));
-                    let line = match typed {
-                        Some(m) => Line::from(vec![
-                            Span::raw(format!(
-                                "  (•) {} ",
-                                tr.f("roles.model_typed", &[("model", &m)])
-                            )),
-                            Span::styled(tr.t("roles.model_hint").to_string(), dim),
-                        ]),
-                        None => Line::from(format!("  ( ) {}", tr.t("roles.model_other"))),
-                    };
+                    let line = self.other_model_line(model, tr);
                     if list.is_none() {
                         lines.push((Some(index), line));
                         let hint = tr.f(
@@ -755,31 +714,7 @@ impl RolesTab {
                 }
                 Row::Effort => {
                     lines.push((None, Line::default()));
-                    let mut spans =
-                        vec![Span::styled(format!("{:<10}", tr.t("roles.effort")), bold)];
-                    let mut levels: Vec<Option<String>> = vec![None];
-                    levels.extend(self.effort_levels().into_iter().map(Some));
-                    if effort.is_some() && !levels.iter().any(|l| l.as_deref() == effort) {
-                        levels.push(effort.map(str::to_string));
-                    }
-                    for (i, level) in levels.iter().enumerate() {
-                        let name = level
-                            .clone()
-                            .unwrap_or_else(|| tr.t("roles.default_effort").to_string());
-                        if i > 0 {
-                            spans.push(Span::styled(" · ", dim));
-                        }
-                        if level.as_deref() == effort {
-                            spans.push(Span::styled(format!("[{name}]"), bold));
-                        } else {
-                            spans.push(Span::styled(name, dim));
-                        }
-                    }
-                    spans.push(Span::styled(
-                        format!("   {}", tr.t("roles.effort_hint")),
-                        dim,
-                    ));
-                    Line::from(spans)
+                    self.effort_line(effort, tr)
                 }
                 Row::Skill(name) => {
                     if !skills_seen {
@@ -791,24 +726,7 @@ impl RolesTab {
                             Line::styled(tr.t("roles.skills_hint").to_string(), dim),
                         ));
                     }
-                    let mark = if settings.is_some_and(|s| s.always_skills.contains(&name)) {
-                        "[■]"
-                    } else if settings.is_some_and(|s| s.skills.contains(&name)) {
-                        "[x]"
-                    } else {
-                        "[ ]"
-                    };
-                    let about = match self.skills.iter().find(|s| s.name == name) {
-                        None => Span::styled(tr.t("roles.no_file").to_string(), theme::bad()),
-                        Some(SkillFile {
-                            description: None, ..
-                        }) => Span::styled(tr.t("roles.no_description").to_string(), theme::bad()),
-                        Some(SkillFile {
-                            description: Some(d),
-                            ..
-                        }) => Span::styled(d.clone(), dim),
-                    };
-                    Line::from(vec![Span::raw(format!("  {mark} {name:<24} ")), about])
+                    self.skill_line(&name, settings, tr)
                 }
                 Row::Mcp(name) => {
                     if !mcp_seen {
@@ -816,17 +734,7 @@ impl RolesTab {
                         lines.push((None, Line::default()));
                         lines.push(heading("roles.mcp"));
                     }
-                    let on = settings.is_some_and(|s| s.mcp.contains(&name));
-                    let about = match self.saved.mcp.get(&name) {
-                        Some(server) => {
-                            Span::styled(server.command.clone().unwrap_or_default(), dim)
-                        }
-                        None => Span::styled(tr.t("roles.not_described").to_string(), theme::bad()),
-                    };
-                    Line::from(vec![
-                        Span::raw(format!("  {} {name:<24} ", check(on))),
-                        about,
-                    ])
+                    self.mcp_line(&name, settings, tr)
                 }
                 Row::Plugin(name) => {
                     if !plugins_seen {
@@ -838,17 +746,7 @@ impl RolesTab {
                         lines.push((None, Line::default()));
                         lines.push((None, Line::styled(title, bold)));
                     }
-                    let on = settings.is_some_and(|s| s.plugins.contains(&name));
-                    let about = match self.saved.plugins.get(&name) {
-                        Some(plugin) => {
-                            Span::styled(plugin.source.clone().unwrap_or_default(), dim)
-                        }
-                        None => Span::styled(tr.t("roles.not_described").to_string(), theme::bad()),
-                    };
-                    Line::from(vec![
-                        Span::raw(format!("  {} {name:<24} ", check(on))),
-                        about,
-                    ])
+                    self.plugin_line(&name, settings, tr)
                 }
             };
             lines.push((Some(index), line));
@@ -872,6 +770,138 @@ impl RolesTab {
             ));
         }
         lines
+    }
+
+    /// An agent to choose, with a note when it is not installed or signed in.
+    fn agent_line(&self, name: AgentKind, chosen: Option<AgentKind>, tr: &I18n) -> Line<'static> {
+        let mark = if chosen == Some(name) { "(•)" } else { "( )" };
+        let mut spans = vec![Span::raw(format!("  {mark} {name:<16}"))];
+        if !self.is_ready(name) {
+            spans.push(Span::styled(
+                tr.t("roles.not_ready").to_string(),
+                theme::bad(),
+            ));
+        }
+        Line::from(spans)
+    }
+
+    /// «Other model»: chosen when the role's model is not in the agent's list.
+    fn other_model_line(&self, model: Option<&str>, tr: &I18n) -> Line<'static> {
+        let list = self.model_list();
+        let typed = model.filter(|m| list.is_none_or(|l| l.find(m).is_none()));
+        match typed {
+            Some(m) => Line::from(vec![
+                Span::raw(format!(
+                    "  (•) {} ",
+                    tr.f("roles.model_typed", &[("model", &m)])
+                )),
+                Span::styled(tr.t("roles.model_hint").to_string(), theme::dim()),
+            ]),
+            None => Line::from(format!("  ( ) {}", tr.t("roles.model_other"))),
+        }
+    }
+
+    /// A model of the agent's list, with what the list says about it.
+    fn model_line(&self, id: &str, model: Option<&str>, tr: &I18n) -> Line<'static> {
+        let dim = theme::dim();
+        let list = self.model_list();
+        let mark = if model == Some(id) { "(•)" } else { "( )" };
+        let about = list
+            .and_then(|l| l.find(id))
+            .map(|m| {
+                let default = if m.default {
+                    format!("{} ", tr.t("roles.agents_default"))
+                } else {
+                    String::new()
+                };
+                format!("{default}{}", m.name.clone().unwrap_or_default())
+            })
+            .unwrap_or_default();
+        Line::from(vec![
+            Span::raw(format!("  {mark} {id:<24} ")),
+            Span::styled(about, dim),
+        ])
+    }
+
+    /// The effort levels in one line, the chosen one in brackets.
+    fn effort_line(&self, effort: Option<&str>, tr: &I18n) -> Line<'static> {
+        let bold = Style::new().add_modifier(Modifier::BOLD);
+        let dim = theme::dim();
+        let mut spans = vec![Span::styled(format!("{:<10}", tr.t("roles.effort")), bold)];
+        let mut levels: Vec<Option<String>> = vec![None];
+        levels.extend(self.effort_levels().into_iter().map(Some));
+        if effort.is_some() && !levels.iter().any(|l| l.as_deref() == effort) {
+            levels.push(effort.map(str::to_string));
+        }
+        for (i, level) in levels.iter().enumerate() {
+            let name = level
+                .clone()
+                .unwrap_or_else(|| tr.t("roles.default_effort").to_string());
+            if i > 0 {
+                spans.push(Span::styled(" · ", dim));
+            }
+            if level.as_deref() == effort {
+                spans.push(Span::styled(format!("[{name}]"), bold));
+            } else {
+                spans.push(Span::styled(name, dim));
+            }
+        }
+        spans.push(Span::styled(
+            format!("   {}", tr.t("roles.effort_hint")),
+            dim,
+        ));
+        Line::from(spans)
+    }
+
+    /// A skill: whether the role always uses it, may use it, or not, and its description.
+    fn skill_line(&self, name: &str, settings: Option<&RoleConfig>, tr: &I18n) -> Line<'static> {
+        let dim = theme::dim();
+        let mark = if settings.is_some_and(|s| s.always_skills.iter().any(|n| n == name)) {
+            "[■]"
+        } else if settings.is_some_and(|s| s.skills.iter().any(|n| n == name)) {
+            "[x]"
+        } else {
+            "[ ]"
+        };
+        let about = match self.skills.iter().find(|s| s.name == name) {
+            None => Span::styled(tr.t("roles.no_file").to_string(), theme::bad()),
+            Some(SkillFile {
+                description: None, ..
+            }) => Span::styled(tr.t("roles.no_description").to_string(), theme::bad()),
+            Some(SkillFile {
+                description: Some(d),
+                ..
+            }) => Span::styled(d.clone(), dim),
+        };
+        Line::from(vec![Span::raw(format!("  {mark} {name:<24} ")), about])
+    }
+
+    /// An MCP server: whether the role has it, and its command.
+    fn mcp_line(&self, name: &str, settings: Option<&RoleConfig>, tr: &I18n) -> Line<'static> {
+        let dim = theme::dim();
+        let on = settings.is_some_and(|s| s.mcp.iter().any(|n| n == name));
+        let about = match self.saved.mcp.get(name) {
+            Some(server) => Span::styled(server.command.clone().unwrap_or_default(), dim),
+            None => Span::styled(tr.t("roles.not_described").to_string(), theme::bad()),
+        };
+        Line::from(vec![
+            Span::raw(format!("  {} {name:<24} ", check(on))),
+            about,
+        ])
+    }
+
+    /// A plugin: whether the role has it, and where it came from.
+    fn plugin_line(&self, name: &str, settings: Option<&RoleConfig>, tr: &I18n) -> Line<'static> {
+        let dim = theme::dim();
+        let on = settings.is_some_and(|s| s.plugins.iter().any(|n| n == name));
+        let about = match self.saved.plugins.get(name) {
+            Some(plugin) => Span::styled(plugin.source.clone().unwrap_or_default(), dim),
+            None => Span::styled(tr.t("roles.not_described").to_string(), theme::bad()),
+        };
+        Line::from(vec![
+            Span::raw(format!("  {} {name:<24} ", check(on))),
+            about,
+        ])
     }
 }
 
