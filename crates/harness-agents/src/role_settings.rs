@@ -10,12 +10,13 @@ use std::time::Duration;
 use harness_core::config::AgentKind;
 use harness_core::mcp::McpServer;
 use harness_core::plugins::Plugin;
+use harness_core::secret::Secret;
 use harness_core::task::agent::RoleJob;
 use harness_core::task::handoff::Role;
 
 /// How long a role may run when `harness.toml` does not say: 30 minutes,
 /// enough for a large change, short enough to notice a stuck agent.
-pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30 * 60);
+pub const DEFAULT_TIMEOUT: Duration = Duration::from_mins(30);
 
 /// The per-role settings an adapter runs with. Built with the `with_*`
 /// methods, like the adapters themselves.
@@ -102,7 +103,7 @@ impl RoleSettings {
     pub fn server_secrets(&self, role: Role) -> Vec<&str> {
         self.servers(role)
             .iter()
-            .flat_map(|server| server.env.values().map(|value| value.expose()))
+            .flat_map(|server| server.env.values().map(Secret::expose))
             .collect()
     }
 
@@ -122,8 +123,6 @@ impl RoleSettings {
 mod tests {
     use super::*;
     use std::path::PathBuf;
-
-    use harness_core::secret::Secret;
 
     fn job(role: Role) -> RoleJob {
         RoleJob {

@@ -384,7 +384,8 @@ async fn build_output_is_not_committed() {
     let (store, mut state) = new_task(&repo);
     state.stage = Stage::Working(Role::Developer);
     let before = state.clone();
-    let big = "x".repeat(MAX_CHANGE_BYTES as usize + 1);
+    let limit = usize::try_from(MAX_CHANGE_BYTES).expect("the 50 MB limit fits in memory");
+    let big = "x".repeat(limit + 1);
     let agent = MockAgent::new().then(
         Role::Developer,
         MockStep::finish_writing(

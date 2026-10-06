@@ -147,25 +147,21 @@ pub(super) fn http(
     }
     let status = child.wait().map_err(|e| e.to_string())?;
     let mut reader = BufReader::new(stdout.as_bytes());
-    match crate::mcp::http_head::read_head(&mut reader) {
-        Some((code, headers)) => {
-            let mut body = String::new();
-            let _ = reader.read_to_string(&mut body);
-            Ok(Answer {
-                code,
-                headers,
-                body,
-            })
-        }
-        None => {
-            let why = stderr.lines().map(str::trim).rfind(|l| !l.is_empty());
-            Err(safe_line(
-                &format!(
-                    "{address}: {}",
-                    why.unwrap_or(&format!("no answer ({status})"))
-                ),
-                300,
-            ))
-        }
-    }
+    let Some((code, headers)) = crate::mcp::http_head::read_head(&mut reader) else {
+        let why = stderr.lines().map(str::trim).rfind(|l| !l.is_empty());
+        return Err(safe_line(
+            &format!(
+                "{address}: {}",
+                why.unwrap_or(&format!("no answer ({status})"))
+            ),
+            300,
+        ));
+    };
+    let mut body = String::new();
+    let _ = reader.read_to_string(&mut body);
+    Ok(Answer {
+        code,
+        headers,
+        body,
+    })
 }

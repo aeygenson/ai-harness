@@ -88,8 +88,8 @@ async fn a_well_behaved_agent_finishes_the_role() {
     let prompt = fs::read_to_string(seen.with_extension("prompt")).unwrap();
     assert!(prompt.contains("Design a parser"));
 
-    let step = store.dir().join("round-01/01-architect");
-    let log = fs::read_to_string(step.join("agent.log")).unwrap();
+    let step_dir = store.dir().join("round-01/01-architect");
+    let log = fs::read_to_string(step_dir.join("agent.log")).unwrap();
     assert!(log.starts_with("agent: claude, model: default"), "{log}");
     assert!(log.contains("\"result\":\"Done.\""));
     assert!(!log.contains("tok-123"));
@@ -160,7 +160,7 @@ async fn a_missing_claude_program_is_a_role_failure() {
 
     match stop {
         StopReason::RoleFailed { problem, .. } => {
-            assert!(problem.contains("cannot start"), "{problem}")
+            assert!(problem.contains("cannot start"), "{problem}");
         }
         other => panic!("expected RoleFailed, got {other:?}"),
     }

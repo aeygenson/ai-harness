@@ -107,7 +107,7 @@ pub fn parse_codex(output: &str) -> Result<Vec<Model>, String> {
     Ok(models)
 }
 
-/// DeepSeek's `GET /models`; no effort levels: reasoning is its own model.
+/// `DeepSeek`'s `GET /models`; no effort levels: reasoning is its own model.
 pub fn parse_deepseek(output: &str) -> Result<Vec<Model>, String> {
     let json: Value = serde_json::from_str(output)
         .map_err(|error| format!("DeepSeek gave no model list: {error}"))?;
@@ -137,14 +137,14 @@ pub fn parse_deepseek(output: &str) -> Result<Vec<Model>, String> {
         .collect())
 }
 
-/// DeepSeek's models as DeepSeek Harness runs them: with its effort levels.
+/// `DeepSeek`'s models as `DeepSeek` Harness runs them: with its effort levels.
 pub fn with_dsh_efforts(models: Vec<Model>) -> Vec<Model> {
     models
         .into_iter()
         .map(|model| Model {
             efforts: crate::adapters::dsh::EFFORTS
                 .iter()
-                .map(|e| e.to_string())
+                .map(ToString::to_string)
                 .collect(),
             default_effort: Some(crate::adapters::dsh::DEFAULT_EFFORT.to_string()),
             ..model

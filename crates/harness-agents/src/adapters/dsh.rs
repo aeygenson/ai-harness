@@ -1,9 +1,9 @@
-//! Runs a role with DeepSeek Harness (`dsh --profile headless`), DeepSeek's
+//! Runs a role with `DeepSeek` Harness (`dsh --profile headless`), `DeepSeek`'s
 //! own console agent, isolated from Lisa's own setup.
 //!
 //! Isolation:
 //! - an empty environment plus a short whitelist (see `process`), so the
-//!   DeepSeek key is not in the environment the agent's commands inherit;
+//!   `DeepSeek` key is not in the environment the agent's commands inherit;
 //! - `DSH_HOME` (dsh's settings, sessions and keys) is a fresh temporary
 //!   folder outside the project, deleted after the role. It holds only the
 //!   key, in dsh's own `.credentials.yaml`, which dsh never puts into the
@@ -11,7 +11,7 @@
 //!   skills and MCP servers never reach a role, and no history is kept;
 //! - the patch (`--patch`, dsh's settings overlay) sets the model and effort,
 //!   gives the role its own MCP servers from harness.toml and turns off what
-//!   should not run: uploading the session log and feedback to DeepSeek, and
+//!   should not run: uploading the session log and feedback to `DeepSeek`, and
 //!   skills from folders (the harness gives skills through the prompt);
 //! - dsh's own sandbox (`workspace-write`, bwrap or Landlock on Linux):
 //!   commands may write only inside the project. A command that needs more
@@ -33,12 +33,12 @@ use crate::install::credentials::Secret;
 use crate::process::{self, failed};
 use crate::role_settings::RoleSettings;
 
-/// The variable in Lisa's shell that may hold the DeepSeek API key; it wins
+/// The variable in Lisa's shell that may hold the `DeepSeek` API key; it wins
 /// over the saved one. dsh's own name for the key too.
 pub const KEY_ENV: &str = "DEEPSEEK_API_KEY";
 /// The model dsh uses when harness.toml names none.
 pub const DEFAULT_MODEL: &str = "deepseek-flash";
-/// The effort levels of DeepSeek models in dsh, weakest first.
+/// The effort levels of `DeepSeek` models in dsh, weakest first.
 pub const EFFORTS: [&str; 4] = ["off", "low", "high", "max"];
 /// The level dsh uses when harness.toml names none.
 pub const DEFAULT_EFFORT: &str = "high";
@@ -47,10 +47,10 @@ pub const DEFAULT_EFFORT: &str = "high";
 const CREDENTIALS_FILE: &str = ".credentials.yaml";
 /// Our settings overlay inside `DSH_HOME`.
 const PATCH_FILE: &str = "harness.patch.json";
-/// dsh's provider for DeepSeek's own API.
+/// dsh's provider for `DeepSeek`'s own API.
 const PROVIDER: &str = "deepseek-official";
 
-/// Runs a role with DeepSeek Harness (`dsh`), using a saved DeepSeek API key.
+/// Runs a role with `DeepSeek` Harness (`dsh`), using a saved `DeepSeek` API key.
 #[derive(Debug, Clone)]
 pub struct Dsh {
     program: PathBuf,
@@ -60,7 +60,7 @@ pub struct Dsh {
 }
 
 impl Dsh {
-    /// dsh with the DeepSeek `key`, running each role with its `settings`.
+    /// dsh with the `DeepSeek` `key`, running each role with its `settings`.
     pub fn new(key: Secret, settings: RoleSettings) -> Self {
         Self {
             program: PathBuf::from("dsh"),

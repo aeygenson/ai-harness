@@ -4,7 +4,7 @@
 #[derive(Debug, PartialEq, Eq)]
 pub(super) struct RunResult {
     pub(super) status: String,
-    /// Actions agy refused because headless mode cannot ask, e.g. "RunCommand".
+    /// Actions agy refused because headless mode cannot ask, e.g. `RunCommand`.
     pub(super) denied: Vec<String>,
 }
 

@@ -156,7 +156,7 @@ async fn a_run_cut_short_by_a_permission_says_so() {
             assert!(
                 problem.contains("needed permission for RunCommand"),
                 "{problem}"
-            )
+            );
         }
         other => panic!("expected RoleFailed, got {other:?}"),
     }
@@ -178,7 +178,7 @@ async fn a_missing_login_is_shown_from_stderr() {
 
     match stop {
         StopReason::RoleFailed { problem, .. } => {
-            assert!(problem.contains("authentication required"), "{problem}")
+            assert!(problem.contains("authentication required"), "{problem}");
         }
         other => panic!("expected RoleFailed, got {other:?}"),
     }
@@ -198,7 +198,7 @@ async fn without_a_saved_login_the_role_fails_with_a_hint() {
 
     match stop {
         StopReason::RoleFailed { problem, .. } => {
-            assert!(problem.contains("sign in on the Agents tab"), "{problem}")
+            assert!(problem.contains("sign in on the Agents tab"), "{problem}");
         }
         other => panic!("expected RoleFailed, got {other:?}"),
     }

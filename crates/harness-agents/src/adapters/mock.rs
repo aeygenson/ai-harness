@@ -87,6 +87,10 @@ impl MockAgent {
     }
 
     /// Adds a step to `role`'s queue (builder style: `MockAgent::new().then(..).then(..)`).
+    ///
+    /// # Panics
+    ///
+    /// Only if another thread panicked while it held the mock's lock (a broken test).
     pub fn then(self, role: Role, step: MockStep) -> Self {
         self.script
             .lock()
@@ -98,6 +102,10 @@ impl MockAgent {
     }
 
     /// Which roles were run, in order. Useful in tests.
+    ///
+    /// # Panics
+    ///
+    /// Only if another thread panicked while it held the mock's lock (a broken test).
     pub fn calls(&self) -> Vec<Role> {
         self.calls.lock().unwrap().clone()
     }
@@ -107,7 +115,7 @@ impl MockAgent {
             .lock()
             .unwrap()
             .get_mut(&role)
-            .and_then(|queue| queue.pop_front())
+            .and_then(VecDeque::pop_front)
             .unwrap_or(MockStep::WriteNothing)
     }
 }

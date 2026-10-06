@@ -7,7 +7,7 @@
 //! - Claude Code: the `initialize` request of its stream-json mode;
 //! - Codex: `codex debug models`;
 //! - Antigravity: `agy models`;
-//! - DeepSeek Harness: `GET /models` of DeepSeek's API with the saved key,
+//! - `DeepSeek` Harness: `GET /models` of `DeepSeek`'s API with the saved key,
 //!   with dsh's effort levels.
 
 mod parse;
@@ -39,7 +39,7 @@ pub struct Programs {
     pub claude: PathBuf,
     /// The Codex CLI program.
     pub codex: PathBuf,
-    /// The `curl` program, which asks DeepSeek's API for its models.
+    /// The `curl` program, which asks `DeepSeek`'s API for its models.
     pub curl: PathBuf,
     /// The Antigravity CLI program.
     pub agy: PathBuf,
