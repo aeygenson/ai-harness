@@ -7,6 +7,7 @@ use std::time::Instant;
 use ratatui::crossterm::event::{KeyCode, MouseButton, MouseEvent, MouseEventKind};
 
 use crate::tabs::retro;
+use crate::ui::message::Message;
 use crate::ui::{ButtonId, Hits, ListId, Target};
 use crate::{App, Tab, DOUBLE_CLICK, TABS};
 
@@ -137,8 +138,7 @@ impl App {
             {
                 if let Some((_, index)) = Hits::row(target, row) {
                     if !tasks.choose(menu, index) {
-                        self.message =
-                            Some((self.tr.t("tasks.choice_unavailable").to_string(), true));
+                        self.message = Some(Message::error(self.tr.t("tasks.choice_unavailable")));
                     }
                 }
             }
@@ -160,7 +160,7 @@ impl App {
                         }
                     }
                 }
-                Some((Target::Field(_), _)) => {}
+                Some((Target::Window, _)) => {}
                 // A click outside the window closes it.
                 _ => self.browser = None,
             }
@@ -171,7 +171,7 @@ impl App {
                 Some((Target::Button(ButtonId::Ok), _)) => self.submit(),
                 Some((Target::Button(ButtonId::Cancel), _)) => self.close_form(),
                 Some((Target::Field(i), _)) if i < form.fields.len() => form.focus = i,
-                Some((Target::Field(_), _)) => {}
+                Some((Target::Field(_) | Target::Window, _)) => {}
                 // A click outside the window closes it.
                 _ => self.close_form(),
             }
@@ -274,7 +274,7 @@ impl App {
                     self.act(action);
                 }
             }
-            Target::Field(_) => {}
+            Target::Field(_) | Target::Window => {}
         }
     }
 }

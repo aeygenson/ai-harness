@@ -6,6 +6,7 @@ use std::sync::mpsc;
 use harness_agents::install::credentials;
 use harness_core::models::{self};
 
+use crate::ui::message::Message;
 use crate::ui::Form;
 use crate::{Answers, App, Purpose};
 
@@ -13,14 +14,11 @@ impl App {
     /// Back from `harness login`: say how it went and look at the logins again.
     pub(crate) fn finish_sign_in(&mut self, name: &str, result: Result<(), String>) {
         self.message = Some(match result {
-            Ok(()) => (self.tr.f("agents.signed_in", &[("name", &name)]), false),
-            Err(error) => (
-                self.tr.f(
-                    "agents.sign_in_failed",
-                    &[("name", &name), ("error", &error)],
-                ),
-                true,
-            ),
+            Ok(()) => Message::info(self.tr.f("agents.signed_in", &[("name", &name)])),
+            Err(error) => Message::error(self.tr.f(
+                "agents.sign_in_failed",
+                &[("name", &name), ("error", &error)],
+            )),
         });
         if let Some(dir) = self.home.as_ref().map(|h| h.join("credentials")) {
             self.agents.reload_logins(&dir);
@@ -91,7 +89,7 @@ impl App {
         if let Some(roles) = &mut self.roles {
             roles.refreshing = true;
         }
-        self.message = Some((self.tr.t("roles.refreshing").to_string(), false));
+        self.message = Some(Message::info(self.tr.t("roles.refreshing")));
     }
 
     /// The agents answered: keep the lists and say what came back.
@@ -113,11 +111,8 @@ impl App {
             }
         }
         let text = match (got.is_empty(), failed.is_empty()) {
-            (true, true) => (self.tr.t("roles.no_logins").to_string(), true),
-            (_, true) => (
-                self.tr.f("roles.refreshed", &[("lists", &got.join(", "))]),
-                false,
-            ),
+            (true, true) => Message::error(self.tr.t("roles.no_logins")),
+            (_, true) => Message::info(self.tr.f("roles.refreshed", &[("lists", &got.join(", "))])),
             _ => {
                 let mut text = failed.join("; ");
                 if !got.is_empty() {
@@ -126,7 +121,7 @@ impl App {
                         self.tr.f("roles.refreshed", &[("lists", &got.join(", "))])
                     );
                 }
-                (text, true)
+                Message::error(text)
             }
         };
         self.message = Some(text);

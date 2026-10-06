@@ -817,7 +817,9 @@ impl RolesTab {
                     }
                     let on = settings.is_some_and(|s| s.mcp.contains(&name));
                     let about = match self.saved.mcp.get(&name) {
-                        Some(server) => Span::styled(server.command.clone(), dim),
+                        Some(server) => {
+                            Span::styled(server.command.clone().unwrap_or_default(), dim)
+                        }
                         None => Span::styled(tr.t("roles.not_described").to_string(), theme::bad()),
                     };
                     Line::from(vec![

@@ -40,6 +40,7 @@ mod app;
 mod tabs;
 mod ui;
 
+use crate::ui::message::Message;
 use tabs::agents::{AgentChecker, AgentsTab, Installer, JobEvent};
 use tabs::mcp::McpTab;
 use tabs::plugins::PluginsTab;
@@ -278,7 +279,7 @@ struct App {
     /// Where choosing a folder starts: `~/code` if it exists.
     start_dir: PathBuf,
     /// The last result or problem, shown at the bottom.
-    message: Option<(String, bool)>,
+    message: Option<Message>,
     hits: Hits,
     last_click: Option<(Instant, Target, u16)>,
     /// Builds the agents that run the roles.
@@ -376,7 +377,7 @@ impl App {
             let text = self
                 .tr
                 .f("projects.not_a_project", &[("path", &root.display())]);
-            self.message = Some((text, true));
+            self.message = Some(Message::error(text));
             return;
         }
         self.tasks = Some(TasksTab::load(root, self.home.as_deref()));
@@ -396,11 +397,8 @@ impl App {
             list.last = Some(root.to_path_buf());
         });
         self.message = Some(match saved {
-            Ok(()) => (
-                self.tr.f("projects.opened", &[("name", &name_of(root))]),
-                false,
-            ),
-            Err(error) => (self.tr.f("projects.not_saved", &[("error", &error)]), true),
+            Ok(()) => Message::info(self.tr.f("projects.opened", &[("name", &name_of(root))])),
+            Err(error) => Message::error(self.tr.f("projects.not_saved", &[("error", &error)])),
         });
     }
 
@@ -408,9 +406,9 @@ impl App {
     fn busy(&mut self) -> bool {
         let running = self.tasks.as_ref().is_some_and(TasksTab::is_running);
         if running {
-            self.message = Some((self.tr.t("tasks.busy").to_string(), true));
+            self.message = Some(Message::error(self.tr.t("tasks.busy")));
         } else if self.generating() {
-            self.message = Some((self.tr.t("retro.busy").to_string(), true));
+            self.message = Some(Message::error(self.tr.t("retro.busy")));
             return true;
         }
         running
@@ -462,7 +460,7 @@ impl App {
     fn roles_unsaved(&mut self) -> bool {
         let unsaved = self.roles.as_ref().is_some_and(RolesTab::changed);
         if unsaved {
-            self.message = Some((self.tr.t("mcp.save_first").to_string(), true));
+            self.message = Some(Message::error(self.tr.t("mcp.save_first")));
         }
         unsaved
     }

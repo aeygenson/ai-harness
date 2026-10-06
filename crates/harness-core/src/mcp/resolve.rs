@@ -4,10 +4,10 @@
 use std::collections::BTreeMap;
 
 use super::{
-    check_variable, is_simple_name, McpError, McpServer, AUTH_OAUTH, BRIDGE_ARG, BRIDGE_COMMAND,
-    BRIDGE_HEADER, BRIDGE_URL, OAUTH_SECRET, SECRET_PREFIX,
+    check_variable, is_simple_name, McpError, McpServer, BRIDGE_ARG, BRIDGE_COMMAND, BRIDGE_HEADER,
+    BRIDGE_URL, OAUTH_SECRET, SECRET_PREFIX,
 };
-use crate::config::McpConfig;
+use crate::config::{McpAuth, McpConfig};
 use crate::secret::Secret;
 
 pub(super) fn resolve(
@@ -27,9 +27,10 @@ pub(super) fn resolve(
             name: config.headers.keys().next().cloned().unwrap_or_default(),
         });
     }
-    if config.command.trim().is_empty() {
-        return Err(McpError::EmptyCommand(name.to_string()));
-    }
+    let command = match &config.command {
+        Some(command) if !command.trim().is_empty() => command.clone(),
+        _ => return Err(McpError::EmptyCommand(name.to_string())),
+    };
     let mut env = BTreeMap::new();
     for (variable, value) in &config.env {
         check_variable(name, variable)?;
@@ -41,7 +42,7 @@ pub(super) fn resolve(
     }
     Ok(McpServer {
         name: name.to_string(),
-        command: config.command.clone(),
+        command,
         args: config.args.clone(),
         env,
     })
@@ -93,7 +94,7 @@ pub(super) fn resolve_web(
     url: &str,
     secret: &impl Fn(&str) -> Option<Secret>,
 ) -> Result<McpServer, McpError> {
-    if !config.command.trim().is_empty() {
+    if config.command.is_some() {
         return Err(McpError::CommandAndUrl(name.to_string()));
     }
     if !config.args.is_empty() || !config.env.is_empty() {
@@ -106,17 +107,19 @@ pub(super) fn resolve_web(
             url: url.to_string(),
         });
     }
-    let oauth = match config.auth.as_deref() {
+    let oauth = match config.auth {
         None => false,
-        Some(AUTH_OAUTH)
-            if !config
+        Some(McpAuth::OAuth) => {
+            // The sign-in sends its own Authorization header.
+            let has_own = config
                 .headers
                 .keys()
-                .any(|h| h.eq_ignore_ascii_case("authorization")) =>
-        {
+                .any(|h| h.eq_ignore_ascii_case("authorization"));
+            if has_own {
+                return Err(McpError::BadAuth(name.to_string()));
+            }
             true
         }
-        Some(_) => return Err(McpError::BadAuth(name.to_string())),
     };
     let mut env = BTreeMap::from([(BRIDGE_URL.to_string(), Secret::new(url))]);
     for (index, (header, value)) in config.headers.iter().enumerate() {

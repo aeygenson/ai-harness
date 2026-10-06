@@ -3,6 +3,7 @@
 use harness_core::config::projects;
 use harness_core::plugins;
 
+use crate::ui::message::Message;
 use crate::{App, Purpose};
 
 impl App {
@@ -71,9 +72,8 @@ impl App {
                     })
                     .map(|()| {
                         self.reload_catalog_views();
-                        self.message = Some((
+                        self.message = Some(Message::info(
                             self.tr.f("plugins.catalog_removed", &[("name", &name)]),
-                            false,
                         ));
                     })
             }
@@ -107,7 +107,7 @@ impl App {
                     self.retro = None;
                 }
                 result.map(|()| {
-                    self.message = Some((self.tr.t("projects.removed").to_string(), false));
+                    self.message = Some(Message::info(self.tr.t("projects.removed")));
                 })
             }
         };
@@ -124,7 +124,7 @@ impl App {
     pub(crate) fn close_form(&mut self) {
         if let Some((Purpose::ApplyUpdate(prepared), _)) = self.form.take() {
             plugins::ops::discard(&prepared);
-            self.message = Some((self.tr.t("plugins.update_dropped").to_string(), false));
+            self.message = Some(Message::info(self.tr.t("plugins.update_dropped")));
         }
     }
 }

@@ -72,7 +72,7 @@ fn the_mcp_tab_gives_servers_to_roles() {
     // Saving checks everything as before a run: the tester's unknown server
     // stops it.
     click(&mut app, " Save ");
-    let (message, problem) = app.message.clone().unwrap();
+    let (message, problem) = shown(&app);
     assert!(problem && message.contains("ghost"), "{message}");
 
     // A server harness.toml does not describe cannot be given ...
@@ -85,7 +85,7 @@ fn the_mcp_tab_gives_servers_to_roles() {
         .message
         .as_ref()
         .unwrap()
-        .0
+        .text
         .contains("take it from the role"));
     // ... only taken away; then no role lists it and it leaves the list.
     click(&mut app, " tester ");
@@ -117,8 +117,8 @@ fn mcp_servers_are_added_changed_and_removed_and_secrets_saved() {
     assert!(app.form.is_none(), "{:?}", app.form);
     let docs = &config(&root).mcp["docs"];
     assert_eq!(
-        (docs.command.as_str(), &docs.args[..]),
-        ("npx", &["-y".to_string(), "docs-mcp".to_string()][..])
+        (docs.command.as_deref(), &docs.args[..]),
+        (Some("npx"), &["-y".to_string(), "docs-mcp".to_string()][..])
     );
     assert_eq!(docs.env["API_KEY"], "secret:docs");
     let text = screen(&mut app);
@@ -250,7 +250,7 @@ fn check_asks_a_server_for_its_tools() {
     click(&mut app, "[ ] other");
     click(&mut app, " Check ");
     assert!(app.checking.is_none());
-    let (message, problem) = app.message.clone().unwrap();
+    let (message, problem) = shown(&app);
     assert!(
         problem && message.contains("harness secret set other"),
         "{message}"
@@ -320,7 +320,7 @@ fn a_server_from_the_catalog_opens_in_the_form_before_it_is_saved() {
     key(&mut app, KeyCode::Down);
     key(&mut app, KeyCode::Enter);
     assert!(app.form.is_none());
-    let (message, problem) = app.message.clone().unwrap();
+    let (message, problem) = shown(&app);
     assert!(problem && message.contains("Cannot be added"), "{message}");
 
     // The first opens filled in; nothing is written before Save.
@@ -398,7 +398,7 @@ fn a_web_server_is_written_and_changed_in_the_form() {
     assert!(app.form.is_none(), "{:?}", app.form);
     let notion = &config(&root).mcp["notion"];
     assert_eq!(notion.url.as_deref(), Some("https://mcp.notion.com/mcp"));
-    assert_eq!(notion.auth.as_deref(), Some("oauth"));
+    assert_eq!(notion.auth, Some(harness_core::config::McpAuth::OAuth));
     assert!(screen(&mut app).contains(" Sign in "));
 
     // Changed back to a key in a header, in the same form.
@@ -511,7 +511,7 @@ fn a_web_server_with_a_sign_in_is_signed_in_from_the_tab() {
     assert!(text.contains("Sign-in: ✗ not signed in"), "{text}");
     // Without a sign-in, «Check» says what to do.
     key(&mut app, KeyCode::Char('c'));
-    let (message, problem) = app.message.clone().unwrap();
+    let (message, problem) = shown(&app);
     assert!(
         problem && message.contains("harness mcp login notion"),
         "{message}"

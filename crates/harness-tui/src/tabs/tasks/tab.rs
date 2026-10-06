@@ -47,6 +47,7 @@ use ratatui::Frame;
 
 use crate::tabs::tasks::runner::{push_line, Builder, Outcome, Request, RunChoice, Running};
 use crate::ui::i18n::I18n;
+use crate::ui::message::Message;
 use crate::ui::theme;
 use crate::ui::{buttons, panel, selected, ButtonId, Hits, ListId, Target};
 
@@ -247,13 +248,15 @@ impl TasksTab {
             .cloned()
             .collect();
         let at = selected.and_then(|id| self.tasks.iter().position(|t| t.id == id));
-        if at.is_none() {
-            // Another task is shown now: at its latest step.
-            self.step = usize::MAX;
-            self.scroll = 0;
-        }
         self.task = at.unwrap_or(0);
-        self.step = self.step.min(self.last_step());
+        self.step = match at {
+            Some(_) => self.step.min(self.last_step()),
+            None => {
+                // Another task is shown now: at its latest step.
+                self.scroll = 0;
+                self.last_step()
+            }
+        };
         self.sync_choice();
     }
 
@@ -599,7 +602,7 @@ impl TasksTab {
 
     /// Takes what the background work sent. When it is over: the message
     /// for the bottom line, and whether it is a problem.
-    pub fn tick(&mut self, tr: &I18n) -> Option<(String, bool)> {
+    pub fn tick(&mut self, tr: &I18n) -> Option<Message> {
         let running = self.running.as_mut()?;
         let known = running.task.clone();
         let result = running.poll(&mut self.log);
@@ -611,18 +614,18 @@ impl TasksTab {
         }
         let result = result?;
         self.running = None;
-        let (text, problem) = match result {
+        let message = match result {
             Ok(outcome) => {
                 self.show_task(&outcome.task);
                 outcome_text(&outcome, tr)
             }
             Err(error) => {
                 self.reload();
-                (error, true)
+                Message::error(error)
             }
         };
-        push_line(&mut self.log, format!("── {text}"));
-        Some((text, problem))
+        push_line(&mut self.log, format!("── {}", message.text));
+        Some(message)
     }
 
     /// The unfinished task whose text is `text` (spaces and line breaks do
@@ -1308,83 +1311,63 @@ fn wrap(text: &str, width: usize) -> Vec<String> {
 }
 
 /// The message after the work: what happened and what Lisa does next.
-fn outcome_text(outcome: &Outcome, tr: &I18n) -> (String, bool) {
+fn outcome_text(outcome: &Outcome, tr: &I18n) -> Message {
     let task = &outcome.task;
     let role = |role: &Role| role.as_str();
     let Some(stop) = &outcome.stop else {
-        return (tr.f("tasks.stop_finished", &[("task", task)]), false);
+        return Message::info(tr.f("tasks.stop_finished", &[("task", task)]));
     };
     match stop {
-        StopReason::Done => (tr.f("tasks.stop_done", &[("task", task)]), false),
+        StopReason::Done => Message::info(tr.f("tasks.stop_done", &[("task", task)])),
         StopReason::WaitingForHuman(WaitReason::ApproveDesign) => {
-            (tr.f("tasks.stop_design", &[("task", task)]), false)
+            Message::info(tr.f("tasks.stop_design", &[("task", task)]))
         }
-        StopReason::WaitingForHuman(WaitReason::RoleAskedForHelp(r)) => (
-            tr.f("tasks.stop_help", &[("task", task), ("role", &role(r))]),
-            false,
-        ),
+        StopReason::WaitingForHuman(WaitReason::RoleAskedForHelp(r)) => {
+            Message::info(tr.f("tasks.stop_help", &[("task", task), ("role", &role(r))]))
+        }
         StopReason::WaitingForHuman(WaitReason::RoundLimitReached) => {
-            (tr.f("tasks.stop_rounds", &[("task", task)]), true)
+            Message::error(tr.f("tasks.stop_rounds", &[("task", task)]))
         }
-        StopReason::UsageLimitReached(r) => (
-            tr.f("tasks.stop_usage", &[("task", task), ("role", &role(r))]),
-            true,
-        ),
-        StopReason::RoleFailed { role: r, problem } => (
-            tr.f(
-                "tasks.stop_failed",
-                &[
-                    ("task", task),
-                    ("role", &role(r)),
-                    ("problem", &problem.lines().next().unwrap_or_default()),
-                ],
-            ),
-            true,
-        ),
-        StopReason::StepLimitReached => (tr.f("tasks.stop_steps", &[("task", task)]), true),
-        StopReason::DirtyWorkingTree(files) => (
-            tr.f(
-                "tasks.stop_dirty",
-                &[("task", task), ("files", &files.join(", "))],
-            ),
-            true,
-        ),
-        StopReason::ForbiddenChanges { role: r, files } => (
-            tr.f(
-                "tasks.stop_forbidden",
-                &[
-                    ("task", task),
-                    ("role", &role(r)),
-                    ("files", &files.join(", ")),
-                ],
-            ),
-            true,
-        ),
-        StopReason::TooLarge { role: r, files } => (
-            tr.f(
-                "tasks.stop_too_large",
-                &[
-                    ("task", task),
-                    ("role", &role(r)),
-                    ("files", &sized_list(files)),
-                ],
-            ),
-            true,
-        ),
-        StopReason::AgentCommitted(r) => (
-            tr.f(
-                "tasks.stop_committed",
-                &[("task", task), ("role", &role(r))],
-            ),
-            true,
-        ),
-        StopReason::GitConfigChanged(r) => (
-            tr.f(
-                "tasks.stop_git_config",
-                &[("task", task), ("role", &role(r))],
-            ),
-            true,
-        ),
+        StopReason::UsageLimitReached(r) => {
+            Message::error(tr.f("tasks.stop_usage", &[("task", task), ("role", &role(r))]))
+        }
+        StopReason::RoleFailed { role: r, problem } => Message::error(tr.f(
+            "tasks.stop_failed",
+            &[
+                ("task", task),
+                ("role", &role(r)),
+                ("problem", &problem.lines().next().unwrap_or_default()),
+            ],
+        )),
+        StopReason::StepLimitReached => Message::error(tr.f("tasks.stop_steps", &[("task", task)])),
+        StopReason::DirtyWorkingTree(files) => Message::error(tr.f(
+            "tasks.stop_dirty",
+            &[("task", task), ("files", &files.join(", "))],
+        )),
+        StopReason::ForbiddenChanges { role: r, files } => Message::error(tr.f(
+            "tasks.stop_forbidden",
+            &[
+                ("task", task),
+                ("role", &role(r)),
+                ("files", &files.join(", ")),
+            ],
+        )),
+        StopReason::TooLarge { role: r, files } => Message::error(tr.f(
+            "tasks.stop_too_large",
+            &[
+                ("task", task),
+                ("role", &role(r)),
+                ("files", &sized_list(files)),
+            ],
+        )),
+        StopReason::AgentCommitted(r) => Message::error(tr.f(
+            "tasks.stop_committed",
+            &[("task", task), ("role", &role(r))],
+        )),
+        StopReason::GitConfigChanged(r) => Message::error(tr.f(
+            "tasks.stop_git_config",
+            &[("task", task), ("role", &role(r))],
+        )),
     }
 }
 

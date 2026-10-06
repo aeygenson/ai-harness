@@ -7,6 +7,7 @@ use crate::tabs::plugins::PluginsTab;
 use crate::tabs::roles::RolesTab;
 use crate::tabs::tasks::TasksTab;
 use crate::ui::keys;
+use crate::ui::message::Message;
 use crate::ui::ButtonId;
 use crate::{App, Tab, TABS};
 
@@ -93,7 +94,7 @@ impl App {
                 } else {
                     "tasks.quit_running"
                 };
-                self.message = Some((self.tr.t(key).to_string(), true));
+                self.message = Some(Message::error(self.tr.t(key)));
             }
             KeyCode::Esc
                 if self.tab == Tab::Roles
@@ -120,11 +121,11 @@ impl App {
             }
             KeyCode::Char('q') | KeyCode::Esc if unsaved && !quit_warned => {
                 self.quit_warned = true;
-                self.message = Some((self.tr.t("roles.unsaved_quit").to_string(), true));
+                self.message = Some(Message::error(self.tr.t("roles.unsaved_quit")));
             }
             KeyCode::Char('q') | KeyCode::Esc if unsent && !quit_warned => {
                 self.quit_warned = true;
-                self.message = Some((self.tr.t("tasks.unsent_quit").to_string(), true));
+                self.message = Some(Message::error(self.tr.t("tasks.unsent_quit")));
             }
             KeyCode::Char('q') | KeyCode::Esc => self.quit = true,
             KeyCode::Char('L') | KeyCode::F(2) => self.press(ButtonId::Language),

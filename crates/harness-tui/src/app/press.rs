@@ -7,6 +7,7 @@ use crate::tabs::plugins;
 use crate::tabs::projects::has_config;
 use crate::tabs::roles::Action;
 use crate::tabs::tasks::Menu;
+use crate::ui::message::Message;
 use crate::ui::{i18n, theme};
 use crate::ui::{ButtonId, Form};
 use crate::{App, Pick, Purpose};
@@ -56,7 +57,7 @@ impl App {
             ButtonId::McpToggle => {
                 if let (Some(mcp), Some(roles)) = (&self.mcp, &mut self.roles) {
                     if let Err(key) = mcp.toggle(roles) {
-                        self.message = Some((self.tr.t(key).to_string(), true));
+                        self.message = Some(Message::error(self.tr.t(key)));
                     }
                 }
             }
@@ -68,7 +69,7 @@ impl App {
             ButtonId::PluginToggle => {
                 if let (Some(plugins), Some(roles)) = (&self.plugins, &mut self.roles) {
                     if let Err(key) = plugins.toggle(roles) {
-                        self.message = Some((self.tr.t(key).to_string(), true));
+                        self.message = Some(Message::error(self.tr.t(key)));
                     }
                 }
             }
@@ -141,13 +142,13 @@ impl App {
                 }
             }
             ButtonId::Send if self.generating() => {
-                self.message = Some((self.tr.t("retro.busy").to_string(), true));
+                self.message = Some(Message::error(self.tr.t("retro.busy")));
             }
             ButtonId::Send => {
                 if let Some(tasks) = &mut self.tasks {
                     self.message = Some(match tasks.send(self.builder, &self.tr) {
-                        Ok(text) => (text, false),
-                        Err(error) => (error, true),
+                        Ok(text) => Message::info(text),
+                        Err(error) => Message::error(error),
                     });
                 }
             }
@@ -160,7 +161,7 @@ impl App {
                         self.form = Some(self.init_form(&path));
                     } else {
                         let text = self.tr.f("projects.gone", &[("path", &path.display())]);
-                        self.message = Some((text, true));
+                        self.message = Some(Message::error(text));
                     }
                 }
             }
@@ -190,7 +191,7 @@ impl App {
                 theme::next();
                 if let Some(home) = &self.home {
                     if let Err(error) = i18n::save_setting(home, "theme", theme::current().code) {
-                        self.message = Some((error, true));
+                        self.message = Some(Message::error(error));
                     }
                 }
             }
@@ -200,7 +201,7 @@ impl App {
                 self.message = None;
                 if let Some(home) = &self.home {
                     if let Err(error) = self.tr.save(home) {
-                        self.message = Some((error, true));
+                        self.message = Some(Message::error(error));
                     }
                 }
             }
@@ -225,8 +226,8 @@ impl App {
             ButtonId::Save => {
                 if let Some(roles) = &mut self.roles {
                     self.message = Some(match roles.save() {
-                        Ok(()) => (self.tr.t("roles.saved").to_string(), false),
-                        Err(error) => (error, true),
+                        Ok(()) => Message::info(self.tr.t("roles.saved")),
+                        Err(error) => Message::error(error),
                     });
                     // The Tasks and Skills tabs show the agents and skills too.
                     if let Some(tasks) = &mut self.tasks {
@@ -252,7 +253,7 @@ impl App {
     pub(crate) fn act(&mut self, action: Action) {
         match action {
             Action::None => {}
-            Action::Say(text) => self.message = Some((text, false)),
+            Action::Say(text) => self.message = Some(Message::info(text)),
             Action::EditModel(model) => {
                 let tr = &self.tr;
                 self.form = Some((

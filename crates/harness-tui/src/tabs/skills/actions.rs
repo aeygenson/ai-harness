@@ -5,6 +5,7 @@ use std::fs;
 use harness_core::git::Repo;
 use harness_core::skills::{self};
 
+use crate::ui::message::Message;
 use crate::ui::Form;
 use crate::{skill_path, App, EditJob, EditKind, Purpose};
 
@@ -35,7 +36,7 @@ impl App {
                         .map_or(Ok(()), fs::create_dir_all)
                         .and_then(|()| fs::write(&path, copy));
                     if let Err(error) = written {
-                        self.message = Some((format!("{}: {error}", path.display()), true));
+                        self.message = Some(Message::error(format!("{}: {error}", path.display())));
                         return;
                     }
                     copied = true;
@@ -123,7 +124,9 @@ impl App {
             )
             .map_err(|e| e.to_string())?;
         }
-        self.message = Some((self.tr.f("skills.restored", &[("name", &name)]), false));
+        self.message = Some(Message::info(
+            self.tr.f("skills.restored", &[("name", &name)]),
+        ));
         self.reload_skills(Some(name));
         Ok(())
     }

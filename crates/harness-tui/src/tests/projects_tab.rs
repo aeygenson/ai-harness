@@ -103,7 +103,7 @@ fn a_new_project_is_created_in_a_folder_chosen_in_the_browser() {
     key(&mut app, KeyCode::Enter);
     key(&mut app, KeyCode::Char('c'));
     assert!(app.form.is_none());
-    let (text, error) = app.message.clone().unwrap();
+    let (text, error) = shown(&app);
     assert!(
         error && text.contains("already is a harness project"),
         "{text}"

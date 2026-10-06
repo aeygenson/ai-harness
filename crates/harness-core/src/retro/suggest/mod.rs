@@ -25,7 +25,7 @@ use crate::git::{GitError, Repo};
 use crate::retro::proposals::{ProposalError, ProposalsFile};
 use crate::retro::Stats;
 use crate::skills::SkillError;
-use crate::task::agent::{AgentRunner, RoleJob};
+use crate::task::agent::{AgentRunner, RoleJob, RunEnd};
 use crate::task::handoff::Role;
 use crate::text;
 pub use apply::apply;
@@ -177,13 +177,16 @@ pub async fn suggest<A: AgentRunner>(
         )?;
         Err(error)
     };
-    if !outcome.success {
-        let message = if outcome.usage_limit_reached {
-            "the usage limit was reached".to_string()
-        } else {
-            text::safe_line(&outcome.message, 500)
-        };
-        return failed(SuggestError::AgentFailed(message));
+    match &outcome.end {
+        RunEnd::Succeeded => {}
+        RunEnd::UsageLimit => {
+            return failed(SuggestError::AgentFailed(
+                "the usage limit was reached".to_string(),
+            ));
+        }
+        RunEnd::Failed(message) => {
+            return failed(SuggestError::AgentFailed(text::safe_line(message, 500)));
+        }
     }
     let Ok(retro) = fs::read_to_string(inbox.join(RETRO_MD)) else {
         return failed(SuggestError::Missing(RETRO_MD));
@@ -303,7 +306,7 @@ mod tests {
         crate::task::orchestrator::create_task(&repo, "task-001", "Build a parser", 5).unwrap();
         let config = Config::load(&harness).unwrap();
         let tasks = TaskHistory::load_all(&repo.runs_dir()).unwrap();
-        let stats = Stats::collect("all", &tasks, Some(&config));
+        let stats = Stats::collect(crate::retro::Scope::All, &tasks, Some(&config));
         let retro_dir = stats.save(&harness).unwrap();
         repo.commit_all("setup").unwrap();
         (dir, repo, retro_dir, stats, config)
@@ -312,7 +315,7 @@ mod tests {
     /// An agent that writes the given files into its output folder, and maybe more.
     struct FakeAgent {
         files: Vec<(&'static str, String)>,
-        success: bool,
+        end: RunEnd,
         also_write: Option<&'static str>,
     }
 
@@ -323,7 +326,7 @@ mod tests {
                     (RETRO_MD, retro.to_string()),
                     (PROPOSALS_JSON, proposals.to_string()),
                 ],
-                success: true,
+                end: RunEnd::Succeeded,
                 also_write: None,
             }
         }
@@ -340,10 +343,8 @@ mod tests {
                 fs::write(job.project_dir.join(path), "sneaky").unwrap();
             }
             let outcome = AgentOutcome {
-                success: self.success,
+                end: self.end.clone(),
                 log: "agent talked".into(),
-                message: if self.success { "" } else { "timed out" }.into(),
-                ..AgentOutcome::default()
             };
             async move { outcome }
         }
@@ -481,7 +482,7 @@ mod tests {
         };
 
         let mut failing = FakeAgent::writing("x", "{\"proposals\": []}");
-        failing.success = false;
+        failing.end = RunEnd::Failed("timed out".into());
         assert!(matches!(run(failing), Err(SuggestError::AgentFailed(m)) if m == "timed out"));
         assert!(
             repo.changed_files().unwrap().is_empty(),
@@ -490,7 +491,7 @@ mod tests {
 
         let missing = FakeAgent {
             files: vec![(RETRO_MD, "x".into())],
-            success: true,
+            end: RunEnd::Succeeded,
             also_write: None,
         };
         assert!(matches!(

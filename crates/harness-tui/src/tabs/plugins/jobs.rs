@@ -6,6 +6,7 @@ use std::sync::mpsc;
 use harness_core::git::Repo;
 use harness_core::plugins;
 
+use crate::ui::message::Message;
 use crate::ui::Form;
 use crate::{App, PluginJob, Purpose};
 
@@ -27,7 +28,7 @@ impl App {
         if let Some(plugins) = &mut self.plugins {
             plugins.busy = Some(label.clone());
         }
-        self.message = Some((label, false));
+        self.message = Some(Message::info(label));
     }
 
     /// «Update»: the newest version is downloaded in the background, then
@@ -61,19 +62,13 @@ impl App {
                 plugins::ops::apply_update(&repo, prepared).map_err(|e| e.to_string())
             });
         self.message = Some(match result {
-            Ok(()) => (
-                self.tr.f("plugins.updated", &[("name", &prepared.name)]),
-                false,
-            ),
+            Ok(()) => Message::info(self.tr.f("plugins.updated", &[("name", &prepared.name)])),
             Err(error) => {
                 plugins::ops::discard(prepared);
-                (
-                    self.tr.f(
-                        "plugins.update_failed",
-                        &[("name", &prepared.name), ("error", &error)],
-                    ),
-                    true,
-                )
+                Message::error(self.tr.f(
+                    "plugins.update_failed",
+                    &[("name", &prepared.name), ("error", &error)],
+                ))
             }
         });
         self.reload_plugins();
@@ -84,11 +79,10 @@ impl App {
         match done {
             PluginJob::CatalogAdded(result) => {
                 self.message = Some(match result {
-                    Ok(text) => (text, false),
-                    Err(error) => (
-                        self.tr.f("plugins.catalog_failed", &[("error", &error)]),
-                        true,
-                    ),
+                    Ok(text) => Message::info(text),
+                    Err(error) => {
+                        Message::error(self.tr.f("plugins.catalog_failed", &[("error", &error)]))
+                    }
                 });
                 self.reload_catalog_views();
             }
@@ -96,15 +90,15 @@ impl App {
                 let tr = &self.tr;
                 self.message = Some(match result {
                     Ok(plugins::ops::CatalogUpdate::Local) => {
-                        (tr.f("plugins.catalog_local", &[("name", &name)]), false)
+                        Message::info(tr.f("plugins.catalog_local", &[("name", &name)]))
                     }
                     Ok(plugins::ops::CatalogUpdate::Same(_)) => {
-                        (tr.f("plugins.catalog_same", &[("name", &name)]), false)
+                        Message::info(tr.f("plugins.catalog_same", &[("name", &name)]))
                     }
                     Ok(plugins::ops::CatalogUpdate::Updated(_)) => {
-                        (tr.f("plugins.catalog_updated", &[("name", &name)]), false)
+                        Message::info(tr.f("plugins.catalog_updated", &[("name", &name)]))
                     }
-                    Err(error) => (error, true),
+                    Err(error) => Message::error(error),
                 });
                 self.reload_catalog_views();
             }
@@ -115,7 +109,7 @@ impl App {
                         let text = self
                             .tr
                             .f("plugins.add_failed", &[("name", &name), ("error", &error)]);
-                        self.message = Some((text, true));
+                        self.message = Some(Message::error(text));
                         return;
                     }
                 };
@@ -125,7 +119,9 @@ impl App {
                     plugins.catalogs = None;
                     plugins.select_named(&name, roles);
                 }
-                self.message = Some((self.tr.f("plugins.added", &[("name", &name)]), false));
+                self.message = Some(Message::info(
+                    self.tr.f("plugins.added", &[("name", &name)]),
+                ));
                 let contents = added.contents;
                 if contents.hooks || contents.servers {
                     let tr = &self.tr;
@@ -155,7 +151,7 @@ impl App {
             PluginJob::UpdateReady(name, result) => match result {
                 Ok(None) => {
                     let text = self.tr.f("plugins.up_to_date", &[("name", &name)]);
-                    self.message = Some((text, false));
+                    self.message = Some(Message::info(text));
                 }
                 Ok(Some(prepared)) => {
                     let tr = &self.tr;
@@ -193,7 +189,7 @@ impl App {
                         "plugins.update_failed",
                         &[("name", &name), ("error", &error)],
                     );
-                    self.message = Some((text, true));
+                    self.message = Some(Message::error(text));
                 }
             },
         }

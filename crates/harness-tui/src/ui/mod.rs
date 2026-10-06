@@ -2,6 +2,7 @@
 
 pub(crate) mod i18n;
 pub(crate) mod keys;
+pub(crate) mod message;
 pub(crate) mod theme;
 
 use ratatui::layout::{Constraint, Flex, Layout, Rect};
@@ -22,6 +23,9 @@ pub enum Target {
     Button(ButtonId),
     /// A field of the open form.
     Field(usize),
+    /// The rest of an open window: a click there does nothing, but it does
+    /// not close the window either.
+    Window,
     /// A line of a tab's details that can be chosen, by its index.
     Row(usize),
 }
@@ -406,7 +410,7 @@ impl Form {
         let inner = block.inner(area);
         frame.render_widget(block, area);
         // Clicks anywhere in the window stay in it.
-        hits.add(area, Target::Field(usize::MAX));
+        hits.add(area, Target::Window);
 
         let mut y = inner.y;
         if text_lines > 0 {

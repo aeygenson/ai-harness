@@ -25,7 +25,7 @@
 use std::path::{Path, PathBuf};
 
 use harness_agents::install::credentials;
-use harness_core::config::{AgentKind, McpConfig};
+use harness_core::config::{AgentKind, McpAuth, McpConfig};
 use harness_core::mcp::registry::{Entry, Offer};
 use harness_core::mcp::{self, SECRET_PREFIX};
 use harness_core::task::handoff::Role;
@@ -615,7 +615,9 @@ impl McpTab {
         if let Some(url) = &server.url {
             self.web_details(name, server, url, tr, &mut lines);
         } else {
-            let command = std::iter::once(&server.command)
+            let command = server
+                .command
+                .iter()
                 .chain(&server.args)
                 .map(|part| {
                     if part.contains(char::is_whitespace) || part.is_empty() {
@@ -882,7 +884,7 @@ fn entry_details(entry: &Entry, tr: &I18n) -> Vec<Line<'static>> {
         ),
         None => (
             "mcp.command",
-            join_words(std::iter::once(&offer.server.command).chain(&offer.server.args)),
+            join_words(offer.server.command.iter().chain(&offer.server.args)),
             &offer.server.env,
             "mcp.no_variables",
             "mcp.variables",
@@ -922,7 +924,7 @@ fn short_name(name: &str) -> String {
 
 /// A web server Lisa signs in to in the browser.
 fn is_oauth(server: &McpConfig) -> bool {
-    server.url.is_some() && server.auth.as_deref() == Some(harness_core::mcp::AUTH_OAUTH)
+    server.url.is_some() && server.auth == Some(McpAuth::OAuth)
 }
 
 /// The names of the secrets a server's variables (or a web server's
@@ -1001,12 +1003,8 @@ pub fn form_values(server: &McpConfig) -> [String; 3] {
             pairs(&server.headers),
             if server.auth.is_some() { "yes" } else { "" }.to_string(),
         ],
-        // A new server has no command yet: an empty field, not `""`.
-        None if server.command.is_empty() && server.args.is_empty() => {
-            [String::new(), pairs(&server.env), String::new()]
-        }
         None => [
-            join_words(std::iter::once(&server.command).chain(&server.args)),
+            join_words(server.command.iter().chain(&server.args)),
             pairs(&server.env),
             String::new(),
         ],
@@ -1042,7 +1040,7 @@ pub fn server_from(command: &str, variables: &str, sign_in: &str) -> Result<McpC
         return Ok(McpConfig {
             url: Some(command.to_string()),
             headers: pairs,
-            auth: oauth.then(|| harness_core::mcp::AUTH_OAUTH.to_string()),
+            auth: oauth.then_some(McpAuth::OAuth),
             ..McpConfig::default()
         });
     }
@@ -1051,7 +1049,7 @@ pub fn server_from(command: &str, variables: &str, sign_in: &str) -> Result<McpC
     }
     let mut words = split_words(command)?.into_iter();
     Ok(McpConfig {
-        command: words.next().unwrap_or_default(),
+        command: words.next(),
         args: words.collect(),
         env: pairs,
         ..McpConfig::default()
@@ -1070,7 +1068,7 @@ mod tests {
             "",
         )
         .unwrap();
-        assert_eq!(server.command, "npx");
+        assert_eq!(server.command.as_deref(), Some("npx"));
         assert_eq!(server.args, ["-y", "@scope/a b"]);
         assert_eq!(server.env["API_KEY"], "secret:docs");
         assert_eq!(server.env["MODE"], "read only");
@@ -1088,14 +1086,14 @@ mod tests {
         .unwrap();
         assert_eq!(web.url.as_deref(), Some("https://a.b/mcp"));
         assert_eq!(web.headers["Authorization"], "Bearer secret:gh");
-        assert!(web.command.is_empty() && web.auth.is_none());
+        assert!(web.command.is_none() && web.auth.is_none());
         let [address, headers, sign_in] = form_values(&web);
         assert_eq!(server_from(&address, &headers, &sign_in).unwrap(), web);
 
         assert_eq!(form_values(&McpConfig::default()), ["", "", ""]);
 
         let oauth = server_from("https://a.b/mcp", "", "да").unwrap();
-        assert_eq!(oauth.auth.as_deref(), Some("oauth"));
+        assert_eq!(oauth.auth, Some(McpAuth::OAuth));
         assert_eq!(form_values(&oauth)[2], "yes");
     }
 }

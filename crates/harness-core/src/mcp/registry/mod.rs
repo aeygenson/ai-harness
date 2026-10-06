@@ -183,7 +183,7 @@ mod tests {
 
         let context7 = entries[0].offer.as_ref().unwrap();
         assert_eq!(context7.name, "context7");
-        assert_eq!(context7.server.command, "npx");
+        assert_eq!(context7.server.command.as_deref(), Some("npx"));
         assert_eq!(context7.server.args, ["-y", "@upstash/context7-mcp@4.1.1"]);
         assert_eq!(context7.server.env["CONTEXT7_API_KEY"], "secret:context7");
         assert_eq!(context7.server.env["MODE"], "fast");
@@ -199,7 +199,7 @@ mod tests {
 
         let files = entries[1].offer.as_ref().unwrap();
         assert_eq!(files.name, "files-server");
-        assert_eq!(files.server.command, "uvx");
+        assert_eq!(files.server.command.as_deref(), Some("uvx"));
         assert_eq!(
             files.server.args,
             [

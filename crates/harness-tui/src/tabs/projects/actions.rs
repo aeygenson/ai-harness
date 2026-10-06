@@ -7,6 +7,7 @@ use harness_platform::folder_dialog::{self, Native};
 
 use crate::tabs::projects::has_config;
 use crate::tabs::projects::picker::Browser;
+use crate::ui::message::Message;
 use crate::ui::Form;
 use crate::{App, Pick, Purpose, Tab};
 
@@ -42,7 +43,7 @@ impl App {
         }
         match pick {
             Pick::NewProject if has_config(&path) => {
-                self.message = Some((self.tr.t("form.exists").to_string(), true));
+                self.message = Some(Message::error(self.tr.t("form.exists")));
             }
             Pick::NewProject => {
                 let tr = &self.tr;
@@ -78,7 +79,7 @@ impl App {
         let text = self
             .tr
             .f("projects.created", &[("name", &name), ("git", &git)]);
-        self.message = Some((text, false));
+        self.message = Some(Message::info(text));
         Ok(())
     }
 

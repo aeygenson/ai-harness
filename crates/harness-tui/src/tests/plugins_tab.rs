@@ -75,7 +75,7 @@ fn the_plugins_tab_gives_allows_and_removes_plugins() {
     key(&mut app, KeyCode::Char(' '));
     assert!(screen(&mut app).contains("▶ [x] review"));
     key(&mut app, KeyCode::Char('s'));
-    let (message, problem) = app.message.clone().unwrap();
+    let (message, problem) = shown(&app);
     assert!(problem && message.contains("hooks"), "{message}");
     key(&mut app, KeyCode::Char('u'));
 
@@ -95,7 +95,7 @@ fn the_plugins_tab_gives_allows_and_removes_plugins() {
 
     // Forbidding hooks the architect needs is refused, and nothing changes.
     click(&mut app, " Forbid hooks ");
-    let (message, problem) = app.message.clone().unwrap();
+    let (message, problem) = shown(&app);
     assert!(
         problem && message.contains("Take review from its roles first"),
         "{message}"
@@ -110,14 +110,14 @@ fn the_plugins_tab_gives_allows_and_removes_plugins() {
     assert!(screen(&mut app).contains("The developer runs on codex"));
     key(&mut app, KeyCode::Char(' '));
     assert_eq!(
-        app.message.as_ref().unwrap().0,
+        app.message.as_ref().unwrap().text,
         "This plugin is for another agent"
     );
     // Antigravity has none at all.
     click(&mut app, " security ");
     key(&mut app, KeyCode::Char(' '));
     assert_eq!(
-        app.message.as_ref().unwrap().0,
+        app.message.as_ref().unwrap().text,
         "The role's agent has no plugins"
     );
 
@@ -128,7 +128,7 @@ fn the_plugins_tab_gives_allows_and_removes_plugins() {
     assert!(job.kind == EditKind::Plugin && job.path.ends_with(".harness/plugins/review"));
     app.finish_edit(&job, Ok(()));
     assert_eq!(
-        app.message.as_ref().unwrap().0,
+        app.message.as_ref().unwrap().text,
         "Nothing changed in the plugin"
     );
     fs::write(job.path.join("commands/new.md"), "# new").unwrap();
@@ -137,7 +137,7 @@ fn the_plugins_tab_gives_allows_and_removes_plugins() {
         .message
         .as_ref()
         .unwrap()
-        .0
+        .text
         .contains("changes committed"));
     assert!(repo.changed_files().unwrap().is_empty());
     assert!(screen(&mut app).contains("2 commands"));
@@ -226,7 +226,7 @@ fn plugins_come_from_the_catalog_and_are_updated() {
         .message
         .as_ref()
         .unwrap()
-        .0
+        .text
         .contains("Catalog official added: 3 plugins"));
 
     // Searching keeps only what matches.
@@ -273,7 +273,7 @@ fn plugins_come_from_the_catalog_and_are_updated() {
         .message
         .as_ref()
         .unwrap()
-        .0
+        .text
         .contains("already up to date"));
 
     // An update that is not taken leaves nothing behind.

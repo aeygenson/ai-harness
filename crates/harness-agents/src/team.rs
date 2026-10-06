@@ -67,6 +67,7 @@ impl AgentRunner for Team {
 mod tests {
     use super::*;
     use crate::MockStep;
+    use harness_core::task::agent::RunEnd;
     use harness_core::task::handoff::{NextStep, Verdict};
     use std::path::PathBuf;
 
@@ -91,10 +92,13 @@ mod tests {
         let team = Team::new().with(Role::Tester, AnyAgent::Mock(tester));
 
         let outcome = team.run(&job(Role::Tester, dir.path())).await;
-        assert!(outcome.success);
+        assert_eq!(outcome.end, RunEnd::Succeeded);
 
         let outcome = team.run(&job(Role::Developer, dir.path())).await;
-        assert!(!outcome.success);
-        assert!(outcome.message.contains("Developer"), "{}", outcome.message);
+        assert!(
+            matches!(&outcome.end, RunEnd::Failed(message) if message.contains("Developer")),
+            "{:?}",
+            outcome.end
+        );
     }
 }

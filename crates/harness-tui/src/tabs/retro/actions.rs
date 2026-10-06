@@ -7,6 +7,7 @@ use harness_core::config::projects::name_of;
 use harness_core::git::{Repo, HARNESS_DIR};
 
 use crate::tabs::tasks::TasksTab;
+use crate::ui::message::Message;
 use crate::ui::Form;
 use crate::{App, EditJob, EditKind, Purpose};
 
@@ -16,10 +17,10 @@ impl App {
         use super::Action as A;
         match action {
             A::None => {}
-            A::Say(key) => self.message = Some((self.tr.t(key).to_string(), true)),
+            A::Say(key) => self.message = Some(Message::error(self.tr.t(key))),
             A::Generate => {
                 if self.tasks.as_ref().is_some_and(TasksTab::is_running) {
-                    self.message = Some((self.tr.t("retro.tasks_running").to_string(), true));
+                    self.message = Some(Message::error(self.tr.t("retro.tasks_running")));
                     return;
                 }
                 // Lisa sees which project the retrospective is for.
@@ -99,7 +100,7 @@ impl App {
     pub(crate) fn generate_retro(&mut self) {
         // The roles may have started while the question was open.
         if self.tasks.as_ref().is_some_and(TasksTab::is_running) {
-            self.message = Some((self.tr.t("retro.tasks_running").to_string(), true));
+            self.message = Some(Message::error(self.tr.t("retro.tasks_running")));
             return;
         }
         let language = self.tr.t("retro.language").to_string();
@@ -108,7 +109,7 @@ impl App {
                 return;
             }
             retro.generate(self.retro_builder, &language);
-            self.message = Some((self.tr.t("retro.started").to_string(), false));
+            self.message = Some(Message::info(self.tr.t("retro.started")));
         }
     }
 
@@ -119,9 +120,8 @@ impl App {
         let applied =
             harness_core::retro::ops::apply(&repo, dir, ids).map_err(|e| e.to_string())?;
         let list: Vec<String> = applied.iter().map(u32::to_string).collect();
-        self.message = Some((
+        self.message = Some(Message::info(
             self.tr.f("retro.applied", &[("ids", &list.join(", "))]),
-            false,
         ));
         if let Some(retro) = &mut self.retro {
             retro.chosen.clear();
@@ -144,10 +144,10 @@ impl App {
                     .map_err(|e| e.to_string())
             });
         self.message = Some(match (result, saved) {
-            (Err(error), _) => (tr.f("skills.editor_failed", &[("error", &error)]), true),
-            (_, Err(error)) => (error, true),
-            (_, Ok(true)) => (tr.f("retro.edited", &[("number", &job.name)]), false),
-            (_, Ok(false)) => (tr.t("retro.unchanged").to_string(), false),
+            (Err(error), _) => Message::error(tr.f("skills.editor_failed", &[("error", &error)])),
+            (_, Err(error)) => Message::error(error),
+            (_, Ok(true)) => Message::info(tr.f("retro.edited", &[("number", &job.name)])),
+            (_, Ok(false)) => Message::info(tr.t("retro.unchanged")),
         });
         if let Some(retro) = &mut self.retro {
             retro.reload();

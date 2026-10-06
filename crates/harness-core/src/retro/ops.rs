@@ -12,7 +12,7 @@ use crate::config::Config;
 use crate::git::{GitError, Repo, HARNESS_DIR};
 use crate::retro::proposals::ProposalsFile;
 use crate::retro::suggest::{self, Applied, ApplyError, PROPOSALS_JSON, RETRO_MD};
-use crate::retro::{RetroError, Stats, TaskHistory, RETROS_DIR};
+use crate::retro::{RetroError, Scope, Stats, TaskHistory, RETROS_DIR};
 use crate::task::store::StoreError;
 
 const STATS_MD: &str = "stats.md";
@@ -50,8 +50,8 @@ pub struct RetroInfo {
     /// `003`.
     pub number: String,
     pub dir: PathBuf,
-    /// `all` or a task id.
-    pub scope: String,
+    /// What it looked at; `None` when `stats.json` cannot be read.
+    pub scope: Option<Scope>,
     /// The day it was last committed, `2026-10-02`.
     pub date: Option<String>,
     /// What the agent wrote (and Lisa may have edited), if it ran.
@@ -88,8 +88,7 @@ fn info(repo: &Repo, n: u32, dir: PathBuf) -> RetroInfo {
     let read = |name: &str| fs::read_to_string(dir.join(name)).ok();
     let scope = read(STATS_JSON)
         .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
-        .and_then(|json| json.get("scope")?.as_str().map(str::to_string))
-        .unwrap_or_default();
+        .and_then(|json| json.get("scope")?.as_str().map(Scope::from_text));
     let proposals = read(PROPOSALS_JSON)
         .map(|text| serde_json::from_str::<ProposalsFile>(&text).map_err(|e| e.to_string()));
     RetroInfo {
@@ -131,10 +130,10 @@ pub fn save_stats(
     let runs = repo.runs_dir();
     let (scope, tasks) = match task_id {
         Some(id) => (
-            id,
+            Scope::Task(id.to_string()),
             vec![TaskHistory::load(&runs, id).map_err(|e| OpsError::NoTask(id.to_string(), e))?],
         ),
-        None => ("all", TaskHistory::load_all(&runs)?),
+        None => (Scope::All, TaskHistory::load_all(&runs)?),
     };
     if tasks.is_empty() {
         return Err(OpsError::NoTasks);
@@ -142,7 +141,8 @@ pub fn save_stats(
     let stats = Stats::collect(scope, &tasks, config);
     let dir = stats.save(&repo.root().join(HARNESS_DIR))?;
     let number = dir.file_name().unwrap_or_default().to_string_lossy();
-    repo.commit_paths(&[&dir], &format!("harness: retro {number} ({scope})"))?;
+    let message = format!("harness: retro {number} ({})", stats.scope);
+    repo.commit_paths(&[&dir], &message)?;
     Ok((dir, stats))
 }
 
@@ -238,7 +238,7 @@ mod tests {
         ));
         let (first, _) = save_stats(&repo, Some("task-001"), None).unwrap();
         let (second, stats) = save_stats(&repo, None, None).unwrap();
-        assert_eq!(stats.scope, "all");
+        assert_eq!(stats.scope, Scope::All);
         check_clean(&repo).unwrap();
 
         // What the agent would have written into the second one.
@@ -266,8 +266,8 @@ mod tests {
         let found = list(&repo);
         assert_eq!(found.len(), 2);
         assert_eq!(found[0].number, "002");
-        assert_eq!(found[0].scope, "all");
-        assert_eq!(found[1].scope, "task-001");
+        assert_eq!(found[0].scope, Some(Scope::All));
+        assert_eq!(found[1].scope, Some(Scope::Task("task-001".into())));
         assert!(found[0].date.is_some());
         assert_eq!(found[0].retro.as_deref(), Some("Went well."));
         assert!(found[0]

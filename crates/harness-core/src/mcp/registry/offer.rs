@@ -162,7 +162,7 @@ pub(super) fn offer(registry_name: &str, package: &Value) -> Option<Offer> {
     Some(Offer {
         name,
         server: McpConfig {
-            command: command.into(),
+            command: Some(command.into()),
             args,
             env,
             ..McpConfig::default()

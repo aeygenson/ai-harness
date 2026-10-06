@@ -65,8 +65,6 @@ pub const BRIDGE_ARG: &str = "mcp-remote";
 /// `Name: value`, from `HARNESS_MCP_HEADER_1`, `_2`, ...
 pub const BRIDGE_URL: &str = "HARNESS_MCP_URL";
 pub const BRIDGE_HEADER: &str = "HARNESS_MCP_HEADER_";
-/// The only `auth` there is: a sign-in in the browser.
-pub const AUTH_OAUTH: &str = "oauth";
 /// A server with `auth = "oauth"` asks the secret function for
 /// `oauth/<server> <url>`: the access token of the sign-in, still valid.
 pub const OAUTH_SECRET: &str = "oauth/";
@@ -110,7 +108,7 @@ pub enum McpError {
     #[error("MCP server {server:?}: header {name:?} is not allowed")]
     BadHeader { server: String, name: String },
     #[error(
-        "MCP server {0:?}: auth may only be \"oauth\", for a server on the web (url) \
+        "MCP server {0:?}: auth = \"oauth\" is only for a server on the web (url) \
          without its own Authorization header"
     )]
     BadAuth(String),
@@ -475,7 +473,11 @@ mod tests {
             matches!(check_server("x", &config), Err(McpError::BadAuth(_)))
         };
         assert!(bad("command = \"npx\"\nauth = \"oauth\""));
-        assert!(bad("url = \"https://a.b\"\nauth = \"basic\""));
+        // Any other kind of sign-in is not even read.
+        assert!(toml::from_str::<crate::config::McpConfig>(
+            "url = \"https://a.b\"\nauth = \"basic\""
+        )
+        .is_err());
         assert!(bad(
             "url = \"https://a.b\"\nauth = \"oauth\"\nheaders = { authorization = \"x\" }"
         ));

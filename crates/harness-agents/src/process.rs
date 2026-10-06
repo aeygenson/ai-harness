@@ -9,7 +9,7 @@ use std::sync::Mutex;
 use std::time::Duration;
 
 use harness_core::secret;
-use harness_core::task::agent::AgentOutcome;
+use harness_core::task::agent::{AgentOutcome, RunEnd};
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWriteExt, BufReader};
 
 /// `program`, started in the project folder with an empty environment plus
@@ -217,10 +217,21 @@ pub fn failed(mut log: String, message: String) -> AgentOutcome {
     log.push_str(&message);
     log.push('\n');
     AgentOutcome {
-        success: false,
-        usage_limit_reached: false,
+        end: RunEnd::Failed(message),
         log,
-        message,
+    }
+}
+
+/// How a run that finished turned out. `done` says the agent did its work;
+/// otherwise `message` says why not, and a used-up subscription (seen in
+/// `message` or `stderr`) pauses the task instead of failing the role.
+pub fn run_end(done: bool, message: String, stderr: &str) -> RunEnd {
+    if done {
+        RunEnd::Succeeded
+    } else if looks_like_usage_limit(&format!("{message}\n{stderr}")) {
+        RunEnd::UsageLimit
+    } else {
+        RunEnd::Failed(message)
     }
 }
 

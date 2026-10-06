@@ -9,6 +9,7 @@ use harness_core::config::McpConfig;
 use harness_core::mcp::tools::{self, Tool, ToolList};
 
 use crate::tabs::roles::RolesTab;
+use crate::ui::message::Message;
 use crate::ui::Form;
 use crate::{server_form, App, Purpose};
 
@@ -43,7 +44,7 @@ impl App {
         let server = match server {
             Ok(server) => server,
             Err(error) => {
-                self.message = Some((error.to_string(), true));
+                self.message = Some(Message::error(error.to_string()));
                 return;
             }
         };
@@ -53,7 +54,7 @@ impl App {
             let _ = tx.send(checker(&server, &root));
         });
         mcp.checking = Some(name.clone());
-        self.message = Some((self.tr.f("mcp.checking", &[("name", &name)]), false));
+        self.message = Some(Message::info(self.tr.f("mcp.checking", &[("name", &name)])));
         self.checking = Some((name, config, rx));
     }
 
@@ -79,17 +80,16 @@ impl App {
                 };
                 match &self.home {
                     Some(home) => match tools::save(home, server, &list) {
-                        Ok(()) => (
+                        Ok(()) => Message::info(
                             self.tr
                                 .f("mcp.checked", &[("name", &name), ("count", &count)]),
-                            false,
                         ),
-                        Err(error) => (error.to_string(), true),
+                        Err(error) => Message::error(error.to_string()),
                     },
-                    None => ("HOME is not set".into(), true),
+                    None => Message::error("HOME is not set"),
                 }
             }
-            Err(error) => (error, true),
+            Err(error) => Message::error(error),
         });
     }
 
@@ -110,7 +110,9 @@ impl App {
             let _ = tx.send(signer(&dir, &server, url.trim()));
         });
         mcp.signing = Some(name.to_string());
-        self.message = Some((self.tr.f("mcp.sign_in_started", &[("name", &name)]), false));
+        self.message = Some(Message::info(
+            self.tr.f("mcp.sign_in_started", &[("name", &name)]),
+        ));
         self.signing = Some((name.to_string(), rx));
     }
 
@@ -146,7 +148,7 @@ impl App {
                 return;
             }
             A::Unusable(why) => {
-                self.message = Some((tr.f("mcp.cannot_use", &[("why", &why)]), true));
+                self.message = Some(Message::error(tr.f("mcp.cannot_use", &[("why", &why)])));
                 return;
             }
             A::Search(query) => Some((
@@ -234,14 +236,14 @@ impl App {
             mcp.catalog = None;
             mcp.select_named(&name, roles);
         }
-        self.message = Some((self.tr.f("mcp.saved", &[("name", &name)]), false));
+        self.message = Some(Message::info(self.tr.f("mcp.saved", &[("name", &name)])));
         Ok(())
     }
 
     /// Removes an MCP server from `harness.toml`.
     pub(crate) fn remove_mcp(&mut self, name: &str) -> Result<(), String> {
         self.save_settings(|text| config::edit::remove_mcp(text, name).map_err(|e| e.to_string()))?;
-        self.message = Some((self.tr.f("mcp.removed", &[("name", &name)]), false));
+        self.message = Some(Message::info(self.tr.f("mcp.removed", &[("name", &name)])));
         Ok(())
     }
 
@@ -267,7 +269,9 @@ impl App {
         if let Some(mcp) = &mut self.mcp {
             mcp.reload();
         }
-        self.message = Some((self.tr.f("mcp.secret_saved_as", &[("name", &name)]), false));
+        self.message = Some(Message::info(
+            self.tr.f("mcp.secret_saved_as", &[("name", &name)]),
+        ));
         Ok(())
     }
 }

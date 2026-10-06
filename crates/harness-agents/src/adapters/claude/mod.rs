@@ -20,7 +20,7 @@ use crate::install::credentials::Secret;
 use crate::process::{self, failed};
 use crate::role_settings::RoleSettings;
 use harness_core::config::AgentKind;
-use harness_core::task::agent::{AgentOutcome, AgentRunner, RoleJob};
+use harness_core::task::agent::{AgentOutcome, AgentRunner, RoleJob, RunEnd};
 use harness_core::task::handoff::Role;
 use rules::RoleRules;
 
@@ -209,12 +209,15 @@ impl AgentRunner for ClaudeCode {
             Some(result) => result.text.clone(),
             None => format!("claude exited ({status}) without a result"),
         };
-        AgentOutcome {
-            success,
-            usage_limit_reached,
-            log,
-            message,
-        }
+        // The usage limit wins: Claude Code may report it inside a "result".
+        let end = if usage_limit_reached {
+            RunEnd::UsageLimit
+        } else if success {
+            RunEnd::Succeeded
+        } else {
+            RunEnd::Failed(message)
+        };
+        AgentOutcome { end, log }
     }
 }
 

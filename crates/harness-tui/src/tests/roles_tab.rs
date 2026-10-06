@@ -87,7 +87,7 @@ fn settings_that_fail_the_checks_are_not_saved() {
     key(&mut app, KeyCode::Char('2'));
     click(&mut app, "[ ] broken");
     click(&mut app, " Save ");
-    let (text, error) = app.message.clone().unwrap();
+    let (text, error) = shown(&app);
     assert!(error, "{text}");
     assert_eq!(
         fs::read_to_string(root.join(".harness/harness.toml")).unwrap(),

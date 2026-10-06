@@ -220,13 +220,9 @@ impl AgentRunner for Codex {
             Some(TurnEnd::Failed(message)) => message.clone(),
             _ => format!("codex exited ({}) without finishing", finished.status),
         };
-        let usage_limit_reached =
-            !success && process::looks_like_usage_limit(&format!("{message}\n{}", finished.stderr));
         AgentOutcome {
-            success: success && !usage_limit_reached,
-            usage_limit_reached,
+            end: process::run_end(success, message, &finished.stderr),
             log,
-            message,
         }
     }
 }
