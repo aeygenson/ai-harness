@@ -4,7 +4,7 @@
 use std::sync::mpsc;
 
 use harness_core::git::Repo;
-use harness_core::plugin_ops;
+use harness_core::plugins;
 
 use crate::ui::Form;
 use crate::{App, PluginJob, Purpose};
@@ -44,27 +44,29 @@ impl App {
             let result = Repo::open(&root)
                 .map_err(|e| e.to_string())
                 .and_then(|repo| {
-                    plugin_ops::prepare_update(&repo, &home, &name).map_err(|e| e.to_string())
+                    plugins::ops::prepare_update(&repo, &home, &name).map_err(|e| e.to_string())
                 });
             PluginJob::UpdateReady(name, result)
         });
     }
 
     /// Applies a prepared plugin update; if that fails, the download is thrown away.
-    pub(crate) fn apply_plugin_update(&mut self, prepared: &plugin_ops::Prepared) {
+    pub(crate) fn apply_plugin_update(&mut self, prepared: &plugins::ops::Prepared) {
         let result = self
             .project
             .as_deref()
             .ok_or_else(String::new)
             .and_then(|root| Repo::open(root).map_err(|e| e.to_string()))
-            .and_then(|repo| plugin_ops::apply_update(&repo, prepared).map_err(|e| e.to_string()));
+            .and_then(|repo| {
+                plugins::ops::apply_update(&repo, prepared).map_err(|e| e.to_string())
+            });
         self.message = Some(match result {
             Ok(()) => (
                 self.tr.f("plugins.updated", &[("name", &prepared.name)]),
                 false,
             ),
             Err(error) => {
-                plugin_ops::discard(prepared);
+                plugins::ops::discard(prepared);
                 (
                     self.tr.f(
                         "plugins.update_failed",
@@ -93,13 +95,13 @@ impl App {
             PluginJob::CatalogUpdated(name, result) => {
                 let tr = &self.tr;
                 self.message = Some(match result {
-                    Ok(plugin_ops::CatalogUpdate::Local) => {
+                    Ok(plugins::ops::CatalogUpdate::Local) => {
                         (tr.f("plugins.catalog_local", &[("name", &name)]), false)
                     }
-                    Ok(plugin_ops::CatalogUpdate::Same(_)) => {
+                    Ok(plugins::ops::CatalogUpdate::Same(_)) => {
                         (tr.f("plugins.catalog_same", &[("name", &name)]), false)
                     }
-                    Ok(plugin_ops::CatalogUpdate::Updated(_)) => {
+                    Ok(plugins::ops::CatalogUpdate::Updated(_)) => {
                         (tr.f("plugins.catalog_updated", &[("name", &name)]), false)
                     }
                     Err(error) => (error, true),

@@ -2,7 +2,7 @@
 //!
 //! The steps are the same for both: count the statistics and commit them
 //! (`save_stats`), let the `[retro]` agent read the history
-//! (`crate::suggest::suggest`), and later apply the proposals Lisa picks
+//! (`suggest::suggest`), and later apply the proposals Lisa picks
 //! (`apply`). `list` reads what was saved, newest first.
 
 use std::fs;
@@ -10,10 +10,10 @@ use std::path::{Path, PathBuf};
 
 use crate::config::Config;
 use crate::git::{GitError, Repo, HARNESS_DIR};
-use crate::proposals::ProposalsFile;
+use crate::retro::proposals::ProposalsFile;
+use crate::retro::suggest::{self, Applied, ApplyError, PROPOSALS_JSON, RETRO_MD};
 use crate::retro::{RetroError, Stats, TaskHistory, RETROS_DIR};
-use crate::store::StoreError;
-use crate::suggest::{self, Applied, ApplyError, PROPOSALS_JSON, RETRO_MD};
+use crate::task::store::StoreError;
 
 const STATS_MD: &str = "stats.md";
 const STATS_JSON: &str = "stats.json";
@@ -205,8 +205,8 @@ pub fn apply(repo: &Repo, dir: &Path, ids: &[u32]) -> Result<Vec<u32>, OpsError>
 mod tests {
     use super::*;
     use crate::config::CONFIG_FILE;
-    use crate::handoff::Role;
-    use crate::proposals::{Proposal, RoleSkill, SkillList};
+    use crate::retro::proposals::{Proposal, RoleSkill, SkillList};
+    use crate::task::handoff::Role;
 
     fn project() -> (tempfile::TempDir, Repo) {
         let dir = tempfile::tempdir().unwrap();
@@ -231,7 +231,7 @@ mod tests {
         ));
         assert!(list(&repo).is_empty());
 
-        crate::orchestrator::create_task(&repo, "task-001", "Build a parser", 5).unwrap();
+        crate::task::orchestrator::create_task(&repo, "task-001", "Build a parser", 5).unwrap();
         assert!(matches!(
             save_stats(&repo, Some("task-404"), None),
             Err(OpsError::NoTask(..))

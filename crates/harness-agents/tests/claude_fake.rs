@@ -13,8 +13,8 @@ use harness_agents::credentials::Secret;
 use harness_agents::role_settings::RoleSettings;
 use harness_agents::ClaudeCode;
 use harness_core::git::Repo;
-use harness_core::handoff::Role;
-use harness_core::orchestrator::{self, create_task, StopReason};
+use harness_core::task::handoff::Role;
+use harness_core::task::orchestrator::{self, create_task, StopReason};
 use harness_core::task::{TaskState, WaitReason, DEFAULT_MAX_ROUNDS};
 use tempfile::TempDir;
 
@@ -50,7 +50,7 @@ fn fake_claude(dir: &Path, body: &str) -> PathBuf {
     path
 }
 
-fn new_task(repo: &Repo) -> (harness_core::store::TaskStore, TaskState) {
+fn new_task(repo: &Repo) -> (harness_core::task::store::TaskStore, TaskState) {
     create_task(repo, "task-001", "Design a parser", DEFAULT_MAX_ROUNDS).unwrap()
 }
 

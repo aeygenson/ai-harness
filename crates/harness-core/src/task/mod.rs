@@ -1,11 +1,22 @@
 //! The state of one task and the rules for moving it forward (the state machine).
+//!
+//! The folder holds the rest of running a task: `handoff` (what a role hands
+//! over), `routes`, `prompt`, `permissions`, `agent` (the adapter interface),
+//! `orchestrator` (the run loop) and `store` (saving tasks to disk).
+
+pub mod agent;
+pub mod handoff;
+pub mod orchestrator;
+pub mod permissions;
+pub mod prompt;
+pub mod routes;
+pub mod store;
 
 use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
-use crate::handoff::{Handoff, NextStep, Role, Verdict, SCHEMA_VERSION};
-use crate::routes;
+use crate::task::handoff::{Handoff, NextStep, Role, Verdict, SCHEMA_VERSION};
 
 /// Default limit on how many rounds a task may take before Lisa must step in.
 pub const DEFAULT_MAX_ROUNDS: u32 = 5;
@@ -202,7 +213,7 @@ impl TaskState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::handoff::{Issue, Severity};
+    use crate::task::handoff::{Issue, Severity};
 
     /// A minimal handoff for tests; rejected handoffs get one issue.
     fn handoff(role: Role, round: u32, verdict: Verdict, next: NextStep) -> Handoff {
@@ -450,12 +461,12 @@ mod tests {
             Verdict::Approved,
             NextStep::To(Role::Human),
         );
-        h.summary = "x".repeat(crate::handoff::MAX_TEXT_CHARS + 1);
+        h.summary = "x".repeat(crate::task::handoff::MAX_TEXT_CHARS + 1);
         assert_eq!(
             task.apply(&h),
             Err(TransitionError::TooLong {
                 field: "summary",
-                max_chars: crate::handoff::MAX_TEXT_CHARS
+                max_chars: crate::task::handoff::MAX_TEXT_CHARS
             })
         );
     }

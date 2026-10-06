@@ -3,7 +3,7 @@
 //! A role only *suggests* `next_role` in its handoff. The orchestrator accepts the
 //! suggestion only if it is listed here (see `docs/handoff-format.md`).
 
-use crate::handoff::{NextStep, Role, Verdict};
+use crate::task::handoff::{NextStep, Role, Verdict};
 
 /// Every place the work may go after `role` gives `verdict`.
 pub fn allowed_next(role: Role, verdict: Verdict) -> &'static [NextStep] {

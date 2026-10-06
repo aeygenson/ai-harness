@@ -277,7 +277,7 @@ mod tests {
 
     #[test]
     fn reads_every_example_in_the_docs() {
-        let doc = include_str!("../../../docs/handoff-format.md");
+        let doc = include_str!("../../../../docs/handoff-format.md");
         let examples: Vec<&str> = doc
             .split("```json")
             .skip(1)

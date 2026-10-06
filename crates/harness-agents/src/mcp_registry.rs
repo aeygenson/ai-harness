@@ -1,10 +1,10 @@
 //! Asking the official MCP registry for servers (see
-//! `harness_core::mcp_registry`). `curl` runs with only the whitelisted
+//! `harness_core::mcp::registry`). `curl` runs with only the whitelisted
 //! environment in a temporary folder; no key is sent, the registry is public.
 
 use std::path::Path;
 
-use harness_core::mcp_registry::{parse, Entry, REGISTRY_URL};
+use harness_core::mcp::registry::{parse, Entry, REGISTRY_URL};
 
 use crate::models::run;
 use crate::process::base_command;

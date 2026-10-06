@@ -1,30 +1,18 @@
 //! The harness engine: everything except the user interface.
+//!
+//! Topics with several files have their own folder: `task/` (a task, its
+//! handoffs, routes and the run loop), `config/` (`harness.toml` and the
+//! project list), `mcp/`, `plugins/` and `retro/`. A folder's `mod.rs` holds
+//! the topic's main types, so `harness_core::config::Config` reads the same
+//! as before; the other files are its parts, such as `config::edit`.
 
-pub mod agent;
-pub mod catalog;
 pub mod config;
-pub mod config_edit;
 pub mod git;
-pub mod handoff;
 pub mod mcp;
-pub mod mcp_registry;
-pub mod mcp_tools;
 pub mod models;
-pub mod orchestrator;
-pub mod permissions;
-pub mod plugin_install;
-pub mod plugin_ops;
 pub mod plugins;
-pub mod projects;
-pub mod prompt;
-pub mod proposals;
 pub mod retro;
-pub mod retro_ops;
-pub mod routes;
 pub mod secret;
-pub mod settings;
 pub mod skills;
-pub mod store;
-pub mod suggest;
 pub mod task;
 pub mod text;

@@ -7,7 +7,7 @@
 //! security role, and no MCP servers, plugins or skills of its own.
 //!
 //! The agent writes `retro.md` (for Lisa) and `proposals.json` (see
-//! `crate::proposals`). Nothing changes until Lisa picks proposals with
+//! `crate::retro::proposals`). Nothing changes until Lisa picks proposals with
 //! `harness retro apply <NNN> <ids>`; applied ids are kept in `applied.json`.
 
 use std::fs;
@@ -16,14 +16,14 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use crate::agent::{AgentRunner, RoleJob};
+use crate::config::edit::{self, EditError};
 use crate::config::{Config, ConfigError, CONFIG_FILE};
-use crate::config_edit::{self, EditError};
 use crate::git::{GitError, Repo, HARNESS_DIR};
-use crate::handoff::Role;
-use crate::proposals::{FileChange, ProposalError, ProposalsFile, SkillList};
+use crate::retro::proposals::{FileChange, ProposalError, ProposalsFile, SkillList};
 use crate::retro::Stats;
 use crate::skills::{SkillError, Skills, SKILLS_DIR};
+use crate::task::agent::{AgentRunner, RoleJob};
+use crate::task::handoff::Role;
 use crate::text;
 
 pub const RETRO_MD: &str = "retro.md";
@@ -418,7 +418,7 @@ pub fn apply(
     for proposal in &chosen {
         for given in proposal.missing_roles(&config) {
             let always = given.list == SkillList::AlwaysSkills;
-            text = config_edit::add_role_skill(&text, given.role, &proposal.skill, always)?;
+            text = edit::add_role_skill(&text, given.role, &proposal.skill, always)?;
         }
     }
 
@@ -502,9 +502,9 @@ fn io_error(path: &Path, source: io::Error) -> SuggestError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::agent::AgentOutcome;
-    use crate::proposals::{Proposal, RoleSkill};
+    use crate::retro::proposals::{Proposal, RoleSkill};
     use crate::retro::TaskHistory;
+    use crate::task::agent::AgentOutcome;
     use std::future::Future;
 
     const TOML: &str = "[roles.developer]\nagent = \"claude\"\nskills = [\"style\"]\n\
@@ -521,7 +521,7 @@ mod tests {
         fs::write(harness.join(CONFIG_FILE), TOML).unwrap();
         fs::write(harness.join("skills/style.md"), STYLE).unwrap();
         repo.commit_all("settings").unwrap();
-        crate::orchestrator::create_task(&repo, "task-001", "Build a parser", 5).unwrap();
+        crate::task::orchestrator::create_task(&repo, "task-001", "Build a parser", 5).unwrap();
         let config = Config::load(&harness).unwrap();
         let tasks = TaskHistory::load_all(&repo.runs_dir()).unwrap();
         let stats = Stats::collect("all", &tasks, Some(&config));

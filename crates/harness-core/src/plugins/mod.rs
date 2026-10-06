@@ -22,14 +22,21 @@
 //! rules, so a plugin that has them is refused unless its settings allow them.
 //! A Codex plugin with apps (`.app.json`, ChatGPT connectors) is always
 //! refused: apps reach services outside the project.
+//!
+//! The folder also holds `catalog` (plugin catalogs), `install` (copying a
+//! plugin into a project) and `ops` (plugin changes shared by the CLI and TUI).
+
+pub mod catalog;
+pub mod install;
+pub mod ops;
 
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 
 use crate::config::{Config, PluginConfig};
-use crate::handoff::Role;
 use crate::mcp::is_simple_name;
+use crate::task::handoff::Role;
 
 /// Where plugins live by default, inside the project.
 pub const PLUGINS_DIR: &str = ".harness/plugins";

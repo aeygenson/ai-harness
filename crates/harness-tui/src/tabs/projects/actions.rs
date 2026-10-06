@@ -2,7 +2,7 @@
 
 use std::path::{Path, PathBuf};
 
-use harness_core::projects::{self, name_of};
+use harness_core::config::projects::{self, name_of};
 use harness_platform::folder_dialog::{self, Native};
 
 use crate::tabs::projects::has_config;

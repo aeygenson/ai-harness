@@ -3,8 +3,8 @@
 
 use std::path::Path;
 
+use harness_core::config::projects::name_of;
 use harness_core::git::{Repo, HARNESS_DIR};
-use harness_core::projects::name_of;
 
 use crate::tabs::tasks::TasksTab;
 use crate::ui::Form;
@@ -53,7 +53,7 @@ impl App {
                 };
                 let harness_dir = root.join(HARNESS_DIR);
                 let config = harness_core::config::Config::load(&harness_dir).ok();
-                let found = harness_core::suggest::load(&dir).ok();
+                let found = harness_core::retro::suggest::load(&dir).ok();
                 let tr = &self.tr;
                 let mut text = tr.t("retro.apply_text").to_string();
                 for id in &ids {
@@ -61,7 +61,7 @@ impl App {
                         continue;
                     };
                     text.push_str(&format!("\n{id}. {}", proposal.summary));
-                    use harness_core::proposals::FileChange;
+                    use harness_core::retro::proposals::FileChange;
                     let file = match (proposal.file_change(&harness_dir), &proposal.content) {
                         (FileChange::New, Some(_)) => Some("retro.new_skill"),
                         (FileChange::Changed { .. }, Some(_)) => Some("retro.changed_skill"),
@@ -116,7 +116,8 @@ impl App {
     pub(crate) fn apply_proposals(&mut self, dir: &Path, ids: &[u32]) -> Result<(), String> {
         let root = self.project.clone().ok_or_else(String::new)?;
         let repo = Repo::open(&root).map_err(|e| e.to_string())?;
-        let applied = harness_core::retro_ops::apply(&repo, dir, ids).map_err(|e| e.to_string())?;
+        let applied =
+            harness_core::retro::ops::apply(&repo, dir, ids).map_err(|e| e.to_string())?;
         let list: Vec<String> = applied.iter().map(u32::to_string).collect();
         self.message = Some((
             self.tr.f("retro.applied", &[("ids", &list.join(", "))]),

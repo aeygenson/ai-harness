@@ -8,10 +8,10 @@
 
 use std::path::Path;
 
-use crate::handoff::{FileAction, FileChange, Handoff, NextStep, Role, Verdict};
-use crate::permissions::{self, WriteRule};
-use crate::routes;
 use crate::skills::RoleSkills;
+use crate::task::handoff::{FileAction, FileChange, Handoff, NextStep, Role, Verdict};
+use crate::task::permissions::{self, WriteRule};
+use crate::task::routes;
 use crate::task::TaskState;
 
 pub fn build(

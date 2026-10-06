@@ -10,6 +10,14 @@
 //! effort = "high"       # optional: how hard the model thinks (see `crate::models`)
 //! skills = ["write-docs"]  # optional: see `crate::skills`
 //! ```
+//!
+//! The folder also holds `edit` (changing `harness.toml` without losing
+//! comments), `save` (checking and committing a changed file) and `projects`
+//! (the list of Lisa's projects).
+
+pub mod edit;
+pub mod projects;
+pub mod save;
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -17,7 +25,7 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
-use crate::handoff::Role;
+use crate::task::handoff::Role;
 use crate::task::DEFAULT_MAX_ROUNDS;
 
 pub const CONFIG_FILE: &str = "harness.toml";

@@ -23,12 +23,12 @@ use std::sync::mpsc::{channel, Receiver};
 
 use harness_agents::build::BuildError;
 use harness_agents::{process, AnyAgent};
+use harness_core::config::projects::name_of;
 use harness_core::config::Config;
 use harness_core::git::{Repo, HARNESS_DIR};
-use harness_core::projects::name_of;
-use harness_core::proposals::Proposal;
-use harness_core::retro_ops::{self, RetroInfo};
-use harness_core::suggest::{self, RETRO_MD};
+use harness_core::retro::ops::{self, RetroInfo};
+use harness_core::retro::proposals::Proposal;
+use harness_core::retro::suggest::{self, RETRO_MD};
 use ratatui::crossterm::event::KeyCode;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Modifier, Style};
@@ -116,7 +116,7 @@ impl RetroTab {
     pub fn reload(&mut self) {
         let keep = self.current().map(|r| r.number.clone());
         self.list = Repo::open(&self.root)
-            .map(|repo| retro_ops::list(&repo))
+            .map(|repo| ops::list(&repo))
             .unwrap_or_default();
         self.config = Config::load(&self.root.join(HARNESS_DIR)).ok();
         match keep {
@@ -537,9 +537,9 @@ fn generate(
     let repo = Repo::open(root).map_err(|e| text(&e))?;
     let config = Config::load(&root.join(HARNESS_DIR)).map_err(|e| text(&e))?;
     // Everything the agent needs is checked before anything is saved.
-    retro_ops::check_clean(&repo).map_err(|e| text(&e))?;
+    ops::check_clean(&repo).map_err(|e| text(&e))?;
     let agent = builder(&config).map_err(|e| text(&e))?;
-    let (dir, stats) = retro_ops::save_stats(&repo, None, Some(&config)).map_err(|e| text(&e))?;
+    let (dir, stats) = ops::save_stats(&repo, None, Some(&config)).map_err(|e| text(&e))?;
     let number = dir
         .file_name()
         .unwrap_or_default()

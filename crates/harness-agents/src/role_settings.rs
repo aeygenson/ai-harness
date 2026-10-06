@@ -7,10 +7,10 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
-use harness_core::agent::RoleJob;
-use harness_core::handoff::Role;
 use harness_core::mcp::McpServer;
 use harness_core::plugins::Plugin;
+use harness_core::task::agent::RoleJob;
+use harness_core::task::handoff::Role;
 
 /// How long a role may run when `harness.toml` does not say: 30 minutes,
 /// enough for a large change, short enough to notice a stuck agent.

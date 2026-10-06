@@ -13,13 +13,13 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::agent::{AgentRunner, RoleJob};
 use crate::git::{GitError, Repo};
-use crate::handoff::{Handoff, NextStep, Role, Verdict};
-use crate::permissions;
-use crate::prompt;
 use crate::skills::Skills;
-use crate::store::{self, StoreError, TaskStore};
+use crate::task::agent::{AgentRunner, RoleJob};
+use crate::task::handoff::{Handoff, NextStep, Role, Verdict};
+use crate::task::permissions;
+use crate::task::prompt;
+use crate::task::store::{self, StoreError, TaskStore};
 use crate::task::{Stage, TaskState, WaitReason};
 use crate::text;
 
@@ -328,8 +328,8 @@ pub fn record_human_decision(
         .unwrap_or("Lisa's decision")
         .to_string();
     let issues = if verdict == Verdict::Rejected {
-        vec![crate::handoff::Issue {
-            severity: crate::handoff::Severity::Medium,
+        vec![crate::task::handoff::Issue {
+            severity: crate::task::handoff::Severity::Medium,
             location: None,
             description: summary.clone(),
         }]
@@ -337,7 +337,7 @@ pub fn record_human_decision(
         vec![]
     };
     let handoff = Handoff {
-        schema_version: crate::handoff::SCHEMA_VERSION,
+        schema_version: crate::task::handoff::SCHEMA_VERSION,
         task_id: state.task_id.clone(),
         round: state.round,
         role: Role::Human,

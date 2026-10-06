@@ -61,9 +61,9 @@ pub fn save(repo: &Repo, text: &str) -> Result<bool, SettingsError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::projects;
     use crate::config::DEFAULT_CONFIG;
-    use crate::handoff::Role;
-    use crate::projects;
+    use crate::task::handoff::Role;
 
     #[test]
     fn only_settings_that_pass_the_checks_are_saved() {

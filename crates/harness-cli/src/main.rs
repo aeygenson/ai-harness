@@ -36,11 +36,11 @@ use anyhow::{bail, Context, Result};
 use clap::Parser;
 use harness_agents::credentials;
 use harness_agents::launcher;
+use harness_core::config::projects;
 use harness_core::config::CONFIG_FILE;
 use harness_core::git::{Repo, HARNESS_DIR};
-use harness_core::handoff::Verdict;
-use harness_core::projects;
-use harness_core::store::TaskStore;
+use harness_core::task::handoff::Verdict;
+use harness_core::task::store::TaskStore;
 use harness_core::task::TaskState;
 
 use crate::cli::{
@@ -190,7 +190,7 @@ pub(crate) fn init(project: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use harness_core::handoff::Role;
+    use harness_core::task::handoff::Role;
     use harness_core::task::Stage;
 
     #[test]

@@ -3,7 +3,7 @@
 use std::future::Future;
 use std::path::PathBuf;
 
-use crate::handoff::Role;
+use crate::task::handoff::Role;
 
 /// Everything an agent needs to do one role once.
 #[derive(Debug, Clone)]

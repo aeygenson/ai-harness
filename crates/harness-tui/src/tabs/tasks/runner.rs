@@ -14,10 +14,10 @@ use harness_agents::process;
 use harness_agents::Team;
 use harness_core::config::Config;
 use harness_core::git::{Repo, HARNESS_DIR};
-use harness_core::handoff::{NextStep, Role, Verdict};
-use harness_core::orchestrator::{self, StopReason};
 use harness_core::skills::Skills;
-use harness_core::store::{next_task_id, TaskStore};
+use harness_core::task::handoff::{NextStep, Role, Verdict};
+use harness_core::task::orchestrator::{self, StopReason};
+use harness_core::task::store::{next_task_id, TaskStore};
 use harness_core::text;
 use tokio::sync::oneshot;
 

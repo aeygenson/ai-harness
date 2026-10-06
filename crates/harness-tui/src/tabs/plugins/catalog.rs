@@ -19,9 +19,9 @@
 
 use std::path::Path;
 
-use harness_core::catalog::{Entry, Source};
-use harness_core::plugin_ops::{self, CatalogInfo};
 use harness_core::plugins;
+use harness_core::plugins::catalog::{Entry, Source};
+use harness_core::plugins::ops::{self, CatalogInfo};
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
@@ -73,7 +73,7 @@ impl CatalogView {
         let Some(home) = home else {
             return;
         };
-        match plugin_ops::catalogs(home) {
+        match ops::catalogs(home) {
             Ok(catalogs) => {
                 for catalog in catalogs {
                     match catalog.entries {
@@ -161,7 +161,7 @@ impl CatalogsView {
     }
 
     pub fn reload(&mut self, home: Option<&Path>) {
-        match home.map(plugin_ops::catalogs) {
+        match home.map(ops::catalogs) {
             Some(Ok(list)) => {
                 self.list = list;
                 self.error = None;

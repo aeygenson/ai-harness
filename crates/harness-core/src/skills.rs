@@ -39,7 +39,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::config::Config;
-use crate::handoff::Role;
+use crate::task::handoff::Role;
 
 /// The folder with the skills, inside `.harness/`.
 pub const SKILLS_DIR: &str = "skills";

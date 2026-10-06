@@ -10,6 +10,13 @@
 //!
 //! The result is saved in `.harness/retros/<NNN>/` as `stats.md` (for Lisa)
 //! and `stats.json` (for programs, and later for the Retrospective role).
+//!
+//! The folder also holds `ops` (saving and applying retrospectives),
+//! `suggest` (the Retrospective agent) and `proposals` (the changes it proposes).
+
+pub mod ops;
+pub mod proposals;
+pub mod suggest;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
@@ -20,8 +27,8 @@ use std::path::{Path, PathBuf};
 use serde::Serialize;
 
 use crate::config::Config;
-use crate::handoff::{Handoff, NextStep, Role, Severity, Verdict};
-use crate::store::{self, StoreError, TaskStore};
+use crate::task::handoff::{Handoff, NextStep, Role, Severity, Verdict};
+use crate::task::store::{self, StoreError, TaskStore};
 use crate::task::{Stage, TaskState, WaitReason};
 
 /// Folder inside `.harness/` where retrospectives are saved.
@@ -532,7 +539,7 @@ fn io_error(path: &Path, source: io::Error) -> RetroError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::handoff::Issue;
+    use crate::task::handoff::Issue;
 
     fn handoff(role: Role, verdict: Verdict, next: NextStep) -> Handoff {
         Handoff {

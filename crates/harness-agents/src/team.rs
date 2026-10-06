@@ -3,8 +3,8 @@
 
 use std::collections::HashMap;
 
-use harness_core::agent::{AgentOutcome, AgentRunner, RoleJob};
-use harness_core::handoff::Role;
+use harness_core::task::agent::{AgentOutcome, AgentRunner, RoleJob};
+use harness_core::task::handoff::Role;
 
 use crate::process::failed;
 use crate::{Antigravity, ClaudeCode, Codex, Dsh, MockAgent};
@@ -67,7 +67,7 @@ impl AgentRunner for Team {
 mod tests {
     use super::*;
     use crate::MockStep;
-    use harness_core::handoff::{NextStep, Verdict};
+    use harness_core::task::handoff::{NextStep, Verdict};
     use std::path::PathBuf;
 
     fn job(role: Role, dir: &std::path::Path) -> RoleJob {

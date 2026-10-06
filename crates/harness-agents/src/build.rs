@@ -7,10 +7,10 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use harness_core::config::Config;
-use harness_core::handoff::Role;
 use harness_core::mcp::{McpServer, McpServers};
 use harness_core::plugins::{Plugin, Plugins};
-use harness_core::suggest;
+use harness_core::retro::suggest;
+use harness_core::task::handoff::Role;
 
 use crate::credentials::{self, Secret};
 use crate::role_settings::RoleSettings;

@@ -4,7 +4,7 @@
 //! These are the defaults from docs/design.md (section 3). Later a project will be
 //! able to change them in `.harness/harness.toml`.
 
-use crate::handoff::Role;
+use crate::task::handoff::Role;
 
 /// Nobody may change these, whatever the role: the harness's own files, and the
 /// files that give agents their instructions and settings. An agent that rewrites

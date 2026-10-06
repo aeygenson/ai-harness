@@ -8,9 +8,9 @@ use anyhow::{Context, Result};
 use harness_agents::build::retro_agent;
 use harness_core::config::Config;
 use harness_core::git::{Repo, HARNESS_DIR};
-use harness_core::proposals::FileChange;
-use harness_core::retro_ops;
-use harness_core::suggest::{self, Applied};
+use harness_core::retro;
+use harness_core::retro::proposals::FileChange;
+use harness_core::retro::suggest::{self, Applied};
 
 use crate::open_repo;
 
@@ -31,13 +31,13 @@ pub(crate) async fn retro(project: &Path, task_id: Option<&str>, suggest: bool) 
     // Check everything the agent needs before saving anything.
     let agent = match (&config, suggest) {
         (Some(config), true) => {
-            retro_ops::check_clean(&repo)?;
+            retro::ops::check_clean(&repo)?;
             Some(retro_agent(config)?)
         }
         _ => None,
     };
 
-    let (dir, stats) = retro_ops::save_stats(&repo, task_id, config.as_ref())?;
+    let (dir, stats) = retro::ops::save_stats(&repo, task_id, config.as_ref())?;
     print!("{}", stats.to_markdown());
     let number = dir
         .file_name()
@@ -76,7 +76,7 @@ pub(crate) async fn retro(project: &Path, task_id: Option<&str>, suggest: bool) 
 
 /// `.harness/retros/<NNN>` for `4`, `04` or `004`; it must exist.
 fn retro_dir(repo: &Repo, number: &str) -> Result<PathBuf> {
-    Ok(retro_ops::dir(repo, number)?)
+    Ok(retro::ops::dir(repo, number)?)
 }
 
 /// `harness retro show <number>`: the retro notes and each proposal with its diff.
@@ -132,7 +132,7 @@ pub(crate) fn retro_apply(project: &Path, number: &str, ids: &[u32]) -> Result<(
             println!("{id}. {}{file}", proposal.summary);
         }
     }
-    if !retro_ops::apply(&repo, &dir, ids)?.is_empty() {
+    if !retro::ops::apply(&repo, &dir, ids)?.is_empty() {
         println!("Applied and committed.");
     }
     Ok(())
@@ -145,8 +145,8 @@ mod tests {
 
     use harness_core::config::Config;
     use harness_core::git::Repo;
-    use harness_core::handoff::Role;
-    use harness_core::suggest::Applied;
+    use harness_core::retro::suggest::Applied;
+    use harness_core::task::handoff::Role;
 
     use crate::init;
     use crate::tasks::new_task;

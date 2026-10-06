@@ -7,11 +7,11 @@ use std::process::Command;
 
 use harness_agents::{MockAgent, MockStep};
 use harness_core::git::Repo;
-use harness_core::handoff::{NextStep, Role, Verdict};
-use harness_core::orchestrator::{
+use harness_core::task::handoff::{NextStep, Role, Verdict};
+use harness_core::task::orchestrator::{
     self, create_task, record_human_decision, StopReason, ATTEMPTS_PER_ROLE, MAX_CHANGE_BYTES,
 };
-use harness_core::store::TaskStore;
+use harness_core::task::store::TaskStore;
 use harness_core::task::{Stage, TaskState, WaitReason, DEFAULT_MAX_ROUNDS};
 use tempfile::TempDir;
 

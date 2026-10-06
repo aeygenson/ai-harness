@@ -9,14 +9,14 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context, Result};
-use harness_core::catalog::{Entry, Registry, Source};
 use harness_core::config::{Config, CONFIG_FILE};
 use harness_core::git::{Repo, HARNESS_DIR};
-use harness_core::handoff::Role;
 use harness_core::mcp::is_simple_name;
-use harness_core::plugin_install::Changes;
-use harness_core::plugin_ops::{self, CatalogUpdate};
+use harness_core::plugins::catalog::{Entry, Registry, Source};
+use harness_core::plugins::install::Changes;
+use harness_core::plugins::ops::{self, CatalogUpdate};
 use harness_core::plugins::{self, Contents, PLUGINS_DIR};
+use harness_core::task::handoff::Role;
 
 /// `~/.harness`.
 pub fn harness_home() -> Result<PathBuf> {
@@ -25,8 +25,8 @@ pub fn harness_home() -> Result<PathBuf> {
 
 pub fn marketplace_add(source: &str, name: Option<&str>) -> Result<()> {
     let home = harness_home()?;
-    let catalog = match plugin_ops::add_catalog(&home, source, name) {
-        Err(plugin_ops::OpsError::CatalogExists(name)) => bail!(
+    let catalog = match ops::add_catalog(&home, source, name) {
+        Err(ops::OpsError::CatalogExists(name)) => bail!(
             "a catalog named {name:?} is already added; use `harness marketplace update` \
              or give this one another name with --name"
         ),
@@ -56,7 +56,7 @@ fn count(entries: &[Entry]) -> String {
 
 pub fn marketplace_list() -> Result<()> {
     let home = harness_home()?;
-    let catalogs = plugin_ops::catalogs(&home)?;
+    let catalogs = ops::catalogs(&home)?;
     if catalogs.is_empty() {
         println!("No catalogs yet. Add one with `harness marketplace add owner/repo`.");
     }
@@ -84,7 +84,7 @@ pub fn marketplace_update(name: Option<&str>) -> Result<()> {
         None => Registry::load(&home)?.marketplaces.into_keys().collect(),
     };
     for name in names {
-        match plugin_ops::update_catalog(&home, &name)? {
+        match ops::update_catalog(&home, &name)? {
             CatalogUpdate::Local => println!("{name}: a local folder, always read as it is."),
             CatalogUpdate::Same(commit) => {
                 println!("{name}: already up to date ({}).", short(&commit));
@@ -98,7 +98,7 @@ pub fn marketplace_update(name: Option<&str>) -> Result<()> {
 
 pub fn marketplace_remove(name: &str) -> Result<()> {
     let home = harness_home()?;
-    plugin_ops::remove_catalog(&home, name)?;
+    ops::remove_catalog(&home, name)?;
     println!("Removed catalog {name}. Plugins already in projects stay there.");
     Ok(())
 }
@@ -209,7 +209,7 @@ pub fn plugin_add(project: &Path, wanted: &str, options: &AddOptions) -> Result<
             target.display()
         );
     }
-    let added = plugin_ops::add(
+    let added = ops::add(
         &repo,
         &home,
         entry,
@@ -245,12 +245,12 @@ pub fn plugin_add(project: &Path, wanted: &str, options: &AddOptions) -> Result<
 pub fn plugin_update(project: &Path, name: &str) -> Result<()> {
     let repo = open_repo(project)?;
     let home = harness_home()?;
-    let Some(prepared) = plugin_ops::prepare_update(&repo, &home, name)? else {
+    let Some(prepared) = ops::prepare_update(&repo, &home, name)? else {
         println!("Plugin {name} is already up to date.");
         return Ok(());
     };
-    if let Err(e) = plugin_ops::apply_update(&repo, &prepared) {
-        plugin_ops::discard(&prepared);
+    if let Err(e) = ops::apply_update(&repo, &prepared) {
+        ops::discard(&prepared);
         return Err(anyhow::Error::new(e).context(format!(
             "the new version of {name} was not taken; the old one is kept"
         )));
@@ -277,7 +277,7 @@ pub fn plugin_update(project: &Path, name: &str) -> Result<()> {
 
 pub fn plugin_remove(project: &Path, name: &str) -> Result<()> {
     let repo = open_repo(project)?;
-    plugin_ops::remove(&repo, name)?;
+    ops::remove(&repo, name)?;
     println!("Removed plugin {name} from the project and from every role.");
     Ok(())
 }
