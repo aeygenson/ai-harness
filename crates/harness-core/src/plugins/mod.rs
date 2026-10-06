@@ -56,6 +56,7 @@ pub fn manifest(agent: AgentKind) -> &'static str {
 /// One plugin as the agent loads it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Plugin {
+    /// The plugin's name, as in `[plugins.<name>]` in harness.toml.
     pub name: String,
     /// The plugin folder, absolute.
     pub path: PathBuf,
@@ -69,55 +70,103 @@ pub struct Plugins {
     roles: BTreeMap<Role, Vec<Plugin>>,
 }
 
+/// Why a plugin cannot be used, with a message saying how to fix it.
 #[derive(Debug, thiserror::Error)]
 pub enum PluginError {
+    /// The plugin name is not a simple name; holds that name.
     #[error(
         "plugin name {0:?} is not allowed; use lowercase letters, digits, '-' and '_', \
          for example \"rust-review\""
     )]
     BadName(String),
+    /// A role lists a plugin that harness.toml does not define.
     #[error("the {role:?} role uses plugin {name:?}, but harness.toml has no [plugins.{name}]")]
-    Unknown { role: Role, name: String },
+    Unknown {
+        /// The role that lists the plugin.
+        role: Role,
+        /// The plugin name the role lists.
+        name: String,
+    },
+    /// The plugin is for an agent other than Claude Code or Codex.
     #[error(
         "plugin {name:?} is for agent \"{agent}\"; only \"claude\" and \"codex\" plugins \
          are supported"
     )]
-    UnsupportedAgent { name: String, agent: AgentKind },
+    UnsupportedAgent {
+        /// The plugin's name.
+        name: String,
+        /// The agent the plugin's settings name.
+        agent: AgentKind,
+    },
+    /// The role runs on a different agent than the one the plugin is for.
     #[error(
         "the {role:?} role runs on \"{role_agent}\", but plugin {name:?} is for \"{plugin_agent}\""
     )]
     WrongAgent {
+        /// The role that lists the plugin.
         role: Role,
+        /// The plugin's name.
         name: String,
+        /// The agent the role runs on.
         role_agent: AgentKind,
+        /// The agent the plugin is for.
         plugin_agent: AgentKind,
     },
+    /// The plugin's path is empty or leaves the project (`..`, an absolute path).
     #[error("plugin {name:?}: the path {path:?} must be a folder inside the project")]
-    BadPath { name: String, path: String },
+    BadPath {
+        /// The plugin's name.
+        name: String,
+        /// The path from the plugin's settings, relative to the project.
+        path: String,
+    },
+    /// The plugin folder has no manifest for the plugin's agent.
     #[error("plugin {name:?}: {path} has no {manifest}; is it a plugin for \"{agent}\"?")]
     NoManifest {
+        /// The plugin's name.
         name: String,
+        /// The plugin folder that was searched.
         path: String,
+        /// The manifest file expected inside it, such as `.claude-plugin/plugin.json`.
         manifest: &'static str,
+        /// The agent the plugin is for.
         agent: AgentKind,
     },
+    /// The manifest is not a JSON object.
     #[error("plugin {name:?}: {path} is not valid JSON")]
-    BadManifest { name: String, path: String },
+    BadManifest {
+        /// The plugin's name.
+        name: String,
+        /// The manifest file that could not be read as JSON.
+        path: String,
+    },
+    /// The plugin has hooks, but its settings do not allow them.
     #[error(
         "plugin {name:?} has hooks, which run commands by themselves; \
          add `allow_hooks = true` to [plugins.{name}] if you trust them"
     )]
-    HooksNotAllowed { name: String },
+    HooksNotAllowed {
+        /// The plugin's name.
+        name: String,
+    },
+    /// The plugin starts MCP or LSP servers, but its settings do not allow them.
     #[error(
         "plugin {name:?} starts its own MCP or LSP servers; \
          add `allow_mcp = true` to [plugins.{name}] if you trust them"
     )]
-    ServersNotAllowed { name: String },
+    ServersNotAllowed {
+        /// The plugin's name.
+        name: String,
+    },
+    /// A Codex plugin has apps, which are never allowed.
     #[error(
         "plugin {name:?} has apps (ChatGPT connectors), which reach services outside \
          the project; they are not supported"
     )]
-    AppsNotAllowed { name: String },
+    AppsNotAllowed {
+        /// The plugin's name.
+        name: String,
+    },
 }
 
 impl Plugins {

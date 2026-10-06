@@ -29,7 +29,9 @@ pub fn clone_url(source: &str) -> Result<String, OpsError> {
 /// One added catalog, as the list of catalogs shows it.
 #[derive(Debug)]
 pub struct CatalogInfo {
+    /// The catalog's name, its key in `~/.harness/marketplaces.toml`.
     pub name: String,
+    /// Where the catalog came from and whether it is a local folder.
     pub config: CatalogConfig,
     /// The commit of its copy; none for a local folder.
     pub commit: Option<String>,

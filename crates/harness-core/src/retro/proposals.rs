@@ -41,21 +41,26 @@ pub const MAX_SKILL_BYTES: usize = 20_000;
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ProposalsFile {
+    /// Every proposal the agent made, in the order written.
     pub proposals: Vec<Proposal>,
 }
 
+/// One proposed change to a skill, as written in `proposals.json`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Proposal {
+    /// The number Lisa picks it by; unique within the file.
     pub id: u32,
     /// One line: what changes.
     pub summary: String,
     /// What in the history this is based on.
     pub reason: String,
+    /// The skill name; its file is `.harness/skills/<skill>.md`.
     pub skill: String,
     /// The whole new text of the skill file; `None` leaves the file as it is.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub content: Option<String>,
+    /// The role lists to add the skill to; empty adds it to none.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub roles: Vec<RoleSkill>,
 }
@@ -64,10 +69,13 @@ pub struct Proposal {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RoleSkill {
+    /// The role that gets the skill.
     pub role: Role,
+    /// Which of the role's lists the skill goes into.
     pub list: SkillList,
 }
 
+/// The two lists in a role's harness.toml settings that name skills.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SkillList {
@@ -77,21 +85,36 @@ pub enum SkillList {
     AlwaysSkills,
 }
 
+/// Why `proposals.json`, or one proposal in it, was refused.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum ProposalError {
+    /// The JSON could not be read, or it has unknown keys.
     #[error("proposals.json is not valid: {0}")]
     Format(String),
+    /// Two proposals have the same id.
     #[error("proposal {0} is listed twice")]
     DuplicateId(u32),
+    /// The proposal cannot be applied to the project as it is now.
     #[error("proposal {id}: {problem}")]
-    Invalid { id: u32, problem: String },
+    Invalid {
+        /// The id of the refused proposal.
+        id: u32,
+        /// What is wrong, in words for Lisa.
+        problem: String,
+    },
 }
 
 /// What applying a proposal would do to the skill file.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FileChange {
+    /// The skill file does not exist yet and will be created.
     New,
-    Changed { old: String },
+    /// The skill file exists and its text will be replaced.
+    Changed {
+        /// The text of the file now, before the change.
+        old: String,
+    },
+    /// The file stays as it is: there is no `content`, or it is the same text.
     Unchanged,
 }
 
@@ -121,6 +144,7 @@ impl ProposalsFile {
         Ok(file)
     }
 
+    /// The proposal with this id, if there is one.
     pub fn get(&self, id: u32) -> Option<&Proposal> {
         self.proposals.iter().find(|p| p.id == id)
     }

@@ -53,7 +53,9 @@ pub enum Source {
     InCatalog(String),
     /// Another git repository, optionally a folder inside it.
     Git {
+        /// The address to clone, from `url` (or `repo` for GitHub) in the entry.
         url: String,
+        /// The plugin's folder inside that repository; `None` means its top folder.
         path: Option<String>,
         /// A branch or tag.
         reference: Option<String>,
@@ -67,11 +69,15 @@ pub enum Source {
 /// One plugin a catalog offers.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Entry {
+    /// The plugin's name, from `name` in the entry.
     pub name: String,
     /// Claude Code or Codex: which catalog file listed it.
     pub agent: AgentKind,
+    /// The name of the catalog that offers it.
     pub catalog: String,
+    /// One line about the plugin, from `description`; empty when the entry has none.
     pub description: String,
+    /// Where to fetch the plugin's files from, read from `source` in the entry.
     pub source: Source,
     /// The entry itself, for plugins without their own `plugin.json`
     /// (`"strict": false`): the harness writes one from it.
@@ -90,20 +96,32 @@ impl Entry {
     }
 }
 
+/// What can go wrong when reading a catalog or the list of catalogs.
 #[derive(Debug, thiserror::Error)]
 pub enum CatalogError {
+    /// The folder has no catalog file for any agent; holds the folder.
     #[error("{0} has neither .claude-plugin/marketplace.json nor .agents/plugins/marketplace.json; is it a plugin catalog?")]
     NoCatalogFile(String),
+    /// A catalog file or `marketplaces.toml` could not be parsed.
     #[error("{path} is not a valid catalog file: {reason}")]
-    BadFile { path: String, reason: String },
+    BadFile {
+        /// The file that failed, as shown to the user.
+        path: String,
+        /// The parser's message saying what is wrong.
+        reason: String,
+    },
+    /// The catalog's name is not a simple name; holds that name.
     #[error(
         "catalog name {0:?} is not allowed; use lowercase letters, digits, '-' and '_' \
          (give another one with --name)"
     )]
     BadName(String),
+    /// Reading or writing a file failed.
     #[error("cannot read {path}: {source}")]
     Io {
+        /// The file that failed, as shown to the user.
         path: String,
+        /// The error from the operating system.
         #[source]
         source: std::io::Error,
     },
@@ -114,6 +132,7 @@ pub enum CatalogError {
 pub struct Catalog {
     /// The name inside the files (the same in both when there are two).
     pub name: String,
+    /// Every plugin listed in its catalog files, for all agents together.
     pub entries: Vec<Entry>,
 }
 

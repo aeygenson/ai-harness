@@ -31,9 +31,13 @@ use crate::text;
 pub use apply::apply;
 pub use prompt::{past_settings, prompt};
 
+/// The agent's report for Lisa, saved in the retrospective folder.
 pub const RETRO_MD: &str = "retro.md";
+/// The proposed skill changes (see `crate::retro::proposals`).
 pub const PROPOSALS_JSON: &str = "proposals.json";
+/// The ids of the proposals Lisa has applied (see [`Applied`]).
 pub const APPLIED_JSON: &str = "applied.json";
+/// The agent's output, saved even when it fails.
 pub const AGENT_LOG: &str = "agent.log";
 const INBOX_DIR: &str = "inbox";
 /// The language the CLI asks for.
@@ -43,45 +47,65 @@ pub const ENGLISH: &str = "English";
 /// its own output folder.
 pub const RULES_OF: Role = Role::Security;
 
+/// What can go wrong while the Retrospective agent runs.
 #[derive(Debug, thiserror::Error)]
 pub enum SuggestError {
+    /// The project had uncommitted changes before the agent started.
     #[error("the project has uncommitted changes; commit or remove them first: {}", .0.join(", "))]
     Dirty(Vec<String>),
+    /// The agent made a git commit.
     #[error("the retro agent made a git commit itself, which agents must never do")]
     AgentCommitted,
+    /// The agent changed project files it may not touch.
     #[error("the retro agent changed files it may not touch (left as they are): {}", .0.join(", "))]
     ForbiddenChanges(Vec<String>),
+    /// The agent stopped with an error or reached its usage limit.
     #[error("the retro agent failed: {0}")]
     AgentFailed(String),
+    /// The agent did not write `retro.md` or `proposals.json`.
     #[error("the retro agent did not write {0}")]
     Missing(&'static str),
+    /// The agent's `proposals.json` was refused.
     #[error(transparent)]
     Proposals(#[from] ProposalError),
+    /// A git command failed.
     #[error(transparent)]
     Git(#[from] GitError),
+    /// A file or folder could not be read or written.
     #[error("cannot access {path}: {source}")]
     Io {
+        /// The file or folder involved.
         path: PathBuf,
+        /// The error from the operating system.
         #[source]
         source: io::Error,
     },
 }
 
+/// What can go wrong while applying proposals.
 #[derive(Debug, thiserror::Error)]
 pub enum ApplyError {
+    /// No proposal has this id.
     #[error("there is no proposal {0}")]
     UnknownId(u32),
+    /// The proposal no longer fits the project as it is now.
     #[error(transparent)]
     Proposal(#[from] ProposalError),
+    /// harness.toml could not be changed.
     #[error(transparent)]
     Edit(#[from] EditError),
+    /// harness.toml could not be read or is not valid.
     #[error(transparent)]
     Config(#[from] ConfigError),
+    /// The skills failed to load after the change, so nothing was changed.
     #[error("after the change the skills do not load, so nothing was changed: {0}")]
     Skills(#[from] SkillError),
+    /// A file or folder could not be read or written.
     #[error("cannot access {path}: {source}")]
     Io {
+        /// The file or folder involved.
         path: PathBuf,
+        /// The error from the operating system.
         #[source]
         source: io::Error,
     },
@@ -90,20 +114,25 @@ pub enum ApplyError {
 /// What the agent wrote, after the checks.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Suggestions {
+    /// The text of `retro.md`, cleaned of terminal control characters.
     pub retro: String,
+    /// The checked proposals from `proposals.json`.
     pub proposals: ProposalsFile,
 }
 
 /// `applied.json`: which proposals of one retrospective Lisa applied.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Applied {
+    /// The applied proposal ids, sorted, each listed once.
     pub applied: Vec<u32>,
 }
 
 /// harness.toml as it was when some tasks ran, if it differs from now.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PastSettings {
+    /// The ids of the tasks that ran with these settings.
     pub tasks: Vec<String>,
+    /// The whole harness.toml text of that time.
     pub text: String,
 }
 
@@ -242,6 +271,7 @@ pub fn load(retro_dir: &Path) -> Result<Suggestions, SuggestError> {
 }
 
 impl Applied {
+    /// Reads `applied.json` in `retro_dir`; empty when it is missing or unreadable.
     pub fn load(retro_dir: &Path) -> Self {
         fs::read_to_string(retro_dir.join(APPLIED_JSON))
             .ok()
