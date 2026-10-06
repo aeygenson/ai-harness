@@ -77,7 +77,7 @@
 
 ## Где лежат файлы
 
-Реализовано в `crates/harness-core/src/store.rs` (подробнее — раздел 8 в [design.md](design.md)):
+Реализовано в `crates/harness-core/src/task/store/` (подробнее — раздел 8 в [design.md](design.md)):
 
 ```
 runs/

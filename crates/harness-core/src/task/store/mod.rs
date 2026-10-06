@@ -19,15 +19,22 @@
 //! (for example the tester asks Lisa for help and then continues).
 //! Nothing is ever overwritten.
 
+mod files;
+mod ids;
+
+pub use ids::{next_task_id, task_ids};
+
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use serde::{de::DeserializeOwned, Serialize};
-
 use crate::task::handoff::{Handoff, Role};
 use crate::task::{TaskState, TransitionError};
-use crate::text;
+use files::{
+    create_dir, io_error, read_handoff, read_json, read_notes, sorted_subdirs, to_json,
+    write_json_new, write_new,
+};
+use ids::{check_task_id, parse_failure};
 
 const STATE_FILE: &str = "state.json";
 const TASK_FILE: &str = "task.md";
@@ -253,121 +260,6 @@ impl TaskStore {
         fs::write(&tmp, to_json(&tmp, state)?).map_err(|e| io_error(&tmp, e))?;
         fs::rename(&tmp, &path).map_err(|e| io_error(&path, e))
     }
-}
-
-/// The ids of all tasks in `runs_dir` (folders with a `state.json`), sorted.
-pub fn task_ids(runs_dir: &Path) -> Result<Vec<String>, StoreError> {
-    if !runs_dir.exists() {
-        return Ok(Vec::new());
-    }
-    Ok(sorted_subdirs(runs_dir)?
-        .into_iter()
-        .filter(|dir| dir.join(STATE_FILE).exists())
-        .filter_map(|dir| Some(dir.file_name()?.to_string_lossy().into_owned()))
-        .filter(|id| check_task_id(id).is_ok())
-        .collect())
-}
-
-/// The id for the next new task: `task-001`, or one more than the highest
-/// `task-NNN` in `runs_dir`.
-pub fn next_task_id(runs_dir: &Path) -> Result<String, StoreError> {
-    let highest = task_ids(runs_dir)?
-        .iter()
-        .filter_map(|id| id.strip_prefix("task-")?.parse::<u32>().ok())
-        .max()
-        .unwrap_or(0);
-    Ok(format!("task-{:03}", highest + 1))
-}
-
-/// `round-02-tester-1.log` -> (2, Tester).
-fn parse_failure(name: &str) -> Option<(u32, Role)> {
-    let rest = name.strip_prefix("round-")?.strip_suffix(".log")?;
-    let (round, rest) = rest.split_once('-')?;
-    let (role, attempt) = rest.rsplit_once('-')?;
-    attempt.parse::<u32>().ok()?;
-    let role = role.parse().ok()?;
-    Some((round.parse().ok()?, role))
-}
-
-/// Task ids become folder names, so we allow only safe characters.
-/// This blocks tricks like `../../etc`.
-fn check_task_id(task_id: &str) -> Result<(), StoreError> {
-    let ok = !task_id.is_empty()
-        && task_id
-            .chars()
-            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-');
-    if ok {
-        Ok(())
-    } else {
-        Err(StoreError::InvalidTaskId(task_id.to_string()))
-    }
-}
-
-fn io_error(path: &Path, source: io::Error) -> StoreError {
-    StoreError::Io {
-        path: path.to_path_buf(),
-        source,
-    }
-}
-
-fn create_dir(path: &Path) -> Result<(), StoreError> {
-    fs::create_dir(path).map_err(|e| io_error(path, e))
-}
-
-/// Writes a file that must not exist yet: history is never overwritten.
-fn write_new(path: &Path, contents: &str) -> Result<(), StoreError> {
-    use std::io::Write;
-    let mut file = fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(path)
-        .map_err(|e| io_error(path, e))?;
-    file.write_all(contents.as_bytes())
-        .map_err(|e| io_error(path, e))
-}
-
-fn to_json<T: Serialize>(path: &Path, value: &T) -> Result<String, StoreError> {
-    serde_json::to_string_pretty(value).map_err(|source| StoreError::Json {
-        path: path.to_path_buf(),
-        source,
-    })
-}
-
-/// A handoff written by an agent, with its texts made safe to show.
-fn read_handoff(path: &Path) -> Result<Handoff, StoreError> {
-    let mut handoff: Handoff = read_json(path)?;
-    handoff.make_text_safe();
-    Ok(handoff)
-}
-
-/// The agent's `notes.md`, safe to show; missing notes are an empty text.
-fn read_notes(path: &Path) -> String {
-    text::safe(&fs::read_to_string(path).unwrap_or_default())
-}
-
-fn write_json_new<T: Serialize>(path: &Path, value: &T) -> Result<(), StoreError> {
-    write_new(path, &to_json(path, value)?)
-}
-
-fn read_json<T: DeserializeOwned>(path: &Path) -> Result<T, StoreError> {
-    let text = fs::read_to_string(path).map_err(|e| io_error(path, e))?;
-    serde_json::from_str(&text).map_err(|source| StoreError::Json {
-        path: path.to_path_buf(),
-        source,
-    })
-}
-
-/// Sub-folders of `dir`, sorted by name. Numbered names sort in time order.
-fn sorted_subdirs(dir: &Path) -> Result<Vec<PathBuf>, StoreError> {
-    let mut dirs = Vec::new();
-    for entry in fs::read_dir(dir).map_err(|e| io_error(dir, e))? {
-        let path = entry.map_err(|e| io_error(dir, e))?.path();
-        if path.is_dir() {
-            dirs.push(path);
-        }
-    }
-    dirs.sort();
-    Ok(dirs)
 }
 
 #[cfg(test)]
