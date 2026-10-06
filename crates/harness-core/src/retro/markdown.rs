@@ -10,7 +10,16 @@ impl Stats {
     pub fn to_markdown(&self) -> String {
         let mut md = String::new();
         let _ = writeln!(md, "# Retrospective: {}\n", self.scope);
+        self.tasks_markdown(&mut md);
+        self.roles_markdown(&mut md);
+        self.returns_markdown(&mut md);
+        self.issues_markdown(&mut md);
+        self.skills_markdown(&mut md);
+        md
+    }
 
+    /// The «Tasks» table: one row per task.
+    fn tasks_markdown(&self, md: &mut String) {
         md.push_str("## Tasks\n\n");
         md.push_str("| Task | Rounds | Stage | Steps | Lisa's decisions | Failed attempts |\n");
         md.push_str("|---|---|---|---|---|---|\n");
@@ -27,7 +36,10 @@ impl Stats {
                 t.failed_attempts
             );
         }
+    }
 
+    /// The «Roles» table: steps and verdicts of each role.
+    fn roles_markdown(&self, md: &mut String) {
         md.push_str("\n## Roles\n\n");
         if self.roles.is_empty() {
             md.push_str("No role has finished a step yet.\n");
@@ -48,7 +60,10 @@ impl Stats {
                 );
             }
         }
+    }
 
+    /// The «Work sent back» list: which role sent work back to which.
+    fn returns_markdown(&self, md: &mut String) {
         md.push_str("\n## Work sent back\n\n");
         if self.returns.is_empty() {
             md.push_str("Nothing was sent back.\n");
@@ -63,7 +78,10 @@ impl Stats {
                 times(r.count)
             );
         }
+    }
 
+    /// The «Issues» section: counts by severity and the repeated issues.
+    fn issues_markdown(&self, md: &mut String) {
         md.push_str("\n## Issues\n\n");
         let i = &self.issues;
         let _ = writeln!(
@@ -91,7 +109,10 @@ impl Stats {
                 issue.tasks.join(", ")
             );
         }
+    }
 
+    /// The «Skills» table and the skills that were configured but never used.
+    fn skills_markdown(&self, md: &mut String) {
         md.push_str("\n## Skills\n\n");
         if self.skills.is_empty() {
             md.push_str("No skills configured or used.\n");
@@ -122,7 +143,6 @@ impl Stats {
                 let _ = writeln!(md, "\nConfigured but never used: {}.", unused.join(", "));
             }
         }
-        md
     }
 }
 

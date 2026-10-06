@@ -347,110 +347,133 @@ mod tests {
                 let Ok(stream) = stream else { break };
                 let (base, state) = (address.clone(), Arc::clone(&state));
                 thread::spawn(move || {
-                    let mut reader = BufReader::new(stream.try_clone().unwrap());
-                    let mut first = String::new();
-                    reader.read_line(&mut first).unwrap();
-                    let mut length = 0;
-                    loop {
-                        let mut line = String::new();
-                        reader.read_line(&mut line).unwrap();
-                        let line = line.trim_end().to_ascii_lowercase();
-                        if line.is_empty() {
-                            break;
-                        }
-                        if let Some(n) = line.strip_prefix("content-length:") {
-                            length = n.trim().parse().unwrap();
-                        }
-                    }
-                    let mut body = vec![0; length];
-                    reader.read_exact(&mut body).unwrap();
-                    let body = String::from_utf8(body).unwrap();
-                    let form: std::collections::HashMap<String, String> =
-                        parse_query(&body).into_iter().collect();
-                    let target = first.split_whitespace().nth(1).unwrap().to_string();
-                    let json = |code: u16, value: Value| {
-                        let text = value.to_string();
-                        format!(
-                            "HTTP/1.1 {code} X\r\nContent-Type: application/json\r\n\
-                             Content-Length: {}\r\n\r\n{text}",
-                            text.len()
-                        )
-                    };
-                    let answer = match target.as_str() {
-                        "/mcp" => format!(
-                            "HTTP/1.1 401 Unauthorized\r\nWWW-Authenticate: Bearer \
-                             resource_metadata=\"{base}/.well-known/oauth-protected-resource/mcp\"\r\n\
-                             Content-Length: 0\r\n\r\n"
-                        ),
-                        "/.well-known/oauth-protected-resource/mcp" => json(
-                            200,
-                            serde_json::json!({"resource": format!("{base}/mcp"),
-                                "authorization_servers": [format!("{base}/auth")]}),
-                        ),
-                        "/.well-known/oauth-authorization-server/auth" => json(
-                            200,
-                            serde_json::json!({
-                                "issuer": format!("{base}/auth"),
-                                "authorization_endpoint": format!("{base}/auth/authorize"),
-                                "token_endpoint": format!("{base}/auth/token"),
-                                "registration_endpoint": format!("{base}/auth/register"),
-                                "code_challenge_methods_supported": ["S256"],
-                            }),
-                        ),
-                        "/auth/register" => {
-                            let request: Value = serde_json::from_str(&body).unwrap();
-                            assert!(request["redirect_uris"][0]
-                                .as_str()
-                                .unwrap()
-                                .starts_with("http://127.0.0.1:"));
-                            json(201, serde_json::json!({"client_id": "client-1"}))
-                        }
-                        "/auth/token" => match form["grant_type"].as_str() {
-                            "authorization_code" => {
-                                let fake = state.lock().unwrap();
-                                let ok = form["code"] == "code-1"
-                                    && form["client_id"] == "client-1"
-                                    && form["resource"] == format!("{base}/mcp")
-                                    && base64_url(&sha256(form["code_verifier"].as_bytes()))
-                                        == fake.challenge;
-                                if ok {
-                                    json(200, serde_json::json!({"access_token": "at-1",
-                                        "refresh_token": "rt-1", "expires_in": 3600,
-                                        "token_type": "Bearer"}))
-                                } else {
-                                    json(400, serde_json::json!({"error": "invalid_grant"}))
-                                }
-                            }
-                            "refresh_token" if form["refresh_token"] == "rt-1" => {
-                                state.lock().unwrap().refreshed = true;
-                                json(200, serde_json::json!({"access_token": "at-2",
-                                    "expires_in": 3600}))
-                            }
-                            _ => json(400, serde_json::json!({"error": "invalid_grant",
-                                "error_description": "bad"})),
-                        },
-                        _ if target.starts_with("/auth/authorize?") => {
-                            let query: std::collections::HashMap<String, String> =
-                                parse_query(target.split_once('?').unwrap().1)
-                                    .into_iter()
-                                    .collect();
-                            assert_eq!(query["code_challenge_method"], "S256");
-                            state.lock().unwrap().challenge = query["code_challenge"].clone();
-                            // The «browser» goes back with the code.
-                            format!(
-                                "HTTP/1.1 302 Found\r\nLocation: {}?code=code-1&state={}\r\n\
-                                 Content-Length: 0\r\n\r\n",
-                                query["redirect_uri"], query["state"]
-                            )
-                        }
-                        _ => "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n".into(),
-                    };
+                    let (target, body) = read_request(&stream);
+                    let answer = answer(&target, &body, &base, &state);
                     let mut stream = stream;
                     let _ = stream.write_all(answer.as_bytes());
                 });
             }
         });
         base
+    }
+
+    /// Reads one HTTP request: the path it asks for and its body.
+    fn read_request(stream: &TcpStream) -> (String, String) {
+        let mut reader = BufReader::new(stream.try_clone().unwrap());
+        let mut first = String::new();
+        reader.read_line(&mut first).unwrap();
+        let mut length = 0;
+        loop {
+            let mut line = String::new();
+            reader.read_line(&mut line).unwrap();
+            let line = line.trim_end().to_ascii_lowercase();
+            if line.is_empty() {
+                break;
+            }
+            if let Some(n) = line.strip_prefix("content-length:") {
+                length = n.trim().parse().unwrap();
+            }
+        }
+        let mut body = vec![0; length];
+        reader.read_exact(&mut body).unwrap();
+        let target = first.split_whitespace().nth(1).unwrap().to_string();
+        (target, String::from_utf8(body).unwrap())
+    }
+
+    /// An HTTP answer with a JSON body.
+    fn json(code: u16, value: &Value) -> String {
+        let text = value.to_string();
+        format!(
+            "HTTP/1.1 {code} X\r\nContent-Type: application/json\r\n\
+             Content-Length: {}\r\n\r\n{text}",
+            text.len()
+        )
+    }
+
+    /// What the fake servers answer to a request for `target`.
+    fn answer(target: &str, body: &str, base: &str, state: &Mutex<Fake>) -> String {
+        match target {
+            "/mcp" => format!(
+                "HTTP/1.1 401 Unauthorized\r\nWWW-Authenticate: Bearer \
+                 resource_metadata=\"{base}/.well-known/oauth-protected-resource/mcp\"\r\n\
+                 Content-Length: 0\r\n\r\n"
+            ),
+            "/.well-known/oauth-protected-resource/mcp" => json(
+                200,
+                &serde_json::json!({"resource": format!("{base}/mcp"),
+                    "authorization_servers": [format!("{base}/auth")]}),
+            ),
+            "/.well-known/oauth-authorization-server/auth" => json(
+                200,
+                &serde_json::json!({
+                    "issuer": format!("{base}/auth"),
+                    "authorization_endpoint": format!("{base}/auth/authorize"),
+                    "token_endpoint": format!("{base}/auth/token"),
+                    "registration_endpoint": format!("{base}/auth/register"),
+                    "code_challenge_methods_supported": ["S256"],
+                }),
+            ),
+            "/auth/register" => {
+                let request: Value = serde_json::from_str(body).unwrap();
+                assert!(request["redirect_uris"][0]
+                    .as_str()
+                    .unwrap()
+                    .starts_with("http://127.0.0.1:"));
+                json(201, &serde_json::json!({"client_id": "client-1"}))
+            }
+            "/auth/token" => token_answer(body, base, state),
+            _ if target.starts_with("/auth/authorize?") => {
+                let query: std::collections::HashMap<String, String> =
+                    parse_query(target.split_once('?').unwrap().1)
+                        .into_iter()
+                        .collect();
+                assert_eq!(query["code_challenge_method"], "S256");
+                state.lock().unwrap().challenge = query["code_challenge"].clone();
+                // The «browser» goes back with the code.
+                format!(
+                    "HTTP/1.1 302 Found\r\nLocation: {}?code=code-1&state={}\r\n\
+                     Content-Length: 0\r\n\r\n",
+                    query["redirect_uri"], query["state"]
+                )
+            }
+            _ => "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n".into(),
+        }
+    }
+
+    /// The token endpoint: swaps the code, or the refresh token, for an access token.
+    fn token_answer(body: &str, base: &str, state: &Mutex<Fake>) -> String {
+        let form: std::collections::HashMap<String, String> =
+            parse_query(body).into_iter().collect();
+        match form["grant_type"].as_str() {
+            "authorization_code" => {
+                let fake = state.lock().unwrap();
+                let ok = form["code"] == "code-1"
+                    && form["client_id"] == "client-1"
+                    && form["resource"] == format!("{base}/mcp")
+                    && base64_url(&sha256(form["code_verifier"].as_bytes())) == fake.challenge;
+                if ok {
+                    json(
+                        200,
+                        &serde_json::json!({"access_token": "at-1",
+                            "refresh_token": "rt-1", "expires_in": 3600,
+                            "token_type": "Bearer"}),
+                    )
+                } else {
+                    json(400, &serde_json::json!({"error": "invalid_grant"}))
+                }
+            }
+            "refresh_token" if form["refresh_token"] == "rt-1" => {
+                state.lock().unwrap().refreshed = true;
+                json(
+                    200,
+                    &serde_json::json!({"access_token": "at-2", "expires_in": 3600}),
+                )
+            }
+            _ => json(
+                400,
+                &serde_json::json!({"error": "invalid_grant", "error_description": "bad"}),
+            ),
+        }
     }
 
     /// A «browser» that follows the redirects with curl, in the background.
