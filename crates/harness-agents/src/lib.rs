@@ -1,5 +1,5 @@
 //! Agent adapters: how to run each console agent for one role.
-//! The mock, Claude Code, Codex CLI, Antigravity CLI and DeepSeek Harness.
+//! The mock, Claude Code, Codex CLI, Antigravity CLI and `DeepSeek` Harness.
 //!
 //! Layout: `adapters/` holds one file per agent, `mcp/` the MCP tools that run outside a
 //! role (check, OAuth sign-in, the web bridge, the registry), and `install/` the agent

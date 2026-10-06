@@ -205,7 +205,7 @@ fn check_dsh_effort(choice: &AgentChoice) -> Result<(), BuildError> {
     }
 }
 
-/// The DeepSeek API key: one in the shell wins; otherwise the one the Agents
+/// The `DeepSeek` API key: one in the shell wins; otherwise the one the Agents
 /// tab («Sign in») saved.
 fn deepseek_key(dir: &Path) -> Result<Secret, BuildError> {
     match std::env::var(dsh::KEY_ENV) {

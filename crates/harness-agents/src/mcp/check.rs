@@ -15,6 +15,7 @@ use std::time::{Duration, Instant};
 
 use harness_core::mcp::tools::Tool;
 use harness_core::mcp::McpServer;
+use harness_core::secret::Secret;
 use harness_core::text::safe_line;
 use serde_json::{json, Value};
 
@@ -22,7 +23,7 @@ use crate::process::base_command;
 
 /// How long the server may take, all questions together. `npx` may first
 /// have to download it.
-pub const TIME_LIMIT: Duration = Duration::from_secs(120);
+pub const TIME_LIMIT: Duration = Duration::from_mins(2);
 
 /// The MCP version the harness speaks; servers answer with theirs.
 const PROTOCOL_VERSION: &str = "2025-06-18";
@@ -42,7 +43,7 @@ pub fn list_tools_within(
     project_dir: &Path,
     limit: Duration,
 ) -> Result<Vec<Tool>, String> {
-    let secrets: Vec<&str> = server.env.values().map(|s| s.expose()).collect();
+    let secrets: Vec<&str> = server.env.values().map(Secret::expose).collect();
     let hide = |text: String| harness_core::secret::hide(&text, &secrets);
     let mut command = base_command(Path::new(&server.command), project_dir);
     // `npx` starts the real server as a child; both are stopped together.
@@ -132,7 +133,7 @@ impl Session {
 
     /// Sends a request and waits for the answer with its id; notifications
     /// and the server's own requests in between are skipped.
-    fn request(&mut self, method: &str, params: Value) -> Result<Value, String> {
+    fn request(&mut self, method: &str, params: &Value) -> Result<Value, String> {
         let id = self.next_id;
         self.next_id += 1;
         self.send(&json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params}))?;
@@ -164,7 +165,7 @@ impl Session {
     fn ask_tools(&mut self) -> Result<Vec<Tool>, String> {
         self.request(
             "initialize",
-            json!({
+            &json!({
                 "protocolVersion": PROTOCOL_VERSION,
                 "capabilities": {},
                 "clientInfo": {"name": "harness", "version": env!("CARGO_PKG_VERSION")},
@@ -178,7 +179,7 @@ impl Session {
                 Some(cursor) => json!({ "cursor": cursor }),
                 None => json!({}),
             };
-            let result = self.request("tools/list", params)?;
+            let result = self.request("tools/list", &params)?;
             tools.extend(parse_tools(&result));
             cursor = result["nextCursor"].as_str().map(str::to_string);
             if cursor.is_none() {
@@ -212,8 +213,9 @@ pub fn parse_tools(result: &Value) -> Vec<Tool> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::BTreeMap;
     #[cfg(unix)]
-    use {harness_core::secret::Secret, std::fs, std::os::unix::fs::PermissionsExt};
+    use {std::fs, std::os::unix::fs::PermissionsExt};
 
     #[test]
     fn tools_are_read_without_control_characters() {
@@ -288,7 +290,7 @@ read line
             name: "none".into(),
             command: "/no/such/program".into(),
             args: vec![],
-            env: Default::default(),
+            env: BTreeMap::default(),
         };
         assert!(list_tools(&missing, dir.path())
             .unwrap_err()
@@ -303,7 +305,7 @@ read line
             name: "silent".into(),
             command: "sleep".into(),
             args: vec!["30".into()],
-            env: Default::default(),
+            env: BTreeMap::default(),
         };
         let start = Instant::now();
         let error = list_tools_within(&server, dir.path(), Duration::from_millis(300)).unwrap_err();
@@ -324,7 +326,7 @@ read line
                 "@modelcontextprotocol/server-everything".into(),
                 "stdio".into(),
             ],
-            env: Default::default(),
+            env: BTreeMap::default(),
         };
         let tools = list_tools(&server, dir.path()).unwrap();
         assert!(tools.iter().any(|t| t.name == "echo"), "{tools:?}");

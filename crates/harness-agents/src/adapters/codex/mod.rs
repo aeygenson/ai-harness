@@ -1,4 +1,4 @@
-//! Runs a role with OpenAI Codex CLI (`codex exec`), isolated from Lisa's own setup.
+//! Runs a role with `OpenAI` Codex CLI (`codex exec`), isolated from Lisa's own setup.
 //!
 //! Isolation (docs/design.md, section 5.1):
 //! - an empty environment plus a short whitelist (see `process`);
@@ -73,7 +73,7 @@ const DISABLED_FEATURES: &[&str] = &[
     "unbounded_connection_retries",
 ];
 
-/// Runs a role with OpenAI's Codex CLI (`codex`), logged in with a saved `auth.json`.
+/// Runs a role with `OpenAI`'s Codex CLI (`codex`), logged in with a saved `auth.json`.
 #[derive(Debug, Clone)]
 pub struct Codex {
     program: PathBuf,

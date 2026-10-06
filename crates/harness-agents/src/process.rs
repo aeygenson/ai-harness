@@ -86,7 +86,7 @@ pub async fn run(
     // all at the same time, and all inside the time limit: an agent that never
     // reads a long prompt cannot block the harness.
     let work = async {
-        let (_, stdout, stderr, status) = tokio::join!(
+        let ((), stdout, stderr, status) = tokio::join!(
             write_prompt(stdin, prompt),
             read_lines(stdout, secrets),
             read_lines(stderr, secrets),
@@ -167,22 +167,22 @@ static LIVE_LOG: Mutex<Option<Sender<String>>> = Mutex::new(None);
 /// From now on every line an agent prints is also sent to `sink`, with the
 /// agent's secrets hidden; `None` stops it. The command line never sets it.
 pub fn set_live_log(sink: Option<Sender<String>>) {
-    if let Ok(mut live) = LIVE_LOG.lock() {
-        *live = sink;
+    if let Ok(mut live_log) = LIVE_LOG.lock() {
+        *live_log = sink;
     }
 }
 
 fn send_live(line: &[u8], secrets: &[&str]) {
-    let Ok(mut live) = LIVE_LOG.lock() else {
+    let Ok(mut live_log) = LIVE_LOG.lock() else {
         return;
     };
-    let Some(sink) = live.as_ref() else {
+    let Some(sink) = live_log.as_ref() else {
         return;
     };
     let line = secret::hide(String::from_utf8_lossy(line).trim_end(), secrets);
     if sink.send(line).is_err() {
         // Nobody listens any more.
-        *live = None;
+        *live_log = None;
     }
 }
 
@@ -376,7 +376,7 @@ mod tests {
         // Like Ctrl+C in the command line: the run is dropped half-way.
         tokio::select! {
             _ = run(command, "", Duration::from_secs(20), &[]) => panic!("ended by itself"),
-            _ = tokio::time::sleep(Duration::from_millis(500)) => {}
+            () = tokio::time::sleep(Duration::from_millis(500)) => {}
         }
 
         assert!(!still_running(&pid_file));

@@ -49,7 +49,7 @@ pub fn has_login(dir: &Path, agent: AgentKind) -> bool {
     }
 }
 
-/// Whose login `agent` needs: DeepSeek Harness needs the DeepSeek key. A
+/// Whose login `agent` needs: `DeepSeek` Harness needs the `DeepSeek` key. A
 /// catalog agent the harness cannot run keeps its own name.
 pub fn login_name(agent: &str) -> &str {
     agent

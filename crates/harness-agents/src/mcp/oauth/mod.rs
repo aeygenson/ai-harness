@@ -45,7 +45,7 @@ use http::token_request;
 const OAUTH_DIR: &str = "oauth";
 
 /// How long Lisa has to finish in the browser.
-pub const BROWSER_LIMIT: Duration = Duration::from_secs(300);
+pub const BROWSER_LIMIT: Duration = Duration::from_mins(5);
 
 /// An access token that ends sooner than this is renewed first.
 const RENEW_BEFORE: u64 = 120;
@@ -454,6 +454,10 @@ mod tests {
     }
 
     /// A «browser» that follows the redirects with curl, in the background.
+    #[expect(
+        clippy::unnecessary_wraps,
+        reason = "it must match the type of `Tools::open`, where a real browser can fail"
+    )]
     fn browser(address: &str) -> Result<(), String> {
         let address = address.to_string();
         thread::spawn(move || {

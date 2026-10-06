@@ -1,5 +1,7 @@
 //! Small text helpers for OAuth: address parts, form encoding, random text and PKCE.
 
+use std::fmt::Write as _;
+
 use sha2::{Digest, Sha256};
 
 /// `key="value"` from a `WWW-Authenticate` header.
@@ -38,7 +40,8 @@ pub(super) fn percent(text: &str) -> String {
         if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~') {
             out.push(char::from(byte));
         } else {
-            out.push_str(&format!("%{byte:02X}"));
+            // Writing into a `String` cannot fail, so `let _ =` ignores the `Result`.
+            let _ = write!(out, "%{byte:02X}");
         }
     }
     out

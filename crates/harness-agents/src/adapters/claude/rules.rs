@@ -118,7 +118,7 @@ pub(super) fn edit_rules(role: Role) -> Vec<String> {
     let patterns = folders
         .iter()
         .map(|folder| format!("{folder}/**"))
-        .chain(files.iter().map(|file| file.to_string()));
+        .chain(files.iter().map(ToString::to_string));
     patterns
         .flat_map(|pattern| {
             [

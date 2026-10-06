@@ -28,7 +28,7 @@ use crate::install::credentials::write_private;
 use crate::process::base_command;
 
 /// How long one request may take; a tool may work for a while.
-pub const REQUEST_LIMIT: Duration = Duration::from_secs(600);
+pub const REQUEST_LIMIT: Duration = Duration::from_mins(10);
 
 /// Where the bridge sends the messages.
 #[derive(Clone)]
@@ -423,6 +423,8 @@ mod tests {
     #[cfg(unix)] // a shell script stands in for the program
     #[test]
     fn the_key_is_never_on_curls_command_line() {
+        use std::os::unix::fs::PermissionsExt;
+
         let dir = tempfile::tempdir().unwrap();
         let curl = dir.path().join("curl");
         let log = dir.path().join("args");
@@ -434,7 +436,6 @@ mod tests {
             ),
         )
         .unwrap();
-        use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(&curl, std::fs::Permissions::from_mode(0o755)).unwrap();
         let mut bridge = bridge("https://example.com/mcp", "tok-12345678");
         bridge.curl = curl;

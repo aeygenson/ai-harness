@@ -22,7 +22,7 @@ pub enum AnyAgent {
     Codex(Codex),
     /// Antigravity CLI.
     Antigravity(Antigravity),
-    /// DeepSeek Harness.
+    /// `DeepSeek` Harness.
     Dsh(Dsh),
     /// The scripted mock agent, for tests.
     Mock(MockAgent),
