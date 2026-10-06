@@ -14,6 +14,9 @@ use crate::task::permissions::{self, WriteRule};
 use crate::task::routes;
 use crate::task::TaskState;
 
+/// Builds the whole prompt an agent receives for `role` in this task.
+/// It holds the task, the previous handoff, what the role may change, its skills
+/// and the exact `handoff.json` format, to be written in `output_dir`.
 pub fn build(
     role: Role,
     task_description: &str,

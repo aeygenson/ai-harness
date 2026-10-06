@@ -77,6 +77,7 @@ pub enum UnknownAgent {
          with the same DeepSeek key)"
     )]
     Removed,
+    /// Any other text that is not an agent name.
     #[error("{0:?} is not an agent; use \"claude\", \"codex\", \"antigravity\" or \"dsh\"")]
     Other(String),
 }

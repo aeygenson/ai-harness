@@ -59,7 +59,10 @@ pub enum Source {
     BuiltIn,
     /// A project file replaces a built-in skill; `outdated` when the
     /// built-in text has changed since the copy was made.
-    Changed { outdated: bool },
+    Changed {
+        /// True when the built-in text has changed since the copy was made.
+        outdated: bool,
+    },
     /// The project's own skill.
     Own,
 }
@@ -67,6 +70,7 @@ pub enum Source {
 /// One skill.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Skill {
+    /// The skill's name: its file name in `.harness/skills/` without `.md`.
     pub name: String,
     /// One line from the file's header; it goes into the prompt's skill list.
     pub description: String,
@@ -74,6 +78,7 @@ pub struct Skill {
     pub path: PathBuf,
     /// The instructions, without the header.
     pub body: String,
+    /// Whether the skill is built-in, a changed built-in or the project's own.
     pub source: Source,
 }
 
@@ -101,28 +106,38 @@ pub struct Skills {
     roles: BTreeMap<Role, RoleSkills>,
 }
 
+/// A problem with a skill a role uses, found while loading the skills.
 #[derive(Debug, thiserror::Error)]
 pub enum SkillError {
+    /// A skill name with characters that are not allowed.
     #[error(
         "skill name {0:?} is not allowed; use lowercase letters, digits and '-', \
          for example \"rust-errors\""
     )]
     BadName(String),
+    /// A role lists a skill that has neither a file nor a built-in text.
     #[error(
         "the {role:?} role uses skill {name:?}, but {path} does not exist \
          and there is no built-in skill with that name"
     )]
     Missing {
+        /// The role that lists the skill.
         role: Role,
+        /// The skill name as the role lists it.
         name: String,
+        /// The file that was looked for, ready to show.
         path: String,
     },
+    /// A skill file exists but could not be read.
     #[error("cannot read {path}: {source}")]
     Io {
+        /// The skill file, ready to show.
         path: String,
+        /// The error the operating system gave.
         #[source]
         source: std::io::Error,
     },
+    /// A skill file without a `description:` line in its header.
     #[error(
         "{0} has no description; start it with\n---\ndescription: one line about the skill\n---"
     )]

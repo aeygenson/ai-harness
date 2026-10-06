@@ -31,6 +31,7 @@ use serde::{Deserialize, Serialize};
 use crate::task::handoff::Role;
 use crate::task::DEFAULT_MAX_ROUNDS;
 
+/// The name of the settings file inside a project's `.harness` folder.
 pub const CONFIG_FILE: &str = "harness.toml";
 
 /// What `harness init` writes into a new project.
@@ -96,11 +97,14 @@ agent = "claude"
 agent = "claude"
 "#;
 
+/// All settings of one project, as read from `.harness/harness.toml`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
+    /// `max_rounds`: how many rounds of sent-back work AI roles may do before Lisa decides.
     #[serde(default = "default_max_rounds")]
     pub max_rounds: u32,
+    /// `agent_timeout_minutes`: how long one agent run may take, in minutes, before it is stopped.
     #[serde(default = "default_timeout")]
     pub agent_timeout_minutes: u64,
     /// `BTreeMap` keeps the roles sorted, so saved files are stable.
@@ -121,17 +125,23 @@ pub struct Config {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RetroConfig {
+    /// The agent that does the retro.
     pub agent: AgentKind,
+    /// The model to use; `None` means the agent's default model.
     #[serde(default)]
     pub model: Option<String>,
+    /// The reasoning effort, such as "high"; the agent's default if not set.
     #[serde(default, deserialize_with = "effort")]
     pub effort: Option<String>,
 }
 
+/// `[roles.<role>]`: which agent works as one role, and what it gets.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RoleConfig {
+    /// The agent that works as this role.
     pub agent: AgentKind,
+    /// The model to use; `None` means the agent's default model.
     #[serde(default)]
     pub model: Option<String>,
     /// The reasoning effort, such as "high"; the agent's default if not set.
@@ -182,6 +192,7 @@ pub struct McpConfig {
     /// The program that is the server; `None` for a server on the web.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub command: Option<String>,
+    /// Command-line arguments for `command`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub args: Vec<String>,
     /// Variables for the server. A value `"secret:<name>"` is read from the
@@ -219,20 +230,28 @@ impl McpAuth {
     }
 }
 
+/// Why `harness.toml` could not be loaded.
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigError {
+    /// The file could not be read, for example because it is missing.
     #[error("cannot read {path}: {source}")]
     Io {
+        /// The file that could not be read, ready to show.
         path: String,
+        /// The error from the operating system.
         #[source]
         source: std::io::Error,
     },
+    /// The file was read but its contents are not valid settings.
     #[error("{path} is not valid: {source}")]
     Toml {
+        /// The file that is not valid, ready to show.
         path: String,
+        /// What is wrong, with the line, from the TOML reader.
         #[source]
         source: toml::de::Error,
     },
+    /// The file has no `[roles.<role>]` for an AI role that needs one.
     #[error("no agent is set for the {0:?} role in harness.toml")]
     MissingRole(Role),
 }
@@ -259,6 +278,7 @@ fn default_timeout() -> u64 {
 }
 
 impl Config {
+    /// Reads settings from the text of a `harness.toml` file.
     pub fn parse(text: &str) -> Result<Self, toml::de::Error> {
         toml::from_str(text)
     }

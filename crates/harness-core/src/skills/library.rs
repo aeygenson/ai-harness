@@ -55,6 +55,7 @@ pub fn library(harness_dir: &Path) -> Vec<LibrarySkill> {
 /// A skill as the Skills tab shows it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LibrarySkill {
+    /// The skill's name: its file name in `.harness/skills/` without `.md`.
     pub name: String,
     /// `None` when the header is broken.
     pub description: Option<String>,
@@ -62,6 +63,7 @@ pub struct LibrarySkill {
     pub path: PathBuf,
     /// The whole text, header included.
     pub text: String,
+    /// Whether the skill is built-in, a changed built-in or the project's own.
     pub source: Source,
 }
 

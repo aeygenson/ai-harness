@@ -23,10 +23,15 @@ pub const MAX_NAME_CHARS: usize = 500;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Role {
+    /// Designs the solution before any code is written.
     Architect,
+    /// Writes the code.
     Developer,
+    /// Writes and runs the tests.
     Tester,
+    /// Reviews the work for security problems; changes no files.
     Security,
+    /// Lisa herself, deciding when a role asks for help or a design needs approval.
     Human,
 }
 
@@ -76,8 +81,11 @@ impl FromStr for Role {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Verdict {
+    /// The role accepted the work.
     Approved,
+    /// The role sent the work back; the handoff must list the issues.
     Rejected,
+    /// The role cannot decide and asks Lisa.
     NeedsHuman,
 }
 
@@ -87,7 +95,9 @@ pub enum Verdict {
 /// Because `Done` is not a `Role`, a handoff can never claim to be written by "done".
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NextStep {
+    /// Send the work to this role next.
     To(Role),
+    /// The task is finished.
     Done,
 }
 
@@ -117,33 +127,47 @@ impl<'de> Deserialize<'de> for NextStep {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum FileAction {
+    /// The role made a new file.
     Created,
+    /// The role changed an existing file.
     Modified,
+    /// The role removed a file.
     Deleted,
+    /// The role only read the file.
     Read,
 }
 
+/// One file a role touched, as listed under `files` in `handoff.json`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FileChange {
+    /// The file's path inside the project, for example `src/parser.rs`.
     pub path: String,
+    /// What the role did with the file.
     pub action: FileAction,
 }
 
+/// How serious an [`Issue`] is, from least to most.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Severity {
+    /// A minor problem.
     Low,
+    /// A problem that should be fixed.
     Medium,
+    /// A serious problem, for example a crash.
     High,
+    /// The most serious kind of problem.
     Critical,
 }
 
 /// A problem a role found, explaining why it rejected the work.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Issue {
+    /// How serious the problem is.
     pub severity: Severity,
     /// Where the problem is, for example `src/parser.rs:42`.
     pub location: Option<String>,
+    /// What is wrong, in a sentence or two (at most [`MAX_TEXT_CHARS`] characters).
     pub description: String,
 }
 
@@ -151,17 +175,27 @@ pub struct Issue {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Handoff {
+    /// The format version the file is written in; must be [`SCHEMA_VERSION`].
     pub schema_version: u32,
+    /// The task the handoff is for, for example `task-001`.
     pub task_id: String,
+    /// The round it was written in (1, 2, 3...); a rejection starts the next round.
     pub round: u32,
+    /// Who wrote the handoff.
     pub role: Role,
+    /// What the author decided about the work it received.
     pub verdict: Verdict,
+    /// Where the work goes next (JSON key `next_role`): a role, or `done`.
     pub next_role: NextStep,
+    /// A short account of what the role did (at most [`MAX_TEXT_CHARS`] characters).
     pub summary: String,
+    /// Names of the skills the role used; empty if the key is missing.
     #[serde(default)]
     pub skills_used: Vec<String>,
+    /// The files the role created, changed, deleted or read; empty if the key is missing.
     #[serde(default)]
     pub files: Vec<FileChange>,
+    /// The problems found; must not be empty when the verdict is `rejected`.
     #[serde(default)]
     pub issues: Vec<Issue>,
 }

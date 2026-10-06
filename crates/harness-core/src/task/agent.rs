@@ -1,4 +1,5 @@
-//! The interface every agent adapter implements: Claude Code, Codex, Antigravity CLI, mock.
+//! The interface every agent adapter implements: Claude Code, Codex, Antigravity CLI,
+//! DeepSeek Harness (dsh) and the mock.
 
 use std::future::Future;
 use std::path::PathBuf;
@@ -8,8 +9,11 @@ use crate::task::handoff::Role;
 /// Everything an agent needs to do one role once.
 #[derive(Debug, Clone)]
 pub struct RoleJob {
+    /// The task this job belongs to, for example `task-001`.
     pub task_id: String,
+    /// The round the task is in; the handoff must carry the same number.
     pub round: u32,
+    /// The role the agent plays in this run.
     pub role: Role,
     /// The project folder: the agent works here.
     pub project_dir: PathBuf,
@@ -47,5 +51,6 @@ pub enum RunEnd {
 /// the future is `Send`, so it can later run on any Tokio thread. Implementations
 /// may still simply write `async fn run(...)`.
 pub trait AgentRunner {
+    /// Runs the agent for `job` and reports how the run ended, with its output.
     fn run(&self, job: &RoleJob) -> impl Future<Output = AgentOutcome> + Send;
 }

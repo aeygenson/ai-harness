@@ -17,16 +17,21 @@ use crate::skills::fingerprint;
 
 const MCP_DIR: &str = "mcp";
 
+/// The tools one MCP server said it offers, as saved in its cache file.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ToolList {
+    /// The server's name from `harness.toml`; it is also part of the file name.
     pub server: String,
     /// When it was asked, in seconds since 1970.
     pub fetched: u64,
+    /// The tools in the order the server listed them.
     pub tools: Vec<Tool>,
 }
 
+/// One tool of an MCP server.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Tool {
+    /// The tool's name, as the agent calls it.
     pub name: String,
     /// The first line of the server's description.
     #[serde(default)]
@@ -56,6 +61,7 @@ pub fn load(home: &Path, name: &str, server: &McpConfig) -> Option<ToolList> {
     serde_json::from_str(&text).ok()
 }
 
+/// Writes `list` to its cache file for these settings, creating the folder if needed.
 pub fn save(home: &Path, server: &McpConfig, list: &ToolList) -> io::Result<()> {
     let path = cache_path(home, &list.server, server);
     if let Some(dir) = path.parent() {

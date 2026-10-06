@@ -25,17 +25,29 @@ const HARNESS_IGNORES: &str = "runs/*/inbox/\nretros/*/inbox/\nagents/\n";
 const AUTHOR_NAME: &str = "AI Harness";
 const AUTHOR_EMAIL: &str = "harness@localhost";
 
+/// What can go wrong when the harness runs git or writes a file in the repository.
 #[derive(Debug, thiserror::Error)]
 pub enum GitError {
+    /// The `git` program could not be started, for example it is not installed.
     #[error("cannot run git: {0}")]
     CannotRun(#[source] io::Error),
+    /// Git ran but ended with an error.
     #[error("`git {command}` failed: {stderr}")]
-    Failed { command: String, stderr: String },
+    Failed {
+        /// The arguments given to git, joined with spaces (without `git` itself).
+        command: String,
+        /// What git printed to its error output, trimmed; may be empty.
+        stderr: String,
+    },
+    /// The folder is not part of any git repository.
     #[error("{0} is not inside a git repository")]
     NotARepo(PathBuf),
+    /// A file or folder could not be read, written or created.
     #[error("cannot write {path}: {source}")]
     Io {
+        /// The file or folder the harness tried to use.
         path: PathBuf,
+        /// The error the operating system gave.
         #[source]
         source: io::Error,
     },
@@ -78,6 +90,7 @@ impl Repo {
         Ok(top.canonicalize().ok() == self.root.canonicalize().ok())
     }
 
+    /// The top folder of the repository, as it was given to `open` or `init`.
     pub fn root(&self) -> &Path {
         &self.root
     }
