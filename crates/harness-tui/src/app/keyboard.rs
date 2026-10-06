@@ -44,7 +44,7 @@ impl App {
                 KeyCode::Enter => self.submit(),
                 KeyCode::Tab | KeyCode::Down => form.next_field(),
                 KeyCode::Backspace => form.backspace(),
-                KeyCode::Char(c) => form.type_char(c),
+                KeyCode::Char(c) => form.key_char(c),
                 _ => {}
             }
             return;

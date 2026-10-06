@@ -268,20 +268,35 @@ pub struct Form {
     pub error: Option<String>,
 }
 
+/// What a form field holds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FieldKind {
+    /// Text that is typed.
+    Text,
+    /// A secret: shown as dots, never printed.
+    Secret,
+    /// A box that is ticked or not; Space or a click switches it.
+    Check(bool),
+}
+
 #[derive(Clone, PartialEq, Eq)]
 pub struct Field {
     pub label: String,
+    /// What was typed; always empty for a [`FieldKind::Check`].
     pub value: String,
-    /// A secret: shown as dots, never printed.
-    pub hidden: bool,
+    pub kind: FieldKind,
 }
 
 impl std::fmt::Debug for Field {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let value = if self.hidden { "***" } else { &self.value };
+        let value = match self.kind {
+            FieldKind::Secret => "***",
+            FieldKind::Text | FieldKind::Check(_) => &self.value,
+        };
         f.debug_struct("Field")
             .field("label", &self.label)
             .field("value", &value)
+            .field("kind", &self.kind)
             .finish()
     }
 }
@@ -302,7 +317,7 @@ impl Form {
         self.fields.push(Field {
             label: label.into(),
             value: value.into(),
-            hidden: false,
+            kind: FieldKind::Text,
         });
         self
     }
@@ -312,7 +327,17 @@ impl Form {
         self.fields.push(Field {
             label: label.into(),
             value: String::new(),
-            hidden: true,
+            kind: FieldKind::Secret,
+        });
+        self
+    }
+
+    /// A box to tick, ticked from the start when `on`.
+    pub fn check(mut self, label: &str, on: bool) -> Self {
+        self.fields.push(Field {
+            label: label.into(),
+            value: String::new(),
+            kind: FieldKind::Check(on),
         });
         self
     }
@@ -321,10 +346,46 @@ impl Form {
         self.fields.get(index).map_or("", |f| f.value.trim())
     }
 
-    /// Typing goes into the focused field.
+    /// Is the box `index` ticked? `false` for a field that is not a box.
+    pub fn is_checked(&self, index: usize) -> bool {
+        self.fields
+            .get(index)
+            .is_some_and(|f| f.kind == FieldKind::Check(true))
+    }
+
+    /// Ticks the box `index`, or takes the tick away; other fields stay as they are.
+    pub fn switch(&mut self, index: usize) {
+        if let Some(Field {
+            kind: FieldKind::Check(on),
+            ..
+        }) = self.fields.get_mut(index)
+        {
+            *on = !*on;
+        }
+    }
+
+    /// Typing goes into the focused field. A box takes only Space, which
+    /// switches it; pasted text never changes a box.
     pub fn type_char(&mut self, c: char) {
         if let Some(field) = self.fields.get_mut(self.focus) {
-            field.value.push(c);
+            match field.kind {
+                FieldKind::Text | FieldKind::Secret => field.value.push(c),
+                FieldKind::Check(_) => {}
+            }
+        }
+    }
+
+    /// A key typed on the keyboard: like [`Form::type_char`], but Space
+    /// switches a focused box.
+    pub fn key_char(&mut self, c: char) {
+        let on_box = self
+            .fields
+            .get(self.focus)
+            .is_some_and(|f| matches!(f.kind, FieldKind::Check(_)));
+        if on_box && c == ' ' {
+            self.switch(self.focus);
+        } else {
+            self.type_char(c);
         }
     }
 
@@ -384,10 +445,11 @@ impl Form {
             let focused = i == self.focus;
             let cursor = if focused { "▏" } else { "" };
             let style = if focused { input() } else { theme::chip() };
-            let shown = if field.hidden {
-                "•".repeat(field.value.chars().count())
-            } else {
-                field.value.clone()
+            let shown = match field.kind {
+                FieldKind::Text => field.value.clone(),
+                FieldKind::Secret => "•".repeat(field.value.chars().count()),
+                FieldKind::Check(true) => "[x]".to_string(),
+                FieldKind::Check(false) => "[ ]".to_string(),
             };
             frame.render_widget(Span::styled(format!(" {shown}{cursor}"), style), rect);
             hits.add(rect, Target::Field(i));
@@ -508,5 +570,27 @@ mod tests {
         assert_eq!(wrapped_lines("", 10), 1);
         assert_eq!(wrapped_lines("one two three", 9), 2);
         assert_eq!(wrapped_lines("abcdefghijkl", 5), 3);
+    }
+
+    #[test]
+    fn a_box_switches_with_space_and_ignores_other_keys() {
+        let mut form = Form::new("t", "", "OK")
+            .field("name", "")
+            .check("sign in", false);
+        form.key_char(' ');
+        assert_eq!(form.value(0), "");
+        form.next_field();
+        form.key_char('y');
+        assert!(!form.is_checked(1));
+        form.key_char(' ');
+        assert!(form.is_checked(1));
+        // Pasted text never changes a box.
+        form.type_char(' ');
+        assert!(form.is_checked(1));
+        form.switch(1);
+        assert!(!form.is_checked(1));
+        // A text field is never a ticked box, and switching it does nothing.
+        form.switch(0);
+        assert!(!form.is_checked(0));
     }
 }

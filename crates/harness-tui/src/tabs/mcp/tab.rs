@@ -1068,23 +1068,20 @@ pub fn join_words<'a>(words: impl IntoIterator<Item = &'a String>) -> String {
 }
 
 /// What the server form shows for `server`: the command line (or the
-/// address), the variables (or headers) and «yes» for a browser sign-in.
-pub fn form_values(server: &McpConfig) -> [String; 3] {
+/// address), the variables (or headers) and whether to sign in through the
+/// browser.
+pub fn form_values(server: &McpConfig) -> (String, String, bool) {
     let pairs = |map: &std::collections::BTreeMap<String, String>| {
         let words: Vec<String> = map.iter().map(|(k, v)| format!("{k}={v}")).collect();
         join_words(&words)
     };
     match &server.url {
-        Some(url) => [
-            url.clone(),
-            pairs(&server.headers),
-            if server.auth.is_some() { "yes" } else { "" }.to_string(),
-        ],
-        None => [
+        Some(url) => (url.clone(), pairs(&server.headers), server.auth.is_some()),
+        None => (
             join_words(server.command.iter().chain(&server.args)),
             pairs(&server.env),
-            String::new(),
-        ],
+            false,
+        ),
     }
 }
 
@@ -1092,7 +1089,7 @@ pub fn form_values(server: &McpConfig) -> [String; 3] {
 /// on the web; `NAME=value` pairs separated by spaces, which are variables
 /// for a command and headers for an address; and whether to sign in through
 /// the browser.
-pub fn server_from(command: &str, variables: &str, sign_in: &str) -> Result<McpConfig, String> {
+pub fn server_from(command: &str, variables: &str, sign_in: bool) -> Result<McpConfig, String> {
     let mut pairs = std::collections::BTreeMap::new();
     for word in split_words(variables)? {
         let Some((name, value)) = word.split_once('=') else {
@@ -1100,15 +1097,6 @@ pub fn server_from(command: &str, variables: &str, sign_in: &str) -> Result<McpC
         };
         pairs.insert(name.trim().to_string(), value.trim().to_string());
     }
-    let oauth = match sign_in.trim().to_lowercase().as_str() {
-        "" | "no" | "нет" => false,
-        "yes" | "да" | "oauth" => true,
-        other => {
-            return Err(format!(
-                "sign-in: write yes or leave it empty, not {other:?}"
-            ))
-        }
-    };
     let command = command.trim();
     if command.starts_with("https://") || command.starts_with("http://") {
         if command.contains(char::is_whitespace) {
@@ -1117,11 +1105,11 @@ pub fn server_from(command: &str, variables: &str, sign_in: &str) -> Result<McpC
         return Ok(McpConfig {
             url: Some(command.to_string()),
             headers: pairs,
-            auth: oauth.then_some(McpAuth::OAuth),
+            auth: sign_in.then_some(McpAuth::OAuth),
             ..McpConfig::default()
         });
     }
-    if oauth {
+    if sign_in {
         return Err("a sign-in through the browser is only for an address (https://...)".into());
     }
     let mut words = split_words(command)?.into_iter();
@@ -1142,7 +1130,7 @@ mod tests {
         let server = server_from(
             "npx -y \"@scope/a b\"",
             "API_KEY=secret:docs  MODE=\"read only\"",
-            "",
+            false,
         )
         .unwrap();
         assert_eq!(server.command.as_deref(), Some("npx"));
@@ -1150,27 +1138,29 @@ mod tests {
         assert_eq!(server.env["API_KEY"], "secret:docs");
         assert_eq!(server.env["MODE"], "read only");
         assert_eq!(join_words(&server.args), "-y \"@scope/a b\"");
-        assert!(server_from("npx \"open", "", "").is_err());
-        assert!(server_from("npx", "NOVALUE", "").is_err());
-        assert!(server_from("npx", "", "yes").is_err());
-        assert!(server_from("https://a.b/mcp", "", "maybe").is_err());
+        assert!(server_from("npx \"open", "", false).is_err());
+        assert!(server_from("npx", "NOVALUE", false).is_err());
+        assert!(server_from("npx", "", true).is_err());
 
         let web = server_from(
             " https://a.b/mcp ",
             "Authorization=\"Bearer secret:gh\" X-Mode=read",
-            "",
+            false,
         )
         .unwrap();
         assert_eq!(web.url.as_deref(), Some("https://a.b/mcp"));
         assert_eq!(web.headers["Authorization"], "Bearer secret:gh");
         assert!(web.command.is_none() && web.auth.is_none());
-        let [address, headers, sign_in] = form_values(&web);
-        assert_eq!(server_from(&address, &headers, &sign_in).unwrap(), web);
+        let (address, headers, sign_in) = form_values(&web);
+        assert_eq!(server_from(&address, &headers, sign_in).unwrap(), web);
 
-        assert_eq!(form_values(&McpConfig::default()), ["", "", ""]);
+        assert_eq!(
+            form_values(&McpConfig::default()),
+            (String::new(), String::new(), false)
+        );
 
-        let oauth = server_from("https://a.b/mcp", "", "да").unwrap();
+        let oauth = server_from("https://a.b/mcp", "", true).unwrap();
         assert_eq!(oauth.auth, Some(McpAuth::OAuth));
-        assert_eq!(form_values(&oauth)[2], "yes");
+        assert!(form_values(&oauth).2);
     }
 }
