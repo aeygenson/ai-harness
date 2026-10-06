@@ -123,12 +123,14 @@ These are what the project already uses; prefer them over alternatives.
 ## Documentation
 
 - Every module starts with a `//!` comment saying what it is for.
-- Every public item (function, struct, enum, method, important field) has a `///` comment:
+- Every public item (function, struct, enum, variant, method, field) has a `///` comment:
   one or two sentences on what it does, plus what is not obvious (errors, side effects such
   as writing files or starting processes, which OS behaves differently).
 - `# Arguments` / `# Returns` / `# Errors` sections and examples are welcome for complex
   functions, but not required for simple ones. A long template on a three-line function hurts
   readability more than it helps.
+- The `missing_docs` lint (`[workspace.lints]` in the root `Cargo.toml`) enforces this: with
+  `-D warnings`, an undocumented public item fails clippy and CI.
 - The first sentence of a `///` comment fits on one line (about 15 words): it is what lists
   and tooltips show.
 - Magic values (a size limit, an error code, a width) are named constants with a comment

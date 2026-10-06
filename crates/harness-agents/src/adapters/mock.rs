@@ -15,8 +15,11 @@ use harness_core::task::handoff::{Handoff, Issue, NextStep, Role, Severity, Verd
 pub enum MockStep {
     /// Change project files, then write a correct `notes.md` and `handoff.json`.
     Finish {
+        /// The verdict written into `handoff.json`.
         verdict: Verdict,
+        /// The role (or the end) the handoff asks to go to next.
         next: NextStep,
+        /// The handoff's summary; with `Rejected` it is also the text of the one issue.
         summary: String,
         /// `(path in the project, contents)` pairs.
         files: Vec<(String, String)>,
@@ -38,6 +41,7 @@ pub enum MockStep {
 }
 
 impl MockStep {
+    /// A step that writes a valid handoff with `verdict` and `next`, changing no project files.
     pub fn finish(verdict: Verdict, next: NextStep) -> Self {
         MockStep::Finish {
             verdict,
@@ -77,6 +81,7 @@ pub struct MockAgent {
 }
 
 impl MockAgent {
+    /// A mock with no steps yet; add them with `then`.
     pub fn new() -> Self {
         Self::default()
     }

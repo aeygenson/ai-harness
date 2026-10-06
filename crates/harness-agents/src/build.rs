@@ -94,8 +94,11 @@ pub fn retro_agent(config: &Config) -> Result<AnyAgent, BuildError> {
 pub struct AgentChoice<'a> {
     /// For error messages: `Tester` or `[retro]`.
     pub who: &'a str,
+    /// Which agent program runs the role.
     pub agent: AgentKind,
+    /// The model to ask for; `None` keeps the agent's own default.
     pub model: Option<&'a str>,
+    /// The reasoning effort to ask for; `None` keeps the agent's own default.
     pub effort: Option<&'a str>,
     /// The role whose rules the agent gets.
     pub role: Role,

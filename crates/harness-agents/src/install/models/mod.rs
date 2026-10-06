@@ -35,9 +35,13 @@ const DEEPSEEK_MODELS_URL: &str = "https://api.deepseek.com/models";
 /// The programs to run; tests put fake ones here.
 #[derive(Debug, Clone)]
 pub struct Programs {
+    /// The Claude Code program.
     pub claude: PathBuf,
+    /// The Codex CLI program.
     pub codex: PathBuf,
+    /// The `curl` program, which asks DeepSeek's API for its models.
     pub curl: PathBuf,
+    /// The Antigravity CLI program.
     pub agy: PathBuf,
 }
 

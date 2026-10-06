@@ -35,6 +35,8 @@ pub fn list_tools(server: &McpServer, project_dir: &Path) -> Result<Vec<Tool>, S
     list_tools_within(server, project_dir, TIME_LIMIT)
 }
 
+/// Like `list_tools`, but waits at most `limit` for the server instead of [`TIME_LIMIT`].
+/// Starts the server as a process and stops it, with everything it started, at the end.
 pub fn list_tools_within(
     server: &McpServer,
     project_dir: &Path,

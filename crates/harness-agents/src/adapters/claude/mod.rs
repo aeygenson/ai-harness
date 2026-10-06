@@ -42,6 +42,7 @@ agent runs can see its Claude login; install the package «bubblewrap» to hide 
 /// `--mcp-config` for a role without MCP servers.
 const NO_MCP_SERVERS: &str = r#"{"mcpServers":{}}"#;
 
+/// Runs a role with Anthropic's Claude Code (`claude`), logged in with a saved token.
 #[derive(Debug, Clone)]
 pub struct ClaudeCode {
     program: PathBuf,

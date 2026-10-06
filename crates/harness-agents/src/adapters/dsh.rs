@@ -50,6 +50,7 @@ const PATCH_FILE: &str = "harness.patch.json";
 /// dsh's provider for DeepSeek's own API.
 const PROVIDER: &str = "deepseek-official";
 
+/// Runs a role with DeepSeek Harness (`dsh`), using a saved DeepSeek API key.
 #[derive(Debug, Clone)]
 pub struct Dsh {
     program: PathBuf,
@@ -68,6 +69,7 @@ impl Dsh {
         }
     }
 
+    /// Uses `program` instead of `dsh`; tests pass a small script that stands in for it.
     pub fn with_program(mut self, program: impl Into<PathBuf>) -> Self {
         self.program = program.into();
         self

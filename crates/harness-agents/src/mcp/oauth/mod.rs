@@ -55,11 +55,16 @@ const RENEW_BEFORE: u64 = 120;
 pub struct SignIn {
     /// The MCP server's address it belongs to.
     pub url: String,
+    /// The server's address that hands out and renews access tokens.
     pub token_endpoint: String,
+    /// The id the server gave the harness when it registered as a client.
     pub client_id: String,
+    /// The client's password from that registration; `None` if the server gave none.
     #[serde(default)]
     pub client_secret: Option<String>,
+    /// The token sent with each request to the MCP server.
     pub access_token: String,
+    /// Gets a new access token when the old one ends; `None` if the server gave none.
     #[serde(default)]
     pub refresh_token: Option<String>,
     /// Seconds since 1970; `None` if the server did not say.
@@ -78,12 +83,15 @@ impl std::fmt::Debug for SignIn {
 
 /// How to reach the network and the browser; tests use their own.
 pub struct Tools<'a> {
+    /// The `curl` program that sends the requests.
     pub curl: PathBuf,
     /// Opens the address in the browser.
     pub open: &'a dyn Fn(&str) -> Result<(), String>,
+    /// How long to wait for Lisa to finish signing in in the browser.
     pub browser_limit: Duration,
 }
 
+/// The file that keeps the sign-in of `server`: `oauth/<server>.json` in `credentials_dir`.
 pub fn path(credentials_dir: &Path, server: &str) -> PathBuf {
     credentials_dir
         .join(OAUTH_DIR)
