@@ -55,6 +55,7 @@ const NOT_COPIED: &[&str] = &[
     "updater",
 ];
 
+/// Runs a role with Google's Antigravity CLI (`agy`), logged in through its own `HOME`.
 #[derive(Debug, Clone)]
 pub struct Antigravity {
     program: PathBuf,
@@ -74,6 +75,7 @@ impl Antigravity {
         }
     }
 
+    /// Uses `program` instead of `agy`; tests pass a small script that stands in for it.
     pub fn with_program(mut self, program: impl Into<PathBuf>) -> Self {
         self.program = program.into();
         self

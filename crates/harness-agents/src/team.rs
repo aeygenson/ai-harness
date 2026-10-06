@@ -16,10 +16,15 @@ use crate::{Antigravity, ClaudeCode, Codex, Dsh, MockAgent};
 /// `match` is simple and the compiler checks that every agent is handled.
 #[derive(Debug)]
 pub enum AnyAgent {
+    /// Claude Code.
     Claude(ClaudeCode),
+    /// Codex CLI.
     Codex(Codex),
+    /// Antigravity CLI.
     Antigravity(Antigravity),
+    /// DeepSeek Harness.
     Dsh(Dsh),
+    /// The scripted mock agent, for tests.
     Mock(MockAgent),
 }
 
@@ -35,16 +40,19 @@ impl AgentRunner for AnyAgent {
     }
 }
 
+/// The agent of each role; running a role with no agent set fails with a message.
 #[derive(Debug, Default)]
 pub struct Team {
     agents: HashMap<Role, AnyAgent>,
 }
 
 impl Team {
+    /// A team with no agents yet; add them with `with`.
     pub fn new() -> Self {
         Self::default()
     }
 
+    /// Lets `agent` run `role`, replacing the agent set for it before.
     pub fn with(mut self, role: Role, agent: AnyAgent) -> Self {
         self.agents.insert(role, agent);
         self

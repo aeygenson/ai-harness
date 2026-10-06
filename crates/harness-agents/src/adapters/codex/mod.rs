@@ -73,6 +73,7 @@ const DISABLED_FEATURES: &[&str] = &[
     "unbounded_connection_retries",
 ];
 
+/// Runs a role with OpenAI's Codex CLI (`codex`), logged in with a saved `auth.json`.
 #[derive(Debug, Clone)]
 pub struct Codex {
     program: PathBuf,
@@ -95,6 +96,7 @@ impl Codex {
         }
     }
 
+    /// Uses `program` instead of `codex`; tests pass a small script that stands in for it.
     pub fn with_program(mut self, program: impl Into<PathBuf>) -> Self {
         self.program = program.into();
         self

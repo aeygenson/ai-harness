@@ -6,7 +6,9 @@ use harness_core::config::AgentKind;
 /// site says how.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Commands {
+    /// The command for Linux and macOS.
     pub unix: Option<&'static str>,
+    /// The command for Windows.
     pub windows: Option<&'static str>,
 }
 
@@ -48,7 +50,9 @@ pub(super) fn for_npm(command: &str, prefix: Option<&str>) -> String {
 pub struct Entry {
     /// The name in `harness.toml` (`agent = "codex"`), or the catalog's own.
     pub id: &'static str,
+    /// The name shown to Lisa, such as `Claude Code`.
     pub name: &'static str,
+    /// The company that makes the agent, such as `Anthropic`.
     pub vendor: &'static str,
     /// The program, by name; the first one found counts.
     pub programs: &'static [&'static str],
@@ -59,11 +63,14 @@ pub struct Entry {
     pub plan: &'static str,
     /// The lowest version the harness was checked with.
     pub min_version: Option<&'static str>,
+    /// The maker's commands that install the agent.
     pub install: Commands,
+    /// The maker's commands that update the agent to its newest version.
     pub update: Commands,
     /// The maker's own way to take it off, when deleting the program file
     /// is not enough (Claude Code keeps its versions next to it).
     pub remove: Commands,
+    /// The maker's web page about the agent; shown when there is no command.
     pub site: &'static str,
 }
 

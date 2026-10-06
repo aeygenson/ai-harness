@@ -43,8 +43,11 @@ pub fn spawn(command: &mut Command) -> std::io::Result<std::process::Child> {
 /// What a finished agent printed.
 #[derive(Debug)]
 pub struct Finished {
+    /// Everything the agent printed to standard output.
     pub stdout: String,
+    /// Everything the agent printed to standard error.
     pub stderr: String,
+    /// How the agent's process ended (its exit code).
     pub status: ExitStatus,
 }
 

@@ -8,6 +8,7 @@ use super::older;
 /// What was found for one agent.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Status {
+    /// The catalog entry this status is about.
     pub entry: Entry,
     /// The program's full path; `None`: not installed.
     pub path: Option<PathBuf>,
@@ -144,7 +145,10 @@ pub(super) fn npm_command(verb: &str, prefix: Option<&str>, what: &str) -> Strin
 /// What can be done with an agent on the Agents tab.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Action {
+    /// Install the agent.
     Install,
+    /// Update the installed agent to its newest version.
     Update,
+    /// Take the agent off this computer.
     Remove,
 }

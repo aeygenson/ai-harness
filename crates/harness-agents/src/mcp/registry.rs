@@ -18,6 +18,7 @@ pub fn search(query: &str) -> Result<Vec<Entry>, String> {
     search_with(Path::new("curl"), query)
 }
 
+/// Like `search`, but runs the given `curl` program; tests pass a fake one.
 pub fn search_with(curl: &Path, query: &str) -> Result<Vec<Entry>, String> {
     let dir = tempfile::Builder::new()
         .prefix("harness-registry-")

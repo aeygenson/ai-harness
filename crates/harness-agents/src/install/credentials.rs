@@ -27,6 +27,8 @@ pub fn save_token(dir: &Path, agent: &str, token: &Secret) -> io::Result<PathBuf
     Ok(path)
 }
 
+/// Reads the saved token of `agent` (for example `claude`), without any whitespace.
+/// Fails when no token was saved.
 pub fn load_token(dir: &Path, agent: &str) -> io::Result<Secret> {
     let text = fs::read_to_string(dir.join(agent).join(TOKEN_FILE))?;
     Ok(Secret::new(clean(&text)))
@@ -67,6 +69,8 @@ pub fn save_secret(dir: &Path, name: &str, value: &Secret) -> io::Result<PathBuf
     Ok(path)
 }
 
+/// Reads a secret saved for an MCP server under `name`, without any whitespace.
+/// Fails when no such secret was saved.
 pub fn load_secret(dir: &Path, name: &str) -> io::Result<Secret> {
     let text = fs::read_to_string(dir.join(SECRETS_DIR).join(name))?;
     Ok(Secret::new(clean(&text)))

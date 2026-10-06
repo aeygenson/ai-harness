@@ -33,10 +33,13 @@ pub const REQUEST_LIMIT: Duration = Duration::from_secs(600);
 /// Where the bridge sends the messages.
 #[derive(Clone)]
 pub struct Bridge {
+    /// The remote MCP server's address.
     pub url: String,
     /// `Name: value`, with the secrets already in.
     pub headers: Vec<String>,
+    /// The `curl` program that sends each message.
     pub curl: PathBuf,
+    /// How long one request may take; passed to `curl` in whole seconds.
     pub limit: Duration,
 }
 
