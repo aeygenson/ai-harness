@@ -6,7 +6,10 @@ use std::time::Instant;
 
 use ratatui::crossterm::event::{KeyCode, MouseButton, MouseEvent, MouseEventKind};
 
-use crate::tabs::retro;
+use crate::tabs::mcp::{McpButton, McpCatalogButton};
+use crate::tabs::plugins::{PluginButton, PluginCatalogButton};
+use crate::tabs::retro::{self, RetroButton};
+use crate::tabs::skills::SkillButton;
 use crate::ui::message::Message;
 use crate::ui::{ButtonId, Hits, ListId, Target};
 use crate::{App, Tab, DOUBLE_CLICK, TABS};
@@ -203,7 +206,7 @@ impl App {
                         skills.select(index);
                     }
                     if double {
-                        self.press(ButtonId::SkillEdit);
+                        self.press(ButtonId::Skill(SkillButton::Edit));
                     }
                 }
                 Some((ListId::Mcp, index)) => {
@@ -211,7 +214,7 @@ impl App {
                         mcp.select(index, roles);
                     }
                     if double {
-                        self.press(ButtonId::McpToggle);
+                        self.press(ButtonId::Mcp(McpButton::Toggle));
                     }
                 }
                 Some((ListId::Plugins, index)) => {
@@ -219,7 +222,7 @@ impl App {
                         plugins.select(index, roles);
                     }
                     if double {
-                        self.press(ButtonId::PluginToggle);
+                        self.press(ButtonId::Plugin(PluginButton::Toggle));
                     }
                 }
                 Some((ListId::PluginCatalog, index)) => {
@@ -227,7 +230,7 @@ impl App {
                         view.select(index);
                     }
                     if double {
-                        self.press(ButtonId::PluginAdd);
+                        self.press(ButtonId::PluginCatalog(PluginCatalogButton::Add));
                     }
                 }
                 Some((ListId::PluginCatalogs, index)) => {
@@ -245,7 +248,7 @@ impl App {
                         retro.select_proposal(index);
                     }
                     if double {
-                        self.press(ButtonId::RetroToggle);
+                        self.press(ButtonId::Retro(RetroButton::Toggle));
                     }
                 }
                 Some((ListId::McpCatalog, index)) => {
@@ -253,7 +256,7 @@ impl App {
                         mcp.select_found(index);
                     }
                     if double {
-                        self.press(ButtonId::McpUse);
+                        self.press(ButtonId::McpCatalog(McpCatalogButton::Use));
                     }
                 }
                 Some((ListId::RoleFilter, index)) => {
@@ -261,11 +264,14 @@ impl App {
                         tasks.toggle_filter(index);
                     }
                 }
-                Some((list, index)) => {
+                Some((list @ (ListId::Tasks | ListId::Steps), index)) => {
                     if let Some(tasks) = &mut self.tasks {
                         tasks.on_click(list, index);
                     }
                 }
+                // Clicks in the folder browser and the «To» menu are handled
+                // above, while they are open.
+                Some((ListId::Folders | ListId::Choices, _)) => {}
                 None => {}
             },
             Target::Row(index) => {

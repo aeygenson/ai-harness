@@ -1,12 +1,10 @@
 //! What the buttons do: one place for every `ButtonId`, whether it was clicked
-//! or chosen with a key.
+//! or chosen with a key. A tab's own buttons go on to that tab's `press`.
 
 use harness_agents::install::credentials;
 
-use crate::tabs::plugins;
 use crate::tabs::projects::has_config;
 use crate::tabs::roles::Action;
-use crate::tabs::tasks::Menu;
 use crate::ui::message::Message;
 use crate::ui::{i18n, theme};
 use crate::ui::{ButtonId, Form};
@@ -26,94 +24,39 @@ impl App {
                 }
             }
             ButtonId::RefreshModels => self.ask_for_models(),
-            ButtonId::McpRole(index) => {
-                if let Some(mcp) = &mut self.mcp {
-                    mcp.choose_role(index);
-                }
-            }
-            ButtonId::McpCheck => self.check_mcp(),
-            ButtonId::McpCatalog => {
-                if let Some(mcp) = &mut self.mcp {
-                    let action = mcp.open_catalog();
+            ButtonId::Mcp(button) => {
+                if let (Some(mcp), Some(roles)) = (&mut self.mcp, &mut self.roles) {
+                    let action = mcp.press(button, roles);
                     self.mcp_action(action);
                 }
             }
-            ButtonId::McpSearch | ButtonId::McpUse | ButtonId::McpBack => {
+            ButtonId::McpCatalog(button) => {
                 if let Some(mcp) = &mut self.mcp {
-                    let action = mcp.catalog_press(id);
+                    let action = mcp.catalog_press(button);
                     self.mcp_action(action);
                 }
             }
-            ButtonId::McpNew
-            | ButtonId::McpEdit
-            | ButtonId::McpRemove
-            | ButtonId::McpSecret
-            | ButtonId::McpSignIn => {
-                if let (Some(mcp), Some(roles)) = (&self.mcp, &self.roles) {
-                    let action = mcp.press(id, roles);
-                    self.mcp_action(action);
-                }
-            }
-            ButtonId::McpToggle => {
-                if let (Some(mcp), Some(roles)) = (&self.mcp, &mut self.roles) {
-                    if let Err(key) = mcp.toggle(roles) {
-                        self.message = Some(Message::error(self.tr.t(key)));
-                    }
-                }
-            }
-            ButtonId::PluginRole(index) => {
-                if let Some(plugins) = &mut self.plugins {
-                    plugins.choose_role(index);
-                }
-            }
-            ButtonId::PluginToggle => {
-                if let (Some(plugins), Some(roles)) = (&self.plugins, &mut self.roles) {
-                    if let Err(key) = plugins.toggle(roles) {
-                        self.message = Some(Message::error(self.tr.t(key)));
-                    }
-                }
-            }
-            ButtonId::PluginCatalog => self.plugin_action(plugins::Action::OpenCatalog),
-            ButtonId::PluginFilter(_)
-            | ButtonId::PluginSearch
-            | ButtonId::PluginAdd
-            | ButtonId::PluginAddGive
-            | ButtonId::PluginCatalogs
-            | ButtonId::PluginBack
-            | ButtonId::CatalogAdd
-            | ButtonId::CatalogUpdate
-            | ButtonId::CatalogRemove => {
-                if let Some(plugins) = &mut self.plugins {
-                    let action = plugins.catalog_press(id);
+            ButtonId::Plugin(button) => {
+                if let (Some(plugins), Some(roles)) = (&mut self.plugins, &mut self.roles) {
+                    let action = plugins.press(button, roles);
                     self.plugin_action(action);
                 }
             }
-            ButtonId::PluginHooks
-            | ButtonId::PluginServers
-            | ButtonId::PluginUpdate
-            | ButtonId::PluginRemove
-            | ButtonId::PluginOpen => {
-                if let (Some(plugins), Some(roles)) = (&self.plugins, &self.roles) {
-                    let action = plugins.press(id, roles);
+            ButtonId::PluginCatalog(button) => {
+                if let Some(plugins) = &mut self.plugins {
+                    let action = plugins.catalog_press(button);
                     self.plugin_action(action);
                 }
             }
-            ButtonId::RetroGenerate
-            | ButtonId::RetroOpen
-            | ButtonId::RetroToggle
-            | ButtonId::RetroApply => {
+            ButtonId::Retro(button) => {
                 if let Some(retro) = &mut self.retro {
-                    let action = retro.press(id);
+                    let action = retro.press(button);
                     self.retro_action(action);
                 }
             }
-            ButtonId::SkillRole(_)
-            | ButtonId::SkillEdit
-            | ButtonId::SkillNew
-            | ButtonId::SkillRestore
-            | ButtonId::SkillMark(_) => {
+            ButtonId::Skill(button) => {
                 if let Some(skills) = &mut self.skills {
-                    let action = skills.press(id);
+                    let action = skills.press(button);
                     self.skill_action(action);
                 }
             }
@@ -132,13 +75,9 @@ impl App {
                     tasks.focus_input();
                 }
             }
-            ButtonId::To | ButtonId::Model | ButtonId::Level => {
+            ButtonId::Menu(menu) => {
                 if let Some(tasks) = &mut self.tasks {
-                    tasks.toggle_menu(match id {
-                        ButtonId::Model => Menu::Model,
-                        ButtonId::Level => Menu::Level,
-                        _ => Menu::To,
-                    });
+                    tasks.toggle_menu(menu);
                 }
             }
             ButtonId::Send if self.generating() => {

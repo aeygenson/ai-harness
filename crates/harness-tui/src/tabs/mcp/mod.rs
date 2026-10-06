@@ -6,4 +6,4 @@
 mod actions;
 mod tab;
 
-pub(crate) use tab::{form_values, server_from, Action, McpTab};
+pub(crate) use tab::{form_values, server_from, Action, McpButton, McpCatalogButton, McpTab};

@@ -17,6 +17,7 @@ impl App {
         let tr = &self.tr;
         match action {
             A::None => {}
+            A::Refused(key) => self.message = Some(Message::error(tr.t(key))),
             A::Remove(name) => {
                 let text = tr.f("plugins.remove_text", &[("name", &name)]);
                 self.form = Some((

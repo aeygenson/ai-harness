@@ -48,6 +48,19 @@ use crate::ui::{buttons, panel, ButtonId, Hits, ListId};
 /// Builds the agent of `[retro]`: `retro_agent`, or a mock in tests.
 pub type RetroBuilder = fn(&Config) -> Result<AnyAgent, BuildError>;
 
+/// A button of the Retro tab, clicked or chosen with a key.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RetroButton {
+    /// A new retrospective of the whole project.
+    Generate,
+    /// Open the retrospective's text in the editor.
+    Open,
+    /// Choose the selected proposal, or take it out.
+    Toggle,
+    /// Apply the chosen proposals.
+    Apply,
+}
+
 /// What the tab asks the App to do.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Action {
@@ -251,34 +264,36 @@ impl RetroTab {
             }
             KeyCode::PageDown => self.scroll = self.scroll.saturating_add(10),
             KeyCode::PageUp => self.scroll = self.scroll.saturating_sub(10),
-            KeyCode::Char('g') => return self.press(ButtonId::RetroGenerate),
-            KeyCode::Char('e') => return self.press(ButtonId::RetroOpen),
-            KeyCode::Char('a') => return self.press(ButtonId::RetroApply),
+            KeyCode::Char('g') => return self.press(RetroButton::Generate),
+            KeyCode::Char('e') => return self.press(RetroButton::Open),
+            KeyCode::Char('a') => return self.press(RetroButton::Apply),
             _ => {}
         }
         Action::None
     }
 
-    pub fn press(&mut self, id: ButtonId) -> Action {
+    /// A button of the tab.
+    pub fn press(&mut self, id: RetroButton) -> Action {
         match id {
-            ButtonId::RetroGenerate if self.generating.is_none() => Action::Generate,
-            ButtonId::RetroOpen => match self.current() {
+            RetroButton::Generate if self.generating.is_some() => Action::None,
+            RetroButton::Generate => Action::Generate,
+            RetroButton::Open => match self.current() {
                 Some(retro) if retro.retro.is_some() => {
                     Action::Open(retro.number.clone(), retro.dir.join(RETRO_MD))
                 }
                 _ => Action::None,
             },
-            ButtonId::RetroToggle => {
+            RetroButton::Toggle => {
                 self.focus = Focus::Proposals;
                 self.toggle()
             }
-            ButtonId::RetroApply if !self.chosen.is_empty() => match self.current() {
+            RetroButton::Apply if self.chosen.is_empty() => Action::None,
+            RetroButton::Apply => match self.current() {
                 Some(retro) => {
                     Action::Apply(retro.dir.clone(), self.chosen.iter().copied().collect())
                 }
                 None => Action::None,
             },
-            _ => Action::None,
         }
     }
 
@@ -441,10 +456,22 @@ impl RetroTab {
             bottom,
             hits,
             &[
-                (tr.t("retro.generate"), ButtonId::RetroGenerate, !generating),
-                (tr.t("retro.open"), ButtonId::RetroOpen, has_text),
-                (choose, ButtonId::RetroToggle, can_choose),
-                (&apply, ButtonId::RetroApply, !self.chosen.is_empty()),
+                (
+                    tr.t("retro.generate"),
+                    ButtonId::Retro(RetroButton::Generate),
+                    !generating,
+                ),
+                (
+                    tr.t("retro.open"),
+                    ButtonId::Retro(RetroButton::Open),
+                    has_text,
+                ),
+                (choose, ButtonId::Retro(RetroButton::Toggle), can_choose),
+                (
+                    &apply,
+                    ButtonId::Retro(RetroButton::Apply),
+                    !self.chosen.is_empty(),
+                ),
             ],
         );
     }

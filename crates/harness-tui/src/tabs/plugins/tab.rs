@@ -46,10 +46,49 @@ use crate::ui::i18n::I18n;
 use crate::ui::theme;
 use crate::ui::{buttons, panel, selector, ButtonId, Hits, ListId};
 
+/// A button of the Plugins tab's plugin list, clicked or chosen with a key.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PluginButton {
+    /// A role of the selector, an index into `ROLES`.
+    Role(usize),
+    /// Give the selected plugin to the role, or take it away.
+    Toggle,
+    /// Allow or forbid the plugin's hooks, its own servers.
+    Hooks,
+    Servers,
+    Remove,
+    /// Open the plugin's folder in the editor.
+    Open,
+    /// Download the plugin's newest version from its catalog.
+    Update,
+    /// Open «From catalog».
+    OpenCatalog,
+}
+
+/// A button of «From catalog» or «Catalogs».
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PluginCatalogButton {
+    /// The agent filter, an index into `catalog::FILTERS`.
+    Filter(usize),
+    Search,
+    Add,
+    /// Add and give to the role chosen on the tab.
+    AddGive,
+    /// Open «Catalogs».
+    OpenCatalogs,
+    /// Back to the list (from «Catalogs» to «From catalog» first).
+    Back,
+    CatalogAdd,
+    CatalogUpdate,
+    CatalogRemove,
+}
+
 /// What the tab asks the App to do.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Action {
     None,
+    /// Something cannot be done; the key of the message that says why.
+    Refused(&'static str),
     /// Ask before removing this plugin.
     Remove(String),
     /// Set what the plugin may run by itself: its hooks, its own servers.
@@ -235,16 +274,16 @@ impl PluginsTab {
         Ok(())
     }
 
-    pub fn on_key(&mut self, key: KeyCode, roles: &RolesTab) -> Action {
+    pub fn on_key(&mut self, key: KeyCode, roles: &mut RolesTab) -> Action {
         match key {
             KeyCode::Up | KeyCode::Char('k') => self.move_by(-1, roles),
             KeyCode::Down | KeyCode::Char('j') => self.move_by(1, roles),
             KeyCode::Left | KeyCode::Char('h') => self.choose_role(self.role.saturating_sub(1)),
             KeyCode::Right | KeyCode::Char('l') => self.choose_role(self.role + 1),
-            KeyCode::Char('e') => return self.press(ButtonId::PluginOpen, roles),
+            KeyCode::Char('e') => return self.press(PluginButton::Open, roles),
             KeyCode::Char('f') => return Action::OpenCatalog,
-            KeyCode::Char('U') => return self.press(ButtonId::PluginUpdate, roles),
-            KeyCode::Delete => return self.press(ButtonId::PluginRemove, roles),
+            KeyCode::Char('U') => return self.press(PluginButton::Update, roles),
+            KeyCode::Delete => return self.press(PluginButton::Remove, roles),
             _ => {}
         }
         Action::None
@@ -261,9 +300,11 @@ impl PluginsTab {
             match key {
                 KeyCode::Up | KeyCode::Char('k') => view.move_by(-1),
                 KeyCode::Down | KeyCode::Char('j') => view.move_by(1),
-                KeyCode::Char('n') => return self.catalog_press(ButtonId::CatalogAdd),
-                KeyCode::Char('U') => return self.catalog_press(ButtonId::CatalogUpdate),
-                KeyCode::Delete => return self.catalog_press(ButtonId::CatalogRemove),
+                KeyCode::Char('n') => return self.catalog_press(PluginCatalogButton::CatalogAdd),
+                KeyCode::Char('U') => {
+                    return self.catalog_press(PluginCatalogButton::CatalogUpdate)
+                }
+                KeyCode::Delete => return self.catalog_press(PluginCatalogButton::CatalogRemove),
                 KeyCode::Esc | KeyCode::Backspace => self.catalogs = None,
                 _ => {}
             }
@@ -279,10 +320,14 @@ impl PluginsTab {
                 view.choose_filter(view.filter.saturating_sub(1));
             }
             KeyCode::Right | KeyCode::Char('l') => view.choose_filter(view.filter + 1),
-            KeyCode::Char('/' | 's' | 'f') => return self.catalog_press(ButtonId::PluginSearch),
-            KeyCode::Enter | KeyCode::Char('a') => return self.catalog_press(ButtonId::PluginAdd),
-            KeyCode::Char('g') => return self.catalog_press(ButtonId::PluginAddGive),
-            KeyCode::Char('c') => return self.catalog_press(ButtonId::PluginCatalogs),
+            KeyCode::Char('/' | 's' | 'f') => {
+                return self.catalog_press(PluginCatalogButton::Search)
+            }
+            KeyCode::Enter | KeyCode::Char('a') => {
+                return self.catalog_press(PluginCatalogButton::Add)
+            }
+            KeyCode::Char('g') => return self.catalog_press(PluginCatalogButton::AddGive),
+            KeyCode::Char('c') => return self.catalog_press(PluginCatalogButton::OpenCatalogs),
             KeyCode::Esc | KeyCode::Backspace => self.catalog = None,
             _ => {}
         }
@@ -290,77 +335,108 @@ impl PluginsTab {
     }
 
     /// A button of «From catalog» or «Catalogs».
-    pub fn catalog_press(&mut self, id: ButtonId) -> Action {
+    pub fn catalog_press(&mut self, id: PluginCatalogButton) -> Action {
+        // A download is running: nothing that starts another one.
         let busy = self.busy.is_some();
         match id {
-            ButtonId::PluginBack if self.catalogs.is_some() => self.catalogs = None,
-            ButtonId::PluginBack => self.catalog = None,
-            ButtonId::PluginCatalogs => return Action::OpenCatalogs,
-            ButtonId::PluginFilter(index) => {
+            PluginCatalogButton::Back if self.catalogs.is_some() => self.catalogs = None,
+            PluginCatalogButton::Back => self.catalog = None,
+            PluginCatalogButton::OpenCatalogs => return Action::OpenCatalogs,
+            PluginCatalogButton::Filter(index) => {
                 if let Some(view) = &mut self.catalog {
                     view.choose_filter(index);
                 }
             }
-            ButtonId::PluginSearch => {
+            PluginCatalogButton::Search => {
                 if let Some(view) = &self.catalog {
                     return Action::Search(view.query.clone());
                 }
             }
-            ButtonId::PluginAdd | ButtonId::PluginAddGive if !busy => {
+            PluginCatalogButton::Add | PluginCatalogButton::AddGive if !busy => {
                 if let Some(entry) = self.catalog.as_ref().and_then(CatalogView::current) {
                     if let Some(why) = unusable(entry) {
                         return Action::Unusable(why);
                     }
                     return Action::Add {
                         entry: entry.clone(),
-                        give: id == ButtonId::PluginAddGive,
+                        give: id == PluginCatalogButton::AddGive,
                     };
                 }
             }
-            ButtonId::CatalogAdd if !busy => {
+            PluginCatalogButton::CatalogAdd if !busy => {
                 let empty = self.catalogs.as_ref().is_none_or(|v| v.list.is_empty());
                 return Action::AddCatalog(if empty { OFFICIAL } else { "" }.to_string());
             }
-            ButtonId::CatalogUpdate if !busy => {
+            PluginCatalogButton::CatalogUpdate if !busy => {
                 if let Some(c) = self.catalogs.as_ref().and_then(CatalogsView::current) {
                     return Action::UpdateCatalog(c.name.clone());
                 }
             }
-            ButtonId::CatalogRemove if !busy => {
+            PluginCatalogButton::CatalogRemove if !busy => {
                 if let Some(c) = self.catalogs.as_ref().and_then(CatalogsView::current) {
                     return Action::RemoveCatalog(c.name.clone());
                 }
             }
-            _ => {}
+            PluginCatalogButton::Add
+            | PluginCatalogButton::AddGive
+            | PluginCatalogButton::CatalogAdd
+            | PluginCatalogButton::CatalogUpdate
+            | PluginCatalogButton::CatalogRemove => {}
         }
         Action::None
     }
 
-    /// A button about the plugins themselves.
-    pub fn press(&self, id: ButtonId, roles: &RolesTab) -> Action {
+    /// A button of the plugin list.
+    pub fn press(&mut self, id: PluginButton, roles: &mut RolesTab) -> Action {
+        match id {
+            PluginButton::Role(index) => {
+                self.choose_role(index);
+                return Action::None;
+            }
+            PluginButton::OpenCatalog => return Action::OpenCatalog,
+            PluginButton::Toggle => {
+                return match self.toggle(roles) {
+                    Ok(()) => Action::None,
+                    Err(key) => Action::Refused(key),
+                }
+            }
+            PluginButton::Hooks
+            | PluginButton::Servers
+            | PluginButton::Remove
+            | PluginButton::Open
+            | PluginButton::Update => {}
+        }
+        // The rest is about the selected plugin.
         let Some(name) = self.current(roles) else {
             return Action::None;
         };
         let Some(plugin) = roles.plugins().get(&name) else {
             return Action::None;
         };
+        let (has_hooks, has_servers) = self.brings(&name);
         match id {
-            ButtonId::PluginRemove => Action::Remove(name),
-            ButtonId::PluginUpdate if plugin.source.is_some() && self.busy.is_none() => {
+            PluginButton::Remove => Action::Remove(name),
+            PluginButton::Open => Action::Open(name),
+            PluginButton::Update if plugin.source.is_some() && self.busy.is_none() => {
                 Action::Update(name)
             }
-            ButtonId::PluginOpen => Action::Open(name),
-            ButtonId::PluginHooks if self.brings(&name).0 || plugin.allow_hooks => Action::Allow {
+            PluginButton::Hooks if has_hooks || plugin.allow_hooks => Action::Allow {
                 name,
                 hooks: !plugin.allow_hooks,
                 servers: plugin.allow_mcp,
             },
-            ButtonId::PluginServers if self.brings(&name).1 || plugin.allow_mcp => Action::Allow {
+            PluginButton::Servers if has_servers || plugin.allow_mcp => Action::Allow {
                 name,
                 hooks: plugin.allow_hooks,
                 servers: !plugin.allow_mcp,
             },
-            _ => Action::None,
+            // Not possible now, or handled above.
+            PluginButton::Update
+            | PluginButton::Hooks
+            | PluginButton::Servers
+            | PluginButton::Role(_)
+            | PluginButton::Toggle
+            | PluginButton::OpenCatalog => Action::None,
         }
     }
 
@@ -421,7 +497,7 @@ impl PluginsTab {
             tr.t("skills.role"),
             &names,
             self.role,
-            ButtonId::PluginRole,
+            |index| ButtonId::Plugin(PluginButton::Role(index)),
         );
         if let Some(settings) = roles.settings(role) {
             let text = format!("{} · {} ", role.as_str(), settings.agent);
@@ -512,7 +588,7 @@ impl PluginsTab {
             bottom,
             hits,
             &[
-                (&toggle, ButtonId::PluginToggle, can),
+                (&toggle, ButtonId::Plugin(PluginButton::Toggle), can),
                 (tr.t("roles.save"), ButtonId::Save, changed),
                 (tr.t("roles.undo"), ButtonId::Undo, changed),
             ],
@@ -544,30 +620,34 @@ impl PluginsTab {
             plugins_row,
             hits,
             &[
-                (tr.t("plugins.from_catalog"), ButtonId::PluginCatalog, true),
+                (
+                    tr.t("plugins.from_catalog"),
+                    ButtonId::Plugin(PluginButton::OpenCatalog),
+                    true,
+                ),
                 (
                     tr.t("plugins.update"),
-                    ButtonId::PluginUpdate,
+                    ButtonId::Plugin(PluginButton::Update),
                     busy.is_none() && described.is_some_and(|(_, p)| p.source.is_some()),
                 ),
                 (
                     hooks_label,
-                    ButtonId::PluginHooks,
+                    ButtonId::Plugin(PluginButton::Hooks),
                     described.is_some_and(|(_, p)| hooks || p.allow_hooks),
                 ),
                 (
                     servers_label,
-                    ButtonId::PluginServers,
+                    ButtonId::Plugin(PluginButton::Servers),
                     described.is_some_and(|(_, p)| servers || p.allow_mcp),
                 ),
                 (
                     tr.t("plugins.remove"),
-                    ButtonId::PluginRemove,
+                    ButtonId::Plugin(PluginButton::Remove),
                     described.is_some(),
                 ),
                 (
                     tr.t("plugins.open"),
-                    ButtonId::PluginOpen,
+                    ButtonId::Plugin(PluginButton::Open),
                     described.is_some(),
                 ),
             ],

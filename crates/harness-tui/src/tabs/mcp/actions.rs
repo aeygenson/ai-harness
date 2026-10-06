@@ -143,6 +143,14 @@ impl App {
         let servers = self.roles.as_ref().map(RolesTab::servers);
         self.form = match action {
             A::None => return,
+            A::Refused(key) => {
+                self.message = Some(Message::error(tr.t(key)));
+                return;
+            }
+            A::Check => {
+                self.check_mcp();
+                return;
+            }
             A::SignIn(name) => {
                 self.start_sign_in(&name);
                 return;

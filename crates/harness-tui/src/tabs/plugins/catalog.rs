@@ -28,6 +28,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{ListItem, Paragraph, Wrap};
 use ratatui::Frame;
 
+use crate::tabs::plugins::PluginCatalogButton;
 use crate::tabs::roles::RolesTab;
 use crate::tabs::tasks::draw_list;
 use crate::ui::i18n::I18n;
@@ -237,7 +238,7 @@ pub fn draw_catalog(
         tr.t("plugins.agent"),
         &labels,
         view.filter,
-        ButtonId::PluginFilter,
+        |index| ButtonId::PluginCatalog(PluginCatalogButton::Filter(index)),
     );
 
     let [left, right] =
@@ -314,11 +315,31 @@ pub fn draw_catalog(
         bottom,
         hits,
         &[
-            (tr.t("plugins.search"), ButtonId::PluginSearch, true),
-            (tr.t("plugins.add"), ButtonId::PluginAdd, can_add),
-            (&give, ButtonId::PluginAddGive, can_add),
-            (tr.t("plugins.catalogs"), ButtonId::PluginCatalogs, true),
-            (tr.t("plugins.back"), ButtonId::PluginBack, true),
+            (
+                tr.t("plugins.search"),
+                ButtonId::PluginCatalog(PluginCatalogButton::Search),
+                true,
+            ),
+            (
+                tr.t("plugins.add"),
+                ButtonId::PluginCatalog(PluginCatalogButton::Add),
+                can_add,
+            ),
+            (
+                &give,
+                ButtonId::PluginCatalog(PluginCatalogButton::AddGive),
+                can_add,
+            ),
+            (
+                tr.t("plugins.catalogs"),
+                ButtonId::PluginCatalog(PluginCatalogButton::OpenCatalogs),
+                true,
+            ),
+            (
+                tr.t("plugins.back"),
+                ButtonId::PluginCatalog(PluginCatalogButton::Back),
+                true,
+            ),
         ],
     );
 }
@@ -485,18 +506,26 @@ pub fn draw_catalogs(
         bottom,
         hits,
         &[
-            (tr.t("plugins.add_catalog"), ButtonId::CatalogAdd, free),
+            (
+                tr.t("plugins.add_catalog"),
+                ButtonId::PluginCatalog(PluginCatalogButton::CatalogAdd),
+                free,
+            ),
             (
                 tr.t("plugins.update_catalog"),
-                ButtonId::CatalogUpdate,
+                ButtonId::PluginCatalog(PluginCatalogButton::CatalogUpdate),
                 chosen,
             ),
             (
                 tr.t("plugins.remove_catalog"),
-                ButtonId::CatalogRemove,
+                ButtonId::PluginCatalog(PluginCatalogButton::CatalogRemove),
                 chosen,
             ),
-            (tr.t("plugins.back"), ButtonId::PluginBack, true),
+            (
+                tr.t("plugins.back"),
+                ButtonId::PluginCatalog(PluginCatalogButton::Back),
+                true,
+            ),
         ],
     );
 }

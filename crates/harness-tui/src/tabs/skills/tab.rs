@@ -53,6 +53,19 @@ pub const ROLES: [Role; 4] = [
 /// How the names of the agents' notes start.
 const AGENT_NOTE: &str = "agent-";
 
+/// A button of the Skills tab, clicked or chosen with a key.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SkillButton {
+    /// A role of the selector, an index into `ROLES`.
+    Role(usize),
+    Edit,
+    New,
+    /// Go back to the built-in text of a changed skill.
+    Restore,
+    /// The `[ ]` mark of the skill on this row of the list.
+    Mark(usize),
+}
+
 /// What the tab asks the App to do.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Action {
@@ -237,39 +250,38 @@ impl SkillsTab {
             KeyCode::Right | KeyCode::Char('l') => self.choose_role(self.role + 1),
             KeyCode::PageDown => self.scroll = self.scroll.saturating_add(10),
             KeyCode::PageUp => self.scroll = self.scroll.saturating_sub(10),
-            KeyCode::Enter | KeyCode::Char('e') => return self.press(ButtonId::SkillEdit),
-            KeyCode::Char(' ') => return self.press(ButtonId::SkillMark(self.row)),
-            KeyCode::Char('n') => return self.press(ButtonId::SkillNew),
-            KeyCode::Delete => return self.press(ButtonId::SkillRestore),
+            KeyCode::Enter | KeyCode::Char('e') => return self.press(SkillButton::Edit),
+            KeyCode::Char(' ') => return self.press(SkillButton::Mark(self.row)),
+            KeyCode::Char('n') => return self.press(SkillButton::New),
+            KeyCode::Delete => return self.press(SkillButton::Restore),
             _ => {}
         }
         Action::None
     }
 
     /// A button of the tab.
-    pub fn press(&mut self, id: ButtonId) -> Action {
+    pub fn press(&mut self, id: SkillButton) -> Action {
         match id {
-            ButtonId::SkillRole(index) => self.choose_role(index),
-            ButtonId::SkillEdit => {
+            SkillButton::Role(index) => self.choose_role(index),
+            SkillButton::Edit => {
                 if let Some(skill) = self.current() {
                     return Action::Edit(skill.name.clone());
                 }
             }
-            ButtonId::SkillNew => return Action::New,
-            ButtonId::SkillMark(index) => {
+            SkillButton::New => return Action::New,
+            SkillButton::Mark(index) => {
                 if let Some(name) = self.optional_at(index) {
                     self.select(index);
                     return Action::Cycle(self.role(), name);
                 }
             }
-            ButtonId::SkillRestore => {
+            SkillButton::Restore => {
                 if let Some(skill) = self.current() {
                     if matches!(skill.source, Source::Changed { .. }) {
                         return Action::Restore(skill.name.clone());
                     }
                 }
             }
-            _ => {}
         }
         Action::None
     }
@@ -325,7 +337,7 @@ impl SkillsTab {
             tr.t("skills.role"),
             &names,
             self.role,
-            ButtonId::SkillRole,
+            |index| ButtonId::Skill(SkillButton::Role(index)),
         );
 
         let [left, right] =
@@ -398,7 +410,7 @@ impl SkillsTab {
             if self.optional_at(index).is_some() && inner.width > 5 {
                 hits.add(
                     Rect::new(inner.x + 2, inner.y + line, 3, 1),
-                    Target::Button(ButtonId::SkillMark(index)),
+                    Target::Button(ButtonId::Skill(SkillButton::Mark(index))),
                 );
             }
         }
@@ -452,11 +464,15 @@ impl SkillsTab {
             &[
                 (
                     tr.t("skills.edit"),
-                    ButtonId::SkillEdit,
+                    ButtonId::Skill(SkillButton::Edit),
                     self.current().is_some(),
                 ),
-                (tr.t("skills.new"), ButtonId::SkillNew, true),
-                (tr.t("skills.restore"), ButtonId::SkillRestore, restore),
+                (tr.t("skills.new"), ButtonId::Skill(SkillButton::New), true),
+                (
+                    tr.t("skills.restore"),
+                    ButtonId::Skill(SkillButton::Restore),
+                    restore,
+                ),
                 (tr.t("roles.save"), ButtonId::Save, roles.changed()),
                 (tr.t("roles.undo"), ButtonId::Undo, roles.changed()),
             ],
