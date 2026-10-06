@@ -60,8 +60,8 @@ pub struct Offer {
 /// The servers of one answer of `GET /v0/servers`, each name once, those
 /// that can be added first.
 pub fn parse(answer: &str) -> Result<Vec<Entry>, String> {
-    let value: Value =
-        serde_json::from_str(answer).map_err(|_| "the registry did not answer with JSON")?;
+    let value: Value = serde_json::from_str(answer)
+        .map_err(|error| format!("the registry did not answer with JSON: {error}"))?;
     let servers = value["servers"]
         .as_array()
         .ok_or("the registry's answer has no servers")?;
@@ -244,7 +244,7 @@ mod tests {
         assert_eq!(local_name("com.example/My_Server!"), "my_server");
         assert_eq!(local_name("x/__"), "server");
         assert_eq!(local_name("ai.smithery/9lives"), "9lives");
-        assert!(parse("not json").is_err());
+        parse("not json").unwrap_err();
     }
 
     #[test]

@@ -91,6 +91,16 @@ pub struct Tools<'a> {
     pub browser_limit: Duration,
 }
 
+/// Written by hand because a closure (`open`) has no `Debug` of its own.
+impl std::fmt::Debug for Tools<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Tools")
+            .field("curl", &self.curl)
+            .field("browser_limit", &self.browser_limit)
+            .finish_non_exhaustive()
+    }
+}
+
 /// The file that keeps the sign-in of `server`: `oauth/<server>.json` in `credentials_dir`.
 pub fn path(credentials_dir: &Path, server: &str) -> PathBuf {
     credentials_dir

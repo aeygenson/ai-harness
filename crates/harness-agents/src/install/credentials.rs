@@ -147,7 +147,7 @@ mod tests {
             "ctx-1"
         );
         assert_eq!(secret_names(dir.path()).unwrap(), ["context7", "github"]);
-        assert!(load_secret(dir.path(), "nope").is_err());
+        load_secret(dir.path(), "nope").unwrap_err();
 
         assert!(harness_platform::private::is_private(&path).unwrap());
     }
@@ -155,6 +155,6 @@ mod tests {
     #[test]
     fn a_missing_token_is_an_error() {
         let dir = tempfile::tempdir().unwrap();
-        assert!(load_token(dir.path(), "claude").is_err());
+        load_token(dir.path(), "claude").unwrap_err();
     }
 }

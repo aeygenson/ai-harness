@@ -214,7 +214,7 @@ fn parse_next(text: &str) -> Result<NextStep, String> {
     }
     text.parse()
         .map(NextStep::To)
-        .map_err(|_| format!("{text:?} is not a role or `done`"))
+        .map_err(|_not_a_role| format!("{text:?} is not a role or `done`"))
 }
 
 /// `architect`, `developer`, `tester` or `security`.
@@ -228,13 +228,12 @@ fn parse_role(text: &str) -> Result<Role, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use harness_core::task::handoff::{NextStep, Role};
 
     #[test]
     fn next_step_words_are_the_handoff_words() {
         assert_eq!(parse_next("tester"), Ok(NextStep::To(Role::Tester)));
         assert_eq!(parse_next("done"), Ok(NextStep::Done));
-        assert!(parse_next("boss").is_err());
+        parse_next("boss").unwrap_err();
     }
 
     #[test]

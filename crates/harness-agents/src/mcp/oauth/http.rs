@@ -37,8 +37,8 @@ pub(super) fn token_request(
             said(&answer.body)
         ));
     }
-    let tokens: Value =
-        serde_json::from_str(&answer.body).map_err(|_| "the token answer is not JSON")?;
+    let tokens: Value = serde_json::from_str(&answer.body)
+        .map_err(|error| format!("the token answer is not JSON: {error}"))?;
     let access_token = tokens["access_token"]
         .as_str()
         .filter(|t| !t.is_empty() && !t.chars().any(char::is_control))

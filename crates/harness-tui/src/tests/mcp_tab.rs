@@ -117,7 +117,7 @@ fn mcp_servers_are_added_changed_and_removed_and_secrets_saved() {
     assert!(app.form.is_none(), "{:?}", app.form);
     let docs = &config(&root).mcp["docs"];
     assert_eq!(
-        (docs.command.as_deref(), &docs.args[..]),
+        (docs.command.as_deref(), docs.args.as_slice()),
         (Some("npx"), &["-y".to_string(), "docs-mcp".to_string()][..])
     );
     assert_eq!(docs.env["API_KEY"], "secret:docs");

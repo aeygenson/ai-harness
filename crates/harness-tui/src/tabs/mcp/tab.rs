@@ -208,7 +208,7 @@ impl McpTab {
     pub fn names(roles: &RolesTab) -> Vec<String> {
         let mut names: Vec<String> = roles.servers().keys().cloned().collect();
         for role in ROLES {
-            for name in roles.settings(role).map_or(&[][..], |s| &s.mcp[..]) {
+            for name in roles.settings(role).map_or(&[][..], |s| s.mcp.as_slice()) {
                 if !names.contains(name) {
                     names.push(name.clone());
                 }

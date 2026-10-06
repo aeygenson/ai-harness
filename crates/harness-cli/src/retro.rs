@@ -143,9 +143,6 @@ mod tests {
     use super::*;
     use std::fs;
 
-    use harness_core::config::Config;
-    use harness_core::git::Repo;
-    use harness_core::retro::suggest::Applied;
     use harness_core::task::handoff::Role;
 
     use crate::init;

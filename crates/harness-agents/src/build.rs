@@ -91,6 +91,7 @@ pub fn retro_agent(config: &Config) -> Result<AnyAgent, BuildError> {
 }
 
 /// Which agent to build, and for whom.
+#[derive(Debug)]
 pub struct AgentChoice<'a> {
     /// For error messages: `Tester` or `[retro]`.
     pub who: &'a str,
@@ -165,7 +166,7 @@ fn role_settings(
 /// The Claude token the Agents tab («Sign in») saved.
 fn claude_token(dir: &Path) -> Result<Secret, BuildError> {
     credentials::load_token(dir, "claude")
-        .map_err(|_| problem("no Claude token saved; sign in on the Agents tab first"))
+        .map_err(|_missing| problem("no Claude token saved; sign in on the Agents tab first"))
 }
 
 /// The folder with Codex's saved `auth.json`.
@@ -209,7 +210,8 @@ fn check_dsh_effort(choice: &AgentChoice) -> Result<(), BuildError> {
 fn deepseek_key(dir: &Path) -> Result<Secret, BuildError> {
     match std::env::var(dsh::KEY_ENV) {
         Ok(key) if !key.trim().is_empty() => Ok(Secret::new(key.trim())),
-        _ => credentials::load_token(dir, "deepseek")
-            .map_err(|_| problem("no DeepSeek API key saved; sign in on the Agents tab first")),
+        _ => credentials::load_token(dir, "deepseek").map_err(|_missing| {
+            problem("no DeepSeek API key saved; sign in on the Agents tab first")
+        }),
     }
 }

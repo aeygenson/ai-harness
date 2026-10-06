@@ -363,7 +363,7 @@ mod tests {
         let file = ProposalsFile::parse(text, dir.path(), &config).unwrap();
         assert_eq!(file.proposals.len(), 2);
         assert_eq!(file.get(1).unwrap().roles, [DEVELOPER, TESTER_ALWAYS]);
-        assert!(ProposalsFile::parse(r#"{"proposals": []}"#, dir.path(), &config).is_ok());
+        ProposalsFile::parse(r#"{"proposals": []}"#, dir.path(), &config).unwrap();
     }
 
     #[test]
@@ -402,8 +402,8 @@ mod tests {
     fn a_proposal_must_be_applicable() {
         let (dir, config) = project();
         let check = |p: Proposal| p.check(dir.path(), &config);
-        assert!(check(proposal(1, "empty-input", Some(SKILL), &[DEVELOPER])).is_ok());
-        assert!(check(proposal(1, "style", None, &[TESTER_ALWAYS])).is_ok());
+        check(proposal(1, "empty-input", Some(SKILL), &[DEVELOPER])).unwrap();
+        check(proposal(1, "style", None, &[TESTER_ALWAYS])).unwrap();
 
         let bad = [
             proposal(1, "../escape", Some(SKILL), &[]),

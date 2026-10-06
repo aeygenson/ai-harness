@@ -332,8 +332,8 @@ mod tests {
             config.role(Role::Tester).unwrap().effort.as_deref(),
             Some("high")
         );
-        assert!(Config::parse(&format!("{base}effort = \"high\\\" x\"\n")).is_err());
-        assert!(Config::parse(&format!("{base}effort = \"\"\n")).is_err());
+        Config::parse(&format!("{base}effort = \"high\\\" x\"\n")).unwrap_err();
+        Config::parse(&format!("{base}effort = \"\"\n")).unwrap_err();
     }
 
     #[test]
@@ -356,9 +356,9 @@ mod tests {
 
     #[test]
     fn typos_are_errors() {
-        assert!(Config::parse("max_round = 5").is_err());
-        assert!(Config::parse("[roles.tester]\nagnet = \"claude\"").is_err());
-        assert!(Config::parse("[roles.designer]\nagent = \"claude\"").is_err());
+        Config::parse("max_round = 5").unwrap_err();
+        Config::parse("[roles.tester]\nagnet = \"claude\"").unwrap_err();
+        Config::parse("[roles.designer]\nagent = \"claude\"").unwrap_err();
     }
 
     #[test]

@@ -364,7 +364,7 @@ mod tests {
         assert_eq!(head_commit(&into), Some(second));
 
         let missing = fetch("file:///no/such/repo", None, &copy.path().join("x"));
-        assert!(missing.is_err());
+        missing.unwrap_err();
     }
 
     fn new_repo() -> (tempfile::TempDir, Repo) {

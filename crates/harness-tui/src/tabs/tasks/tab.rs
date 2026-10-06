@@ -1390,7 +1390,10 @@ fn input_height(area: Rect) -> u16 {
 }
 
 /// A bordered list whose rows can be clicked.
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "every list on every tab is drawn by this one function with these inputs"
+)]
 pub fn draw_list(
     frame: &mut Frame,
     hits: &mut Hits,

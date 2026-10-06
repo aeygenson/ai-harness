@@ -95,7 +95,7 @@ pub fn ask(
     let models = match agent {
         AgentKind::Claude => {
             let token = credentials::load_token(credentials_dir, "claude")
-                .map_err(|_| "no Claude login saved".to_string())?;
+                .map_err(|_missing| "no Claude login saved".to_string())?;
             let mut command = base_command(&programs.claude, tmp);
             command
                 .env("CLAUDE_CONFIG_DIR", tmp.join("claude"))
@@ -111,7 +111,7 @@ pub fn ask(
             let home = tmp.join("codex");
             fs::create_dir_all(&home).map_err(|e| e.to_string())?;
             let auth = fs::read_to_string(credentials_dir.join("codex/auth.json"))
-                .map_err(|_| "no Codex login saved".to_string())?;
+                .map_err(|_missing| "no Codex login saved".to_string())?;
             credentials::write_private(&home.join("auth.json"), &auth)
                 .map_err(|e| e.to_string())?;
             let mut command = base_command(&programs.codex, tmp);
@@ -122,7 +122,7 @@ pub fn ask(
             let key = match std::env::var(DEEPSEEK_KEY_ENV) {
                 Ok(key) if !key.trim().is_empty() => Secret::new(key.trim()),
                 _ => credentials::load_token(credentials_dir, "deepseek")
-                    .map_err(|_| "no DeepSeek API key saved".to_string())?,
+                    .map_err(|_missing| "no DeepSeek API key saved".to_string())?,
             };
             // The key goes in a private file, not on the command line.
             let header = tmp.join("header");
@@ -141,7 +141,7 @@ pub fn ask(
         AgentKind::Antigravity => {
             let home = tmp.join("home");
             crate::adapters::antigravity::copy_dir(&credentials_dir.join("antigravity"), &home)
-                .map_err(|_| "no Antigravity login saved".to_string())?;
+                .map_err(|_missing| "no Antigravity login saved".to_string())?;
             let mut command = base_command(&programs.agy, tmp);
             harness_platform::home::set_for(&mut command, &home);
             command
@@ -261,7 +261,7 @@ mod tests {
         assert_eq!(models[1].efforts, ["low", "high", "xhigh"]);
         assert_eq!(models[1].default_effort.as_deref(), Some("high"));
         assert!(models[2].efforts.is_empty());
-        assert!(parse_claude("{\"type\":\"result\"}").is_err());
+        parse_claude("{\"type\":\"result\"}").unwrap_err();
     }
 
     #[test]

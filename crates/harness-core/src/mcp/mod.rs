@@ -465,8 +465,8 @@ mod tests {
             let config: crate::config::McpConfig = toml::from_str(toml).unwrap();
             check_server("web", &config)
         };
-        assert!(check("url = \"https://example.com/mcp\"").is_ok());
-        assert!(check("url = \"http://127.0.0.1:8080/mcp\"").is_ok());
+        check("url = \"https://example.com/mcp\"").unwrap();
+        check("url = \"http://127.0.0.1:8080/mcp\"").unwrap();
         assert!(matches!(
             check("url = \"http://example.com/mcp\""),
             Err(McpError::BadUrl { .. })
@@ -534,10 +534,8 @@ mod tests {
         };
         assert!(bad("command = \"npx\"\nauth = \"oauth\""));
         // Any other kind of sign-in is not even read.
-        assert!(toml::from_str::<crate::config::McpConfig>(
-            "url = \"https://a.b\"\nauth = \"basic\""
-        )
-        .is_err());
+        toml::from_str::<crate::config::McpConfig>("url = \"https://a.b\"\nauth = \"basic\"")
+            .unwrap_err();
         assert!(bad(
             "url = \"https://a.b\"\nauth = \"oauth\"\nheaders = { authorization = \"x\" }"
         ));

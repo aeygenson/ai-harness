@@ -127,7 +127,7 @@ impl Session {
         let stdin = self.stdin.as_mut().ok_or("no standard input")?;
         writeln!(stdin, "{message}")
             .and_then(|()| stdin.flush())
-            .map_err(|_| "the server stopped".to_string())
+            .map_err(|error| format!("the server stopped: {error}"))
     }
 
     /// Sends a request and waits for the answer with its id; notifications

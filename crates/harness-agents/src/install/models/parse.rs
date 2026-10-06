@@ -109,8 +109,8 @@ pub fn parse_codex(output: &str) -> Result<Vec<Model>, String> {
 
 /// DeepSeek's `GET /models`; no effort levels: reasoning is its own model.
 pub fn parse_deepseek(output: &str) -> Result<Vec<Model>, String> {
-    let json: Value =
-        serde_json::from_str(output).map_err(|_| "DeepSeek gave no model list".to_string())?;
+    let json: Value = serde_json::from_str(output)
+        .map_err(|error| format!("DeepSeek gave no model list: {error}"))?;
     if let Some(message) = json["error"]["message"].as_str() {
         return Err(format!("DeepSeek: {message}"));
     }

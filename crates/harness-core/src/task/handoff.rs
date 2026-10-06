@@ -345,19 +345,19 @@ mod tests {
 
         let banana =
             TESTER_EXAMPLE.replace("\"next_role\": \"developer\"", "\"next_role\": \"banana\"");
-        assert!(Handoff::from_json(&banana).is_err());
+        Handoff::from_json(&banana).unwrap_err();
     }
 
     #[test]
     fn done_is_not_a_role() {
         let bad = TESTER_EXAMPLE.replace("\"role\": \"tester\"", "\"role\": \"done\"");
-        assert!(Handoff::from_json(&bad).is_err());
+        Handoff::from_json(&bad).unwrap_err();
     }
 
     #[test]
     fn rejects_an_unknown_verdict() {
         let bad = TESTER_EXAMPLE.replace("\"rejected\"", "\"maybe\"");
-        assert!(Handoff::from_json(&bad).is_err());
+        Handoff::from_json(&bad).unwrap_err();
     }
 
     #[test]
