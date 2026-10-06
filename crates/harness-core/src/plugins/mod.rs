@@ -38,32 +38,19 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 
-use crate::config::{Config, PluginConfig};
+use crate::config::{AgentKind, Config, PluginConfig};
 use crate::mcp::is_simple_name;
 use crate::task::handoff::Role;
 
 /// Where plugins live by default, inside the project.
 pub const PLUGINS_DIR: &str = ".harness/plugins";
-/// Claude Code plugins.
-pub const CLAUDE: &str = "claude";
-/// Codex plugins.
-pub const CODEX: &str = "codex";
-/// The agents with plugin support.
-const AGENTS: &[&str] = &[CLAUDE, CODEX];
-
 /// The plugin manifest each agent looks for inside the plugin folder.
-pub fn manifest(agent: &str) -> &'static str {
-    if agent == CODEX {
+pub fn manifest(agent: AgentKind) -> &'static str {
+    if agent == AgentKind::Codex {
         ".codex-plugin/plugin.json"
     } else {
         ".claude-plugin/plugin.json"
     }
-}
-
-/// The agent family a role runs on: an agent with a model inside it, such as
-/// `"claude+glm"`, is still the first one.
-pub fn family(role_agent: &str) -> &str {
-    role_agent.split('+').next().unwrap_or(role_agent)
 }
 
 /// One plugin as the agent loads it.
@@ -92,27 +79,27 @@ pub enum PluginError {
     #[error("the {role:?} role uses plugin {name:?}, but harness.toml has no [plugins.{name}]")]
     Unknown { role: Role, name: String },
     #[error(
-        "plugin {name:?} is for agent {agent:?}; only \"claude\" and \"codex\" plugins \
+        "plugin {name:?} is for agent \"{agent}\"; only \"claude\" and \"codex\" plugins \
          are supported"
     )]
-    UnsupportedAgent { name: String, agent: String },
+    UnsupportedAgent { name: String, agent: AgentKind },
     #[error(
-        "the {role:?} role runs on {role_agent:?}, but plugin {name:?} is for {plugin_agent:?}"
+        "the {role:?} role runs on \"{role_agent}\", but plugin {name:?} is for \"{plugin_agent}\""
     )]
     WrongAgent {
         role: Role,
         name: String,
-        role_agent: String,
-        plugin_agent: String,
+        role_agent: AgentKind,
+        plugin_agent: AgentKind,
     },
     #[error("plugin {name:?}: the path {path:?} must be a folder inside the project")]
     BadPath { name: String, path: String },
-    #[error("plugin {name:?}: {path} has no {manifest}; is it a plugin for {agent:?}?")]
+    #[error("plugin {name:?}: {path} has no {manifest}; is it a plugin for \"{agent}\"?")]
     NoManifest {
         name: String,
         path: String,
         manifest: &'static str,
-        agent: String,
+        agent: AgentKind,
     },
     #[error("plugin {name:?}: {path} is not valid JSON")]
     BadManifest { name: String, path: String },
@@ -156,18 +143,18 @@ impl Plugins {
                         role,
                         name: name.clone(),
                     })?;
-                if !AGENTS.contains(&plugin.agent.as_str()) {
+                if !plugin.agent.has_plugins() {
                     return Err(PluginError::UnsupportedAgent {
                         name: name.clone(),
-                        agent: plugin.agent.clone(),
+                        agent: plugin.agent,
                     });
                 }
-                if family(&settings.agent) != plugin.agent {
+                if settings.agent != plugin.agent {
                     return Err(PluginError::WrongAgent {
                         role,
                         name: name.clone(),
-                        role_agent: settings.agent.clone(),
-                        plugin_agent: plugin.agent.clone(),
+                        role_agent: settings.agent,
+                        plugin_agent: plugin.agent,
                     });
                 }
                 plugins.push(check(project_dir, name, plugin)?);
@@ -228,7 +215,7 @@ fn check(project_dir: &Path, name: &str, plugin: &PluginConfig) -> Result<Plugin
         });
     }
     let path = project_dir.join(&relative);
-    let contents = inspect(&path, name, &plugin.agent)?;
+    let contents = inspect(&path, name, plugin.agent)?;
     if contents.hooks && !plugin.allow_hooks {
         return Err(PluginError::HooksNotAllowed {
             name: name.to_string(),
@@ -239,7 +226,7 @@ fn check(project_dir: &Path, name: &str, plugin: &PluginConfig) -> Result<Plugin
             name: name.to_string(),
         });
     }
-    if plugin.agent == CODEX && contents.apps {
+    if plugin.agent == AgentKind::Codex && contents.apps {
         return Err(PluginError::AppsNotAllowed {
             name: name.to_string(),
         });
@@ -257,11 +244,15 @@ mod tests {
 
     /// A project with one Claude Code plugin folder `.harness/plugins/review/`.
     fn project(manifest_text: &str, extra: &[(&str, &str)]) -> tempfile::TempDir {
-        project_for(CLAUDE, manifest_text, extra)
+        project_for(AgentKind::Claude, manifest_text, extra)
     }
 
     /// The same for any agent's plugin.
-    fn project_for(agent: &str, manifest_text: &str, extra: &[(&str, &str)]) -> tempfile::TempDir {
+    fn project_for(
+        agent: AgentKind,
+        manifest_text: &str,
+        extra: &[(&str, &str)],
+    ) -> tempfile::TempDir {
         let dir = tempfile::tempdir().unwrap();
         let plugin = dir.path().join(PLUGINS_DIR).join("review");
         let manifest_path = plugin.join(manifest(agent));
@@ -296,7 +287,7 @@ mod tests {
             ],
         );
         let path = dir.path().join(PLUGINS_DIR).join("review");
-        let details = describe(&path, "review", CLAUDE).unwrap();
+        let details = describe(&path, "review", AgentKind::Claude).unwrap();
         assert_eq!(details.description.as_deref(), Some("Reviews code"));
         assert_eq!(details.version.as_deref(), Some("1.2.0"));
         assert_eq!(
@@ -305,7 +296,7 @@ mod tests {
         );
         assert!(details.contents.hooks && !details.contents.servers);
         assert!(matches!(
-            describe(&path, "review", CODEX),
+            describe(&path, "review", AgentKind::Codex),
             Err(PluginError::NoManifest { .. })
         ));
     }
@@ -356,7 +347,7 @@ mod tests {
     #[test]
     fn codex_plugins_work_for_codex_roles() {
         let dir = project_for(
-            CODEX,
+            AgentKind::Codex,
             MANIFEST_OK,
             &[("skills/audit/SKILL.md", "---\n---\n")],
         );
@@ -388,7 +379,7 @@ mod tests {
             (MANIFEST_OK, &[(".app.json", "{}")][..]),
             (r#"{"name": "review", "apps": "./apps"}"#, &[][..]),
         ] {
-            let dir = project_for(CODEX, manifest_text, extra);
+            let dir = project_for(AgentKind::Codex, manifest_text, extra);
             assert!(matches!(
                 load(dir.path(), toml),
                 Err(PluginError::AppsNotAllowed { .. })

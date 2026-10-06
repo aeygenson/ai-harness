@@ -19,6 +19,7 @@ use std::process::Command;
 use crate::install::credentials::Secret;
 use crate::process::{self, failed};
 use crate::role_settings::RoleSettings;
+use harness_core::config::AgentKind;
 use harness_core::task::agent::{AgentOutcome, AgentRunner, RoleJob};
 use harness_core::task::handoff::Role;
 use rules::RoleRules;
@@ -164,7 +165,7 @@ impl ClaudeCode {
 
 impl AgentRunner for ClaudeCode {
     async fn run(&self, job: &RoleJob) -> AgentOutcome {
-        let mut log = self.settings.header("claude", job);
+        let mut log = self.settings.header(AgentKind::Claude, job);
         if !harness_platform::program::sandbox_ready() {
             log.push_str(NO_SANDBOX_NOTE);
         }

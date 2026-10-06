@@ -6,7 +6,7 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use harness_core::config::Config;
+use harness_core::config::{AgentKind, Config};
 use harness_core::mcp::{McpServer, McpServers};
 use harness_core::plugins::{Plugin, Plugins};
 use harness_core::retro::suggest;
@@ -16,8 +16,8 @@ use crate::install::credentials::{self, Secret};
 use crate::role_settings::RoleSettings;
 use crate::{adapters::dsh, Antigravity, AnyAgent, ClaudeCode, Codex, Dsh, Team};
 
-/// Why an agent cannot be built, in words for Lisa: a missing login, an
-/// unknown agent name, a broken setting.
+/// Why an agent cannot be built, in words for Lisa: a missing login or a
+/// broken setting.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BuildError(pub String);
 
@@ -55,7 +55,7 @@ pub fn build_team(config: &Config, project_dir: &Path) -> Result<Team, BuildErro
             config,
             &AgentChoice {
                 who: &format!("{role:?}"),
-                agent: &settings.agent,
+                agent: settings.agent,
                 model: settings.model.as_deref(),
                 effort: settings.effort.as_deref(),
                 role,
@@ -80,7 +80,7 @@ pub fn retro_agent(config: &Config) -> Result<AnyAgent, BuildError> {
         config,
         &AgentChoice {
             who: "[retro]",
-            agent: &settings.agent,
+            agent: settings.agent,
             model: settings.model.as_deref(),
             effort: settings.effort.as_deref(),
             role: suggest::RULES_OF,
@@ -94,7 +94,7 @@ pub fn retro_agent(config: &Config) -> Result<AnyAgent, BuildError> {
 pub struct AgentChoice<'a> {
     /// For error messages: `Tester` or `[retro]`.
     pub who: &'a str,
-    pub agent: &'a str,
+    pub agent: AgentKind,
     pub model: Option<&'a str>,
     pub effort: Option<&'a str>,
     /// The role whose rules the agent gets.
@@ -102,8 +102,8 @@ pub struct AgentChoice<'a> {
 }
 
 /// Builds the agent `choice` names, with the role's model, effort, MCP
-/// servers and plugins. Fails with a message for Lisa when the agent is
-/// unknown or its login is missing.
+/// servers and plugins. Fails with a message for Lisa when the agent's
+/// login is missing.
 pub fn build_agent(
     config: &Config,
     choice: &AgentChoice,
@@ -116,31 +116,22 @@ pub fn build_agent(
         .map_err(|e| problem(format!("cannot find the harness program: {e}")))?;
     let settings = role_settings(config, choice, &harness, servers, plugins);
     match choice.agent {
-        "claude" => Ok(AnyAgent::Claude(ClaudeCode::new(
+        AgentKind::Claude => Ok(AnyAgent::Claude(ClaudeCode::new(
             claude_token(&dir)?,
             settings,
         ))),
-        "codex" => {
+        AgentKind::Codex => {
             let codex = Codex::new(codex_login(&dir)?, settings).with_launcher(&harness);
             Ok(AnyAgent::Codex(codex))
         }
-        "codex+deepseek" => Err(problem(format!(
-            "{} uses agent \"codex+deepseek\", which was removed; use \"dsh\" \
-             (DeepSeek Harness, with the same DeepSeek key)",
-            choice.who
-        ))),
-        "antigravity" => Ok(AnyAgent::Antigravity(Antigravity::new(
+        AgentKind::Antigravity => Ok(AnyAgent::Antigravity(Antigravity::new(
             antigravity_login(&dir)?,
             settings,
         ))),
-        "dsh" => {
+        AgentKind::Dsh => {
             check_dsh_effort(choice)?;
             Ok(AnyAgent::Dsh(Dsh::new(deepseek_key(&dir)?, settings)))
         }
-        other => Err(problem(format!(
-            "{} uses agent {other:?}; use \"claude\", \"codex\", \"antigravity\" or \"dsh\"",
-            choice.who
-        ))),
     }
 }
 

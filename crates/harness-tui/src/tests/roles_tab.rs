@@ -47,7 +47,7 @@ fn roles_get_agents_models_and_skills_and_are_saved() {
     assert!(text.contains("Changes not saved"), "{text}");
     assert_eq!(
         config(&root).roles[&Role::Developer].agent,
-        "claude",
+        AgentKind::Claude,
         "not saved yet"
     );
 
@@ -60,10 +60,10 @@ fn roles_get_agents_models_and_skills_and_are_saved() {
     assert!(text.contains("Settings saved and committed"), "{text}");
     let saved = config(&root);
     let developer = &saved.roles[&Role::Developer];
-    assert_eq!(developer.agent, "codex");
+    assert_eq!(developer.agent, AgentKind::Codex);
     assert_eq!(developer.model.as_deref(), Some("gpt-5.5"));
     assert_eq!(developer.always_skills, ["rust-errors"]);
-    assert_eq!(saved.retro.unwrap().agent, "antigravity");
+    assert_eq!(saved.retro.unwrap().agent, AgentKind::Antigravity);
     let changed = Repo::open(&root).unwrap().changed_files().unwrap();
     assert!(
         !changed.iter().any(|f| f.ends_with("harness.toml")),
@@ -112,12 +112,12 @@ fn settings_that_fail_the_checks_are_not_saved() {
     assert!(app.quit);
 }
 
-fn codex_models() -> Vec<(String, Result<ModelList, String>)> {
+fn codex_models() -> Vec<(AgentKind, Result<ModelList, String>)> {
     vec![
         (
-            "codex".into(),
+            AgentKind::Codex,
             Ok(ModelList {
-                agent: "codex".into(),
+                agent: AgentKind::Codex,
                 fetched: 1,
                 models: vec![
                     model("gpt-6.1-sol", &["low", "medium", "high"], Some("low"), true),
@@ -126,7 +126,7 @@ fn codex_models() -> Vec<(String, Result<ModelList, String>)> {
             }),
         ),
         (
-            "antigravity".into(),
+            AgentKind::Antigravity,
             Err("agy did not answer in 90 s".into()),
         ),
     ]

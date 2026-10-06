@@ -7,6 +7,7 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
+use harness_core::config::AgentKind;
 use harness_core::mcp::McpServer;
 use harness_core::plugins::Plugin;
 use harness_core::task::agent::RoleJob;
@@ -107,7 +108,7 @@ impl RoleSettings {
 
     /// The first line of a role's `agent.log`: which agent, model and effort
     /// ran which role in which round.
-    pub fn header(&self, agent: &str, job: &RoleJob) -> String {
+    pub fn header(&self, agent: AgentKind, job: &RoleJob) -> String {
         let model = self.model(job.role).unwrap_or("default");
         let effort = self.effort(job.role).unwrap_or("default");
         format!(
@@ -155,11 +156,11 @@ mod tests {
         assert!(settings.plugins(Role::Tester).is_empty());
         assert_eq!(settings.timeout(), DEFAULT_TIMEOUT);
         assert_eq!(
-            settings.header("codex", &job(Role::Developer)),
+            settings.header(AgentKind::Codex, &job(Role::Developer)),
             "agent: codex, model: big, effort: high, role: Developer, round: 2\n"
         );
         assert_eq!(
-            settings.header("dsh", &job(Role::Tester)),
+            settings.header(AgentKind::Dsh, &job(Role::Tester)),
             "agent: dsh, model: default, effort: default, role: Tester, round: 2\n"
         );
     }

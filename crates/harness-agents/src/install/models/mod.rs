@@ -19,7 +19,7 @@ use std::process::{Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use harness_core::config::AGENTS;
+use harness_core::config::AgentKind;
 use harness_core::models::ModelList;
 
 use crate::adapters::dsh::KEY_ENV as DEEPSEEK_KEY_ENV;
@@ -57,11 +57,11 @@ impl Default for Programs {
 pub fn ask_all(
     credentials_dir: &Path,
     programs: &Programs,
-) -> Vec<(String, Result<ModelList, String>)> {
-    let handles: Vec<_> = AGENTS
-        .iter()
-        .filter(|agent| credentials::has_login(credentials_dir, agent))
-        .map(|&agent| {
+) -> Vec<(AgentKind, Result<ModelList, String>)> {
+    let handles: Vec<_> = AgentKind::ALL
+        .into_iter()
+        .filter(|&agent| credentials::has_login(credentials_dir, agent))
+        .map(|agent| {
             let (dir, programs) = (credentials_dir.to_path_buf(), programs.clone());
             (agent, thread::spawn(move || ask(agent, &dir, &programs)))
         })
@@ -72,20 +72,24 @@ pub fn ask_all(
             let result = handle
                 .join()
                 .unwrap_or_else(|_| Err("asking stopped unexpectedly".into()));
-            (agent.to_string(), result)
+            (agent, result)
         })
         .collect()
 }
 
 /// Asks one agent (as harness.toml names it) for its models.
-pub fn ask(agent: &str, credentials_dir: &Path, programs: &Programs) -> Result<ModelList, String> {
+pub fn ask(
+    agent: AgentKind,
+    credentials_dir: &Path,
+    programs: &Programs,
+) -> Result<ModelList, String> {
     let dir = tempfile::Builder::new()
         .prefix("harness-models-")
         .tempdir()
         .map_err(|e| format!("cannot make a temporary folder: {e}"))?;
     let tmp = dir.path();
     let models = match agent {
-        "claude" => {
+        AgentKind::Claude => {
             let token = credentials::load_token(credentials_dir, "claude")
                 .map_err(|_| "no Claude login saved".to_string())?;
             let mut command = base_command(&programs.claude, tmp);
@@ -99,7 +103,7 @@ pub fn ask(agent: &str, credentials_dir: &Path, programs: &Programs) -> Result<M
                 r#"{"type":"control_request","request_id":"1","request":{"subtype":"initialize"}}"#;
             parse_claude(&run(command, &format!("{request}\n"), &[token.expose()])?)?
         }
-        "codex" => {
+        AgentKind::Codex => {
             let home = tmp.join("codex");
             fs::create_dir_all(&home).map_err(|e| e.to_string())?;
             let auth = fs::read_to_string(credentials_dir.join("codex/auth.json"))
@@ -110,7 +114,7 @@ pub fn ask(agent: &str, credentials_dir: &Path, programs: &Programs) -> Result<M
             command.env("CODEX_HOME", &home).args(["debug", "models"]);
             parse_codex(&run(command, "", &[])?)?
         }
-        "dsh" => {
+        AgentKind::Dsh => {
             let key = match std::env::var(DEEPSEEK_KEY_ENV) {
                 Ok(key) if !key.trim().is_empty() => Secret::new(key.trim()),
                 _ => credentials::load_token(credentials_dir, "deepseek")
@@ -130,7 +134,7 @@ pub fn ask(agent: &str, credentials_dir: &Path, programs: &Programs) -> Result<M
                 .arg(DEEPSEEK_MODELS_URL);
             with_dsh_efforts(parse_deepseek(&run(command, "", &[key.expose()])?)?)
         }
-        "antigravity" => {
+        AgentKind::Antigravity => {
             let home = tmp.join("home");
             crate::adapters::antigravity::copy_dir(&credentials_dir.join("antigravity"), &home)
                 .map_err(|_| "no Antigravity login saved".to_string())?;
@@ -141,7 +145,6 @@ pub fn ask(agent: &str, credentials_dir: &Path, programs: &Programs) -> Result<M
                 .arg("models");
             parse_agy(&run(command, "", &[])?)
         }
-        other => return Err(format!("unknown agent {other:?}")),
     };
     if models.is_empty() {
         return Err("the agent listed no models".into());
@@ -150,7 +153,7 @@ pub fn ask(agent: &str, credentials_dir: &Path, programs: &Programs) -> Result<M
         .duration_since(UNIX_EPOCH)
         .map_or(0, |d| d.as_secs());
     Ok(ModelList {
-        agent: agent.to_string(),
+        agent,
         fetched,
         models,
     })
@@ -326,17 +329,17 @@ echo '{"models":[{"slug":"gpt-x","visibility":"list","supported_reasoning_levels
             curl: script("curl", "cat \"${5#@}\" >&2; exit 22"),
             ..Programs::default()
         };
-        let list = ask("codex", creds.path(), &programs).unwrap();
-        assert_eq!(list.agent, "codex");
+        let list = ask(AgentKind::Codex, creds.path(), &programs).unwrap();
+        assert_eq!(list.agent, AgentKind::Codex);
         assert_eq!(list.models[0].id, "gpt-x");
-        let error = ask("dsh", creds.path(), &programs).unwrap_err();
+        let error = ask(AgentKind::Dsh, creds.path(), &programs).unwrap_err();
         assert!(!error.contains("sk-secret"), "{error}");
         assert!(error.contains("***"), "{error}");
         // Only agents with a saved login are asked.
-        let asked: Vec<String> = ask_all(creds.path(), &programs)
+        let asked: Vec<AgentKind> = ask_all(creds.path(), &programs)
             .into_iter()
             .map(|(agent, _)| agent)
             .collect();
-        assert_eq!(asked, ["codex", "dsh"]);
+        assert_eq!(asked, [AgentKind::Codex, AgentKind::Dsh]);
     }
 }

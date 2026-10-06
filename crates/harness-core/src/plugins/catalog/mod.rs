@@ -31,14 +31,14 @@ use std::path::{Component, Path, PathBuf};
 
 use serde::Deserialize;
 
+use crate::config::AgentKind;
 use crate::mcp::is_simple_name;
-use crate::plugins::{CLAUDE, CODEX};
 use crate::text;
 
 /// Where each agent's catalog file is inside a catalog repository.
-pub const CATALOG_FILES: &[(&str, &str)] = &[
-    (CLAUDE, ".claude-plugin/marketplace.json"),
-    (CODEX, ".agents/plugins/marketplace.json"),
+pub const CATALOG_FILES: &[(AgentKind, &str)] = &[
+    (AgentKind::Claude, ".claude-plugin/marketplace.json"),
+    (AgentKind::Codex, ".agents/plugins/marketplace.json"),
 ];
 
 /// The list of added catalogs, `~/.harness/marketplaces.toml`.
@@ -68,8 +68,8 @@ pub enum Source {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Entry {
     pub name: String,
-    /// "claude" or "codex": which catalog file listed it.
-    pub agent: &'static str,
+    /// Claude Code or Codex: which catalog file listed it.
+    pub agent: AgentKind,
     pub catalog: String,
     pub description: String,
     pub source: Source,
@@ -149,7 +149,7 @@ impl Catalog {
             let catalog = name.unwrap_or(&raw.name).to_string();
             found_name.get_or_insert(catalog.clone());
             for fields in raw.plugins {
-                if let Some(entry) = entry(agent, &catalog, fields) {
+                if let Some(entry) = entry(*agent, &catalog, fields) {
                     entries.push(entry);
                 }
             }
@@ -167,7 +167,7 @@ impl Catalog {
 
 /// One entry, or `None` for an entry without a usable name.
 fn entry(
-    agent: &'static str,
+    agent: AgentKind,
     catalog: &str,
     fields: serde_json::Map<String, serde_json::Value>,
 ) -> Option<Entry> {
@@ -298,12 +298,12 @@ mod tests {
                 .unwrap()
                 .clone()
         };
-        let review = find(CLAUDE, "review");
+        let review = find(AgentKind::Claude, "review");
         assert_eq!(review.description, "Reviews code");
         assert_eq!(review.source, Source::InCatalog("./plugins/review".into()));
         assert_eq!(review.id(), "official/review");
         assert_eq!(
-            find(CLAUDE, "remote").source,
+            find(AgentKind::Claude, "remote").source,
             Source::Git {
                 url: "https://example.com/r.git".into(),
                 path: Some("plugins/remote".into()),
@@ -312,17 +312,17 @@ mod tests {
             }
         );
         assert!(matches!(
-            find(CLAUDE, "gh").source,
+            find(AgentKind::Claude, "gh").source,
             Source::Git { ref url, .. } if url == "https://github.com/owner/gh.git"
         ));
         assert_eq!(
-            find(CLAUDE, "pkg").source,
+            find(AgentKind::Claude, "pkg").source,
             Source::Unsupported("npm".into())
         );
-        assert!(find(CLAUDE, "lsp").is_its_own_manifest());
+        assert!(find(AgentKind::Claude, "lsp").is_its_own_manifest());
         assert!(!review.is_its_own_manifest());
         assert_eq!(
-            find(CODEX, "review").source,
+            find(AgentKind::Codex, "review").source,
             Source::InCatalog("./plugins/review".into())
         );
         assert_eq!(

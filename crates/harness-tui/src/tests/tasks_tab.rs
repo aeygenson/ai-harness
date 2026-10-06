@@ -278,7 +278,7 @@ fn a_model_and_level_can_be_chosen_for_one_run() {
     harness_core::models::save(
         env.home.path(),
         &ModelList {
-            agent: "claude".into(),
+            agent: AgentKind::Claude,
             fetched: 1,
             models: vec![
                 model("sonnet", &["low", "high"], Some("high"), true),

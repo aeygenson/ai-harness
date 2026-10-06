@@ -140,13 +140,10 @@ impl App {
     /// by itself.
     fn open_plugin_catalog(&mut self) {
         let agent = match (&self.plugins, &self.roles) {
-            (Some(plugins), Some(roles)) => roles
-                .settings(plugins.role())
-                .map(|s| harness_core::plugins::family(&s.agent).to_string())
-                .unwrap_or_default(),
+            (Some(plugins), Some(roles)) => roles.settings(plugins.role()).map(|s| s.agent),
             _ => return,
         };
-        let view = catalog::CatalogView::load(self.home.as_deref(), &agent);
+        let view = catalog::CatalogView::load(self.home.as_deref(), agent);
         let none = self
             .home
             .as_deref()

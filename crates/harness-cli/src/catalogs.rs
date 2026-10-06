@@ -9,13 +9,13 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context, Result};
-use harness_core::config::{Config, CONFIG_FILE};
+use harness_core::config::{AgentKind, Config, CONFIG_FILE};
 use harness_core::git::{Repo, HARNESS_DIR};
 use harness_core::mcp::is_simple_name;
 use harness_core::plugins::catalog::{Entry, Registry, Source};
 use harness_core::plugins::install::Changes;
 use harness_core::plugins::ops::{self, CatalogUpdate};
-use harness_core::plugins::{self, Contents, PLUGINS_DIR};
+use harness_core::plugins::{Contents, PLUGINS_DIR};
 use harness_core::task::handoff::Role;
 
 /// `~/.harness`.
@@ -45,7 +45,7 @@ pub fn marketplace_add(source: &str, name: Option<&str>) -> Result<()> {
 fn count(entries: &[Entry]) -> String {
     let claude = entries
         .iter()
-        .filter(|e| e.agent == plugins::CLAUDE)
+        .filter(|e| e.agent == AgentKind::Claude)
         .count();
     let codex = entries.len() - claude;
     format!(
@@ -103,7 +103,7 @@ pub fn marketplace_remove(name: &str) -> Result<()> {
     Ok(())
 }
 
-pub fn plugin_list(project: &Path, agent: Option<&str>) -> Result<()> {
+pub fn plugin_list(project: &Path, agent: Option<AgentKind>) -> Result<()> {
     let home = harness_home()?;
     let registry = Registry::load(&home)?;
     let (entries, errors) = registry.entries(&home);
@@ -154,8 +154,9 @@ pub fn plugin_list(project: &Path, agent: Option<&str>) -> Result<()> {
 }
 
 /// The options of `harness plugin add`.
-pub struct AddOptions<'a> {
-    pub agent: Option<&'a str>,
+#[derive(Debug)]
+pub struct AddOptions {
+    pub agent: Option<AgentKind>,
     pub role: Option<Role>,
     pub allow_hooks: bool,
     pub allow_mcp: bool,

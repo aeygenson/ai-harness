@@ -21,7 +21,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use harness_core::config::projects::{self, name_of};
-use harness_core::config::McpConfig;
+use harness_core::config::{AgentKind, McpConfig};
 use harness_core::git::{Repo, HARNESS_DIR};
 use harness_core::mcp::registry::Entry;
 use harness_core::mcp::tools::Tool;
@@ -199,7 +199,7 @@ pub fn run(start: &Path) -> Result<()> {
 }
 
 /// Each agent's answer: its model list, or why there is none.
-type Answers = Vec<(String, Result<ModelList, String>)>;
+type Answers = Vec<(AgentKind, Result<ModelList, String>)>;
 
 /// Asks the agents with a saved login (in `credentials_dir`) for their models.
 type ModelAsker = fn(&Path) -> Answers;

@@ -11,7 +11,7 @@ pub use mcp::{remove_mcp, set_mcp};
 
 use toml_edit::{value, Array, DocumentMut, Item, Table};
 
-use crate::config::{Config, RetroConfig, RoleConfig};
+use crate::config::{AgentKind, Config, RetroConfig, RoleConfig};
 use crate::task::handoff::Role;
 
 #[derive(Debug, thiserror::Error)]
@@ -38,7 +38,7 @@ pub enum EditError {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NewPlugin<'a> {
     pub name: &'a str,
-    pub agent: &'a str,
+    pub agent: AgentKind,
     pub source: &'a str,
     pub commit: Option<&'a str>,
     pub allow_hooks: bool,
@@ -54,7 +54,7 @@ pub fn add_plugin(text: &str, plugin: &NewPlugin, role: Option<Role>) -> Result<
         return Err(EditError::PluginExists(plugin.name.to_string()));
     }
     let mut entry = Table::new();
-    entry.insert("agent", value(plugin.agent));
+    entry.insert("agent", value(plugin.agent.as_str()));
     entry.insert("source", value(plugin.source));
     if let Some(commit) = plugin.commit {
         entry.insert("commit", value(commit));
@@ -157,7 +157,7 @@ pub fn set_role(text: &str, role: Role, settings: &RoleConfig) -> Result<String,
     let role_table = entry
         .as_table_mut()
         .ok_or_else(|| EditError::NotATable(format!("roles.{key}")))?;
-    set_text(role_table, "agent", Some(&settings.agent));
+    set_text(role_table, "agent", Some(settings.agent.as_str()));
     set_text(role_table, "model", settings.model.as_deref());
     set_text(role_table, "effort", settings.effort.as_deref());
     set_list(role_table, "skills", &settings.skills);
@@ -176,7 +176,7 @@ pub fn set_retro(text: &str, retro: &RetroConfig) -> Result<String, EditError> {
     let retro_table = entry
         .as_table_mut()
         .ok_or_else(|| EditError::NotATable("retro".into()))?;
-    set_text(retro_table, "agent", Some(&retro.agent));
+    set_text(retro_table, "agent", Some(retro.agent.as_str()));
     set_text(retro_table, "model", retro.model.as_deref());
     set_text(retro_table, "effort", retro.effort.as_deref());
     finish(doc)
@@ -285,7 +285,7 @@ mod tests {
     fn plugin(name: &str) -> NewPlugin<'_> {
         NewPlugin {
             name,
-            agent: "codex",
+            agent: AgentKind::Codex,
             source: "official/review",
             commit: Some("abc123"),
             allow_hooks: false,
@@ -324,7 +324,7 @@ mod tests {
         let saved = &config.roles[&Role::Developer];
         assert_eq!(saved, &developer);
 
-        developer.agent = "claude".into();
+        developer.agent = AgentKind::Claude;
         developer.model = None;
         developer.effort = None;
         let text = set_role(&text, Role::Developer, &developer).unwrap();
@@ -343,7 +343,7 @@ mod tests {
     #[test]
     fn retro_is_created_or_changed() {
         let retro = RetroConfig {
-            agent: "dsh".into(),
+            agent: AgentKind::Dsh,
             model: Some("deepseek-v4-pro".into()),
             effort: None,
         };
@@ -352,7 +352,7 @@ mod tests {
         let text = set_retro(
             &text,
             &RetroConfig {
-                agent: "claude".into(),
+                agent: AgentKind::Claude,
                 model: None,
                 effort: Some("high".into()),
             },

@@ -11,12 +11,14 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+use crate::config::AgentKind;
+
 const MODELS_DIR: &str = "models";
 
 /// What one agent said about its models.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ModelList {
-    pub agent: String,
+    pub agent: AgentKind,
     /// When it was asked, in seconds since 1970.
     pub fetched: u64,
     pub models: Vec<Model>,
@@ -72,18 +74,18 @@ impl Model {
 }
 
 /// `<home>/models/<agent>.json` (`home` is `~/.harness`).
-pub fn cache_path(home: &Path, agent: &str) -> PathBuf {
+pub fn cache_path(home: &Path, agent: AgentKind) -> PathBuf {
     home.join(MODELS_DIR).join(format!("{agent}.json"))
 }
 
 /// The list saved last time, if any.
-pub fn load(home: &Path, agent: &str) -> Option<ModelList> {
+pub fn load(home: &Path, agent: AgentKind) -> Option<ModelList> {
     let text = fs::read_to_string(cache_path(home, agent)).ok()?;
     serde_json::from_str(&text).ok()
 }
 
 pub fn save(home: &Path, list: &ModelList) -> io::Result<()> {
-    let path = cache_path(home, &list.agent);
+    let path = cache_path(home, list.agent);
     if let Some(dir) = path.parent() {
         fs::create_dir_all(dir)?;
     }
@@ -109,7 +111,7 @@ mod tests {
     fn lists_are_saved_and_give_the_agents_default() {
         let home = tempfile::tempdir().unwrap();
         let list = ModelList {
-            agent: "codex".into(),
+            agent: AgentKind::Codex,
             fetched: 1,
             models: vec![
                 model(
@@ -121,9 +123,9 @@ mod tests {
                 model("gpt-6.1-sol", &["low", "high"], Some("low"), true),
             ],
         };
-        assert_eq!(load(home.path(), "codex"), None);
+        assert_eq!(load(home.path(), AgentKind::Codex), None);
         save(home.path(), &list).unwrap();
-        let loaded = load(home.path(), "codex").unwrap();
+        let loaded = load(home.path(), AgentKind::Codex).unwrap();
         assert_eq!(loaded, list);
         assert_eq!(
             loaded.default_choice(),

@@ -14,6 +14,8 @@ mod status;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use harness_core::config::AgentKind;
+
 use crate::install::credentials;
 pub use entries::{Commands, Entry, CATALOG};
 pub use install::{clean_line, run_command};
@@ -51,8 +53,8 @@ pub fn check_with(
                         Some(Err(error)) => (None, Some(error)),
                         None => (None, None),
                     };
-                    let login = entry.runs().then(|| {
-                        credentials_dir.is_some_and(|dir| credentials::has_login(dir, entry.id))
+                    let login = entry.id.parse::<AgentKind>().ok().map(|agent| {
+                        credentials_dir.is_some_and(|dir| credentials::has_login(dir, agent))
                     });
                     Status {
                         entry: *entry,
@@ -131,14 +133,13 @@ pub fn older(version: &str, min: &str) -> bool {
 mod tests {
     use super::entries::for_npm;
     use super::*;
-    use harness_core::config::AGENTS;
     use std::collections::HashSet;
     use std::fs;
 
     #[test]
     fn every_agent_the_harness_runs_is_in_the_catalog_once() {
-        for agent in AGENTS {
-            let count = CATALOG.iter().filter(|e| e.id == agent).count();
+        for agent in AgentKind::ALL {
+            let count = CATALOG.iter().filter(|e| e.id == agent.as_str()).count();
             assert_eq!(count, 1, "{agent}");
         }
         let ids: HashSet<_> = CATALOG.iter().map(|e| e.id).collect();

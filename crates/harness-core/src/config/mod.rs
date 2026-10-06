@@ -15,9 +15,12 @@
 //! comments), `save` (checking and committing a changed file) and `projects`
 //! (the list of Lisa's projects).
 
+mod agent_kind;
 pub mod edit;
 pub mod projects;
 pub mod save;
+
+pub use agent_kind::{AgentKind, UnknownAgent};
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -29,9 +32,6 @@ use crate::task::handoff::Role;
 use crate::task::DEFAULT_MAX_ROUNDS;
 
 pub const CONFIG_FILE: &str = "harness.toml";
-
-/// The agents a role can run on.
-pub const AGENTS: [&str; 4] = ["claude", "codex", "antigravity", "dsh"];
 
 /// What `harness init` writes into a new project.
 pub const DEFAULT_CONFIG: &str = r#"# Settings of the AI harness for this project.
@@ -121,7 +121,7 @@ pub struct Config {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RetroConfig {
-    pub agent: String,
+    pub agent: AgentKind,
     #[serde(default)]
     pub model: Option<String>,
     #[serde(default, deserialize_with = "effort")]
@@ -131,7 +131,7 @@ pub struct RetroConfig {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RoleConfig {
-    pub agent: String,
+    pub agent: AgentKind,
     #[serde(default)]
     pub model: Option<String>,
     /// The reasoning effort, such as "high"; the agent's default if not set.
@@ -155,8 +155,8 @@ pub struct RoleConfig {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PluginConfig {
-    /// Which agent can load it: "claude" or "codex".
-    pub agent: String,
+    /// Which agent can load it: Claude Code or Codex.
+    pub agent: AgentKind,
     /// The folder, relative to the project; `.harness/plugins/<name>` if not set.
     #[serde(default)]
     pub path: Option<String>,
@@ -279,9 +279,9 @@ mod tests {
             Role::Tester,
             Role::Security,
         ] {
-            assert_eq!(config.role(role).unwrap().agent, "claude");
+            assert_eq!(config.role(role).unwrap().agent, AgentKind::Claude);
         }
-        assert_eq!(config.retro.unwrap().agent, "claude");
+        assert_eq!(config.retro.unwrap().agent, AgentKind::Claude);
         assert_eq!(Config::parse("").unwrap().retro, None);
     }
 
@@ -320,5 +320,13 @@ mod tests {
         assert!(Config::parse("max_round = 5").is_err());
         assert!(Config::parse("[roles.tester]\nagnet = \"claude\"").is_err());
         assert!(Config::parse("[roles.designer]\nagent = \"claude\"").is_err());
+    }
+
+    #[test]
+    fn an_unknown_agent_is_refused_with_the_names_to_use() {
+        let error = Config::parse("[roles.tester]\nagent = \"gemini\"").unwrap_err();
+        assert!(error.to_string().contains("\"antigravity\""), "{error}");
+        let error = Config::parse("[roles.tester]\nagent = \"codex+deepseek\"").unwrap_err();
+        assert!(error.to_string().contains("use \"dsh\""), "{error}");
     }
 }

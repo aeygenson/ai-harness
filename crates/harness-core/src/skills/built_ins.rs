@@ -1,5 +1,6 @@
 //! The skills that come with the program, and the base each role always gets.
 
+use crate::config::AgentKind;
 use crate::task::handoff::Role;
 
 /// The built-in skills: name and text.
@@ -44,24 +45,23 @@ pub fn built_in_names() -> impl Iterator<Item = &'static str> {
 }
 
 /// The note for the agent a role runs on.
-pub fn agent_note(agent: &str) -> Option<&'static str> {
+pub fn agent_note(agent: AgentKind) -> &'static str {
     match agent {
-        "claude" => Some("agent-claude"),
-        "codex" => Some("agent-codex"),
-        "antigravity" => Some("agent-antigravity"),
-        "dsh" => Some("agent-dsh"),
-        _ => None,
+        AgentKind::Claude => "agent-claude",
+        AgentKind::Codex => "agent-codex",
+        AgentKind::Antigravity => "agent-antigravity",
+        AgentKind::Dsh => "agent-dsh",
     }
 }
 
 /// The base of a role on `agent`: always in its prompt, never chosen.
-pub fn base_names(role: Role, agent: &str) -> Vec<&'static str> {
+pub fn base_names(role: Role, agent: AgentKind) -> Vec<&'static str> {
     // Each AI role's base skill has the role's own name; Lisa has none.
     let own = (role != Role::Human).then(|| role.as_str());
     ["common"]
         .into_iter()
         .chain(own)
-        .chain(agent_note(agent))
+        .chain([agent_note(agent)])
         .collect()
 }
 

@@ -3,7 +3,7 @@
 use super::*;
 
 /// A plugin folder for `agent` in the project, with extra files.
-fn plugin_folder(root: &Path, name: &str, agent: &str, extra: &[(&str, &str)]) {
+fn plugin_folder(root: &Path, name: &str, agent: AgentKind, extra: &[(&str, &str)]) {
     let folder = root.join(".harness/plugins").join(name);
     let manifest = folder.join(harness_core::plugins::manifest(agent));
     fs::create_dir_all(manifest.parent().unwrap()).unwrap();
@@ -27,14 +27,14 @@ fn the_plugins_tab_gives_allows_and_removes_plugins() {
     plugin_folder(
         &root,
         "review",
-        "claude",
+        AgentKind::Claude,
         &[
             ("skills/audit/SKILL.md", "---\n---\n"),
             ("commands/review.md", "# review"),
             ("hooks/hooks.json", "{}"),
         ],
     );
-    plugin_folder(&root, "lint", "codex", &[]);
+    plugin_folder(&root, "lint", AgentKind::Codex, &[]);
     let path = root.join(".harness/harness.toml");
     let text = fs::read_to_string(&path).unwrap()
         + "\n[plugins.review]\nagent = \"claude\"\nsource = \"official/review\"\n\

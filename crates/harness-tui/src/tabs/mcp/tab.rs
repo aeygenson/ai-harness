@@ -25,7 +25,7 @@
 use std::path::{Path, PathBuf};
 
 use harness_agents::install::credentials;
-use harness_core::config::{McpConfig, AGENTS};
+use harness_core::config::{AgentKind, McpConfig};
 use harness_core::mcp::registry::{Entry, Offer};
 use harness_core::mcp::{self, SECRET_PREFIX};
 use harness_core::task::handoff::Role;
@@ -221,7 +221,7 @@ impl McpTab {
             // A server the role has can always be taken away.
             _ if on => Ok(()),
             None => Err("mcp.not_described"),
-            Some(server) if !mcp::agent_runs(&settings.agent, server) => Err("mcp.agent_cannot"),
+            Some(server) if !mcp::agent_runs(settings.agent, server) => Err("mcp.agent_cannot"),
             Some(_) => Ok(()),
         }
     }
@@ -655,9 +655,9 @@ impl McpTab {
 
         // Which agents can start it; the role's own agent in bold.
         lines.push(Line::default());
-        let agent = roles.settings(self.role()).map(|s| s.agent.clone());
+        let agent = roles.settings(self.role()).map(|s| s.agent);
         let mut spans = vec![Span::styled(format!("{} ", tr.t("mcp.agents")), bold)];
-        for (index, each) in AGENTS.iter().enumerate() {
+        for (index, each) in AgentKind::ALL.into_iter().enumerate() {
             if index > 0 {
                 spans.push(Span::styled(" · ", dim));
             }
@@ -666,12 +666,12 @@ impl McpTab {
             } else {
                 ("✗", red)
             };
-            let style = if agent.as_deref() == Some(*each) {
+            let style = if agent == Some(each) {
                 Style::new().add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
             } else {
                 Style::new()
             };
-            spans.push(Span::styled((*each).to_string(), style));
+            spans.push(Span::styled(each.to_string(), style));
             spans.push(Span::styled(format!(" {mark}"), look));
         }
         lines.push(Line::from(spans));
