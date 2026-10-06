@@ -6,7 +6,7 @@ use std::path::Path;
 
 use harness_core::mcp::registry::{parse, Entry, REGISTRY_URL};
 
-use crate::models::run;
+use crate::install::models::run;
 use crate::process::base_command;
 
 /// At most this many servers per search.

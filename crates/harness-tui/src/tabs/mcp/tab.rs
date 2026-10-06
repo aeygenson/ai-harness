@@ -24,7 +24,7 @@
 
 use std::path::{Path, PathBuf};
 
-use harness_agents::credentials;
+use harness_agents::install::credentials;
 use harness_core::config::{McpConfig, AGENTS};
 use harness_core::mcp::registry::{Entry, Offer};
 use harness_core::mcp::{self, SECRET_PREFIX};
@@ -363,7 +363,7 @@ impl McpTab {
         let (Some(home), Some(url)) = (&self.home, &server.url) else {
             return false;
         };
-        harness_agents::mcp_oauth::load(&home.join("credentials"), name, url.trim()).is_some()
+        harness_agents::mcp::oauth::load(&home.join("credentials"), name, url.trim()).is_some()
     }
 
     fn missing_secrets(&self, server: &McpConfig) -> Vec<String> {

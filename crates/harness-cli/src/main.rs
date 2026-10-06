@@ -34,7 +34,7 @@ use std::path::Path;
 
 use anyhow::{bail, Context, Result};
 use clap::Parser;
-use harness_agents::credentials;
+use harness_agents::install::credentials;
 use harness_agents::launcher;
 use harness_core::config::projects;
 use harness_core::config::CONFIG_FILE;
@@ -73,7 +73,7 @@ async fn main() -> Result<()> {
             command: McpCommand::Logout { name },
         } => {
             let dir = credentials::default_dir().context("no home folder found")?;
-            harness_agents::mcp_oauth::logout(&dir, &name)?;
+            harness_agents::mcp::oauth::logout(&dir, &name)?;
             println!("Forgot the sign-in of {name}.");
             Ok(())
         }
@@ -155,7 +155,7 @@ async fn main() -> Result<()> {
             )
         }
         Command::McpRemote => {
-            harness_agents::mcp_remote::run_from_env().map_err(anyhow::Error::msg)
+            harness_agents::mcp::remote::run_from_env().map_err(anyhow::Error::msg)
         }
     }
 }

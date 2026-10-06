@@ -14,7 +14,7 @@ use std::process::Command;
 
 use harness_core::mcp::McpServer;
 
-use crate::credentials::write_private;
+use crate::install::credentials::write_private;
 
 /// The `harness` subcommand.
 pub const MCP_EXEC: &str = "mcp-exec";
@@ -84,7 +84,7 @@ pub fn exec_server(spec_file: &Path) -> io::Error {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::credentials::Secret;
+    use crate::install::credentials::Secret;
     use std::collections::BTreeMap;
 
     #[test]

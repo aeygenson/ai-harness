@@ -510,7 +510,7 @@ mod tests {
 
     #[test]
     fn the_home_has_only_the_roles_own_mcp_servers() {
-        use crate::credentials::Secret;
+        use crate::install::credentials::Secret;
         use std::collections::BTreeMap;
 
         let saved = tempfile::tempdir().unwrap();

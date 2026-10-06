@@ -28,7 +28,7 @@ use harness_core::task::agent::{AgentOutcome, AgentRunner, RoleJob};
 use harness_core::task::handoff::Role;
 use serde_json::{json, Value};
 
-use crate::credentials::Secret;
+use crate::install::credentials::Secret;
 use crate::process::{self, failed};
 use crate::role_settings::RoleSettings;
 
@@ -99,11 +99,11 @@ impl Dsh {
             "version": 1,
             "refs": { KEY_ENV: self.key.expose() },
         });
-        crate::credentials::write_private(
+        crate::install::credentials::write_private(
             &home.path().join(CREDENTIALS_FILE),
             &credentials.to_string(),
         )?;
-        crate::credentials::write_private(
+        crate::install::credentials::write_private(
             &home.path().join(PATCH_FILE),
             &self.patch(role, home.path()),
         )?;

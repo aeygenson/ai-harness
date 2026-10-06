@@ -1,7 +1,7 @@
 //! `harness models` and `harness agents`: what the installed agents offer.
 
 use anyhow::{Context, Result};
-use harness_agents::credentials;
+use harness_agents::install::credentials;
 use harness_core::config::projects;
 
 /// `harness models`: the saved lists, after asking the agents again with
@@ -12,7 +12,7 @@ pub(crate) fn models(refresh: bool) -> Result<()> {
     if refresh {
         let dir = credentials::default_dir().context("no home folder found")?;
         println!("Asking the agents with a saved login…");
-        for (agent, result) in harness_agents::models::ask_all(&dir, &Default::default()) {
+        for (agent, result) in harness_agents::install::models::ask_all(&dir, &Default::default()) {
             match result {
                 Ok(list) => {
                     models::save(&home, &list)
@@ -63,7 +63,7 @@ pub(crate) fn models(refresh: bool) -> Result<()> {
 
 /// The catalog of agents with what was found on this computer.
 pub(crate) fn agents() {
-    use harness_agents::catalog;
+    use harness_agents::install::catalog;
     let dir = credentials::default_dir();
     for status in catalog::check_all(dir.as_deref()) {
         let entry = &status.entry;

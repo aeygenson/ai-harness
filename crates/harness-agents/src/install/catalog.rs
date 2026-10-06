@@ -15,7 +15,7 @@ use std::time::Duration;
 
 use harness_core::config::AGENTS;
 
-use crate::credentials;
+use crate::install::credentials;
 
 /// How long `--version` may take.
 const VERSION_LIMIT: Duration = Duration::from_secs(10);
@@ -577,7 +577,7 @@ fn version_of(program: &Path) -> Result<String, String> {
     let dir = std::env::temp_dir();
     let mut command = crate::process::base_command(program, &dir);
     command.arg("--version");
-    crate::models::run_for(command, "", &[], VERSION_LIMIT)
+    crate::install::models::run_for(command, "", &[], VERSION_LIMIT)
 }
 
 /// The first word that looks like a version: `codex-cli 0.159.2` → `0.159.2`,

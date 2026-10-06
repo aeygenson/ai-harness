@@ -128,7 +128,7 @@ enum Purpose {
     /// Run this maker's command to install or update the agent named.
     RunAgentCommand {
         name: &'static str,
-        action: harness_agents::catalog::Action,
+        action: harness_agents::install::catalog::Action,
         command: String,
     },
 }
@@ -205,7 +205,7 @@ type Answers = Vec<(String, Result<ModelList, String>)>;
 type ModelAsker = fn(&Path) -> Answers;
 
 fn ask_agents(credentials_dir: &Path) -> Answers {
-    harness_agents::models::ask_all(credentials_dir, &Default::default())
+    harness_agents::install::models::ask_all(credentials_dir, &Default::default())
 }
 
 /// Starts an MCP server in the project folder and asks it for its tools.
@@ -229,13 +229,13 @@ type McpSearcher = fn(&str) -> Result<Vec<Entry>, String>;
 type McpSigner = fn(&Path, &str, &str) -> Result<(), String>;
 
 fn sign_in(credentials_dir: &Path, name: &str, url: &str) -> Result<(), String> {
-    use harness_agents::mcp_oauth;
-    let tools = mcp_oauth::Tools {
+    use harness_agents::mcp::oauth;
+    let tools = oauth::Tools {
         curl: "curl".into(),
-        open: &mcp_oauth::open_in_browser,
-        browser_limit: mcp_oauth::BROWSER_LIMIT,
+        open: &oauth::open_in_browser,
+        browser_limit: oauth::BROWSER_LIMIT,
     };
-    mcp_oauth::login(credentials_dir, name, url, &tools)
+    oauth::login(credentials_dir, name, url, &tools)
 }
 
 /// A server being checked: its name, settings and the coming answer.
@@ -265,7 +265,7 @@ struct App {
     /// Checks which agents are installed; tests give a fake one.
     agent_checker: AgentChecker,
     /// The answer of that check, while it runs.
-    agent_check: Option<mpsc::Receiver<Vec<harness_agents::catalog::Status>>>,
+    agent_check: Option<mpsc::Receiver<Vec<harness_agents::install::catalog::Status>>>,
     /// Runs an agent's install or update command; tests give a fake one.
     installer: Installer,
     /// What that command prints, while it runs.
@@ -341,9 +341,9 @@ impl App {
             asker: ask_agents,
             viewer: editor::viewer,
             asking: None,
-            checker: harness_agents::mcp_check::list_tools,
+            checker: harness_agents::mcp::check::list_tools,
             checking: None,
-            searcher: harness_agents::mcp_registry::search,
+            searcher: harness_agents::mcp::registry::search,
             searching: None,
             signer: sign_in,
             signing: None,

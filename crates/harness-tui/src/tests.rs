@@ -1212,10 +1212,10 @@ fn the_mcp_tab_gives_servers_to_roles() {
     }
 
     // A saved secret shows up; its value never does.
-    harness_agents::credentials::save_secret(
+    harness_agents::install::credentials::save_secret(
         &env.home.path().join("credentials"),
         "context7",
-        &harness_agents::credentials::Secret::new("ctx-secret-value"),
+        &harness_agents::install::credentials::Secret::new("ctx-secret-value"),
     )
     .unwrap();
     app.mcp.as_mut().unwrap().reload();
@@ -1392,10 +1392,10 @@ fn check_asks_a_server_for_its_tools() {
         + "\n[mcp.docs]\ncommand = \"npx\"\nargs = [\"docs-mcp\"]\nenv = { API_KEY = \"secret:docs\" }\n\n\
            [mcp.other]\ncommand = \"npx\"\nenv = { KEY = \"secret:other\" }\n";
     fs::write(&path, text).unwrap();
-    harness_agents::credentials::save_secret(
+    harness_agents::install::credentials::save_secret(
         &env.home.path().join("credentials"),
         "docs",
-        &harness_agents::credentials::Secret::new("docs-key"),
+        &harness_agents::install::credentials::Secret::new("docs-key"),
     )
     .unwrap();
     let mut app = env.app(&root);
@@ -1626,10 +1626,10 @@ fn a_web_server_shows_its_address_and_is_checked_through_the_bridge() {
     assert!(text.contains("✗ secret"), "{text}");
     assert!(!text.contains("Command:"), "{text}");
 
-    harness_agents::credentials::save_secret(
+    harness_agents::install::credentials::save_secret(
         &env.home.path().join("credentials"),
         "wiki",
-        &harness_agents::credentials::Secret::new("web-key"),
+        &harness_agents::install::credentials::Secret::new("web-key"),
     )
     .unwrap();
     key(&mut app, KeyCode::Char('r'));
@@ -1647,7 +1647,7 @@ fn a_web_server_shows_its_address_and_is_checked_through_the_bridge() {
 
 fn fake_sign_in(dir: &Path, name: &str, url: &str) -> Result<(), String> {
     // As a real sign-in would leave it.
-    let file = harness_agents::mcp_oauth::path(dir, name);
+    let file = harness_agents::mcp::oauth::path(dir, name);
     fs::create_dir_all(file.parent().unwrap()).unwrap();
     let saved = serde_json::json!({
         "url": url, "token_endpoint": "https://auth.example.com/token",
@@ -2326,8 +2326,8 @@ fn the_same_task_sent_twice_is_not_started_again() {
 }
 
 /// Codex is installed but old, Claude is installed and new, nothing else.
-fn fake_agents(credentials: Option<&Path>) -> Vec<harness_agents::catalog::Status> {
-    use harness_agents::catalog;
+fn fake_agents(credentials: Option<&Path>) -> Vec<harness_agents::install::catalog::Status> {
+    use harness_agents::install::catalog;
     // Codex sits in the user's own npm folder, so the tab may update it.
     let local = harness_platform::home::home_dir()
         .map(|home| home.join(".local/bin/codex"))
@@ -2465,8 +2465,8 @@ fn an_agent_is_updated_after_its_command_is_confirmed() {
 
 #[test]
 fn a_codex_in_a_system_folder_shows_the_terminal_commands() {
-    fn system_codex(credentials: Option<&Path>) -> Vec<harness_agents::catalog::Status> {
-        use harness_agents::catalog;
+    fn system_codex(credentials: Option<&Path>) -> Vec<harness_agents::install::catalog::Status> {
+        use harness_agents::install::catalog;
         let find = |name: &str| (name == "codex").then(|| PathBuf::from("/usr/bin/codex"));
         let version = |_: &Path| Ok("codex-cli 0.150.0".to_string());
         catalog::check_with(catalog::CATALOG, &find, &version, credentials)
@@ -2609,10 +2609,10 @@ fn roles_offer_only_agents_ready_on_the_agents_tab() {
 
     // Signing in to Claude and Codex makes them ready.
     let credentials = env.home.path().join("credentials");
-    harness_agents::credentials::save_token(
+    harness_agents::install::credentials::save_token(
         &credentials,
         "claude",
-        &harness_agents::credentials::Secret::new("t"),
+        &harness_agents::install::credentials::Secret::new("t"),
     )
     .unwrap();
     fs::create_dir_all(credentials.join("codex")).unwrap();

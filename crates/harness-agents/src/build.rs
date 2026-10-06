@@ -12,9 +12,9 @@ use harness_core::plugins::{Plugin, Plugins};
 use harness_core::retro::suggest;
 use harness_core::task::handoff::Role;
 
-use crate::credentials::{self, Secret};
+use crate::install::credentials::{self, Secret};
 use crate::role_settings::RoleSettings;
-use crate::{dsh, Antigravity, AnyAgent, ClaudeCode, Codex, Dsh, Team};
+use crate::{adapters::dsh, Antigravity, AnyAgent, ClaudeCode, Codex, Dsh, Team};
 
 /// Why an agent cannot be built, in words for Lisa: a missing login, an
 /// unknown agent name, a broken setting.
@@ -45,7 +45,7 @@ pub const ROLES: [Role; 4] = [
 /// and plugins set there.
 pub fn build_team(config: &Config, project_dir: &Path) -> Result<Team, BuildError> {
     let dir = credentials::default_dir().ok_or_else(|| problem("HOME is not set"))?;
-    let servers = McpServers::load(config, |name| crate::mcp_oauth::mcp_secret(&dir, name))
+    let servers = McpServers::load(config, |name| crate::mcp::oauth::mcp_secret(&dir, name))
         .map_err(|e| problem(e.to_string()))?;
     let plugins = Plugins::load(project_dir, config).map_err(|e| problem(e.to_string()))?;
     let mut team = Team::new();

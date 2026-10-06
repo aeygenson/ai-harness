@@ -1,5 +1,5 @@
 //! The tools an MCP server offers, as it said itself when «Check» asked it
-//! (the asking is in `harness_agents::mcp_check`).
+//! (the asking is in `harness_agents::mcp::check`).
 //!
 //! The answer is kept in `~/.harness/mcp/<name>-<fingerprint>.json`. The
 //! fingerprint is made of the server's settings (command, arguments and

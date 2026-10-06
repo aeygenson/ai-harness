@@ -3,7 +3,7 @@
 
 use std::sync::mpsc;
 
-use harness_agents::credentials;
+use harness_agents::install::credentials;
 use harness_core::models::{self};
 
 use crate::ui::Form;
@@ -32,7 +32,7 @@ impl App {
 
     /// «Install», «Update» or «Remove»: first the command is shown to be confirmed.
     pub(crate) fn ask_to_run_agent_command(&mut self, remove: bool) {
-        use harness_agents::catalog::Action;
+        use harness_agents::install::catalog::Action;
         let Some((status, action, command)) = self.agents.next_step(remove) else {
             return;
         };
