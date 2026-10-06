@@ -64,7 +64,7 @@ fn a_retrospective_is_generated_edited_and_its_proposals_applied() {
     click(&mut app, " Generate ");
     key(&mut app, KeyCode::Enter);
     wait_retro(&mut app);
-    let (message, problem) = app.message.clone().unwrap();
+    let (message, problem) = shown(&app);
     assert!(
         problem && message.contains("there are no tasks yet"),
         "{message}"
@@ -80,7 +80,7 @@ fn a_retrospective_is_generated_edited_and_its_proposals_applied() {
         .message
         .as_ref()
         .unwrap()
-        .0
+        .text
         .contains("agent is still working"));
     // The roles wait for the retrospective.
     app.tab = Tab::Tasks;
@@ -89,12 +89,12 @@ fn a_retrospective_is_generated_edited_and_its_proposals_applied() {
         .message
         .as_ref()
         .unwrap()
-        .0
+        .text
         .contains("retrospective's agent is working"));
     app.tab = Tab::Retro;
     wait_retro(&mut app);
     assert_eq!(
-        app.message.as_ref().unwrap().0,
+        app.message.as_ref().unwrap().text,
         "Retrospective 001 is ready"
     );
     assert!(repo.changed_files().unwrap().is_empty());
@@ -127,7 +127,7 @@ fn a_retrospective_is_generated_edited_and_its_proposals_applied() {
         .message
         .as_ref()
         .unwrap()
-        .0
+        .text
         .starts_with("Applied and committed: 1."));
     assert!(root.join(".harness/skills/empty-input.md").is_file());
     assert!(config(&root).roles[&Role::Developer]
@@ -139,7 +139,7 @@ fn a_retrospective_is_generated_edited_and_its_proposals_applied() {
     assert!(text.contains("✓ Applied: the skill empty-input"), "{text}");
     key(&mut app, KeyCode::Char(' '));
     assert_eq!(
-        app.message.as_ref().unwrap().0,
+        app.message.as_ref().unwrap().text,
         "This proposal is already applied"
     );
 
@@ -148,11 +148,11 @@ fn a_retrospective_is_generated_edited_and_its_proposals_applied() {
     let job = app.edit.take().unwrap();
     assert!(job.kind == EditKind::Retro && job.path.ends_with(".harness/retros/001/retro.md"));
     app.finish_edit(&job, Ok(()));
-    assert_eq!(app.message.as_ref().unwrap().0, "Nothing changed");
+    assert_eq!(app.message.as_ref().unwrap().text, "Nothing changed");
     fs::write(&job.path, "Lesson: write tests first.").unwrap();
     app.finish_edit(&job, Ok(()));
     assert_eq!(
-        app.message.as_ref().unwrap().0,
+        app.message.as_ref().unwrap().text,
         "Retrospective 001 saved and committed"
     );
     assert!(repo.changed_files().unwrap().is_empty());

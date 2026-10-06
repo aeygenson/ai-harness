@@ -5,6 +5,7 @@
 use std::fs;
 
 use super::*;
+use crate::ui::message::{Message, MessageKind};
 use crate::ui::ButtonId;
 use harness_core::config::projects::Projects;
 use harness_core::git::Repo;
@@ -119,6 +120,13 @@ impl Env {
     fn saved(&self) -> Projects {
         Projects::load(self.home.path()).unwrap()
     }
+}
+
+/// The bottom-line message as its text and whether it reports a problem.
+fn shown(app: &App) -> (String, bool) {
+    let message = app.message.clone().expect("a message is shown");
+    let problem = message.kind == MessageKind::Error;
+    (message.text, problem)
 }
 
 fn screen(app: &mut App) -> String {

@@ -453,7 +453,7 @@ mod tests {
                     # Documentation search.\n[mcp.docs]\ncommand = \"npx\" # pinned\n\
                     args = [\"-y\", \"docs-mcp\"]\n";
         let server = |command: &str, args: &[&str], env: &[(&str, &str)]| McpConfig {
-            command: command.into(),
+            command: Some(command.into()),
             args: args.iter().map(|a| a.to_string()).collect(),
             env: env
                 .iter()
@@ -470,7 +470,7 @@ mod tests {
         )
         .unwrap();
         let config = Config::parse(&added).unwrap();
-        assert_eq!(config.mcp["fetch"].command, "uvx");
+        assert_eq!(config.mcp["fetch"].command.as_deref(), Some("uvx"));
         assert!(matches!(
             set_mcp(text, None, "docs", &server("x", &[], &[])),
             Err(EditError::McpExists(_))

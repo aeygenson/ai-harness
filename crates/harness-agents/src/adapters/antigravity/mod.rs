@@ -30,7 +30,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use harness_core::config::AgentKind;
-use harness_core::task::agent::{AgentOutcome, AgentRunner, RoleJob};
+use harness_core::task::agent::{AgentOutcome, AgentRunner, RoleJob, RunEnd};
 use harness_core::task::handoff::Role;
 
 use crate::process::{self, failed};
@@ -209,15 +209,14 @@ fn outcome(mut log: String, result: Result<process::Finished, String>) -> AgentO
             ),
         }
     };
-    let usage_limit_reached =
-        !success && process::looks_like_usage_limit(&format!("{message}\n{}", finished.stderr));
-    let success = success && denied.is_empty();
-    AgentOutcome {
-        success: success && !usage_limit_reached,
-        usage_limit_reached,
-        log,
-        message,
-    }
+    // A run that stopped at a refused action is not done, but it is not the
+    // usage limit either: only a failed run can be that.
+    let end = if success && !denied.is_empty() {
+        RunEnd::Failed(message)
+    } else {
+        process::run_end(success, message, &finished.stderr)
+    };
+    AgentOutcome { end, log }
 }
 
 #[cfg(test)]

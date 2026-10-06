@@ -7,7 +7,7 @@ use std::path::Path;
 use std::process::Command;
 use std::sync::Mutex;
 
-use harness_core::task::agent::{AgentOutcome, AgentRunner, RoleJob};
+use harness_core::task::agent::{AgentOutcome, AgentRunner, RoleJob, RunEnd};
 use harness_core::task::handoff::{Handoff, Issue, NextStep, Role, Severity, Verdict};
 
 /// What the mock does the next time a given role runs.
@@ -114,37 +114,27 @@ impl AgentRunner for MockAgent {
 
         match self.next_step(job.role) {
             MockStep::UsageLimit => AgentOutcome {
-                success: false,
-                usage_limit_reached: true,
+                end: RunEnd::UsageLimit,
                 log,
-                message: String::new(),
             },
             MockStep::WriteNothing => AgentOutcome {
-                success: true,
-                usage_limit_reached: false,
+                end: RunEnd::Succeeded,
                 log,
-                message: String::new(),
             },
             MockStep::WriteGarbage => {
                 let written = fs::write(job.output_dir.join("handoff.json"), "{ not json");
                 AgentOutcome {
-                    success: written.is_ok(),
-                    usage_limit_reached: false,
+                    end: done_if(written.is_ok()),
                     log,
-                    message: String::new(),
                 }
             }
             MockStep::WriteOutput(files) => AgentOutcome {
-                success: write_files(&job.output_dir, &files).is_ok(),
-                usage_limit_reached: false,
+                end: done_if(write_files(&job.output_dir, &files).is_ok()),
                 log,
-                message: String::new(),
             },
             MockStep::WriteFilesOnly(files) => AgentOutcome {
-                success: write_files(&job.project_dir, &files).is_ok(),
-                usage_limit_reached: false,
+                end: done_if(write_files(&job.project_dir, &files).is_ok()),
                 log,
-                message: String::new(),
             },
             MockStep::ChangeGitConfig => {
                 let changed = Command::new("git")
@@ -152,10 +142,8 @@ impl AgentRunner for MockAgent {
                     .args(["config", "core.fsmonitor", "agent-watcher"])
                     .status();
                 AgentOutcome {
-                    success: changed.is_ok_and(|status| status.success()),
-                    usage_limit_reached: false,
+                    end: done_if(changed.is_ok_and(|status| status.success())),
                     log,
-                    message: String::new(),
                 }
             }
             MockStep::GitCommit => {
@@ -165,10 +153,8 @@ impl AgentRunner for MockAgent {
                     .args(["commit", "-q", "--allow-empty", "-m", "sneaky"])
                     .status();
                 AgentOutcome {
-                    success: committed.is_ok_and(|status| status.success()),
-                    usage_limit_reached: false,
+                    end: done_if(committed.is_ok_and(|status| status.success())),
                     log,
-                    message: String::new(),
                 }
             }
             MockStep::Finish {
@@ -180,13 +166,20 @@ impl AgentRunner for MockAgent {
                 let written = write_files(&job.project_dir, &files)
                     .and_then(|()| write_result(job, verdict, next, &summary));
                 AgentOutcome {
-                    success: written.is_ok(),
-                    usage_limit_reached: false,
+                    end: done_if(written.is_ok()),
                     log,
-                    message: String::new(),
                 }
             }
         }
+    }
+}
+
+/// `Succeeded` when the mock's step worked; a failed step reads like a crash.
+fn done_if(worked: bool) -> RunEnd {
+    if worked {
+        RunEnd::Succeeded
+    } else {
+        RunEnd::Failed("the mock agent's step did not work".into())
     }
 }
 

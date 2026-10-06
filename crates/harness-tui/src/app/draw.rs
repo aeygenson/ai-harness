@@ -9,6 +9,7 @@ use ratatui::widgets::{Paragraph, Wrap};
 use ratatui::Frame;
 
 use crate::tabs::tasks::TasksTab;
+use crate::ui::message::MessageKind;
 use crate::ui::{self, theme};
 use crate::ui::{buttons, panel, ButtonId, Target};
 use crate::{App, Tab, TABS};
@@ -109,14 +110,13 @@ impl App {
             .or_else(|| self.skills.as_ref().and_then(|s| s.problem.clone()))
             .or_else(|| self.projects.problem.clone())
             .or_else(|| self.tr.problems.first().cloned());
-        if let Some((text, error)) = &self.message {
-            let (mark, style) = if *error {
-                ("✗", theme::bad())
-            } else {
-                ("✓", theme::ok())
+        if let Some(message) = &self.message {
+            let (mark, style) = match message.kind {
+                MessageKind::Error => ("✗", theme::bad()),
+                MessageKind::Info => ("✓", theme::ok()),
             };
             spans.push(Span::styled(
-                format!(" {mark} {text}  "),
+                format!(" {mark} {}  ", message.text),
                 style.add_modifier(Modifier::BOLD),
             ));
         } else if let Some(problem) = problem {

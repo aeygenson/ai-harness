@@ -20,16 +20,24 @@ pub struct RoleJob {
 }
 
 /// What happened when the agent ran. The handoff itself is read from `output_dir`.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AgentOutcome {
-    /// False if the agent crashed or exited with an error.
-    pub success: bool,
-    /// True if the subscription's usage limit stopped the agent.
-    pub usage_limit_reached: bool,
+    /// How the run ended.
+    pub end: RunEnd,
     /// What the agent printed; saved as `agent.log`.
     pub log: String,
-    /// If it failed: one short line for Lisa, for example "timed out after 1800 s".
-    pub message: String,
+}
+
+/// How an agent's run ended.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RunEnd {
+    /// The agent finished its work (the handoff is checked separately).
+    Succeeded,
+    /// The agent crashed or exited with an error: one short line for Lisa,
+    /// for example "timed out after 1800 s".
+    Failed(String),
+    /// The subscription's usage limit stopped the agent.
+    UsageLimit,
 }
 
 /// Runs one role with some agent.

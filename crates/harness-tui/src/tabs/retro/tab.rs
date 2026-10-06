@@ -29,6 +29,7 @@ use harness_core::git::{Repo, HARNESS_DIR};
 use harness_core::retro::ops::{self, RetroInfo};
 use harness_core::retro::proposals::Proposal;
 use harness_core::retro::suggest::{self, RETRO_MD};
+use harness_core::retro::Scope;
 use ratatui::crossterm::event::KeyCode;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Modifier, Style};
@@ -40,6 +41,7 @@ use tokio::sync::oneshot;
 use crate::tabs::tasks::draw_list;
 use crate::tabs::tasks::runner::{push_line, readable, run_until_stopped, Background};
 use crate::ui::i18n::I18n;
+use crate::ui::message::Message;
 use crate::ui::theme;
 use crate::ui::{buttons, panel, ButtonId, Hits, ListId};
 
@@ -304,7 +306,7 @@ impl RetroTab {
     }
 
     /// Takes what the agent printed; once it is done, the message to show.
-    pub fn tick(&mut self, tr: &I18n) -> Option<(String, bool)> {
+    pub fn tick(&mut self, tr: &I18n) -> Option<Message> {
         let generating = self.generating.as_ref()?;
         for line in generating.log.try_iter() {
             if let Some(line) = readable(&line) {
@@ -326,8 +328,8 @@ impl RetroTab {
         }
         self.focus = Focus::Retros;
         Some(match result {
-            Ok(number) => (tr.f("retro.generated", &[("number", &number)]), false),
-            Err(error) => (tr.f("retro.failed", &[("error", &error)]), true),
+            Ok(number) => Message::info(tr.f("retro.generated", &[("number", &number)])),
+            Err(error) => Message::error(tr.f("retro.failed", &[("error", &error)])),
         })
     }
 
@@ -347,11 +349,7 @@ impl RetroTab {
             .list
             .iter()
             .map(|retro| {
-                let scope = if retro.scope == "all" {
-                    tr.t("retro.all").to_string()
-                } else {
-                    retro.scope.clone()
-                };
+                let scope = scope_text(retro, tr);
                 let mut spans = vec![Span::raw(format!("{}  ", retro.number))];
                 spans.push(Span::raw(format!(
                     "{:<11}",
@@ -503,11 +501,7 @@ impl RetroTab {
                 );
             }
         }
-        let scope = if retro.scope == "all" {
-            tr.t("retro.all").to_string()
-        } else {
-            retro.scope.clone()
-        };
+        let scope = scope_text(retro, tr);
         let title = match &retro.date {
             Some(date) => format!(" {} · {scope} · {date} ", retro.number),
             None => format!(" {} · {scope} ", retro.number),
@@ -551,4 +545,12 @@ fn generate(
     )?
     .map_err(|e| text(&e))?;
     Ok(number)
+}
+/// What `retro` looked at, in Lisa's language: «all tasks» or the task id.
+fn scope_text(retro: &RetroInfo, tr: &I18n) -> String {
+    match &retro.scope {
+        Some(Scope::All) => tr.t("retro.all").to_string(),
+        Some(Scope::Task(id)) => id.clone(),
+        None => String::new(),
+    }
 }

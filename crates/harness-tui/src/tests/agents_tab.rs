@@ -295,7 +295,10 @@ fn roles_offer_only_agents_ready_on_the_agents_tab() {
     fs::create_dir_all(credentials.join("codex")).unwrap();
     fs::write(credentials.join("codex/auth.json"), "{}").unwrap();
     app.finish_sign_in("Claude Code", Ok(()));
-    assert_eq!(app.message.as_ref().unwrap().0, "Claude Code: login saved");
+    assert_eq!(
+        app.message.as_ref().unwrap().text,
+        "Claude Code: login saved"
+    );
     let text = screen_of_width(&mut app, 160);
     assert!(text.contains("( ) codex "), "{text}");
     assert!(!text.contains("not ready"), "{text}");

@@ -7,6 +7,7 @@
 use std::sync::mpsc;
 
 use crate::tabs::agents::{self, JobEvent};
+use crate::ui::message::Message;
 use crate::{App, Tab};
 
 /// What came from a background thread since the last look.
@@ -81,7 +82,9 @@ impl App {
             done: None,
         });
         self.install_events = Some(rx);
-        self.message = Some((self.tr.f("agents.job_running", &[("name", &name)]), false));
+        self.message = Some(Message::info(
+            self.tr.f("agents.job_running", &[("name", &name)]),
+        ));
     }
 
     /// Takes the lines of a running install or update, and its end.
@@ -119,7 +122,12 @@ impl App {
                 (Ok(()), Action::Update) => "agents.job_updated",
                 (Ok(()), Action::Remove) => "agents.job_removed",
             };
-            self.message = Some((self.tr.f(key, &[("name", &job.name)]), result.is_err()));
+            let text = self.tr.f(key, &[("name", &job.name)]);
+            self.message = Some(if result.is_err() {
+                Message::error(text)
+            } else {
+                Message::info(text)
+            });
             job.done = Some(result);
         }
         // See what is installed now.
@@ -162,7 +170,7 @@ impl App {
         }
         match done {
             Some(done) => self.plugin_job_done(done),
-            None => self.message = Some(("the download stopped".into(), true)),
+            None => self.message = Some(Message::error("the download stopped")),
         }
     }
 
@@ -179,7 +187,7 @@ impl App {
             roles.set_ready(self.agents.ready());
         }
         if failed {
-            self.message = Some((self.tr.t("agents.check_stopped").to_string(), true));
+            self.message = Some(Message::error(self.tr.t("agents.check_stopped")));
         } else if self.tab == Tab::Agents && self.agents.job.is_none() {
             let installed = self.agents.statuses.iter().filter(|s| s.installed());
             let text = self.tr.f(
@@ -189,7 +197,7 @@ impl App {
                     ("all", &self.agents.statuses.len()),
                 ],
             );
-            self.message = Some((text, false));
+            self.message = Some(Message::info(text));
         }
     }
 
@@ -238,8 +246,8 @@ impl App {
             mcp.signing = None;
         }
         self.message = Some(match answer {
-            Ok(()) => (self.tr.f("mcp.signed_in_as", &[("name", &name)]), false),
-            Err(error) => (error, true),
+            Ok(()) => Message::info(self.tr.f("mcp.signed_in_as", &[("name", &name)])),
+            Err(error) => Message::error(error),
         });
     }
 }

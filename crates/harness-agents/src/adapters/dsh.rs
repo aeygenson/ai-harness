@@ -203,13 +203,9 @@ fn outcome(mut log: String, result: Result<process::Finished, String>) -> AgentO
             .or_else(|| dsh_error(&finished.stderr))
             .unwrap_or_else(|| format!("dsh exited ({}) without finishing", finished.status))
     };
-    let usage_limit_reached =
-        !success && process::looks_like_usage_limit(&format!("{message}\n{}", finished.stderr));
     AgentOutcome {
-        success: success && !usage_limit_reached,
-        usage_limit_reached,
+        end: process::run_end(success, message, &finished.stderr),
         log,
-        message,
     }
 }
 
@@ -422,6 +418,7 @@ mod tests {
     #[cfg(unix)]
     #[tokio::test]
     async fn a_run_reads_the_prompt_and_reports_success_by_exit_code() {
+        use harness_core::task::agent::RunEnd;
         use std::os::unix::fs::PermissionsExt;
 
         let dir = tempfile::tempdir().unwrap();
@@ -439,7 +436,7 @@ mod tests {
         job.project_dir = dir.path().to_path_buf();
         let dsh = Dsh::new(Secret::new("k"), RoleSettings::default()).with_program(&program);
         let outcome = dsh.run(&job).await;
-        assert!(outcome.success, "{}", outcome.message);
+        assert_eq!(outcome.end, RunEnd::Succeeded);
         assert!(outcome.log.contains("done: do it"), "{}", outcome.log);
         assert!(outcome.log.starts_with("agent: dsh"), "{}", outcome.log);
 
@@ -449,8 +446,11 @@ mod tests {
         )
         .unwrap();
         let outcome = dsh.run(&job).await;
-        assert!(!outcome.success);
-        assert!(outcome.usage_limit_reached);
-        assert_eq!(outcome.message, "dsh: TRANSPORT: rate limit reached");
+        assert_eq!(outcome.end, RunEnd::UsageLimit);
+        assert!(
+            outcome.log.contains("rate limit reached"),
+            "{}",
+            outcome.log
+        );
     }
 }

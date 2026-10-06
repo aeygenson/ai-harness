@@ -3,8 +3,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use super::{
-    stage_text, RepeatedIssue, Return, RoleStats, SeverityCounts, SkillSetting, SkillUse, Stats,
-    TaskHistory, TaskSummary,
+    stage_text, RepeatedIssue, Return, RoleStats, Scope, SeverityCounts, SkillSetting, SkillUse,
+    Stats, TaskHistory, TaskSummary,
 };
 use crate::config::Config;
 use crate::task::handoff::{NextStep, Role, Severity, Verdict};
@@ -12,7 +12,7 @@ use crate::task::handoff::{NextStep, Role, Severity, Verdict};
 impl Stats {
     /// Counts everything in `tasks`. `config` is the current harness.toml,
     /// used to find skills that were configured but never used.
-    pub fn collect(scope: &str, tasks: &[TaskHistory], config: Option<&Config>) -> Self {
+    pub fn collect(scope: Scope, tasks: &[TaskHistory], config: Option<&Config>) -> Self {
         let mut roles: BTreeMap<Role, RoleStats> = BTreeMap::new();
         let mut returns: BTreeMap<(Role, Role), usize> = BTreeMap::new();
         let mut issues = SeverityCounts::default();
@@ -96,7 +96,7 @@ impl Stats {
         });
 
         Self {
-            scope: scope.to_string(),
+            scope,
             tasks: summaries,
             roles,
             returns,

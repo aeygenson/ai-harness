@@ -22,6 +22,7 @@ mod collect;
 mod markdown;
 
 use std::collections::BTreeMap;
+use std::fmt;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -79,11 +80,54 @@ impl TaskHistory {
     }
 }
 
+/// What a retrospective looked at: every task, or one.
+//
+// `into = "String"` makes serde write it as the plain text `"all"` or the
+// task id, so `stats.json` looks the same as before.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(into = "String")]
+pub enum Scope {
+    /// Every task of the project.
+    All,
+    /// One task, by its id (`task-001`).
+    Task(String),
+}
+
+impl Scope {
+    /// How [`Scope::All`] is written in `stats.json`.
+    const ALL: &'static str = "all";
+
+    /// Reads the text `stats.json` keeps back into a scope.
+    pub fn from_text(text: &str) -> Self {
+        if text == Self::ALL {
+            Scope::All
+        } else {
+            Scope::Task(text.to_string())
+        }
+    }
+}
+
+/// Prints `all` or the task id, as in `stats.json`.
+impl fmt::Display for Scope {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Scope::All => f.write_str(Self::ALL),
+            Scope::Task(id) => f.write_str(id),
+        }
+    }
+}
+
+/// Used by serde to write the scope into `stats.json`.
+impl From<Scope> for String {
+    fn from(scope: Scope) -> Self {
+        scope.to_string()
+    }
+}
+
 /// Everything the retrospective counted. Saved as `stats.json`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Stats {
-    /// A task id, or `all`.
-    pub scope: String,
+    pub scope: Scope,
     pub tasks: Vec<TaskSummary>,
     pub roles: BTreeMap<Role, RoleStats>,
     /// Work sent back, most frequent first.
@@ -351,7 +395,7 @@ mod tests {
 
     #[test]
     fn counts_roles_returns_and_tasks() {
-        let stats = Stats::collect("all", &history(), None);
+        let stats = Stats::collect(Scope::All, &history(), None);
 
         let tester = &stats.roles[&Role::Tester];
         assert_eq!((tester.steps, tester.approved, tester.rejected), (3, 1, 2));
@@ -385,7 +429,7 @@ mod tests {
 
     #[test]
     fn the_same_issue_is_found_across_roles_and_tasks() {
-        let stats = Stats::collect("all", &history(), None);
+        let stats = Stats::collect(Scope::All, &history(), None);
         assert_eq!(
             stats.issues,
             SeverityCounts {
@@ -409,7 +453,7 @@ mod tests {
 
     #[test]
     fn skills_show_configured_used_and_unknown() {
-        let stats = Stats::collect("task-001", &history(), Some(&config()));
+        let stats = Stats::collect(Scope::Task("task-001".into()), &history(), Some(&config()));
         let row = |role, skill: &str| {
             stats
                 .skills
@@ -448,7 +492,7 @@ mod tests {
 
     #[test]
     fn markdown_has_every_section() {
-        let md = Stats::collect("all", &history(), Some(&config())).to_markdown();
+        let md = Stats::collect(Scope::All, &history(), Some(&config())).to_markdown();
         for part in [
             "# Retrospective: all",
             "| task-001 | 2 of 5 | done | 6 | 1 | 1 |",
@@ -463,7 +507,7 @@ mod tests {
         ] {
             assert!(md.contains(part), "missing {part:?} in:\n{md}");
         }
-        let empty = Stats::collect("task-003", &[], None).to_markdown();
+        let empty = Stats::collect(Scope::Task("task-003".into()), &[], None).to_markdown();
         assert!(empty.contains("Nothing was sent back."), "{empty}");
         assert!(
             empty.contains("No role has finished a step yet."),
@@ -495,7 +539,7 @@ mod tests {
         assert_eq!(tasks[0].handoffs, [design]);
         assert_eq!(tasks[0].failures, [(1, Role::Architect)]);
 
-        let stats = Stats::collect("all", &tasks, None);
+        let stats = Stats::collect(Scope::All, &tasks, None);
         let first = stats.save(harness).unwrap();
         assert!(first.ends_with("retros/001"));
         fs::create_dir(harness.join("retros/notes")).unwrap();

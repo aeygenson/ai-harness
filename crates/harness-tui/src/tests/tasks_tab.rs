@@ -62,7 +62,7 @@ fn a_new_task_runs_the_architect_then_the_answer_goes_to_the_developer() {
 
     // Sending nothing is refused.
     click(&mut app, " Send ");
-    assert_eq!(app.message.as_ref().unwrap().0, "Write the task first");
+    assert_eq!(app.message.as_ref().unwrap().text, "Write the task first");
 
     click(&mut app, "Write here");
     assert!(app.tasks.as_ref().unwrap().typing());
@@ -76,7 +76,7 @@ fn a_new_task_runs_the_architect_then_the_answer_goes_to_the_developer() {
     key(&mut app, KeyCode::Esc);
     key(&mut app, KeyCode::Esc);
     assert!(!app.quit);
-    assert!(app.message.as_ref().unwrap().0.contains("not sent"));
+    assert!(app.message.as_ref().unwrap().text.contains("not sent"));
     click(&mut app, "Build a CSV");
     key(&mut app, KeyCode::Enter);
     type_text(&mut app, "Second line");
@@ -98,7 +98,7 @@ fn a_new_task_runs_the_architect_then_the_answer_goes_to_the_developer() {
         stage(&app),
         Stage::WaitingForHuman(WaitReason::ApproveDesign)
     );
-    let (message, problem) = app.message.clone().unwrap();
+    let (message, problem) = shown(&app);
     assert!(message.contains("the design is ready"), "{message}");
     assert!(!problem);
     // The answer goes to the developer unless Lisa chooses otherwise.
@@ -129,7 +129,7 @@ fn a_new_task_runs_the_architect_then_the_answer_goes_to_the_developer() {
     );
     assert_eq!(steps[1].handoff.summary, "Use serde");
     assert_eq!(steps[1].handoff.verdict, Verdict::Approved);
-    assert!(app.message.as_ref().unwrap().0.contains("done"));
+    assert!(app.message.as_ref().unwrap().text.contains("done"));
     // A finished task offers only a new one.
     assert!(screen(&mut app).contains(" To: architect · new task ▾ "));
 }
@@ -150,7 +150,7 @@ fn the_to_list_offers_the_roles_and_finishing() {
         .message
         .as_ref()
         .unwrap()
-        .0
+        .text
         .contains("waits for your answer"));
     assert_eq!(
         app.tasks.as_ref().unwrap().choice,
@@ -181,7 +181,7 @@ fn the_to_list_offers_the_roles_and_finishing() {
     send(&mut app);
     wait(&mut app);
     assert_eq!(stage(&app), Stage::Done);
-    assert_eq!(app.message.as_ref().unwrap().0, "task-001: saved");
+    assert_eq!(app.message.as_ref().unwrap().text, "task-001: saved");
     let steps = TaskStore::open(&root.join(".harness/runs"), "task-001")
         .unwrap()
         .0
@@ -200,7 +200,7 @@ fn a_missing_login_stops_before_anything_is_saved() {
     type_text(&mut app, "Something");
     send(&mut app);
     wait(&mut app);
-    let (message, problem) = app.message.clone().unwrap();
+    let (message, problem) = shown(&app);
     assert!(message.contains("sign in on the Agents tab"), "{message}");
     assert!(problem);
     assert!(!root.join(".harness/runs/task-001").exists());
@@ -217,7 +217,7 @@ fn quitting_waits_for_the_running_roles() {
     send(&mut app);
     key(&mut app, KeyCode::Char('q'));
     assert!(!app.quit);
-    assert!(app.message.as_ref().unwrap().1);
+    assert!(app.message.as_ref().unwrap().kind == MessageKind::Error);
     wait(&mut app);
     key(&mut app, KeyCode::Char('q'));
     assert!(app.quit);
@@ -396,14 +396,14 @@ fn files_of_a_step_open_in_zed_with_a_click() {
     app.open_task_file();
     assert_eq!(
         app.message,
-        Some(("Opened in Zed: docs/parser.md".to_string(), false))
+        Some(Message::info("Opened in Zed: docs/parser.md"))
     );
     // A file that is not there any more is not opened.
     click(&mut app, "src/parser.rs");
     app.open_task_file();
     assert_eq!(
         app.message,
-        Some(("src/parser.rs is not there any more".to_string(), true))
+        Some(Message::error("src/parser.rs is not there any more"))
     );
 
     // After the commit the list comes from git: also what the handoff forgot,
@@ -492,7 +492,7 @@ fn the_same_task_sent_twice_is_not_started_again() {
     tasks.focus_input();
     type_text(&mut app, "Fix  the\ndemo ");
     send(&mut app);
-    let (text, problem) = app.message.clone().unwrap();
+    let (text, problem) = shown(&app);
     assert!(problem, "{text}");
     assert!(
         text.starts_with("task-001 already has this text and is not done (waiting"),

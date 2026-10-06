@@ -7,6 +7,7 @@ use harness_core::git::Repo;
 use harness_core::skills::{self};
 use harness_platform::editor;
 
+use crate::ui::message::Message;
 use crate::{App, EditJob, EditKind};
 
 impl App {
@@ -23,17 +24,18 @@ impl App {
             .map(harness_platform::path::slashed)
             .unwrap_or_else(|| path.display().to_string());
         if !path.is_file() {
-            self.message = Some((self.tr.f("tasks.file_missing", &[("path", &shown)]), true));
+            self.message = Some(Message::error(
+                self.tr.f("tasks.file_missing", &[("path", &shown)]),
+            ));
             return;
         }
         match (self.viewer)(&path) {
             Some(command) => {
                 self.message = Some(match editor::view(command) {
-                    Ok(()) => (self.tr.f("tasks.file_opened", &[("path", &shown)]), false),
-                    Err(error) => (
-                        self.tr.f("skills.editor_failed", &[("error", &error)]),
-                        true,
-                    ),
+                    Ok(()) => Message::info(self.tr.f("tasks.file_opened", &[("path", &shown)])),
+                    Err(error) => {
+                        Message::error(self.tr.f("skills.editor_failed", &[("error", &error)]))
+                    }
                 });
             }
             None => {
@@ -56,10 +58,7 @@ impl App {
             EditKind::Retro => return self.finish_retro_edit(job, result),
             EditKind::View => {
                 self.message = result.err().map(|error| {
-                    (
-                        self.tr.f("skills.editor_failed", &[("error", &error)]),
-                        true,
-                    )
+                    Message::error(self.tr.f("skills.editor_failed", &[("error", &error)]))
                 });
                 return;
             }
@@ -67,13 +66,13 @@ impl App {
         let tr = &self.tr;
         let mut message = result
             .err()
-            .map(|error| (tr.f("skills.editor_failed", &[("error", &error)]), true));
+            .map(|error| Message::error(tr.f("skills.editor_failed", &[("error", &error)])));
         let text = fs::read_to_string(&job.path).unwrap_or_default();
         let unchanged_copy =
             job.copied && skills::copy_of_built_in(&job.name).as_deref() == Some(text.as_str());
         if unchanged_copy {
             let _ = fs::remove_file(&job.path);
-            message.get_or_insert((tr.t("skills.unchanged").to_string(), false));
+            message.get_or_insert(Message::info(tr.t("skills.unchanged")));
         } else if job.path.is_file() {
             let saved = self
                 .project
@@ -85,12 +84,12 @@ impl App {
                         .map_err(|e| e.to_string())
                 });
             let next = match saved {
-                Err(error) => (error, true),
+                Err(error) => Message::error(error),
                 Ok(_) if skills::split_header(&text).is_none() => {
-                    (tr.f("skills.broken", &[("name", &job.name)]), true)
+                    Message::error(tr.f("skills.broken", &[("name", &job.name)]))
                 }
-                Ok(true) => (tr.f("skills.saved", &[("name", &job.name)]), false),
-                Ok(false) => (tr.t("skills.unchanged").to_string(), false),
+                Ok(true) => Message::info(tr.f("skills.saved", &[("name", &job.name)])),
+                Ok(false) => Message::info(tr.t("skills.unchanged")),
             };
             message.get_or_insert(next);
         }

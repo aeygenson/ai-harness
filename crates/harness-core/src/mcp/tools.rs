@@ -35,7 +35,10 @@ pub struct Tool {
 
 /// `<home>/mcp/<name>-<fingerprint>.json` (`home` is `~/.harness`).
 pub fn cache_path(home: &Path, name: &str, server: &McpConfig) -> PathBuf {
-    let mut settings = serde_json::json!([name, server.command, server.args, server.env]);
+    // A web server has no command; `""` keeps the key it had before
+    // `command` became an `Option`, so saved lists are still found.
+    let command = server.command.as_deref().unwrap_or_default();
+    let mut settings = serde_json::json!([name, command, server.args, server.env]);
     // A web server's address and headers; a program server keeps its old key.
     if server.url.is_some() || !server.headers.is_empty() {
         settings = serde_json::json!([settings, server.url, server.headers]);
@@ -70,7 +73,7 @@ mod tests {
     fn a_list_belongs_to_the_settings_it_was_asked_with() {
         let home = tempfile::tempdir().unwrap();
         let mut server = McpConfig {
-            command: "npx".into(),
+            command: Some("npx".into()),
             args: vec!["docs-mcp".into()],
             env: [("KEY".to_string(), "secret:docs".to_string())].into(),
             ..McpConfig::default()

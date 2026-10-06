@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 use toml_edit::{value, DocumentMut, Item, Table};
 
 use super::{finish, for_role_lists, set_list, set_text, table, EditError};
-use crate::config::McpConfig;
+use crate::config::{McpAuth, McpConfig};
 
 /// Writes `[mcp.<name>]`. With `old`, that server is changed: when the name
 /// is different it is renamed, in the roles' `mcp` lists too. Without `old`
@@ -30,8 +30,7 @@ pub fn set_mcp(
             .ok_or_else(|| EditError::NoMcp(old.to_string()))?,
         None => Table::new(),
     };
-    let command = Some(server.command.as_str()).filter(|c| !c.is_empty());
-    set_text(&mut entry, "command", command);
+    set_text(&mut entry, "command", server.command.as_deref());
     if server.args.is_empty() {
         entry.remove("args");
     } else {
@@ -40,7 +39,7 @@ pub fn set_mcp(
     set_map(&mut entry, "env", &server.env);
     set_text(&mut entry, "url", server.url.as_deref());
     set_map(&mut entry, "headers", &server.headers);
-    set_text(&mut entry, "auth", server.auth.as_deref());
+    set_text(&mut entry, "auth", server.auth.map(McpAuth::as_str));
     servers.insert(name, Item::Table(entry));
     if let (Some(old), true) = (old, renamed) {
         for_role_lists(&mut doc, "mcp", |list| {

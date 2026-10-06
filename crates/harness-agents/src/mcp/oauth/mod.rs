@@ -247,8 +247,8 @@ pub fn oauth_url(config: &harness_core::config::Config, name: &str) -> Result<St
         .mcp
         .get(name)
         .ok_or_else(|| format!("harness.toml has no [mcp.{name}]"))?;
-    match (&server.url, server.auth.as_deref()) {
-        (Some(url), Some(harness_core::mcp::AUTH_OAUTH)) => Ok(url.trim().to_string()),
+    match (&server.url, server.auth) {
+        (Some(url), Some(harness_core::config::McpAuth::OAuth)) => Ok(url.trim().to_string()),
         _ => Err(format!(
             "[mcp.{name}] is not a sign-in server: it needs url = \"https://...\" and auth = \"oauth\""
         )),

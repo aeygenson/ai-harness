@@ -158,7 +158,7 @@ impl Browser {
         let inner = block.inner(area);
         frame.render_widget(block, area);
         // Clicks anywhere in the window stay in it.
-        hits.add(area, Target::Field(usize::MAX));
+        hits.add(area, Target::Window);
 
         let [path, list, message, hint, bar] = Layout::vertical([
             Constraint::Length(1),

@@ -179,8 +179,9 @@ pub struct PluginConfig {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct McpConfig {
-    #[serde(default, skip_serializing_if = "String::is_empty")]
-    pub command: String,
+    /// The program that is the server; `None` for a server on the web.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub command: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub args: Vec<String>,
     /// Variables for the server. A value `"secret:<name>"` is read from the
@@ -194,10 +195,28 @@ pub struct McpConfig {
     /// `Authorization = "Bearer secret:<name>"`.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub headers: BTreeMap<String, String>,
-    /// `"oauth"`: a web server Lisa signs in to once in the browser
-    /// (`harness mcp login <name>`); the harness keeps the tokens.
+    /// How Lisa signs in to a web server; `None`: it needs no sign-in, or
+    /// its headers carry the key.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub auth: Option<String>,
+    pub auth: Option<McpAuth>,
+}
+
+/// How Lisa signs in to an MCP server on the web.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum McpAuth {
+    /// `auth = "oauth"`: a sign-in in the browser, once
+    /// (`harness mcp login <name>`); the harness keeps the tokens.
+    #[serde(rename = "oauth")]
+    OAuth,
+}
+
+impl McpAuth {
+    /// The name as written in `harness.toml`.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            McpAuth::OAuth => "oauth",
+        }
+    }
 }
 
 #[derive(Debug, thiserror::Error)]

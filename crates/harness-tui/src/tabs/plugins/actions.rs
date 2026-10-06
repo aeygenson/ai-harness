@@ -6,6 +6,7 @@ use harness_core::task::handoff::Role;
 use harness_core::{config, plugins};
 
 use crate::tabs::plugins::catalog;
+use crate::ui::message::Message;
 use crate::ui::Form;
 use crate::{App, EditJob, EditKind, PluginJob, Purpose};
 
@@ -36,7 +37,7 @@ impl App {
                     // still has the plugin.
                     if self.allow_plugin(&name, hooks, servers).is_err() {
                         let text = self.tr.f("plugins.forbid_used", &[("name", &name)]);
-                        self.message = Some((text, true));
+                        self.message = Some(Message::error(text));
                     }
                     return;
                 }
@@ -69,7 +70,7 @@ impl App {
                 ));
             }
             A::Unusable(why) => {
-                self.message = Some((tr.f("plugins.cannot_add", &[("why", &why)]), true));
+                self.message = Some(Message::error(tr.f("plugins.cannot_add", &[("why", &why)])));
             }
             A::Add { entry, give } => self.add_plugin(entry, give),
             A::Update(name) => self.prepare_plugin_update(name),
@@ -128,7 +129,7 @@ impl App {
                     }
                     Some(path) => {
                         let text = tr.f("plugins.no_folder", &[("path", &path.display())]);
-                        self.message = Some((text, true));
+                        self.message = Some(Message::error(text));
                     }
                     None => {}
                 }
@@ -214,12 +215,11 @@ impl App {
         });
         let role = role.as_str();
         self.message = Some(match result {
-            Ok(()) => (
+            Ok(()) => Message::info(
                 self.tr
                     .f("plugins.given", &[("name", &name), ("role", &role)]),
-                false,
             ),
-            Err(error) => (error, true),
+            Err(error) => Message::error(error),
         });
     }
 
@@ -266,7 +266,9 @@ impl App {
         if let Some(tasks) = &mut self.tasks {
             tasks.reload();
         }
-        self.message = Some((self.tr.f("plugins.removed", &[("name", &name)]), false));
+        self.message = Some(Message::info(
+            self.tr.f("plugins.removed", &[("name", &name)]),
+        ));
         Ok(())
     }
 
@@ -283,7 +285,9 @@ impl App {
         if let (Some(plugins), Some(roles)) = (&mut self.plugins, &self.roles) {
             plugins.select_named(name, roles);
         }
-        self.message = Some((self.tr.f("plugins.allow_saved", &[("name", &name)]), false));
+        self.message = Some(Message::info(
+            self.tr.f("plugins.allow_saved", &[("name", &name)]),
+        ));
         Ok(())
     }
 
@@ -300,10 +304,10 @@ impl App {
                     .map_err(|e| e.to_string())
             });
         self.message = Some(match (result, saved) {
-            (Err(error), _) => (tr.f("skills.editor_failed", &[("error", &error)]), true),
-            (_, Err(error)) => (error, true),
-            (_, Ok(true)) => (tr.f("plugins.edited", &[("name", &job.name)]), false),
-            (_, Ok(false)) => (tr.t("plugins.unchanged").to_string(), false),
+            (Err(error), _) => Message::error(tr.f("skills.editor_failed", &[("error", &error)])),
+            (_, Err(error)) => Message::error(error),
+            (_, Ok(true)) => Message::info(tr.f("plugins.edited", &[("name", &job.name)])),
+            (_, Ok(false)) => Message::info(tr.t("plugins.unchanged")),
         });
         if let (Some(plugins), Some(roles)) = (&mut self.plugins, &self.roles) {
             plugins.reload(roles);
