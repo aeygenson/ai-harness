@@ -38,7 +38,8 @@ pub fn has_login(dir: &Path, agent: &str) -> bool {
         "codex" => dir.join("codex").join("auth.json").is_file(),
         "dsh" => {
             dir.join("deepseek").join(TOKEN_FILE).is_file()
-                || std::env::var(crate::dsh::KEY_ENV).is_ok_and(|key| !key.trim().is_empty())
+                || std::env::var(crate::adapters::dsh::KEY_ENV)
+                    .is_ok_and(|key| !key.trim().is_empty())
         }
         "antigravity" => dir.join("antigravity/.gemini/antigravity-cli").is_dir(),
         _ => false,

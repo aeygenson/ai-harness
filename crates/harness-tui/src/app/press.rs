@@ -1,7 +1,7 @@
 //! What the buttons do: one place for every `ButtonId`, whether it was clicked
 //! or chosen with a key.
 
-use harness_agents::credentials;
+use harness_agents::install::credentials;
 
 use crate::tabs::plugins;
 use crate::tabs::projects::has_config;

@@ -3,7 +3,7 @@
 //! Nothing here is written by hand: `harness models --refresh` (or «Refresh
 //! models» in the TUI) asks every agent with a saved login, and the answer is
 //! kept in `~/.harness/models/<agent>.json`, so the Roles tab works without
-//! the network. The asking itself is in `harness_agents::models`.
+//! the network. The asking itself is in `harness_agents::install::models`.
 
 use std::fs;
 use std::io;

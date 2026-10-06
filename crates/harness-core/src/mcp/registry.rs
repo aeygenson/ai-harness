@@ -1,7 +1,7 @@
 //! The official MCP registry (registry.modelcontextprotocol.io): servers to
 //! choose from on the MCP tab instead of typing their command.
 //!
-//! The asking is in `harness_agents::mcp_registry`; here the answer is read
+//! The asking is in `harness_agents::mcp::registry`; here the answer is read
 //! and an entry becomes a server for `harness.toml`. Only servers the agents
 //! can start as a program (`stdio`) from npm (`npx`), PyPI (`uvx`) or a
 //! container image (`docker`) can be used; servers that exist only on the web

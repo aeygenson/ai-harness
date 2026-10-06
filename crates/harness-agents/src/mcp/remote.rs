@@ -22,7 +22,7 @@ use harness_core::mcp::{is_allowed_url, BRIDGE_HEADER, BRIDGE_URL};
 use harness_core::text::safe_line;
 use serde_json::{json, Value};
 
-use crate::credentials::write_private;
+use crate::install::credentials::write_private;
 use crate::process::base_command;
 
 /// How long one request may take; a tool may work for a while.

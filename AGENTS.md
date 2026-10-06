@@ -25,7 +25,7 @@ purpose. Where a rule below differs from common Rust advice, the reason is given
 |---|---|
 | `harness-platform` | Everything that differs between Linux, macOS and Windows. No dependencies, except `crossterm` on Windows for typing a secret. |
 | `harness-core` | The engine. No `tokio`, no UI. Folders: `task/` (state, handoffs, routes, run loop), `config/` (`harness.toml`, project list), `mcp/`, `plugins/`, `retro/`; single files: `git`, `skills`, `models`, `secret`, `text`. |
-| `harness-agents` | Adapters that start each agent; process control; MCP check/OAuth/bridge. |
+| `harness-agents` | Starting the agents. Folders: `adapters/` (one per agent, plus the mock), `mcp/` (check, OAuth sign-in, web bridge, registry), `install/` (catalog, logins, model lists); single files: `build`, `launcher`, `process`, `role_settings`, `team`. |
 | `harness-tui` | The full-screen Ratatui interface: `app/` (event loop, keyboard, mouse, forms, drawing), `tabs/` (one module or folder per tab), `ui/` (shared widgets, themes, translations). |
 | `harness-cli` | The `harness` program (`clap`). |
 

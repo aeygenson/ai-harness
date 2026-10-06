@@ -9,7 +9,7 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use harness_agents::credentials::Secret;
+use harness_agents::install::credentials::Secret;
 use harness_agents::role_settings::RoleSettings;
 use harness_agents::ClaudeCode;
 use harness_core::git::Repo;

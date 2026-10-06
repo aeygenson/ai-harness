@@ -335,7 +335,7 @@ impl TurnEnd {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::credentials::Secret;
+    use crate::install::credentials::Secret;
     use harness_core::plugins::Plugin;
 
     fn job(role: Role) -> RoleJob {

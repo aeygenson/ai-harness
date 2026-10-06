@@ -1,9 +1,9 @@
 //! The Agents tab: the catalog of console agents, with the ones installed on
-//! this computer marked (see `harness_agents::catalog`). It does not need an
+//! this computer marked (see `harness_agents::install::catalog`). It does not need an
 //! open project: agents are installed on the computer, not in a project.
 
-use harness_agents::catalog::{self, Action, Status, CATALOG};
-use harness_agents::credentials;
+use harness_agents::install::catalog::{self, Action, Status, CATALOG};
+use harness_agents::install::credentials;
 use ratatui::crossterm::event::KeyCode;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::Modifier;

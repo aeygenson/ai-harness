@@ -3,7 +3,7 @@
 //! downloads, so it is ignored by default; CI runs it on Linux, macOS and
 //! Windows with `cargo test -p harness-agents --test live_install -- --ignored`.
 
-use harness_agents::catalog::{self, Action, Status};
+use harness_agents::install::catalog::{self, Action, Status};
 
 fn status(id: &str) -> Status {
     catalog::check_all(None)

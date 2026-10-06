@@ -845,7 +845,7 @@ DeepSeek Harness — `reasoningEffort` в его файле настроек (`o
 другое значение — ошибка настройки).
 
 Списки моделей не зашиты в программу: их называют сами агенты (модуль
-`harness_agents::models`). `harness models --refresh` или «Обновить модели» на
+`harness_agents::install::models`). `harness models --refresh` или «Обновить модели» на
 вкладке «Роли» спрашивает каждого агента с сохранённым входом, так же закрыто, как
 при запуске роли (копия входа во временной папке, только разрешённые переменные
 окружения), и ничего не отправляет модели:
@@ -892,7 +892,7 @@ DeepSeek Harness — `reasoningEffort` в его файле настроек (`o
 выбранный сервер в фоне так же, как для роли (папка проекта, только разрешённые
 переменные окружения плюс его собственные, секреты из сохранённых файлов), и
 спрашивает его по MCP: `initialize`, затем `tools/list` со всеми страницами
-(`harness_agents::mcp_check`, предел 120 с — `npx` может сначала скачать сервер).
+(`harness_agents::mcp::check`, предел 120 с — `npx` может сначала скачать сервер).
 Сервер запускается в своей группе процессов и после ответа останавливается вместе с
 дочерними. Модель при этом не вызывается. Ответ хранится в
 `~/.harness/mcp/<имя>-<отпечаток настроек>.json` (`harness_core::mcp::tools`), поэтому
@@ -902,7 +902,7 @@ DeepSeek Harness — `reasoningEffort` в его файле настроек (`o
 
 «Из каталога» (f) открывает поиск в официальном реестре MCP
 (`registry.modelcontextprotocol.io`, `GET /v0/servers?search=…&version=latest`).
-Спрашивает `curl` в фоне (`harness_agents::mcp_registry`, только разрешённые
+Спрашивает `curl` в фоне (`harness_agents::mcp::registry`, только разрешённые
 переменные окружения, временная папка, без ключей; запрос — один аргумент
 `--data-urlencode`, поэтому не может стать опцией curl; реестр отвечает до минуты).
 Ответ разбирает `harness_core::mcp::registry`: из пакета npm получается
@@ -956,7 +956,7 @@ DeepSeek Harness — `reasoningEffort` в его файле настроек (`o
 **Веб-серверы MCP.** Сервер может жить в интернете: тогда в `[mcp.<имя>]` вместо
 `command` стоят `url` (только `https://`, `http://` лишь для localhost) и `headers`,
 например `Authorization = "Bearer secret:github"`. Агенты запускают такой сервер как
-обычную программу — `harness mcp-remote` (`harness_agents::mcp_remote`): мост читает
+обычную программу — `harness mcp-remote` (`harness_agents::mcp::remote`): мост читает
 строки MCP со своего входа и шлёт их на адрес по «streamable HTTP» через `curl`
 (ответ JSON или поток событий, `Mcp-Session-Id`, `MCP-Protocol-Version`, в конце
 DELETE). Заголовки с ключами лежат в приватном файле, который читает curl
@@ -967,7 +967,7 @@ DELETE). Заголовки с ключами лежат в приватном �
 
 Сервер, где нужен вход через браузер (OAuth), пишет `auth = "oauth"` без своего
 `Authorization`. `harness mcp login <имя>` (или «Войти» (i) на вкладке MCP) один раз
-делает вход по спецификации MCP (`harness_agents::mcp_oauth`): спрашивает сервер
+делает вход по спецификации MCP (`harness_agents::mcp::oauth`): спрашивает сервер
 (ответ 401 с `resource_metadata`, `/.well-known/oauth-protected-resource`), читает
 метаданные сервера авторизации, регистрирует harness как клиента (dynamic client
 registration) с адресом возврата `http://127.0.0.1:<порт>/callback`, открывает браузер

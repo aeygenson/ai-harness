@@ -5,7 +5,7 @@ use std::fs;
 use std::path::Path;
 
 use anyhow::{bail, Context, Result};
-use harness_agents::credentials;
+use harness_agents::install::credentials;
 
 use crate::secrets::read_hidden;
 

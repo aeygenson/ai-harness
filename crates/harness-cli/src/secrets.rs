@@ -5,7 +5,7 @@ use std::io::{self, Write};
 use std::path::Path;
 
 use anyhow::{bail, Context, Result};
-use harness_agents::credentials::{self, Secret};
+use harness_agents::install::credentials::{self, Secret};
 use harness_core::config::Config;
 use harness_core::git::HARNESS_DIR;
 use harness_core::mcp;
@@ -46,28 +46,28 @@ pub(crate) fn set_secret(name: &str) -> Result<()> {
 /// `harness mcp login <name>`: signs in to an MCP server in the browser
 /// (OAuth) and saves its token privately.
 pub(crate) fn mcp_login(project: &Path, name: &str) -> Result<()> {
-    use harness_agents::mcp_oauth;
+    use harness_agents::mcp::oauth;
     let repo = open_repo(project)?;
     let config = Config::load(&repo.root().join(HARNESS_DIR))?;
-    let url = mcp_oauth::oauth_url(&config, name).map_err(anyhow::Error::msg)?;
+    let url = oauth::oauth_url(&config, name).map_err(anyhow::Error::msg)?;
     let dir = credentials::default_dir().context("no home folder found")?;
     println!("Signing in to {name} ({url}).");
     let open = |address: &str| {
         println!("Opening the browser. If it does not open, visit:\n{address}");
-        if let Err(why) = mcp_oauth::open_in_browser(address) {
+        if let Err(why) = oauth::open_in_browser(address) {
             println!("({why})");
         }
         Ok(())
     };
-    let tools = mcp_oauth::Tools {
+    let tools = oauth::Tools {
         curl: "curl".into(),
         open: &open,
-        browser_limit: mcp_oauth::BROWSER_LIMIT,
+        browser_limit: oauth::BROWSER_LIMIT,
     };
-    mcp_oauth::login(&dir, name, &url, &tools).map_err(anyhow::Error::msg)?;
+    oauth::login(&dir, name, &url, &tools).map_err(anyhow::Error::msg)?;
     println!(
         "Signed in. The tokens are in {} (only you can read them).",
-        mcp_oauth::path(&dir, name).display()
+        oauth::path(&dir, name).display()
     );
     Ok(())
 }

@@ -21,8 +21,8 @@ use harness_core::config::AGENTS;
 use harness_core::models::{Model, ModelList};
 use serde_json::Value;
 
-use crate::credentials::{self, Secret};
-use crate::dsh::{DEFAULT_MODEL as DEEPSEEK_DEFAULT_MODEL, KEY_ENV as DEEPSEEK_KEY_ENV};
+use crate::adapters::dsh::{DEFAULT_MODEL as DEEPSEEK_DEFAULT_MODEL, KEY_ENV as DEEPSEEK_KEY_ENV};
+use crate::install::credentials::{self, Secret};
 use crate::process::base_command;
 
 /// How long one agent may take to answer.
@@ -130,7 +130,7 @@ pub fn ask(agent: &str, credentials_dir: &Path, programs: &Programs) -> Result<M
         }
         "antigravity" => {
             let home = tmp.join("home");
-            crate::antigravity::copy_dir(&credentials_dir.join("antigravity"), &home)
+            crate::adapters::antigravity::copy_dir(&credentials_dir.join("antigravity"), &home)
                 .map_err(|_| "no Antigravity login saved".to_string())?;
             let mut command = base_command(&programs.agy, tmp);
             harness_platform::home::set_for(&mut command, &home);
@@ -366,8 +366,11 @@ pub fn with_dsh_efforts(models: Vec<Model>) -> Vec<Model> {
     models
         .into_iter()
         .map(|model| Model {
-            efforts: crate::dsh::EFFORTS.iter().map(|e| e.to_string()).collect(),
-            default_effort: Some(crate::dsh::DEFAULT_EFFORT.to_string()),
+            efforts: crate::adapters::dsh::EFFORTS
+                .iter()
+                .map(|e| e.to_string())
+                .collect(),
+            default_effort: Some(crate::adapters::dsh::DEFAULT_EFFORT.to_string()),
             ..model
         })
         .collect()

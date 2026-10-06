@@ -35,7 +35,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
-use crate::credentials::{write_private, Secret};
+use crate::install::credentials::{write_private, Secret};
 use crate::process::base_command;
 
 /// Where the sign-ins are kept, under `~/.harness/credentials`.
@@ -159,7 +159,7 @@ pub fn mcp_secret(credentials_dir: &Path, name: &str) -> Option<Secret> {
         .and_then(|rest| rest.split_once(' '))
     {
         Some((server, url)) => access_token(credentials_dir, server, url, Path::new("curl")),
-        None => crate::credentials::load_secret(credentials_dir, name).ok(),
+        None => crate::install::credentials::load_secret(credentials_dir, name).ok(),
     }
 }
 
@@ -593,7 +593,7 @@ fn http(
     }
     let status = child.wait().map_err(|e| e.to_string())?;
     let mut reader = BufReader::new(stdout.as_bytes());
-    match crate::mcp_remote::read_head(&mut reader) {
+    match crate::mcp::remote::read_head(&mut reader) {
         Some((code, headers)) => {
             let mut body = String::new();
             let _ = reader.read_to_string(&mut body);

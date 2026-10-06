@@ -3,7 +3,7 @@
 
 use std::sync::mpsc;
 
-use harness_agents::credentials;
+use harness_agents::install::credentials;
 use harness_core::config;
 use harness_core::config::McpConfig;
 use harness_core::mcp::tools::{self, Tool, ToolList};
@@ -31,7 +31,7 @@ impl App {
         };
         let secrets = self.home.as_ref().map(|h| h.join("credentials"));
         let server = harness_core::mcp::server(&name, &config, |secret| {
-            harness_agents::mcp_oauth::mcp_secret(secrets.as_deref()?, secret)
+            harness_agents::mcp::oauth::mcp_secret(secrets.as_deref()?, secret)
         });
         // A web server is reached through this same program.
         let server = server.map(|server| match std::env::current_exe() {

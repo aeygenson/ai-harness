@@ -64,7 +64,7 @@ impl App {
     pub(crate) fn run_agent_command(
         &mut self,
         name: &'static str,
-        action: harness_agents::catalog::Action,
+        action: harness_agents::install::catalog::Action,
         command: String,
     ) {
         if self.install_events.is_some() {
@@ -86,7 +86,7 @@ impl App {
 
     /// Takes the lines of a running install or update, and its end.
     fn take_install_events(&mut self) {
-        use harness_agents::catalog::Action;
+        use harness_agents::install::catalog::Action;
         let mut finished = None;
         if let Some(rx) = &self.install_events {
             loop {
