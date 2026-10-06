@@ -44,24 +44,34 @@ const INBOX_DIR: &str = "inbox";
 const LOG_FILE: &str = "agent.log";
 const FAILURES_DIR: &str = "failures";
 
+/// What can go wrong while saving or reading a task's files.
 #[derive(Debug, thiserror::Error)]
 pub enum StoreError {
+    /// The task id has characters other than lowercase letters, digits and `-`.
     #[error("task id {0:?} may only contain lowercase letters, digits and '-'")]
     InvalidTaskId(String),
+    /// A task with this id already has a folder.
     #[error("task {0} already exists")]
     TaskExists(String),
+    /// Reading or writing a file or folder failed.
     #[error("cannot access {path}: {source}")]
     Io {
+        /// The file or folder that could not be used.
         path: PathBuf,
+        /// The error from the operating system.
         #[source]
         source: io::Error,
     },
+    /// A JSON file could not be read or written in the expected format.
     #[error("{path} is not valid JSON for this file: {source}")]
     Json {
+        /// The JSON file.
         path: PathBuf,
+        /// What exactly did not match.
         #[source]
         source: serde_json::Error,
     },
+    /// The handoff broke a rule of the task, so it was not saved.
     #[error("handoff refused: {0}")]
     Refused(#[from] TransitionError),
 }
@@ -71,7 +81,9 @@ pub enum StoreError {
 pub struct Step {
     /// For example `runs/task-001/round-02/03-tester`.
     pub dir: PathBuf,
+    /// The handoff the role (or Lisa) wrote, read from `handoff.json`.
     pub handoff: Handoff,
+    /// The text of `notes.md`; empty if the file is missing.
     pub notes: String,
 }
 
@@ -217,6 +229,7 @@ impl TaskStore {
         Ok(steps)
     }
 
+    /// The task's folder, for example `runs/task-001`.
     pub fn dir(&self) -> &Path {
         &self.dir
     }

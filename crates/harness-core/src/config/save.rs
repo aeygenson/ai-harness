@@ -12,22 +12,31 @@ use crate::plugins::{PluginError, Plugins};
 use crate::secret::Secret;
 use crate::skills::{SkillError, Skills};
 
+/// Why changed settings were not saved; the old file then stays as it was.
 #[derive(Debug, thiserror::Error)]
 pub enum SettingsError {
+    /// The text is not valid `harness.toml` settings.
     #[error("harness.toml is not valid: {0}")]
     Toml(#[from] toml::de::Error),
+    /// A skill named in the settings is missing or broken.
     #[error(transparent)]
     Skill(#[from] SkillError),
+    /// An MCP server in the settings is not described correctly.
     #[error(transparent)]
     Mcp(#[from] McpError),
+    /// A plugin in the settings is missing or not allowed.
     #[error(transparent)]
     Plugin(#[from] PluginError),
+    /// The file could not be written.
     #[error("cannot write {path}: {source}")]
     Io {
+        /// The file that could not be written.
         path: PathBuf,
+        /// The error from the operating system.
         #[source]
         source: std::io::Error,
     },
+    /// Committing the changed file failed.
     #[error(transparent)]
     Git(#[from] GitError),
 }

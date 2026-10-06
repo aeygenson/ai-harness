@@ -14,22 +14,32 @@ use toml_edit::{value, Array, DocumentMut, Item, Table};
 use crate::config::{AgentKind, Config, RetroConfig, RoleConfig};
 use crate::task::handoff::Role;
 
+/// Why a change to `harness.toml` could not be made; the file is then left unchanged.
 #[derive(Debug, thiserror::Error)]
 pub enum EditError {
+    /// The file is not valid TOML, so it cannot be edited.
     #[error("harness.toml is not valid TOML: {0}")]
     Parse(#[from] toml_edit::TomlError),
+    /// A plugin with this name is already in the file.
     #[error("harness.toml already has [plugins.{0}]")]
     PluginExists(String),
+    /// No plugin with this name is in the file.
     #[error("harness.toml has no [plugins.{0}]")]
     NoPlugin(String),
+    /// No MCP server with this name is in the file.
     #[error("harness.toml has no [mcp.{0}]")]
     NoMcp(String),
+    /// An MCP server with this name is already in the file.
     #[error("harness.toml already has [mcp.{0}]")]
     McpExists(String),
+    /// The file has no settings for this role.
     #[error("harness.toml has no [roles.{0}]")]
     NoRole(String),
+    /// The key (such as `roles.developer`) holds a plain value or list of the wrong kind,
+    /// not the table or list the change needs.
     #[error("`{0}` in harness.toml is not a table")]
     NotATable(String),
+    /// The change would leave a file that `Config::parse` rejects.
     #[error("the changed harness.toml would not be valid: {0}")]
     Invalid(#[from] toml::de::Error),
 }
@@ -37,11 +47,17 @@ pub enum EditError {
 /// A new `[plugins.<name>]`, as `harness plugin add` writes it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NewPlugin<'a> {
+    /// The plugin name, used as the key in `[plugins.<name>]`.
     pub name: &'a str,
+    /// Whose plugin it is: Claude Code or Codex.
     pub agent: AgentKind,
+    /// Where it was copied from, as `<catalog>/<plugin>`.
     pub source: &'a str,
+    /// The git commit it was copied at; `None` writes no `commit` key.
     pub commit: Option<&'a str>,
+    /// Writes `allow_hooks = true`, letting the plugin's hooks run commands.
     pub allow_hooks: bool,
+    /// Writes `allow_mcp = true`, letting the plugin start its own servers.
     pub allow_mcp: bool,
 }
 

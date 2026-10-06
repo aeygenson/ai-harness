@@ -44,14 +44,20 @@ pub const MAX_STEPS_PER_RUN: u32 = 50;
 /// Why `run` returned.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StopReason {
+    /// The task is finished.
     Done,
+    /// The task waits for Lisa, for the reason given.
     WaitingForHuman(WaitReason),
+    /// The subscription's usage limit stopped this role; run again later.
     UsageLimitReached(Role),
     /// The role did not produce an acceptable handoff after every attempt.
     RoleFailed {
+        /// The role that failed.
         role: Role,
+        /// Why the last attempt failed, ready to show to Lisa.
         problem: String,
     },
+    /// [`MAX_STEPS_PER_RUN`] roles ran in this call; run again to continue.
     StepLimitReached,
     /// The project had uncommitted changes before a role started. Lisa commits
     /// or removes them, then runs again.
@@ -59,7 +65,9 @@ pub enum StopReason {
     /// The role changed files it may not touch. The changes are left in place,
     /// uncommitted, so Lisa can look at them.
     ForbiddenChanges {
+        /// The role that made the changes.
         role: Role,
+        /// The forbidden files, as paths inside the project.
         files: Vec<String>,
     },
     /// The role's change is too big to commit (see [`MAX_CHANGE_BYTES`]):
@@ -67,7 +75,9 @@ pub enum StopReason {
     /// change as a whole. Everything is left in place, uncommitted, so Lisa
     /// can add it to `.gitignore` or delete it.
     TooLarge {
+        /// The role that made the change.
         role: Role,
+        /// Each too big file or folder with its size in bytes.
         files: Vec<(String, u64)>,
     },
     /// The agent made a git commit itself, which agents must never do.
@@ -81,15 +91,22 @@ pub enum StopReason {
 /// A real problem of the harness itself, not a mistake of an agent.
 #[derive(Debug, thiserror::Error)]
 pub enum RunError {
+    /// Saving or reading the task's files failed.
     #[error(transparent)]
     Store(#[from] StoreError),
+    /// A git command failed.
     #[error(transparent)]
     Git(#[from] GitError),
     /// An unfinished task already has this text: a second one is not created.
     #[error(
         "{task} already has this text and is not done ({stage}); continue it or change the text"
     )]
-    SameTask { task: String, stage: String },
+    SameTask {
+        /// The id of the unfinished task, for example `task-001`.
+        task: String,
+        /// Where that task is now, as text for Lisa.
+        stage: String,
+    },
 }
 
 /// Runs roles until the task is done or someone has to look at it.

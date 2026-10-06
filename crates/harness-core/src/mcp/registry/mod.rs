@@ -21,6 +21,7 @@ use crate::mcp::is_simple_name;
 use crate::text::safe_line;
 use offer::{offer, remote_offer};
 
+/// The address of the registry's server list (`GET /v0/servers`).
 pub const REGISTRY_URL: &str = "https://registry.modelcontextprotocol.io/v0/servers";
 
 /// One server of the registry, as the catalog shows it.
@@ -28,9 +29,13 @@ pub const REGISTRY_URL: &str = "https://registry.modelcontextprotocol.io/v0/serv
 pub struct Entry {
     /// The registry's name, such as `io.github.upstash/context7`.
     pub name: String,
+    /// A readable name for the catalog, if the registry gives one.
     pub title: Option<String>,
+    /// One line on what the server does, if the registry gives one.
     pub description: Option<String>,
+    /// The version the registry lists; empty if it gives none.
     pub version: String,
+    /// The address of the server's source code, if the registry gives one.
     pub repository: Option<String>,
     /// How to start it, if the agents can.
     pub offer: Option<Offer>,
@@ -42,7 +47,9 @@ pub struct Entry {
 /// what the registry says about each variable.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Offer {
+    /// The name for `[mcp.<name>]` in `harness.toml`, made from the registry's name.
     pub name: String,
+    /// The settings to save: a command with its arguments, or a web address.
     pub server: McpConfig,
     /// `(variable, description)`, for the catalog's details.
     pub variables: Vec<(String, String)>,

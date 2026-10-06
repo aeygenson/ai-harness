@@ -39,46 +39,69 @@ pub enum WaitReason {
 pub enum Stage {
     /// An AI role is working (never `Role::Human`; Lisa's turn is `WaitingForHuman`).
     Working(Role),
+    /// The task waits for Lisa, for the reason given.
     WaitingForHuman(WaitReason),
+    /// The task is finished.
     Done,
 }
 
 /// Everything the orchestrator needs to remember about a task. Saved as `state.json`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TaskState {
+    /// The task's id and folder name, for example `task-001`.
     pub task_id: String,
+    /// The current round, starting at 1; each rejected handoff adds one.
     pub round: u32,
+    /// After this many rounds the task stops and waits for Lisa.
     pub max_rounds: u32,
+    /// Who works now, or why the task waits, or that it is done.
     pub stage: Stage,
 }
 
 /// Why a handoff was refused. The task state is left unchanged.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TransitionError {
+    /// The task is done, so no more handoffs are accepted.
     TaskAlreadyDone,
     /// The handoff says it is written in a format version this harness does not know.
     UnknownSchemaVersion(u32),
     /// A text in the handoff is longer than the format allows.
     TooLong {
+        /// The name of the field that is too long, for example `summary`.
         field: &'static str,
+        /// The most characters that field may have.
         max_chars: usize,
     },
+    /// The handoff was written by a different role than the one whose turn it is.
     WrongAuthor {
+        /// The role whose turn it is.
         expected: Role,
+        /// The role named in the handoff.
         got: Role,
     },
+    /// The handoff names a different task.
     WrongTask {
+        /// The id of this task.
         expected: String,
+        /// The task id written in the handoff.
         got: String,
     },
+    /// The handoff names a different round than the task is in.
     WrongRound {
+        /// The round the task is in.
         expected: u32,
+        /// The round written in the handoff.
         got: u32,
     },
+    /// The work was rejected, but the handoff lists no issues.
     RejectedWithoutIssues,
+    /// The routes do not allow this role, with this verdict, to send work there.
     RouteNotAllowed {
+        /// The role that wrote the handoff.
         role: Role,
+        /// The verdict it gave.
         verdict: Verdict,
+        /// Where it wanted the work to go next.
         next: NextStep,
     },
 }

@@ -111,14 +111,16 @@ Rust workspace из нескольких crate (пакетов):
 Общий интерфейс в Rust:
 
 ```rust
-trait AgentRunner {
+pub trait AgentRunner {
     /// Запустить агента для одной роли и дождаться результата.
-    async fn run(&self, job: RoleJob) -> Result<AgentOutcome>;
+    fn run(&self, job: &RoleJob) -> impl Future<Output = AgentOutcome> + Send;
 }
 ```
 
-`RoleJob` — папка проекта, промпт, права, тайм-аут, куда писать результат.
-`AgentOutcome` — код завершения, лог работы агента, признак «упёрся в лимит подписки».
+`RoleJob` — задача, раунд, роль, папка проекта, промпт и папка, куда писать результат.
+Права и тайм-аут знает сам адаптер (из настроек роли).
+`AgentOutcome` — как закончился запуск (`RunEnd`: успешно, ошибка с короткой причиной
+или «упёрся в лимит подписки») и лог работы агента.
 
 **Права ролей.** У каждого агента свои режимы разрешений (например, у Codex —
 `--sandbox read-only` / `workspace-write`, у Claude Code — `--permission-mode`

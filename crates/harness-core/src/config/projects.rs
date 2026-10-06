@@ -21,44 +21,60 @@ use serde::{Deserialize, Serialize};
 use crate::config::{CONFIG_FILE, DEFAULT_CONFIG};
 use crate::git::{GitError, Repo, HARNESS_DIR};
 
+/// The name of the project list file inside `~/.harness`.
 pub const PROJECTS_FILE: &str = "projects.toml";
 
+/// Why the project list or a new project could not be read, saved or set up.
 #[derive(Debug, thiserror::Error)]
 pub enum ProjectError {
+    /// A file or folder could not be read, written or created.
     #[error("cannot access {path}: {source}")]
     Io {
+        /// The file or folder involved.
         path: PathBuf,
+        /// The error from the operating system.
         #[source]
         source: io::Error,
     },
+    /// `projects.toml` was read but is not a valid project list.
     #[error("{path} is not valid: {source}")]
     Toml {
+        /// The path of the file that is not valid.
         path: PathBuf,
+        /// What is wrong, with the line, from the TOML reader.
         #[source]
         source: toml::de::Error,
     },
+    /// The project list could not be turned into TOML.
     #[error("cannot save the project list: {0}")]
     Save(#[from] toml::ser::Error),
+    /// A git command for the new project failed.
     #[error(transparent)]
     Git(#[from] GitError),
+    /// The path exists but is a file, so it cannot hold a project.
     #[error("{0} exists and is not a folder")]
     NotAFolder(PathBuf),
 }
 
+/// The list of Lisa's projects, as stored in `~/.harness/projects.toml`.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Projects {
     /// The project opened last; the TUI starts with it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last: Option<PathBuf>,
+    /// Every project on the list, in the order they were added.
     #[serde(default)]
     pub projects: Vec<Project>,
 }
 
+/// One project on the list: a `[[projects]]` entry in `projects.toml`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Project {
+    /// The name shown in the TUI.
     pub name: String,
+    /// The project's folder.
     pub path: PathBuf,
 }
 
@@ -79,6 +95,7 @@ impl Projects {
         toml::from_str(&text).map_err(|source| ProjectError::Toml { path, source })
     }
 
+    /// Writes the list to `<home>/projects.toml`, creating `home` if needed.
     pub fn save(&self, home: &Path) -> Result<(), ProjectError> {
         let path = home.join(PROJECTS_FILE);
         let text = toml::to_string(self)?;
@@ -110,8 +127,11 @@ impl Projects {
 /// What `init` had to do.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Initialized {
+    /// True if the project folder did not exist and was created.
     pub created_folder: bool,
+    /// True if a new git repository was created in the folder.
     pub created_git: bool,
+    /// True if `.harness/harness.toml` was written with the default settings.
     pub created_config: bool,
 }
 

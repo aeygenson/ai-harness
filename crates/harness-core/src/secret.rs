@@ -7,6 +7,7 @@ use std::fmt;
 pub struct Secret(String);
 
 impl Secret {
+    /// Wraps `value` so that it is hidden when printed.
     pub fn new(value: impl Into<String>) -> Self {
         Secret(value.into())
     }

@@ -51,7 +51,9 @@ pub enum WriteRule {
     /// (`tests` allows `tests/a.rs` and `crates/core/tests/a.rs`), or files
     /// whose own name matches one of `files` (see [`TEST_FILE_NAMES`]).
     Only {
+        /// Names of folders the role may write in, for example `tests`.
         folders: &'static [&'static str],
+        /// Patterns for file names the role may write anywhere; `*` means any letters.
         files: &'static [&'static str],
     },
     /// Read only.

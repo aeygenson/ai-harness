@@ -60,10 +60,12 @@ pub const SECRET_PREFIX: &str = "secret:";
 /// A web server becomes this program with the argument [`BRIDGE_ARG`]: the
 /// adapters replace it with the path of the running `harness`.
 pub const BRIDGE_COMMAND: &str = "harness";
+/// The argument after [`BRIDGE_COMMAND`] that starts the web bridge (`harness mcp-remote`).
 pub const BRIDGE_ARG: &str = "mcp-remote";
 /// The bridge reads the address from this variable and each header, as
 /// `Name: value`, from `HARNESS_MCP_HEADER_1`, `_2`, ...
 pub const BRIDGE_URL: &str = "HARNESS_MCP_URL";
+/// The start of the variable names that pass headers to the bridge; a number follows.
 pub const BRIDGE_HEADER: &str = "HARNESS_MCP_HEADER_";
 /// A server with `auth = "oauth"` asks the secret function for
 /// `oauth/<server> <url>`: the access token of the sign-in, still valid.
@@ -72,8 +74,11 @@ pub const OAUTH_SECRET: &str = "oauth/";
 /// One server as an agent starts it, with every secret already read.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct McpServer {
+    /// The server's name from `harness.toml`, such as `context7` in `[mcp.context7]`.
     pub name: String,
+    /// The program to start; for a web server this is [`BRIDGE_COMMAND`].
     pub command: String,
+    /// The arguments for the program, in order.
     pub args: Vec<String>,
     /// All values are kept as secrets, so none of them is printed by accident.
     pub env: BTreeMap<String, Secret>,
@@ -85,53 +90,108 @@ pub struct McpServers {
     roles: BTreeMap<Role, Vec<McpServer>>,
 }
 
+/// A problem with the MCP servers in `harness.toml`, found before any agent starts.
 #[derive(Debug, thiserror::Error)]
 pub enum McpError {
+    /// A server name with characters that are not allowed.
     #[error(
         "MCP server name {0:?} is not allowed; use lowercase letters, digits, '-' and '_', \
          for example \"context7\""
     )]
     BadServerName(String),
+    /// A role lists a server that has no `[mcp.<name>]` section.
     #[error("the {role:?} role uses MCP server {name:?}, but harness.toml has no [mcp.{name}]")]
-    UnknownServer { role: Role, name: String },
+    UnknownServer {
+        /// The role whose `mcp` list names the server.
+        role: Role,
+        /// The server name as the role lists it.
+        name: String,
+    },
+    /// A program server whose `command` is empty or missing.
     #[error("MCP server {0:?} has an empty command")]
     EmptyCommand(String),
+    /// A server that sets both `command` and `url`.
     #[error("MCP server {0:?} has both a command and a url; it is one or the other")]
     CommandAndUrl(String),
+    /// A web address that is not `https://` (or `http://` to this computer).
     #[error(
         "MCP server {server:?}: url {url:?} is not allowed; use https:// \
          (http:// only for localhost)"
     )]
-    BadUrl { server: String, url: String },
+    BadUrl {
+        /// The server name from `harness.toml`.
+        server: String,
+        /// The address that was refused.
+        url: String,
+    },
+    /// A web server that also sets `args` or `env`.
     #[error("MCP server {0:?} is on the web (url): it takes headers, not args or env")]
     WebServerParts(String),
+    /// A header name in `headers` that is not allowed.
     #[error("MCP server {server:?}: header {name:?} is not allowed")]
-    BadHeader { server: String, name: String },
+    BadHeader {
+        /// The server name from `harness.toml`.
+        server: String,
+        /// The refused header name.
+        name: String,
+    },
+    /// `auth = "oauth"` on a program server or next to an `Authorization` header.
     #[error(
         "MCP server {0:?}: auth = \"oauth\" is only for a server on the web (url) \
          without its own Authorization header"
     )]
     BadAuth(String),
+    /// An OAuth server with no saved, valid sign-in.
     #[error("MCP server {0:?} needs a sign-in: run `harness mcp login {0}`")]
     NotSignedIn(String),
+    /// A variable name in `env` with characters that are not allowed.
     #[error(
         "MCP server {server:?}: variable name {name:?} is not allowed; \
          use capital letters, digits and '_', for example API_KEY"
     )]
-    BadVariable { server: String, name: String },
+    BadVariable {
+        /// The server name from `harness.toml`.
+        server: String,
+        /// The refused variable name.
+        name: String,
+    },
+    /// A variable in `env` that only the harness or the agents may set.
     #[error("MCP server {server:?}: variable {name:?} is reserved for the harness and the agents")]
-    ReservedVariable { server: String, name: String },
+    ReservedVariable {
+        /// The server name from `harness.toml`.
+        server: String,
+        /// The reserved variable name.
+        name: String,
+    },
+    /// Two servers of one role set the same variable.
     #[error(
         "the {role:?} role gets variable {name:?} from two MCP servers; \
          give them different names"
     )]
-    VariableTwice { role: Role, name: String },
+    VariableTwice {
+        /// The role that uses both servers.
+        role: Role,
+        /// The variable name both servers set.
+        name: String,
+    },
+    /// A `secret:<name>` value whose name is not allowed.
     #[error("MCP server {server:?}: secret name {name:?} is not allowed")]
-    BadSecretName { server: String, name: String },
+    BadSecretName {
+        /// The server name from `harness.toml`.
+        server: String,
+        /// The refused secret name, without `secret:`.
+        name: String,
+    },
+    /// A `secret:<name>` value whose secret has not been saved.
     #[error(
         "MCP server {server:?} needs the secret {name:?}; save it with `harness secret set {name}`"
     )]
-    MissingSecret { server: String, name: String },
+    MissingSecret {
+        /// The server name from `harness.toml`.
+        server: String,
+        /// The name of the missing secret, without `secret:`.
+        name: String,
+    },
 }
 
 /// Variables an MCP server may not set (`harness_platform::env::is_reserved`,

@@ -18,12 +18,15 @@ const MODELS_DIR: &str = "models";
 /// What one agent said about its models.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ModelList {
+    /// The agent that was asked; it also names the cache file.
     pub agent: AgentKind,
     /// When it was asked, in seconds since 1970.
     pub fetched: u64,
+    /// The models in the order the agent listed them.
     pub models: Vec<Model>,
 }
 
+/// One model an agent offers, with the effort levels it takes.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Model {
     /// What goes into `model = "..."`.
@@ -43,6 +46,7 @@ pub struct Model {
 }
 
 impl ModelList {
+    /// The model with this id, or `None` if the agent did not list it.
     pub fn find(&self, id: &str) -> Option<&Model> {
         self.models.iter().find(|m| m.id == id)
     }
@@ -84,6 +88,7 @@ pub fn load(home: &Path, agent: AgentKind) -> Option<ModelList> {
     serde_json::from_str(&text).ok()
 }
 
+/// Writes `list` to `<home>/models/<agent>.json`, creating the folder if needed.
 pub fn save(home: &Path, list: &ModelList) -> io::Result<()> {
     let path = cache_path(home, list.agent);
     if let Some(dir) = path.parent() {
