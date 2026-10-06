@@ -11,6 +11,11 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Clear, Paragraph, Wrap};
 use ratatui::Frame;
 
+use crate::tabs::mcp::{McpButton, McpCatalogButton};
+use crate::tabs::plugins::{PluginButton, PluginCatalogButton};
+use crate::tabs::retro::RetroButton;
+use crate::tabs::skills::SkillButton;
+
 /// Something on the screen that reacts to a click.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Target {
@@ -82,76 +87,26 @@ pub enum ButtonId {
     ToggleHidden,
     /// The message field of the Tasks tab.
     Input,
-    /// «To ▾» on the Tasks tab.
-    To,
-    /// «Model ▾» and «Level ▾» on the Tasks tab: for the next launch only.
-    Model,
-    Level,
+    /// «To ▾», «Model ▾» and «Level ▾» on the Tasks tab; model and level
+    /// are for the next launch only.
+    Menu(crate::tabs::tasks::Menu),
     Send,
-    /// A role of the Skills tab's selector, an index into its `ROLES`.
-    SkillRole(usize),
-    SkillEdit,
-    SkillNew,
-    SkillRestore,
-    /// The `[ ]` mark of the skill on this row of the Skills tab's list.
-    SkillMark(usize),
+    /// A button of the Skills tab.
+    Skill(crate::tabs::skills::SkillButton),
     /// A link in «Files» of the step on the Tasks tab.
     TaskFile(usize),
     /// The title of a window of the Tasks tab: over the whole tab, or back.
     TaskZoom(crate::tabs::tasks::Zoom),
-    /// A role of the MCP tab's selector, an index into `tabs::skills::ROLES`.
-    McpRole(usize),
-    /// Gives the selected MCP server to the role, or takes it away.
-    McpToggle,
-    McpNew,
-    McpEdit,
-    McpRemove,
-    /// Saves a secret the selected MCP server needs.
-    McpSecret,
-    /// Starts the selected MCP server and asks it for its tools.
-    McpCheck,
-    /// Signs in to the selected web MCP server in the browser.
-    McpSignIn,
-    /// Opens the catalog of the MCP registry.
-    McpCatalog,
-    /// In the catalog: a new search, add the chosen server, back to the list.
-    McpSearch,
-    McpUse,
-    McpBack,
-    /// A role of the Plugins tab's selector, an index into its `ROLES`.
-    PluginRole(usize),
-    /// Give the selected plugin to the role, or take it away.
-    PluginToggle,
-    /// Allow or forbid the plugin's hooks, its own servers.
-    PluginHooks,
-    PluginServers,
-    PluginRemove,
-    /// Open the plugin's folder in the editor.
-    PluginOpen,
-    /// Download the plugin's newest version from its catalog.
-    PluginUpdate,
-    /// Open «From catalog».
-    PluginCatalog,
-    /// In «From catalog»: the agent filter, an index into its `FILTERS`.
-    PluginFilter(usize),
-    PluginSearch,
-    PluginAdd,
-    /// Add and give to the role chosen on the tab.
-    PluginAddGive,
-    /// Open «Catalogs».
-    PluginCatalogs,
-    PluginBack,
-    CatalogAdd,
-    CatalogUpdate,
-    CatalogRemove,
-    /// The Retro tab: a new retrospective of the whole project.
-    RetroGenerate,
-    /// Open the retrospective's text in the editor.
-    RetroOpen,
-    /// Choose the selected proposal, or take it out.
-    RetroToggle,
-    /// Apply the chosen proposals.
-    RetroApply,
+    /// A button of the MCP tab's server list.
+    Mcp(crate::tabs::mcp::McpButton),
+    /// A button of the MCP registry's catalog.
+    McpCatalog(crate::tabs::mcp::McpCatalogButton),
+    /// A button of the Plugins tab's plugin list.
+    Plugin(crate::tabs::plugins::PluginButton),
+    /// A button of «From catalog» or «Catalogs» on the Plugins tab.
+    PluginCatalog(crate::tabs::plugins::PluginCatalogButton),
+    /// A button of the Retro tab.
+    Retro(crate::tabs::retro::RetroButton),
     /// «Check again» on the Agents tab.
     AgentsCheck,
     /// «Install» or «Update» for the agent selected on the Agents tab.
@@ -224,13 +179,12 @@ fn is_primary(id: ButtonId) -> bool {
             | ButtonId::Save
             | ButtonId::UseProject
             | ButtonId::Choose
-            | ButtonId::RetroGenerate
-            | ButtonId::RetroApply
-            | ButtonId::PluginCatalog
-            | ButtonId::PluginAdd
-            | ButtonId::McpCatalog
-            | ButtonId::McpUse
-            | ButtonId::SkillEdit
+            | ButtonId::Retro(RetroButton::Generate | RetroButton::Apply)
+            | ButtonId::Plugin(PluginButton::OpenCatalog)
+            | ButtonId::PluginCatalog(PluginCatalogButton::Add)
+            | ButtonId::Mcp(McpButton::OpenCatalog)
+            | ButtonId::McpCatalog(McpCatalogButton::Use)
+            | ButtonId::Skill(SkillButton::Edit)
     )
 }
 

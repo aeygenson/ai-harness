@@ -43,10 +43,45 @@ use crate::ui::i18n::I18n;
 use crate::ui::theme;
 use crate::ui::{buttons, panel, selector, ButtonId, Hits, ListId};
 
+/// A button of the MCP tab's server list, clicked or chosen with a key.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum McpButton {
+    /// A role of the selector, an index into `tabs::skills::ROLES`.
+    Role(usize),
+    /// Gives the selected server to the role, or takes it away.
+    Toggle,
+    New,
+    Edit,
+    Remove,
+    /// Saves a secret the selected server needs.
+    Secret,
+    /// Starts the selected server and asks it for its tools.
+    Check,
+    /// Signs in to the selected web server in the browser.
+    SignIn,
+    /// Opens the catalog of the MCP registry.
+    OpenCatalog,
+}
+
+/// A button of the MCP registry's catalog.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum McpCatalogButton {
+    /// A new search.
+    Search,
+    /// Add the chosen server.
+    Use,
+    /// Back to the list.
+    Back,
+}
+
 /// What the tab asks the App to do.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Action {
     None,
+    /// Something cannot be done; the key of the message that says why.
+    Refused(&'static str),
+    /// Start the selected server and ask it for its tools.
+    Check,
     /// Ask for a new server.
     New,
     /// Change this server; one harness.toml does not describe yet gets
@@ -237,17 +272,17 @@ impl McpTab {
         Ok(())
     }
 
-    pub fn on_key(&mut self, key: KeyCode, roles: &RolesTab) -> Action {
+    pub fn on_key(&mut self, key: KeyCode, roles: &mut RolesTab) -> Action {
         match key {
             KeyCode::Up | KeyCode::Char('k') => self.move_by(-1, roles),
             KeyCode::Down | KeyCode::Char('j') => self.move_by(1, roles),
             KeyCode::Left | KeyCode::Char('h') => self.choose_role(self.role.saturating_sub(1)),
             KeyCode::Right | KeyCode::Char('l') => self.choose_role(self.role + 1),
-            KeyCode::Char('n') => return self.press(ButtonId::McpNew, roles),
+            KeyCode::Char('n') => return self.press(McpButton::New, roles),
             KeyCode::Char('f') => return self.open_catalog(),
-            KeyCode::Char('i') => return self.press(ButtonId::McpSignIn, roles),
-            KeyCode::Char('e') => return self.press(ButtonId::McpEdit, roles),
-            KeyCode::Delete => return self.press(ButtonId::McpRemove, roles),
+            KeyCode::Char('i') => return self.press(McpButton::SignIn, roles),
+            KeyCode::Char('e') => return self.press(McpButton::Edit, roles),
+            KeyCode::Delete => return self.press(McpButton::Remove, roles),
             _ => {}
         }
         Action::None
@@ -287,8 +322,10 @@ impl McpTab {
         match key {
             KeyCode::Up | KeyCode::Char('k') => self.move_found(-1),
             KeyCode::Down | KeyCode::Char('j') => self.move_found(1),
-            KeyCode::Char('/' | 's' | 'f') => return self.catalog_press(ButtonId::McpSearch),
-            KeyCode::Enter | KeyCode::Char('a') => return self.catalog_press(ButtonId::McpUse),
+            KeyCode::Char('/' | 's' | 'f') => return self.catalog_press(McpCatalogButton::Search),
+            KeyCode::Enter | KeyCode::Char('a') => {
+                return self.catalog_press(McpCatalogButton::Use)
+            }
             KeyCode::Esc | KeyCode::Backspace => self.catalog = None,
             _ => {}
         }
@@ -296,52 +333,72 @@ impl McpTab {
     }
 
     /// A button of the catalog.
-    pub fn catalog_press(&mut self, id: ButtonId) -> Action {
+    pub fn catalog_press(&mut self, id: McpCatalogButton) -> Action {
         let Some(catalog) = &mut self.catalog else {
             return Action::None;
         };
         match id {
-            ButtonId::McpSearch if !catalog.searching => Action::Search(catalog.query.clone()),
-            ButtonId::McpUse => catalog.choose(),
-            ButtonId::McpBack => {
+            McpCatalogButton::Search if catalog.searching => Action::None,
+            McpCatalogButton::Search => Action::Search(catalog.query.clone()),
+            McpCatalogButton::Use => catalog.choose(),
+            McpCatalogButton::Back => {
                 self.catalog = None;
                 Action::None
             }
-            _ => Action::None,
         }
     }
 
-    /// A button about the servers themselves.
-    pub fn press(&self, id: ButtonId, roles: &RolesTab) -> Action {
+    /// A button of the server list.
+    pub fn press(&mut self, id: McpButton, roles: &mut RolesTab) -> Action {
+        // The selected server; `None` when the list is empty.
         let current = self.current(roles);
-        match (id, current) {
-            (ButtonId::McpNew, _) => Action::New,
-            (ButtonId::McpEdit, Some(name)) => Action::Edit(name),
-            (ButtonId::McpRemove, Some(name)) if roles.servers().contains_key(&name) => {
-                Action::Remove(name)
+        match id {
+            McpButton::Role(index) => {
+                self.choose_role(index);
+                Action::None
             }
-            (ButtonId::McpSignIn, Some(name))
-                if roles.servers().get(&name).is_some_and(is_oauth) && self.signing.is_none() =>
-            {
-                Action::SignIn(name)
-            }
-            (ButtonId::McpSecret, Some(name)) => {
-                // The first secret not saved yet, else the first one.
-                let wanted: Vec<String> = roles
-                    .servers()
-                    .get(&name)
-                    .map(|s| secret_names(s).collect())
-                    .unwrap_or_default();
-                let offered = wanted
-                    .iter()
-                    .find(|n| !self.secrets.contains(n))
-                    .or(wanted.first())
-                    .cloned()
-                    .unwrap_or(name);
-                Action::Secret(offered)
-            }
-            _ => Action::None,
+            McpButton::New => Action::New,
+            McpButton::OpenCatalog => self.open_catalog(),
+            McpButton::Check => Action::Check,
+            McpButton::Toggle => match self.toggle(roles) {
+                Ok(()) => Action::None,
+                Err(key) => Action::Refused(key),
+            },
+            McpButton::Edit => current.map_or(Action::None, Action::Edit),
+            McpButton::Remove => match current {
+                Some(name) if roles.servers().contains_key(&name) => Action::Remove(name),
+                _ => Action::None,
+            },
+            McpButton::SignIn => match current {
+                Some(name)
+                    if roles.servers().get(&name).is_some_and(is_oauth)
+                        && self.signing.is_none() =>
+                {
+                    Action::SignIn(name)
+                }
+                _ => Action::None,
+            },
+            McpButton::Secret => match current {
+                Some(name) => Action::Secret(self.secret_to_ask(&name, roles)),
+                None => Action::None,
+            },
         }
+    }
+
+    /// The secret of server `name` to ask for: the first one not saved yet,
+    /// else the first one, else the server's own name.
+    fn secret_to_ask(&self, name: &str, roles: &RolesTab) -> String {
+        let wanted: Vec<String> = roles
+            .servers()
+            .get(name)
+            .map(|s| secret_names(s).collect())
+            .unwrap_or_default();
+        wanted
+            .iter()
+            .find(|n| !self.secrets.contains(n))
+            .or(wanted.first())
+            .cloned()
+            .unwrap_or_else(|| name.to_string())
     }
 
     /// Selects the server `name`, if it is in the list.
@@ -400,7 +457,7 @@ impl McpTab {
             tr.t("skills.role"),
             &names,
             self.role,
-            ButtonId::McpRole,
+            |index| ButtonId::Mcp(McpButton::Role(index)),
         );
         // The role's agent, on the right of the selector.
         if let Some(settings) = roles.settings(role) {
@@ -491,7 +548,7 @@ impl McpTab {
             bottom,
             hits,
             &[
-                (&toggle, ButtonId::McpToggle, can),
+                (&toggle, ButtonId::Mcp(McpButton::Toggle), can),
                 (tr.t("roles.save"), ButtonId::Save, changed),
                 (tr.t("roles.undo"), ButtonId::Undo, changed),
             ],
@@ -519,23 +576,31 @@ impl McpTab {
             servers_row,
             hits,
             &[
-                (tr.t("mcp.new"), ButtonId::McpNew, true),
-                (tr.t("mcp.catalog"), ButtonId::McpCatalog, true),
-                (edit, ButtonId::McpEdit, current.is_some()),
-                (tr.t("mcp.remove"), ButtonId::McpRemove, described.is_some()),
+                (tr.t("mcp.new"), ButtonId::Mcp(McpButton::New), true),
+                (
+                    tr.t("mcp.catalog"),
+                    ButtonId::Mcp(McpButton::OpenCatalog),
+                    true,
+                ),
+                (edit, ButtonId::Mcp(McpButton::Edit), current.is_some()),
+                (
+                    tr.t("mcp.remove"),
+                    ButtonId::Mcp(McpButton::Remove),
+                    described.is_some(),
+                ),
                 (
                     tr.t("mcp.set_secret"),
-                    ButtonId::McpSecret,
+                    ButtonId::Mcp(McpButton::Secret),
                     described.is_some_and(|s| secret_names(s).next().is_some()),
                 ),
                 (
                     tr.t("mcp.sign_in"),
-                    ButtonId::McpSignIn,
+                    ButtonId::Mcp(McpButton::SignIn),
                     described.is_some_and(is_oauth) && self.signing.is_none(),
                 ),
                 (
                     tr.t("mcp.check"),
-                    ButtonId::McpCheck,
+                    ButtonId::Mcp(McpButton::Check),
                     described.is_some() && self.checking.is_none(),
                 ),
             ],
@@ -838,9 +903,21 @@ fn draw_catalog(
         bottom,
         hits,
         &[
-            (tr.t("mcp.search"), ButtonId::McpSearch, !catalog.searching),
-            (tr.t("mcp.use"), ButtonId::McpUse, usable),
-            (tr.t("mcp.back"), ButtonId::McpBack, true),
+            (
+                tr.t("mcp.search"),
+                ButtonId::McpCatalog(McpCatalogButton::Search),
+                !catalog.searching,
+            ),
+            (
+                tr.t("mcp.use"),
+                ButtonId::McpCatalog(McpCatalogButton::Use),
+                usable,
+            ),
+            (
+                tr.t("mcp.back"),
+                ButtonId::McpCatalog(McpCatalogButton::Back),
+                true,
+            ),
         ],
     );
 }

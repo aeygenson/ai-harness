@@ -2,8 +2,8 @@
 
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-use crate::tabs::mcp::McpTab;
-use crate::tabs::plugins::PluginsTab;
+use crate::tabs::mcp::{McpButton, McpTab};
+use crate::tabs::plugins::{PluginButton, PluginsTab};
 use crate::tabs::roles::RolesTab;
 use crate::tabs::tasks::TasksTab;
 use crate::ui::keys;
@@ -192,10 +192,12 @@ impl App {
                 Tab::Mcp => match code {
                     KeyCode::Char('s') => self.press(ButtonId::Save),
                     KeyCode::Char('u') => self.press(ButtonId::Undo),
-                    KeyCode::Char(' ') | KeyCode::Enter => self.press(ButtonId::McpToggle),
-                    KeyCode::Char('c') => self.press(ButtonId::McpCheck),
+                    KeyCode::Char(' ') | KeyCode::Enter => {
+                        self.press(ButtonId::Mcp(McpButton::Toggle))
+                    }
+                    KeyCode::Char('c') => self.press(ButtonId::Mcp(McpButton::Check)),
                     code => {
-                        if let (Some(mcp), Some(roles)) = (&mut self.mcp, &self.roles) {
+                        if let (Some(mcp), Some(roles)) = (&mut self.mcp, &mut self.roles) {
                             let action = mcp.on_key(code, roles);
                             self.mcp_action(action);
                         }
@@ -210,9 +212,11 @@ impl App {
                 Tab::Plugins => match code {
                     KeyCode::Char('s') => self.press(ButtonId::Save),
                     KeyCode::Char('u') => self.press(ButtonId::Undo),
-                    KeyCode::Char(' ') | KeyCode::Enter => self.press(ButtonId::PluginToggle),
+                    KeyCode::Char(' ') | KeyCode::Enter => {
+                        self.press(ButtonId::Plugin(PluginButton::Toggle))
+                    }
                     code => {
-                        if let (Some(plugins), Some(roles)) = (&mut self.plugins, &self.roles) {
+                        if let (Some(plugins), Some(roles)) = (&mut self.plugins, &mut self.roles) {
                             let action = plugins.on_key(code, roles);
                             self.plugin_action(action);
                         }

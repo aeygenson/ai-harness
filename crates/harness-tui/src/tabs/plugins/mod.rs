@@ -8,4 +8,4 @@ pub(crate) mod catalog;
 mod jobs;
 mod tab;
 
-pub(crate) use tab::{Action, PluginsTab};
+pub(crate) use tab::{Action, PluginButton, PluginCatalogButton, PluginsTab};

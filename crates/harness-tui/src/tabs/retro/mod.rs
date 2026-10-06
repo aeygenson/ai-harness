@@ -6,4 +6,4 @@
 mod actions;
 mod tab;
 
-pub(crate) use tab::{Action, Focus, RetroBuilder, RetroTab};
+pub(crate) use tab::{Action, Focus, RetroBuilder, RetroButton, RetroTab};

@@ -1067,17 +1067,17 @@ impl TasksTab {
             tr.t("tasks.send")
         };
         let default = tr.t("tasks.default");
-        let mut items: Vec<(String, ButtonId, bool)> = vec![(to, ButtonId::To, true)];
+        let mut items: Vec<(String, ButtonId, bool)> = vec![(to, ButtonId::Menu(Menu::To), true)];
         if let Some((_, model, effort)) = self.run_choice() {
             let levels = !self.level_items().is_empty();
             items.push((
                 format!("{} {} ▾", tr.t("tasks.model"), model.unwrap_or(default)),
-                ButtonId::Model,
+                ButtonId::Menu(Menu::Model),
                 true,
             ));
             items.push((
                 format!("{} {} ▾", tr.t("tasks.level"), effort.unwrap_or(default)),
-                ButtonId::Level,
+                ButtonId::Menu(Menu::Level),
                 levels,
             ));
         }
@@ -1140,11 +1140,7 @@ impl TasksTab {
             return;
         };
         // The list opens above its own button.
-        let wanted = match menu {
-            Menu::To => ButtonId::To,
-            Menu::Model => ButtonId::Model,
-            Menu::Level => ButtonId::Level,
-        };
+        let wanted = ButtonId::Menu(menu);
         let mut x = row.x;
         for (label, id, _) in &items {
             if *id == wanted {
