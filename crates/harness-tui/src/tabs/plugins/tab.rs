@@ -10,7 +10,7 @@
 //! │                              ││ Roles: developer                          │
 //! └──────────────────────────────┘└───────────────────────────────────────────┘
 //!  [ Give to the developer ] [ Save ] [ Undo changes ]
-//!  [ Allow hooks ] [ Allow servers ] [ Remove ] [ Open in Zed ]
+//!  [ Allow hooks ] [ Allow servers ] [ Remove ] [ Open in editor ]
 //! ```
 //!
 //! Plugins differ between agents: a Claude Code plugin is only for roles on

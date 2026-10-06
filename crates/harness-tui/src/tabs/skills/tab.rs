@@ -13,7 +13,7 @@
 //! │  [x] crash-recovery  built-in     ││                                          │
 //! │  [■] rust-errors     own          ││                                          │
 //! └───────────────────────────────────┘└──────────────────────────────────────────┘
-//!  Edit in Zed   New skill   Restore built-in   Save   Undo changes
+//!  Edit in editor   New skill   Restore built-in   Save   Undo changes
 //! ```
 //!
 //! Skills are edited in Zed (see `editor`). Editing a built-in skill makes a

@@ -152,7 +152,7 @@ fn a_retrospective_is_generated_edited_and_its_proposals_applied() {
 
     apply_the_proposal(&mut app, &root, &repo);
 
-    // «Open in Zed»: what Lisa writes there is committed.
+    // «Open in editor»: what Lisa writes there is committed.
     key(&mut app, KeyCode::Char('e'));
     let job = app.edit.take().unwrap();
     assert!(job.kind == EditKind::Retro && job.path.ends_with(".harness/retros/001/retro.md"));
