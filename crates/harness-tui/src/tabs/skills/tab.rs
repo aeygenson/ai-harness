@@ -26,7 +26,7 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use harness_core::config::Config;
+use harness_core::config::{AgentKind, Config};
 use harness_core::git::HARNESS_DIR;
 use harness_core::skills::{self, LibrarySkill, Source};
 use harness_core::task::handoff::Role;
@@ -80,7 +80,7 @@ pub struct SkillsTab {
     pub(crate) role: usize,
     library: Vec<LibrarySkill>,
     /// Each role's agent.
-    roles: BTreeMap<Role, String>,
+    roles: BTreeMap<Role, AgentKind>,
     /// The selected line of the list.
     pub(crate) row: usize,
     pub(crate) scroll: u16,
@@ -125,10 +125,11 @@ impl SkillsTab {
     }
 
     /// The agent of the chosen role, `claude` if harness.toml has no such role.
-    fn agent(&self) -> &str {
+    fn agent(&self) -> AgentKind {
         self.roles
             .get(&self.role())
-            .map_or("claude", String::as_str)
+            .copied()
+            .unwrap_or(AgentKind::Claude)
     }
 
     fn rows(&self) -> Vec<Row> {
@@ -349,7 +350,7 @@ impl SkillsTab {
                     let (status, style) = Self::status(skill, tr);
                     if name.starts_with(AGENT_NOTE) {
                         // ● in this role's prompt, ○ the note of another agent.
-                        let used = skills::agent_note(self.agent()) == Some(name.as_str());
+                        let used = skills::agent_note(self.agent()) == name;
                         let (mark, look) = if used {
                             ("●", Style::new())
                         } else {
@@ -414,7 +415,7 @@ impl SkillsTab {
                     ));
                 }
                 if skill.name.starts_with(AGENT_NOTE) {
-                    let key = if skills::agent_note(self.agent()) == Some(skill.name.as_str()) {
+                    let key = if skills::agent_note(self.agent()) == skill.name {
                         "skills.agent_used"
                     } else {
                         "skills.agent_unused"

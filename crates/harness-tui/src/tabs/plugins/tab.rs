@@ -24,8 +24,8 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use harness_core::config::PluginConfig;
-use harness_core::plugins::{self, family, Details};
+use harness_core::config::{AgentKind, PluginConfig};
+use harness_core::plugins::{self, Details};
 use harness_core::task::handoff::Role;
 use ratatui::crossterm::event::KeyCode;
 use ratatui::layout::{Constraint, Layout, Rect};
@@ -123,7 +123,7 @@ impl PluginsTab {
             .map(|(name, plugin)| {
                 let path = self.folder(name, plugin);
                 let details =
-                    plugins::describe(&path, name, &plugin.agent).map_err(|e| e.to_string());
+                    plugins::describe(&path, name, plugin.agent).map_err(|e| e.to_string());
                 (name.clone(), details)
             })
             .collect();
@@ -138,11 +138,9 @@ impl PluginsTab {
         ROLES[self.role.min(ROLES.len() - 1)]
     }
 
-    /// The family of the role's agent: "claude", "codex", or another agent.
-    fn agent<'a>(&self, roles: &'a RolesTab) -> &'a str {
-        roles
-            .settings(self.role())
-            .map_or("", |settings| family(&settings.agent))
+    /// The agent the role runs on, if the role is set up.
+    fn agent(&self, roles: &RolesTab) -> Option<AgentKind> {
+        roles.settings(self.role()).map(|settings| settings.agent)
     }
 
     /// The plugins in the list: those for the role's agent, those the role
@@ -155,7 +153,7 @@ impl PluginsTab {
         let mut names: Vec<String> = roles
             .plugins()
             .iter()
-            .filter(|(_, p)| p.agent == agent)
+            .filter(|(_, p)| Some(p.agent) == agent)
             .map(|(name, _)| name.clone())
             .collect();
         for name in listed {
@@ -221,10 +219,8 @@ impl PluginsTab {
         let agent = self.agent(roles);
         match roles.plugins().get(name) {
             None => Err("plugins.not_described_short"),
-            Some(_) if agent != plugins::CLAUDE && agent != plugins::CODEX => {
-                Err("plugins.agent_has_none")
-            }
-            Some(plugin) if plugin.agent != agent => Err("plugins.other_agent"),
+            Some(_) if !agent.is_some_and(AgentKind::has_plugins) => Err("plugins.agent_has_none"),
+            Some(plugin) if Some(plugin.agent) != agent => Err("plugins.other_agent"),
             Some(_) => Ok(()),
         }
     }
@@ -453,14 +449,14 @@ impl PluginsTab {
                 let grey = self.can_give(roles, name).is_err();
                 let plugin = roles.plugins().get(name);
                 // Kept by the role although it does not fit: a run stops.
-                let wrong = on && plugin.is_none_or(|p| p.agent != self.agent(roles));
+                let wrong = on && plugin.is_none_or(|p| Some(p.agent) != self.agent(roles));
                 let note = match plugin {
                     None => Span::styled(tr.t("plugins.not_described_short").to_string(), red),
-                    Some(p) if wrong => Span::styled(p.agent.clone(), red),
+                    Some(p) if wrong => Span::styled(p.agent.to_string(), red),
                     Some(p) if self.blocked(name, p) => {
                         Span::styled(tr.t("plugins.blocked_short").to_string(), red)
                     }
-                    Some(p) => Span::styled(p.agent.clone(), dim),
+                    Some(p) => Span::styled(p.agent.to_string(), dim),
                 };
                 let style = match () {
                     () if wrong => red,
@@ -596,23 +592,22 @@ impl PluginsTab {
 
         // The agent; red when the role's agent cannot load it.
         let agent = self.agent(roles);
-        let fits = plugin.agent == agent;
+        let fits = Some(plugin.agent) == agent;
         lines.push(Line::from(vec![
             label("plugins.agent"),
-            Span::styled(plugin.agent.clone(), if fits { Style::new() } else { red }),
+            Span::styled(
+                plugin.agent.to_string(),
+                if fits { Style::new() } else { red },
+            ),
         ]));
         if !fits {
-            let why = if agent == plugins::CLAUDE || agent == plugins::CODEX {
-                tr.f(
-                    "plugins.other_agent_long",
-                    &[("role", &self.role()), ("agent", &agent)],
-                )
+            let agent_name = agent.map_or("", AgentKind::as_str);
+            let key = if agent.is_some_and(AgentKind::has_plugins) {
+                "plugins.other_agent_long"
             } else {
-                tr.f(
-                    "plugins.agent_has_none_long",
-                    &[("role", &self.role()), ("agent", &agent)],
-                )
+                "plugins.agent_has_none_long"
             };
+            let why = tr.f(key, &[("role", &self.role()), ("agent", &agent_name)]);
             lines.push(Line::styled(why, dim));
         }
         let from = match (&plugin.source, &plugin.commit) {

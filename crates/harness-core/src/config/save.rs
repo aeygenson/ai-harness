@@ -62,7 +62,7 @@ pub fn save(repo: &Repo, text: &str) -> Result<bool, SettingsError> {
 mod tests {
     use super::*;
     use crate::config::projects;
-    use crate::config::DEFAULT_CONFIG;
+    use crate::config::{AgentKind, DEFAULT_CONFIG};
     use crate::task::handoff::Role;
 
     #[test]
@@ -93,7 +93,7 @@ mod tests {
         );
         assert!(save(&repo, &good).unwrap());
         let config = Config::load(&dir.path().join(HARNESS_DIR)).unwrap();
-        assert_eq!(config.roles[&Role::Tester].agent, "codex");
+        assert_eq!(config.roles[&Role::Tester].agent, AgentKind::Codex);
         assert!(repo.changed_files().unwrap().is_empty(), "committed");
     }
 }

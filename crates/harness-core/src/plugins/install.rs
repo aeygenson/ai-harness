@@ -16,9 +16,10 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
+use crate::config::AgentKind;
 use crate::git::{self, GitError};
 use crate::plugins::catalog::{inside, Entry, Source};
-use crate::plugins::{self, manifest, Contents, PluginError, CLAUDE, CODEX};
+use crate::plugins::{self, manifest, Contents, PluginError};
 
 /// Catalog fields that describe the listing, not the plugin.
 const LISTING_ONLY: &[&str] = &["source", "strict", "category", "tags"];
@@ -120,7 +121,7 @@ pub fn stage(entry: &Entry, fetched: &Fetched, into: &Path) -> Result<Contents, 
 fn stage_inner(entry: &Entry, fetched: &Fetched, into: &Path) -> Result<Contents, InstallError> {
     plugins::copy_dir(&fetched.dir, into)?;
     let manifest_path = into.join(manifest(entry.agent));
-    if !manifest_path.exists() && entry.agent == CLAUDE && entry.is_its_own_manifest() {
+    if !manifest_path.exists() && entry.agent == AgentKind::Claude && entry.is_its_own_manifest() {
         let fields: serde_json::Map<_, _> = entry
             .fields
             .iter()
@@ -132,7 +133,7 @@ fn stage_inner(entry: &Entry, fetched: &Fetched, into: &Path) -> Result<Contents
         fs::write(&manifest_path, text + "\n")?;
     }
     let contents = plugins::inspect(into, &entry.name, entry.agent)?;
-    if entry.agent == CODEX && contents.apps {
+    if entry.agent == AgentKind::Codex && contents.apps {
         return Err(InstallError::Apps(entry.name.clone()));
     }
     Ok(contents)

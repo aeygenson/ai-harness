@@ -148,7 +148,7 @@ impl Skills {
                     .map(|name| read_skill(&dir, role, name))
                     .collect()
             };
-            let base = base_names(role, &settings.agent)
+            let base = base_names(role, settings.agent)
                 .into_iter()
                 .map(|name| read_skill(&dir, role, name))
                 .collect::<Result<Vec<_>, _>>()?;

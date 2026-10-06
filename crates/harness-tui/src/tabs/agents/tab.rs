@@ -4,6 +4,7 @@
 
 use harness_agents::install::catalog::{self, Action, Status, CATALOG};
 use harness_agents::install::credentials;
+use harness_core::config::AgentKind;
 use ratatui::crossterm::event::KeyCode;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::Modifier;
@@ -120,19 +121,19 @@ impl AgentsTab {
     /// Looks again which agents have a saved login (after «Sign in»).
     pub fn reload_logins(&mut self, credentials_dir: &std::path::Path) {
         for status in &mut self.statuses {
-            if status.entry.runs() {
-                status.login = Some(credentials::has_login(credentials_dir, status.entry.id));
+            if let Ok(agent) = status.entry.id.parse::<AgentKind>() {
+                status.login = Some(credentials::has_login(credentials_dir, agent));
             }
         }
     }
 
     /// The agents ready for a role: installed, with a saved login.
-    pub fn ready(&self) -> Option<std::collections::BTreeSet<&'static str>> {
+    pub fn ready(&self) -> Option<std::collections::BTreeSet<AgentKind>> {
         self.known.then(|| {
             self.statuses
                 .iter()
-                .filter(|s| s.entry.runs() && s.installed() && s.login == Some(true))
-                .map(|s| s.entry.id)
+                .filter(|s| s.installed() && s.login == Some(true))
+                .filter_map(|s| s.entry.id.parse::<AgentKind>().ok())
                 .collect()
         })
     }

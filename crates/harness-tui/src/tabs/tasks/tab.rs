@@ -30,7 +30,7 @@ use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 
 use anyhow::Result;
-use harness_core::config::{Config, RoleConfig, AGENTS};
+use harness_core::config::{AgentKind, Config, RoleConfig};
 use harness_core::git::{Repo, HARNESS_DIR};
 use harness_core::models::{self, ModelList};
 use harness_core::retro::stage_text;
@@ -118,7 +118,7 @@ pub struct TasksTab {
     /// What `harness.toml` says about each role.
     settings: BTreeMap<Role, RoleConfig>,
     /// The models each agent said it has.
-    models: BTreeMap<String, ModelList>,
+    models: BTreeMap<AgentKind, ModelList>,
     tasks: Vec<TaskView>,
     /// `architect  claude (opus)`, one line per role.
     roles: Vec<(Option<Role>, String)>,
@@ -210,9 +210,9 @@ impl TasksTab {
 
         self.roles.clear();
         self.models = match &self.home {
-            Some(home) => AGENTS
-                .iter()
-                .filter_map(|agent| models::load(home, agent).map(|l| (agent.to_string(), l)))
+            Some(home) => AgentKind::ALL
+                .into_iter()
+                .filter_map(|agent| models::load(home, agent).map(|l| (agent, l)))
                 .collect(),
             None => BTreeMap::new(),
         };
@@ -222,12 +222,12 @@ impl TasksTab {
                 for (role, settings) in &config.roles {
                     self.roles.push((
                         Some(*role),
-                        agent_line(role.as_str(), &settings.agent, &settings.model),
+                        agent_line(role.as_str(), settings.agent, &settings.model),
                     ));
                 }
                 if let Some(retro) = &config.retro {
                     self.roles
-                        .push((None, agent_line("retro", &retro.agent, &retro.model)));
+                        .push((None, agent_line("retro", retro.agent, &retro.model)));
                 }
             }
             Err(error) => problems.push(error.to_string()),
@@ -407,19 +407,19 @@ impl TasksTab {
     /// The agent, model and level the target role gets in the next launch:
     /// what was chosen here, otherwise what `harness.toml` says. `None` when
     /// no role runs or the role has no settings.
-    pub fn run_choice(&self) -> Option<(&str, Option<&str>, Option<&str>)> {
+    pub fn run_choice(&self) -> Option<(AgentKind, Option<&str>, Option<&str>)> {
         let role = self.target()?;
         let settings = self.settings.get(&role)?;
         let (model, effort) = match self.run.as_ref().filter(|r| r.role == role) {
             Some(run) => (run.model.as_deref(), run.effort.as_deref()),
             None => (settings.model.as_deref(), settings.effort.as_deref()),
         };
-        Some((settings.agent.as_str(), model, effort))
+        Some((settings.agent, model, effort))
     }
 
     /// The model list of the target role's agent.
     fn model_list(&self) -> Option<&ModelList> {
-        self.models.get(self.run_choice()?.0)
+        self.models.get(&self.run_choice()?.0)
     }
 
     /// What «Model» lists: the agent's default (`None`), its models, and
@@ -1449,7 +1449,7 @@ fn load_task(runs: &Path, id: &str) -> Result<TaskView> {
     })
 }
 
-fn agent_line(who: &str, agent: &str, model: &Option<String>) -> String {
+fn agent_line(who: &str, agent: AgentKind, model: &Option<String>) -> String {
     match model {
         Some(model) => format!("{who:<10} {agent} ({model})"),
         None => format!("{who:<10} {agent}"),

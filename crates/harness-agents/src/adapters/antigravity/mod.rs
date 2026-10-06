@@ -29,6 +29,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use harness_core::config::AgentKind;
 use harness_core::task::agent::{AgentOutcome, AgentRunner, RoleJob};
 use harness_core::task::handoff::Role;
 
@@ -157,7 +158,7 @@ impl Antigravity {
 
 impl AgentRunner for Antigravity {
     async fn run(&self, job: &RoleJob) -> AgentOutcome {
-        let log = self.settings.header("antigravity", job);
+        let log = self.settings.header(AgentKind::Antigravity, job);
         let home = match self.prepare_home(job.role) {
             Ok(home) => home,
             Err(e) => return failed(log, format!("cannot prepare the agent's HOME: {e}")),

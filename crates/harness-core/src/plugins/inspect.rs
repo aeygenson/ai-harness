@@ -5,6 +5,7 @@ use std::fs;
 use std::path::Path;
 
 use super::{manifest, PluginError};
+use crate::config::AgentKind;
 
 /// What a plugin folder contains that runs or reaches out by itself.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -19,7 +20,7 @@ pub struct Contents {
 
 /// Reads the manifest of `agent`'s plugin in `path` and looks at what the
 /// plugin brings. `name` is only for messages.
-pub fn inspect(path: &Path, name: &str, agent: &str) -> Result<Contents, PluginError> {
+pub fn inspect(path: &Path, name: &str, agent: AgentKind) -> Result<Contents, PluginError> {
     let manifest = read_manifest(path, name, agent)?;
     Ok(contents_of(path, &manifest))
 }
@@ -39,7 +40,7 @@ pub struct Details {
 }
 
 /// Reads what `agent`'s plugin in `path` brings, for showing it.
-pub fn describe(path: &Path, name: &str, agent: &str) -> Result<Details, PluginError> {
+pub fn describe(path: &Path, name: &str, agent: AgentKind) -> Result<Details, PluginError> {
     let manifest = read_manifest(path, name, agent)?;
     let text = |key: &str| {
         manifest
@@ -69,14 +70,14 @@ pub fn describe(path: &Path, name: &str, agent: &str) -> Result<Details, PluginE
 pub(super) fn read_manifest(
     path: &Path,
     name: &str,
-    agent: &str,
+    agent: AgentKind,
 ) -> Result<serde_json::Value, PluginError> {
     let manifest_path = path.join(manifest(agent));
     let text = fs::read_to_string(&manifest_path).map_err(|_| PluginError::NoManifest {
         name: name.to_string(),
         path: path.display().to_string(),
         manifest: manifest(agent),
-        agent: agent.to_string(),
+        agent,
     })?;
     serde_json::from_str(&text)
         .ok()

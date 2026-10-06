@@ -5,6 +5,7 @@ use std::path::PathBuf;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
+use harness_core::config::AgentKind;
 use harness_core::task::handoff::{NextStep, Role};
 
 #[derive(Parser)]
@@ -168,14 +169,14 @@ pub(crate) enum PluginCommand {
     List {
         /// Only plugins for `claude` or `codex`.
         #[arg(long)]
-        agent: Option<String>,
+        agent: Option<AgentKind>,
     },
     /// Copy a plugin into the project: `name` or `name@catalog`.
     Add {
         name: String,
         /// `claude` or `codex`, when the catalog has the plugin for both.
         #[arg(long)]
-        agent: Option<String>,
+        agent: Option<AgentKind>,
         /// Also give it to this role.
         #[arg(long, value_parser = parse_role)]
         role: Option<Role>,

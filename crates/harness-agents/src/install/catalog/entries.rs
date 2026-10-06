@@ -1,6 +1,6 @@
 //! The agents of the catalog: their programs, versions and the makers' install commands.
 
-use harness_core::config::AGENTS;
+use harness_core::config::AgentKind;
 
 /// A command for Linux and macOS, and one for Windows. `None`: the maker's
 /// site says how.
@@ -70,7 +70,7 @@ pub struct Entry {
 impl Entry {
     /// The harness can run it: it is one of the agents of `harness.toml`.
     pub fn runs(&self) -> bool {
-        AGENTS.contains(&self.id)
+        self.id.parse::<AgentKind>().is_ok()
     }
 
     /// The npm package it is installed from (`npm install -g <package>@latest`).

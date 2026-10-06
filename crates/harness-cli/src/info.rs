@@ -2,7 +2,7 @@
 
 use anyhow::{Context, Result};
 use harness_agents::install::credentials;
-use harness_core::config::projects;
+use harness_core::config::{projects, AgentKind};
 
 /// `harness models`: the saved lists, after asking the agents again with
 /// `--refresh`.
@@ -23,7 +23,7 @@ pub(crate) fn models(refresh: bool) -> Result<()> {
         }
     }
     let mut any = false;
-    for agent in harness_core::config::AGENTS {
+    for agent in AgentKind::ALL {
         let Some(list) = models::load(&home, agent) else {
             continue;
         };

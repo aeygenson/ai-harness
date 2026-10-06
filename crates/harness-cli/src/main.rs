@@ -86,7 +86,7 @@ async fn main() -> Result<()> {
             MarketplaceCommand::Remove { name } => catalogs::marketplace_remove(&name),
         },
         Command::Plugin { command } => match command {
-            PluginCommand::List { agent } => catalogs::plugin_list(project, agent.as_deref()),
+            PluginCommand::List { agent } => catalogs::plugin_list(project, agent),
             PluginCommand::Add {
                 name,
                 agent,
@@ -97,7 +97,7 @@ async fn main() -> Result<()> {
                 project,
                 &name,
                 &catalogs::AddOptions {
-                    agent: agent.as_deref(),
+                    agent,
                     role,
                     allow_hooks,
                     allow_mcp,

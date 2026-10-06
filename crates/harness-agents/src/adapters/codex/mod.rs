@@ -32,6 +32,7 @@ mod home;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use harness_core::config::AgentKind;
 use harness_core::task::agent::{AgentOutcome, AgentRunner, RoleJob};
 use harness_core::task::handoff::Role;
 
@@ -184,7 +185,7 @@ impl Codex {
 
 impl AgentRunner for Codex {
     async fn run(&self, job: &RoleJob) -> AgentOutcome {
-        let mut log = self.settings.header("codex", job);
+        let mut log = self.settings.header(AgentKind::Codex, job);
         let prepared = self.put_auth(job).and_then(|()| self.put_plugins(job));
         if let Err(e) = prepared {
             self.take_auth_back(job);

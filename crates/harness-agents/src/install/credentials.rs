@@ -6,6 +6,8 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
+use harness_core::config::AgentKind;
+
 const TOKEN_FILE: &str = "oauth-token";
 
 /// Lives in `harness_core`, because MCP server settings carry secrets too.
@@ -32,26 +34,25 @@ pub fn load_token(dir: &Path, agent: &str) -> io::Result<Secret> {
 
 /// Is a login for `agent` (as `harness.toml` names it) saved? The same
 /// places the agents are started from; nothing is read beyond "is it there".
-pub fn has_login(dir: &Path, agent: &str) -> bool {
+pub fn has_login(dir: &Path, agent: AgentKind) -> bool {
     match agent {
-        "claude" => dir.join("claude").join(TOKEN_FILE).is_file(),
-        "codex" => dir.join("codex").join("auth.json").is_file(),
-        "dsh" => {
+        AgentKind::Claude => dir.join("claude").join(TOKEN_FILE).is_file(),
+        AgentKind::Codex => dir.join("codex").join("auth.json").is_file(),
+        AgentKind::Dsh => {
             dir.join("deepseek").join(TOKEN_FILE).is_file()
                 || std::env::var(crate::adapters::dsh::KEY_ENV)
                     .is_ok_and(|key| !key.trim().is_empty())
         }
-        "antigravity" => dir.join("antigravity/.gemini/antigravity-cli").is_dir(),
-        _ => false,
+        AgentKind::Antigravity => dir.join("antigravity/.gemini/antigravity-cli").is_dir(),
     }
 }
 
-/// Whose login `agent` needs: DeepSeek Harness needs the DeepSeek key.
+/// Whose login `agent` needs: DeepSeek Harness needs the DeepSeek key. A
+/// catalog agent the harness cannot run keeps its own name.
 pub fn login_name(agent: &str) -> &str {
-    match agent {
-        "dsh" => "deepseek",
-        other => other,
-    }
+    agent
+        .parse::<AgentKind>()
+        .map_or(agent, |kind| kind.login_name())
 }
 
 /// Where `harness secret set` keeps secrets for MCP servers, one file each.
@@ -106,17 +107,16 @@ mod tests {
     fn a_login_is_seen_where_the_agents_look_for_it() {
         let dir = tempfile::tempdir().unwrap();
         let dir = dir.path();
-        assert!(!has_login(dir, "claude"));
+        assert!(!has_login(dir, AgentKind::Claude));
         save_token(dir, "claude", &Secret::new("t")).unwrap();
-        assert!(has_login(dir, "claude"));
+        assert!(has_login(dir, AgentKind::Claude));
         fs::create_dir_all(dir.join("codex")).unwrap();
         fs::write(dir.join("codex/auth.json"), "{}").unwrap();
-        assert!(has_login(dir, "codex"));
+        assert!(has_login(dir, AgentKind::Codex));
         fs::create_dir_all(dir.join("antigravity/.gemini/antigravity-cli")).unwrap();
-        assert!(has_login(dir, "antigravity"));
+        assert!(has_login(dir, AgentKind::Antigravity));
         save_token(dir, "deepseek", &Secret::new("k")).unwrap();
-        assert!(has_login(dir, "dsh"));
-        assert!(!has_login(dir, "gemini"));
+        assert!(has_login(dir, AgentKind::Dsh));
         assert_eq!(login_name("dsh"), "deepseek");
     }
 

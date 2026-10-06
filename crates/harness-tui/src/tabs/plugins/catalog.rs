@@ -19,7 +19,7 @@
 
 use std::path::Path;
 
-use harness_core::plugins;
+use harness_core::config::AgentKind;
 use harness_core::plugins::catalog::{Entry, Source};
 use harness_core::plugins::ops::{self, CatalogInfo};
 use ratatui::layout::{Constraint, Layout, Rect};
@@ -37,8 +37,8 @@ use crate::ui::{buttons, panel, selector, ButtonId, Hits, ListId};
 /// The catalog anyone starts with: Anthropic's plugins for Claude Code.
 pub const OFFICIAL: &str = "anthropics/claude-plugins-official";
 
-/// The agent filter: index into these, "all" last.
-pub const FILTERS: [&str; 3] = [plugins::CLAUDE, plugins::CODEX, "all"];
+/// The agent filter: index into these; `None` (all agents) last.
+pub const FILTERS: [Option<AgentKind>; 3] = [Some(AgentKind::Claude), Some(AgentKind::Codex), None];
 
 /// The plugins of all catalogs, while «From catalog» is open.
 #[derive(Debug, Default)]
@@ -54,8 +54,9 @@ pub struct CatalogView {
 }
 
 impl CatalogView {
-    /// Reads every added catalog; `agent` sets the filter.
-    pub fn load(home: Option<&Path>, agent: &str) -> Self {
+    /// Reads every added catalog; `agent` sets the filter (all agents when
+    /// it has no plugins).
+    pub fn load(home: Option<&Path>, agent: Option<AgentKind>) -> Self {
         let mut view = Self {
             filter: FILTERS
                 .iter()
@@ -100,7 +101,7 @@ impl CatalogView {
         let mut shown: Vec<&Entry> = self
             .entries
             .iter()
-            .filter(|e| agent == "all" || e.agent == agent)
+            .filter(|e| agent.is_none_or(|agent| e.agent == agent))
             .filter(|e| {
                 let text = format!("{} {}", e.name, e.description).to_lowercase();
                 words.iter().all(|w| text.contains(w.as_str()))
@@ -227,7 +228,7 @@ pub fn draw_catalog(
     );
     let labels: Vec<&str> = FILTERS
         .iter()
-        .map(|f| if *f == "all" { tr.t("plugins.all") } else { f })
+        .map(|f| f.map_or(tr.t("plugins.all"), |agent| agent.as_str()))
         .collect();
     selector(
         frame,
@@ -444,7 +445,7 @@ pub fn draw_catalogs(
                 Ok(entries) => {
                     let claude = entries
                         .iter()
-                        .filter(|e| e.agent == plugins::CLAUDE)
+                        .filter(|e| e.agent == AgentKind::Claude)
                         .count();
                     lines.push(Line::from(tr.f(
                         "plugins.catalog_counts",

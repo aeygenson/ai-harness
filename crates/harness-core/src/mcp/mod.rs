@@ -49,7 +49,7 @@ pub use resolve::is_allowed_url;
 
 use std::collections::BTreeMap;
 
-use crate::config::Config;
+use crate::config::{AgentKind, Config};
 use crate::secret::Secret;
 use crate::task::handoff::Role;
 use resolve::resolve;
@@ -217,10 +217,13 @@ pub fn server(
 }
 
 /// Can `agent` start this server? Every agent of the harness starts a
-/// program server (`stdio`) the same way, so for now this is any known
-/// agent; servers some agent cannot start would be refused here.
-pub fn agent_runs(agent: &str, _server: &crate::config::McpConfig) -> bool {
-    crate::config::AGENTS.contains(&agent)
+/// program server (`stdio`) the same way, so for now this is every agent;
+/// servers some agent cannot start would be refused here.
+pub fn agent_runs(agent: AgentKind, _server: &crate::config::McpConfig) -> bool {
+    // No `_` arm: a new agent must be checked here before it gets servers.
+    match agent {
+        AgentKind::Claude | AgentKind::Codex | AgentKind::Antigravity | AgentKind::Dsh => true,
+    }
 }
 
 /// Lowercase letters, digits, `-` and `_`: safe in file names, in Codex's
