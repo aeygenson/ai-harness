@@ -9,4 +9,5 @@ mod forms;
 mod keyboard;
 mod mouse;
 mod press;
+mod setup;
 pub(crate) mod terminal;
