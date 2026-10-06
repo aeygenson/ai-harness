@@ -422,6 +422,10 @@ fn a_web_server_is_written_and_changed_in_the_form() {
     assert!(!text.contains("auth"), "{text}");
 }
 
+#[expect(
+    clippy::unnecessary_wraps,
+    reason = "a fake must match the `McpChecker` function type"
+)]
 fn fake_web_check(
     server: &harness_core::mcp::McpServer,
     _: &Path,
@@ -480,6 +484,10 @@ fn a_web_server_shows_its_address_and_is_checked_through_the_bridge() {
     assert!(!text.contains("web-key"), "{text}");
 }
 
+#[expect(
+    clippy::unnecessary_wraps,
+    reason = "a fake must match the `McpSigner` function type"
+)]
 fn fake_sign_in(dir: &Path, name: &str, url: &str) -> Result<(), String> {
     // As a real sign-in would leave it.
     let file = harness_agents::mcp::oauth::path(dir, name);

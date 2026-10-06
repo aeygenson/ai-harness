@@ -398,9 +398,9 @@ pub enum JobEvent {
 }
 
 /// Runs an install or update command; tests give a fake one.
-pub type Installer = fn(&str, std::sync::mpsc::Sender<JobEvent>);
+pub type Installer = fn(&str, &std::sync::mpsc::Sender<JobEvent>);
 
-pub fn install(command: &str, tx: std::sync::mpsc::Sender<JobEvent>) {
+pub fn install(command: &str, tx: &std::sync::mpsc::Sender<JobEvent>) {
     let result = catalog::run_command(command, |line| {
         let _ = tx.send(JobEvent::Line(line));
     });

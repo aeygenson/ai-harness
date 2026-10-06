@@ -209,7 +209,7 @@ impl Browser {
                 message,
             ),
             (None, Some(error)) => {
-                frame.render_widget(Span::styled(error.clone(), theme::bad()), message)
+                frame.render_widget(Span::styled(error.clone(), theme::bad()), message);
             }
             (None, None) => {}
         }

@@ -3,6 +3,10 @@
 use super::*;
 
 /// The retrospective's agent: it writes its lessons and one proposal.
+#[expect(
+    clippy::unnecessary_wraps,
+    reason = "a fake must match the `RetroBuilder` function type"
+)]
 fn mock_retro(
     _: &harness_core::config::Config,
 ) -> Result<harness_agents::AnyAgent, harness_agents::build::BuildError> {

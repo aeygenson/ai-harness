@@ -193,7 +193,7 @@ impl App {
                     KeyCode::Char('s') => self.press(ButtonId::Save),
                     KeyCode::Char('u') => self.press(ButtonId::Undo),
                     KeyCode::Char(' ') | KeyCode::Enter => {
-                        self.press(ButtonId::Mcp(McpButton::Toggle))
+                        self.press(ButtonId::Mcp(McpButton::Toggle));
                     }
                     KeyCode::Char('c') => self.press(ButtonId::Mcp(McpButton::Check)),
                     code => {
@@ -213,7 +213,7 @@ impl App {
                     KeyCode::Char('s') => self.press(ButtonId::Save),
                     KeyCode::Char('u') => self.press(ButtonId::Undo),
                     KeyCode::Char(' ') | KeyCode::Enter => {
-                        self.press(ButtonId::Plugin(PluginButton::Toggle))
+                        self.press(ButtonId::Plugin(PluginButton::Toggle));
                     }
                     code => {
                         if let (Some(plugins), Some(roles)) = (&mut self.plugins, &mut self.roles) {

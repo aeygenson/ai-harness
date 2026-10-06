@@ -86,6 +86,10 @@ wins**. In short:
   feature flags, and the performance rules (M-HOTPATH, M-THROUGHPUT, M-YIELD-POINTS).
 - Lint overrides use `#[expect(lint, reason = "...")]`, not `#[allow(...)]`: the build then
   says when the override is no longer needed.
+- `[workspace.lints]` in the root `Cargo.toml` turns on the lints of M-STATIC-VERIFICATION:
+  the recommended compiler lints, clippy's `pedantic` group (minus a few listed there with
+  the reason) and some `restriction` lints. CI runs clippy with `-D warnings`, so they fail
+  the build.
 
 ## Preferred tools and libraries
 

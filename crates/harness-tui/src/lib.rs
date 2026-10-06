@@ -206,7 +206,8 @@ type Answers = Vec<(AgentKind, Result<ModelList, String>)>;
 type ModelAsker = fn(&Path) -> Answers;
 
 fn ask_agents(credentials_dir: &Path) -> Answers {
-    harness_agents::install::models::ask_all(credentials_dir, &Default::default())
+    let programs = harness_agents::install::models::Programs::default();
+    harness_agents::install::models::ask_all(credentials_dir, &programs)
 }
 
 /// Starts an MCP server in the project folder and asks it for its tools.
@@ -316,7 +317,7 @@ impl App {
             tab: Tab::Projects,
             projects: ProjectsTab::load(home.clone(), &tr),
             tr,
-            home: home.clone(),
+            home,
             project: None,
             tasks: None,
             roles: None,

@@ -160,7 +160,7 @@ impl Unusable {
 /// Why an entry cannot be added, if it cannot.
 pub fn unusable(entry: &Entry) -> Option<Unusable> {
     match &entry.source {
-        Source::Unsupported(kind) => Some(Unusable::Source(kind.to_string())),
+        Source::Unsupported(kind) => Some(Unusable::Source(kind.clone())),
         _ if !harness_core::mcp::is_simple_name(&entry.name) => Some(Unusable::Name),
         _ => None,
     }
@@ -303,25 +303,24 @@ pub fn draw_catalog(
         true,
     );
 
-    let (title, lines) = match view.current() {
-        Some(entry) => (
+    let (title, lines) = if let Some(entry) = view.current() {
+        (
             format!(" {} · {} ", entry.name, entry.catalog),
             entry_details(entry, roles, tr),
-        ),
-        None => {
-            let mut lines: Vec<Line> = if view.entries.is_empty() {
-                tr.t("plugins.no_catalogs")
-            } else {
-                tr.t("plugins.nothing_found")
-            }
-            .lines()
-            .map(|l| Line::from(l.to_string()))
-            .collect();
-            for error in &view.errors {
-                lines.push(Line::styled(error.clone(), red));
-            }
-            (String::new(), lines)
+        )
+    } else {
+        let mut lines: Vec<Line> = if view.entries.is_empty() {
+            tr.t("plugins.no_catalogs")
+        } else {
+            tr.t("plugins.nothing_found")
         }
+        .lines()
+        .map(|l| Line::from(l.to_string()))
+        .collect();
+        for error in &view.errors {
+            lines.push(Line::styled(error.clone(), red));
+        }
+        (String::new(), lines)
     };
     frame.render_widget(
         Paragraph::new(lines)

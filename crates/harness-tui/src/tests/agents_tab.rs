@@ -6,9 +6,10 @@ use super::*;
 fn fake_agents(credentials: Option<&Path>) -> Vec<harness_agents::install::catalog::Status> {
     use harness_agents::install::catalog;
     // Codex sits in the user's own npm folder, so the tab may update it.
-    let local = harness_platform::home::home_dir()
-        .map(|home| home.join(".local/bin/codex"))
-        .unwrap_or_else(|| PathBuf::from("/bin/codex"));
+    let local = harness_platform::home::home_dir().map_or_else(
+        || PathBuf::from("/bin/codex"),
+        |home| home.join(".local/bin/codex"),
+    );
     let find = move |name: &str| match name {
         "claude" => Some(PathBuf::from("/bin/claude")),
         "codex" => Some(local.clone()),
@@ -81,7 +82,7 @@ fn the_agents_tab_shows_the_catalog_with_what_is_installed() {
 }
 
 /// Prints two lines and succeeds.
-fn fake_installer(command: &str, tx: mpsc::Sender<JobEvent>) {
+fn fake_installer(command: &str, tx: &mpsc::Sender<JobEvent>) {
     let _ = tx.send(JobEvent::Line(format!("running {command}")));
     let _ = tx.send(JobEvent::Line("added 1 package".into()));
     let _ = tx.send(JobEvent::Done(Ok(())));
