@@ -24,8 +24,6 @@ must_use_candidate = "allow"
 return_self_not_must_use = "allow"
 # AGENTS.md asks for `# Errors` sections only on complex functions.
 missing_errors_doc = "allow"
-# Functions over 100 lines: allowed until the long ones are split, one PR at a time.
-too_many_lines = "allow"
 
 # Lints from the `restriction` group recommended by M-STATIC-VERIFICATION: each one
 # forbids a construct that hides a mistake or makes code harder to read.

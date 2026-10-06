@@ -19,13 +19,12 @@ fn plugin_folder(root: &Path, name: &str, agent: AgentKind, extra: &[(&str, &str
     }
 }
 
-#[test]
-fn the_plugins_tab_gives_allows_and_removes_plugins() {
-    let env = Env::new();
-    let root = env.path("test");
-    project(&root);
+/// A project with a Claude plugin `review` (with hooks) and a Codex plugin `lint`;
+/// the developer runs on Codex and the security officer on Antigravity.
+fn two_plugin_project(root: &Path) -> Repo {
+    project(root);
     plugin_folder(
-        &root,
+        root,
         "review",
         AgentKind::Claude,
         &[
@@ -34,7 +33,7 @@ fn the_plugins_tab_gives_allows_and_removes_plugins() {
             ("hooks/hooks.json", "{}"),
         ],
     );
-    plugin_folder(&root, "lint", AgentKind::Codex, &[]);
+    plugin_folder(root, "lint", AgentKind::Codex, &[]);
     let path = root.join(".harness/harness.toml");
     let text = fs::read_to_string(&path).unwrap()
         + "\n[plugins.review]\nagent = \"claude\"\nsource = \"official/review\"\n\
@@ -49,8 +48,37 @@ fn the_plugins_tab_gives_allows_and_removes_plugins() {
             "[roles.security]\nagent = \"antigravity\"",
         );
     fs::write(&path, text).unwrap();
-    let repo = Repo::open(&root).unwrap();
+    let repo = Repo::open(root).unwrap();
     repo.commit_all("plugins").unwrap();
+    repo
+}
+
+/// A Codex role gets Codex plugins only, and an Antigravity role none at all.
+fn other_agents_get_their_own_plugins(app: &mut App) {
+    click(app, " developer ");
+    let text = screen(app);
+    assert!(text.contains("▶ [ ] lint"), "{text}");
+    click(app, "[ ] review");
+    assert!(screen(app).contains("The developer runs on codex"));
+    key(app, KeyCode::Char(' '));
+    assert_eq!(
+        app.message.as_ref().unwrap().text,
+        "This plugin is for another agent"
+    );
+    // Antigravity has none at all.
+    click(app, " security ");
+    key(app, KeyCode::Char(' '));
+    assert_eq!(
+        app.message.as_ref().unwrap().text,
+        "The role's agent has no plugins"
+    );
+}
+
+#[test]
+fn the_plugins_tab_gives_allows_and_removes_plugins() {
+    let env = Env::new();
+    let root = env.path("test");
+    let repo = two_plugin_project(&root);
 
     let mut app = env.app(&root);
     click(&mut app, "5 Plugins");
@@ -102,24 +130,7 @@ fn the_plugins_tab_gives_allows_and_removes_plugins() {
     );
     assert!(config(&root).plugins["review"].allow_hooks);
 
-    // A Codex role gets Codex plugins only.
-    click(&mut app, " developer ");
-    let text = screen(&mut app);
-    assert!(text.contains("▶ [ ] lint"), "{text}");
-    click(&mut app, "[ ] review");
-    assert!(screen(&mut app).contains("The developer runs on codex"));
-    key(&mut app, KeyCode::Char(' '));
-    assert_eq!(
-        app.message.as_ref().unwrap().text,
-        "This plugin is for another agent"
-    );
-    // Antigravity has none at all.
-    click(&mut app, " security ");
-    key(&mut app, KeyCode::Char(' '));
-    assert_eq!(
-        app.message.as_ref().unwrap().text,
-        "The role's agent has no plugins"
-    );
+    other_agents_get_their_own_plugins(&mut app);
 
     // «Open in Zed» opens the folder; what was changed there is committed.
     click(&mut app, " architect ");
@@ -170,6 +181,71 @@ fn wait_job(app: &mut App) {
     }
 }
 
+/// Writes `text` to `file` inside `dir`, making the folders it needs.
+fn write_file(dir: &Path, file: &str, text: &str) {
+    let path = dir.join(file);
+    fs::create_dir_all(path.parent().unwrap()).unwrap();
+    fs::write(path, text).unwrap();
+}
+
+/// A plugin catalog in `dir` with three plugins: `review` (with hooks), `notes` and an npm one.
+fn fake_catalog(dir: &Path) {
+    write_file(
+        dir,
+        ".claude-plugin/marketplace.json",
+        r#"{"name": "official", "plugins": [
+            {"name": "review", "description": "Reviews code for bugs", "source": "./plugins/review"},
+            {"name": "notes", "description": "Keeps notes", "source": "./plugins/notes"},
+            {"name": "pkg", "description": "From npm", "source": {"source": "npm", "package": "x"}}
+        ]}"#,
+    );
+    write_file(
+        dir,
+        "plugins/review/.claude-plugin/plugin.json",
+        r#"{"name": "review"}"#,
+    );
+    write_file(dir, "plugins/review/hooks/hooks.json", "{}");
+    write_file(
+        dir,
+        "plugins/notes/.claude-plugin/plugin.json",
+        r#"{"name": "notes"}"#,
+    );
+    write_file(dir, "plugins/notes/commands/note.md", "# note");
+}
+
+/// «Update» takes a newer version of `review` from the catalog, or leaves nothing if refused.
+fn update_from_catalog(app: &mut App, root: &Path, repo: &Repo, catalog: &Path) {
+    // A newer version in the catalog: «Update» shows the files, then takes it.
+    write_file(catalog, "plugins/review/commands/fix.md", "# fix");
+    key(app, KeyCode::Char('U'));
+    wait_job(app);
+    let text = screen(app);
+    assert!(text.contains("+ commands/fix.md"), "{text}");
+    key(app, KeyCode::Enter);
+    assert!(root
+        .join(".harness/plugins/review/commands/fix.md")
+        .is_file());
+    assert_eq!(repo.changed_files().unwrap(), Vec::<String>::new());
+    key(app, KeyCode::Char('U'));
+    wait_job(app);
+    assert!(app
+        .message
+        .as_ref()
+        .unwrap()
+        .text
+        .contains("already up to date"));
+
+    // An update that is not taken leaves nothing behind.
+    write_file(catalog, "plugins/review/commands/more.md", "# more");
+    key(app, KeyCode::Char('U'));
+    wait_job(app);
+    key(app, KeyCode::Esc);
+    assert!(!root
+        .join(".harness/plugins/review/commands/more.md")
+        .exists());
+    assert_eq!(repo.changed_files().unwrap(), Vec::<String>::new());
+}
+
 #[test]
 fn plugins_come_from_the_catalog_and_are_updated() {
     let env = Env::new();
@@ -179,29 +255,7 @@ fn plugins_come_from_the_catalog_and_are_updated() {
     repo.commit_all("tasks").unwrap();
     // A catalog folder on this computer stands in for the official one.
     let catalog = tempfile::tempdir().unwrap();
-    let write = |file: &str, text: &str| {
-        let path = catalog.path().join(file);
-        fs::create_dir_all(path.parent().unwrap()).unwrap();
-        fs::write(path, text).unwrap();
-    };
-    write(
-        ".claude-plugin/marketplace.json",
-        r#"{"name": "official", "plugins": [
-            {"name": "review", "description": "Reviews code for bugs", "source": "./plugins/review"},
-            {"name": "notes", "description": "Keeps notes", "source": "./plugins/notes"},
-            {"name": "pkg", "description": "From npm", "source": {"source": "npm", "package": "x"}}
-        ]}"#,
-    );
-    write(
-        "plugins/review/.claude-plugin/plugin.json",
-        r#"{"name": "review"}"#,
-    );
-    write("plugins/review/hooks/hooks.json", "{}");
-    write(
-        "plugins/notes/.claude-plugin/plugin.json",
-        r#"{"name": "notes"}"#,
-    );
-    write("plugins/notes/commands/note.md", "# note");
+    fake_catalog(catalog.path());
 
     let mut app = env.app(&root);
     app.official_catalog = catalog.path().display().to_string();
@@ -256,35 +310,7 @@ fn plugins_come_from_the_catalog_and_are_updated() {
     let text = screen(&mut app);
     assert!(text.contains("▶ [x] review"), "{text}");
 
-    // A newer version in the catalog: «Update» shows the files, then takes it.
-    write("plugins/review/commands/fix.md", "# fix");
-    key(&mut app, KeyCode::Char('U'));
-    wait_job(&mut app);
-    let text = screen(&mut app);
-    assert!(text.contains("+ commands/fix.md"), "{text}");
-    key(&mut app, KeyCode::Enter);
-    assert!(root
-        .join(".harness/plugins/review/commands/fix.md")
-        .is_file());
-    assert_eq!(repo.changed_files().unwrap(), Vec::<String>::new());
-    key(&mut app, KeyCode::Char('U'));
-    wait_job(&mut app);
-    assert!(app
-        .message
-        .as_ref()
-        .unwrap()
-        .text
-        .contains("already up to date"));
-
-    // An update that is not taken leaves nothing behind.
-    write("plugins/review/commands/more.md", "# more");
-    key(&mut app, KeyCode::Char('U'));
-    wait_job(&mut app);
-    key(&mut app, KeyCode::Esc);
-    assert!(!root
-        .join(".harness/plugins/review/commands/more.md")
-        .exists());
-    assert_eq!(repo.changed_files().unwrap(), Vec::<String>::new());
+    update_from_catalog(&mut app, &root, &repo, catalog.path());
 
     // «Catalogs» lists it; removing it keeps the plugin.
     key(&mut app, KeyCode::Char('f'));

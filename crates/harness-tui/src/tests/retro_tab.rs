@@ -40,6 +40,47 @@ fn wait_retro(app: &mut App) {
     }
 }
 
+/// Shows the proposal, chooses it and applies it: a new skill given to the developer.
+fn apply_the_proposal(app: &mut App, root: &Path, repo: &Repo) {
+    // A proposal shows what it changes; chosen ones are applied after a question.
+    click(app, "[ ] 1 Teach");
+    let text = screen(app);
+    assert!(
+        text.contains("New file .harness/skills/empty-input.md"),
+        "{text}"
+    );
+    assert!(text.contains("+ Check it first."), "{text}");
+    key(app, KeyCode::Char(' '));
+    assert!(screen(app).contains("[x] 1 Teach"));
+    click(app, " Apply chosen (1) ");
+    let text = screen(app);
+    assert!(text.contains("new skill empty-input"), "{text}");
+    assert!(
+        text.contains("empty-input is given to: developer"),
+        "{text}"
+    );
+    key(app, KeyCode::Enter);
+    assert!(app
+        .message
+        .as_ref()
+        .unwrap()
+        .text
+        .starts_with("Applied and committed: 1."));
+    assert!(root.join(".harness/skills/empty-input.md").is_file());
+    assert!(config(root).roles[&Role::Developer]
+        .skills
+        .contains(&"empty-input".to_string()));
+    assert_eq!(repo.changed_files().unwrap(), Vec::<String>::new());
+    let text = screen(app);
+    assert!(text.contains("✓   1 Teach"), "{text}");
+    assert!(text.contains("✓ Applied: the skill empty-input"), "{text}");
+    key(app, KeyCode::Char(' '));
+    assert_eq!(
+        app.message.as_ref().unwrap().text,
+        "This proposal is already applied"
+    );
+}
+
 #[test]
 fn a_retrospective_is_generated_edited_and_its_proposals_applied() {
     let env = Env::new();
@@ -109,43 +150,7 @@ fn a_retrospective_is_generated_edited_and_its_proposals_applied() {
     assert!(text.contains("── Statistics ──"), "{text}");
     assert!(text.contains("[ ] 1 Teach the developer"), "{text}");
 
-    // A proposal shows what it changes; chosen ones are applied after a question.
-    click(&mut app, "[ ] 1 Teach");
-    let text = screen(&mut app);
-    assert!(
-        text.contains("New file .harness/skills/empty-input.md"),
-        "{text}"
-    );
-    assert!(text.contains("+ Check it first."), "{text}");
-    key(&mut app, KeyCode::Char(' '));
-    assert!(screen(&mut app).contains("[x] 1 Teach"));
-    click(&mut app, " Apply chosen (1) ");
-    let text = screen(&mut app);
-    assert!(text.contains("new skill empty-input"), "{text}");
-    assert!(
-        text.contains("empty-input is given to: developer"),
-        "{text}"
-    );
-    key(&mut app, KeyCode::Enter);
-    assert!(app
-        .message
-        .as_ref()
-        .unwrap()
-        .text
-        .starts_with("Applied and committed: 1."));
-    assert!(root.join(".harness/skills/empty-input.md").is_file());
-    assert!(config(&root).roles[&Role::Developer]
-        .skills
-        .contains(&"empty-input".to_string()));
-    assert_eq!(repo.changed_files().unwrap(), Vec::<String>::new());
-    let text = screen(&mut app);
-    assert!(text.contains("✓   1 Teach"), "{text}");
-    assert!(text.contains("✓ Applied: the skill empty-input"), "{text}");
-    key(&mut app, KeyCode::Char(' '));
-    assert_eq!(
-        app.message.as_ref().unwrap().text,
-        "This proposal is already applied"
-    );
+    apply_the_proposal(&mut app, &root, &repo);
 
     // «Open in Zed»: what Lisa writes there is committed.
     key(&mut app, KeyCode::Char('e'));
