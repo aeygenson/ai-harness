@@ -4,6 +4,7 @@
 use harness_agents::install::credentials;
 
 use crate::tabs::projects::has_config;
+use crate::tabs::projects::picker::FolderButton;
 use crate::tabs::roles::Action;
 use crate::ui::message::Message;
 use crate::ui::{i18n, theme};
@@ -17,12 +18,7 @@ impl App {
             ButtonId::AgentsCheck => self.check_agents(),
             ButtonId::AgentRun => self.ask_to_run_agent_command(false),
             ButtonId::AgentRemove => self.ask_to_run_agent_command(true),
-            ButtonId::AgentSignIn => {
-                if let Some(status) = self.agents.sign_in_target() {
-                    let entry = status.entry;
-                    self.sign_in = Some((credentials::login_name(entry.id), entry.name));
-                }
-            }
+            ButtonId::AgentSignIn => self.sign_in_agent(),
             ButtonId::RefreshModels => self.ask_for_models(),
             ButtonId::Mcp(button) => {
                 if let (Some(mcp), Some(roles)) = (&mut self.mcp, &mut self.roles) {
@@ -80,113 +76,24 @@ impl App {
                     tasks.toggle_menu(menu);
                 }
             }
-            ButtonId::Send if self.generating() => {
-                self.message = Some(Message::error(self.tr.t("retro.busy")));
-            }
-            ButtonId::Send => {
-                if let Some(tasks) = &mut self.tasks {
-                    self.message = Some(match tasks.send(self.builder, &self.tr) {
-                        Ok(text) => Message::info(text),
-                        Err(error) => Message::error(error),
-                    });
-                }
-            }
-            ButtonId::UseProject => {
-                if let Some(project) = self.projects.current() {
-                    let path = project.path.clone();
-                    if has_config(&path) {
-                        self.open(&path);
-                    } else if path.is_dir() {
-                        self.form = Some(self.init_form(&path));
-                    } else {
-                        let text = self.tr.f("projects.gone", &[("path", &path.display())]);
-                        self.message = Some(Message::error(text));
-                    }
-                }
-            }
+            ButtonId::Send => self.send_message(),
+            ButtonId::UseProject => self.use_project(),
             ButtonId::NewProject => self.pick(Pick::NewProject),
             ButtonId::OpenFolder => self.pick(Pick::Open),
-            ButtonId::Choose => {
+            ButtonId::Folder(FolderButton::Choose) => {
                 if let Some((pick, browser)) = self.browser.take() {
                     self.picked(pick, browser.chosen());
                 }
             }
-            ButtonId::Up => {
+            ButtonId::Folder(button) => {
                 if let Some((_, browser)) = &mut self.browser {
-                    browser.up();
+                    browser.press(button, &self.tr);
                 }
             }
-            ButtonId::NewFolder => {
-                if let Some((_, browser)) = &mut self.browser {
-                    browser.naming = Some(String::new());
-                }
-            }
-            ButtonId::CreateFolder => {
-                if let Some((_, browser)) = &mut self.browser {
-                    browser.create(&self.tr);
-                }
-            }
-            ButtonId::StopNaming => {
-                if let Some((_, browser)) = &mut self.browser {
-                    browser.naming = None;
-                }
-            }
-            ButtonId::ToggleHidden => {
-                if let Some((_, browser)) = &mut self.browser {
-                    browser.toggle_hidden();
-                }
-            }
-            ButtonId::Theme => {
-                theme::next();
-                if let Some(home) = &self.home {
-                    if let Err(error) = i18n::save_setting(home, "theme", theme::current().code) {
-                        self.message = Some(Message::error(error));
-                    }
-                }
-            }
-            ButtonId::Language => {
-                self.tr.next();
-                // The last message was in the old language.
-                self.message = None;
-                if let Some(home) = &self.home {
-                    if let Err(error) = self.tr.save(home) {
-                        self.message = Some(Message::error(error));
-                    }
-                }
-            }
-            ButtonId::RemoveProject => {
-                if self.project.as_deref() == self.projects.current().map(|p| p.path.as_path())
-                    && self.busy()
-                {
-                    return;
-                }
-                if let Some(project) = self.projects.current() {
-                    let tr = &self.tr;
-                    let text = tr.f(
-                        "form.remove_text",
-                        &[("name", &project.name), ("path", &project.path.display())],
-                    );
-                    self.form = Some((
-                        Purpose::Remove(project.path.clone()),
-                        Form::new(tr.t("form.remove_title"), &text, tr.t("form.remove")),
-                    ));
-                }
-            }
-            ButtonId::Save => {
-                if let Some(roles) = &mut self.roles {
-                    self.message = Some(match roles.save() {
-                        Ok(()) => Message::info(self.tr.t("roles.saved")),
-                        Err(error) => Message::error(error),
-                    });
-                    // The Tasks and Skills tabs show the agents and skills too.
-                    if let Some(tasks) = &mut self.tasks {
-                        tasks.reload();
-                    }
-                    if let Some(skills) = &mut self.skills {
-                        skills.reload();
-                    }
-                }
-            }
+            ButtonId::Theme => self.next_theme(),
+            ButtonId::Language => self.next_language(),
+            ButtonId::RemoveProject => self.ask_to_remove_project(),
+            ButtonId::Save => self.save_roles(),
             ButtonId::Undo => {
                 if let Some(roles) = &mut self.roles {
                     roles.undo();
@@ -195,6 +102,102 @@ impl App {
             }
             ButtonId::Cancel => self.browser = None,
             ButtonId::Ok => {}
+        }
+    }
+
+    /// Sends the message of the Tasks tab; not while a retrospective is being written.
+    fn send_message(&mut self) {
+        if self.generating() {
+            self.message = Some(Message::error(self.tr.t("retro.busy")));
+            return;
+        }
+        if let Some(tasks) = &mut self.tasks {
+            self.message = Some(match tasks.send(self.builder, &self.tr) {
+                Ok(text) => Message::info(text),
+                Err(error) => Message::error(error),
+            });
+        }
+    }
+
+    /// Starts signing in to the agent selected on the Agents tab.
+    fn sign_in_agent(&mut self) {
+        if let Some(status) = self.agents.sign_in_target() {
+            let entry = status.entry;
+            self.sign_in = Some((credentials::login_name(entry.id), entry.name));
+        }
+    }
+
+    /// Opens the chosen project, offers to set it up, or says the folder is gone.
+    fn use_project(&mut self) {
+        if let Some(project) = self.projects.current() {
+            let path = project.path.clone();
+            if has_config(&path) {
+                self.open(&path);
+            } else if path.is_dir() {
+                self.form = Some(self.init_form(&path));
+            } else {
+                let text = self.tr.f("projects.gone", &[("path", &path.display())]);
+                self.message = Some(Message::error(text));
+            }
+        }
+    }
+
+    /// Switches to the next colour theme and remembers it.
+    fn next_theme(&mut self) {
+        theme::next();
+        if let Some(home) = &self.home {
+            if let Err(error) = i18n::save_setting(home, "theme", theme::current().code) {
+                self.message = Some(Message::error(error));
+            }
+        }
+    }
+
+    /// Switches to the next language and remembers it.
+    fn next_language(&mut self) {
+        self.tr.next();
+        // The last message was in the old language.
+        self.message = None;
+        if let Some(home) = &self.home {
+            if let Err(error) = self.tr.save(home) {
+                self.message = Some(Message::error(error));
+            }
+        }
+    }
+
+    /// Asks whether to remove the chosen project from the list; not while it is busy.
+    fn ask_to_remove_project(&mut self) {
+        if self.project.as_deref() == self.projects.current().map(|p| p.path.as_path())
+            && self.busy()
+        {
+            return;
+        }
+        if let Some(project) = self.projects.current() {
+            let tr = &self.tr;
+            let text = tr.f(
+                "form.remove_text",
+                &[("name", &project.name), ("path", &project.path.display())],
+            );
+            self.form = Some((
+                Purpose::Remove(project.path.clone()),
+                Form::new(tr.t("form.remove_title"), &text, tr.t("form.remove")),
+            ));
+        }
+    }
+
+    /// Saves the Roles tab and reloads the tabs that show its agents and skills.
+    fn save_roles(&mut self) {
+        if let Some(roles) = &mut self.roles {
+            self.message = Some(match roles.save() {
+                Ok(()) => Message::info(self.tr.t("roles.saved")),
+                Err(error) => Message::error(error),
+            });
+            // The Tasks and Skills tabs show the agents and skills too.
+            if let Some(tasks) = &mut self.tasks {
+                tasks.reload();
+            }
+            if let Some(skills) = &mut self.skills {
+                skills.reload();
+            }
         }
     }
 
