@@ -1,0 +1,161 @@
+//! Tests of the Retro tab: generating a retrospective and applying its proposals.
+
+use super::*;
+
+/// The retrospective's agent: it writes its lessons and one proposal.
+fn mock_retro(
+    _: &harness_core::config::Config,
+) -> Result<harness_agents::AnyAgent, harness_agents::build::BuildError> {
+    use harness_agents::{AnyAgent, MockAgent, MockStep};
+    let proposals = r#"{"proposals": [{
+        "id": 1,
+        "summary": "Teach the developer to check empty input",
+        "reason": "task-001 failed on empty input",
+        "skill": "empty-input",
+        "content": "---\ndescription: Check empty input.\n---\nCheck it first.\n",
+        "roles": [{"role": "developer", "list": "skills"}]
+    }]}"#;
+    Ok(AnyAgent::Mock(MockAgent::new().then(
+        Role::Security,
+        MockStep::WriteOutput(vec![
+            ("retro.md".into(), "Went well: small steps.".into()),
+            ("proposals.json".into(), proposals.into()),
+        ]),
+    )))
+}
+
+fn wait_retro(app: &mut App) {
+    let start = Instant::now();
+    while app.retro.as_ref().unwrap().is_generating() {
+        assert!(
+            start.elapsed() < Duration::from_secs(30),
+            "the retrospective did not finish"
+        );
+        std::thread::sleep(Duration::from_millis(20));
+        app.tick();
+    }
+}
+
+#[test]
+fn a_retrospective_is_generated_edited_and_its_proposals_applied() {
+    let env = Env::new();
+    let (root, mut app) = empty_project(&env);
+    app.retro_builder = mock_retro;
+    let repo = Repo::open(&root).unwrap();
+    key(&mut app, KeyCode::Char('6'));
+    let text = screen(&mut app);
+    assert!(text.contains("No retrospectives yet."), "{text}");
+    assert!(text.contains(" Generate "), "{text}");
+    // The tab says which project the retrospectives are of.
+    assert!(text.contains("Retrospectives · fresh"), "{text}");
+
+    // «Generate» first asks about the open project; Esc changes nothing.
+    click(&mut app, " Generate ");
+    let text = screen(&mut app);
+    assert!(
+        text.contains("Make a retrospective of the project «fresh»?"),
+        "{text}"
+    );
+    key(&mut app, KeyCode::Esc);
+    assert!(app.form.is_none());
+    assert!(!app.retro.as_ref().unwrap().is_generating());
+
+    // Without tasks there is nothing to learn from.
+    click(&mut app, " Generate ");
+    key(&mut app, KeyCode::Enter);
+    wait_retro(&mut app);
+    let (message, problem) = app.message.clone().unwrap();
+    assert!(
+        problem && message.contains("there are no tasks yet"),
+        "{message}"
+    );
+
+    orchestrator::create_task(&repo, "task-001", "Build a parser", 5).unwrap();
+    click(&mut app, " Generate ");
+    key(&mut app, KeyCode::Enter);
+    assert!(app.retro.as_ref().unwrap().is_generating());
+    key(&mut app, KeyCode::Char('q'));
+    assert!(!app.quit);
+    assert!(app
+        .message
+        .as_ref()
+        .unwrap()
+        .0
+        .contains("agent is still working"));
+    // The roles wait for the retrospective.
+    app.tab = Tab::Tasks;
+    app.press(ButtonId::Send);
+    assert!(app
+        .message
+        .as_ref()
+        .unwrap()
+        .0
+        .contains("retrospective's agent is working"));
+    app.tab = Tab::Retro;
+    wait_retro(&mut app);
+    assert_eq!(
+        app.message.as_ref().unwrap().0,
+        "Retrospective 001 is ready"
+    );
+    assert!(repo.changed_files().unwrap().is_empty());
+    let text = screen(&mut app);
+    assert!(text.contains("001  "), "{text}");
+    assert!(text.contains("whole project"), "{text}");
+    assert!(text.contains("Went well: small steps."), "{text}");
+    assert!(text.contains("── Statistics ──"), "{text}");
+    assert!(text.contains("[ ] 1 Teach the developer"), "{text}");
+
+    // A proposal shows what it changes; chosen ones are applied after a question.
+    click(&mut app, "[ ] 1 Teach");
+    let text = screen(&mut app);
+    assert!(
+        text.contains("New file .harness/skills/empty-input.md"),
+        "{text}"
+    );
+    assert!(text.contains("+ Check it first."), "{text}");
+    key(&mut app, KeyCode::Char(' '));
+    assert!(screen(&mut app).contains("[x] 1 Teach"));
+    click(&mut app, " Apply chosen (1) ");
+    let text = screen(&mut app);
+    assert!(text.contains("new skill empty-input"), "{text}");
+    assert!(
+        text.contains("empty-input is given to: developer"),
+        "{text}"
+    );
+    key(&mut app, KeyCode::Enter);
+    assert!(app
+        .message
+        .as_ref()
+        .unwrap()
+        .0
+        .starts_with("Applied and committed: 1."));
+    assert!(root.join(".harness/skills/empty-input.md").is_file());
+    assert!(config(&root).roles[&Role::Developer]
+        .skills
+        .contains(&"empty-input".to_string()));
+    assert!(repo.changed_files().unwrap().is_empty());
+    let text = screen(&mut app);
+    assert!(text.contains("✓   1 Teach"), "{text}");
+    assert!(text.contains("✓ Applied: the skill empty-input"), "{text}");
+    key(&mut app, KeyCode::Char(' '));
+    assert_eq!(
+        app.message.as_ref().unwrap().0,
+        "This proposal is already applied"
+    );
+
+    // «Open in Zed»: what Lisa writes there is committed.
+    key(&mut app, KeyCode::Char('e'));
+    let job = app.edit.take().unwrap();
+    assert!(job.kind == EditKind::Retro && job.path.ends_with(".harness/retros/001/retro.md"));
+    app.finish_edit(&job, Ok(()));
+    assert_eq!(app.message.as_ref().unwrap().0, "Nothing changed");
+    fs::write(&job.path, "Lesson: write tests first.").unwrap();
+    app.finish_edit(&job, Ok(()));
+    assert_eq!(
+        app.message.as_ref().unwrap().0,
+        "Retrospective 001 saved and committed"
+    );
+    assert!(repo.changed_files().unwrap().is_empty());
+    click(&mut app, "001  ");
+    assert!(screen(&mut app).contains("Lesson: write tests first."));
+}
