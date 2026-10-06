@@ -233,7 +233,6 @@ pub fn draw_catalog(
     ])
     .areas(area);
     let dim = theme::dim();
-    let red = theme::bad();
     let bold = Style::new().add_modifier(Modifier::BOLD);
     let [title_area, filter_area] =
         Layout::horizontal([Constraint::Min(0), Constraint::Length(44)]).areas(top);
@@ -266,32 +265,7 @@ pub fn draw_catalog(
     let [left, right] =
         Layout::horizontal([Constraint::Percentage(40), Constraint::Percentage(60)]).areas(main);
     let shown = view.shown();
-    let items: Vec<ListItem> = shown
-        .iter()
-        .map(|entry| {
-            let added = roles
-                .plugins()
-                .values()
-                .any(|p| p.source.as_deref() == Some(entry.id().as_str()));
-            let style = if unusable(entry).is_some() {
-                dim
-            } else {
-                Style::new()
-            };
-            let note = if added {
-                tr.t("plugins.added_mark")
-            } else if unusable(entry).is_some() {
-                tr.t("plugins.cannot_mark")
-            } else {
-                ""
-            };
-            ListItem::new(Line::from(vec![
-                Span::styled(format!("{:<20} ", entry.name), style),
-                Span::styled(format!("{:<7}", entry.agent), dim),
-                Span::styled(note.to_string(), dim),
-            ]))
-        })
-        .collect();
+    let items = catalog_items(&shown, roles, tr);
     draw_list(
         frame,
         hits,
@@ -303,25 +277,7 @@ pub fn draw_catalog(
         true,
     );
 
-    let (title, lines) = if let Some(entry) = view.current() {
-        (
-            format!(" {} · {} ", entry.name, entry.catalog),
-            entry_details(entry, roles, tr),
-        )
-    } else {
-        let mut lines: Vec<Line> = if view.entries.is_empty() {
-            tr.t("plugins.no_catalogs")
-        } else {
-            tr.t("plugins.nothing_found")
-        }
-        .lines()
-        .map(|l| Line::from(l.to_string()))
-        .collect();
-        for error in &view.errors {
-            lines.push(Line::styled(error.clone(), red));
-        }
-        (String::new(), lines)
-    };
+    let (title, lines) = catalog_details(view, roles, tr);
     frame.render_widget(
         Paragraph::new(lines)
             .block(panel(&title, false))
@@ -363,6 +319,65 @@ pub fn draw_catalog(
             ),
         ],
     );
+}
+
+/// The rows of «From catalog»: name, agent, and whether it is added or cannot be.
+fn catalog_items(shown: &[&Entry], roles: &RolesTab, tr: &I18n) -> Vec<ListItem<'static>> {
+    let dim = theme::dim();
+    shown
+        .iter()
+        .map(|entry| {
+            let added = roles
+                .plugins()
+                .values()
+                .any(|p| p.source.as_deref() == Some(entry.id().as_str()));
+            let style = if unusable(entry).is_some() {
+                dim
+            } else {
+                Style::new()
+            };
+            let note = if added {
+                tr.t("plugins.added_mark")
+            } else if unusable(entry).is_some() {
+                tr.t("plugins.cannot_mark")
+            } else {
+                ""
+            };
+            ListItem::new(Line::from(vec![
+                Span::styled(format!("{:<20} ", entry.name), style),
+                Span::styled(format!("{:<7}", entry.agent), dim),
+                Span::styled(note.to_string(), dim),
+            ]))
+        })
+        .collect()
+}
+
+/// The title and text of the right panel of «From catalog».
+fn catalog_details(
+    view: &CatalogView,
+    roles: &RolesTab,
+    tr: &I18n,
+) -> (String, Vec<Line<'static>>) {
+    let red = theme::bad();
+    if let Some(entry) = view.current() {
+        (
+            format!(" {} · {} ", entry.name, entry.catalog),
+            entry_details(entry, roles, tr),
+        )
+    } else {
+        let mut lines: Vec<Line> = if view.entries.is_empty() {
+            tr.t("plugins.no_catalogs")
+        } else {
+            tr.t("plugins.nothing_found")
+        }
+        .lines()
+        .map(|l| Line::from(l.to_string()))
+        .collect();
+        for error in &view.errors {
+            lines.push(Line::styled(error.clone(), red));
+        }
+        (String::new(), lines)
+    }
 }
 
 /// What the catalog shows about one plugin.
@@ -435,7 +450,6 @@ pub fn draw_catalogs(
     ])
     .areas(area);
     let dim = theme::dim();
-    let red = theme::bad();
     let bold = Style::new().add_modifier(Modifier::BOLD);
     frame.render_widget(
         Line::from(vec![
@@ -470,44 +484,7 @@ pub fn draw_catalogs(
         view.row,
         true,
     );
-    let mut lines = Vec::new();
-    match view.current() {
-        Some(catalog) => {
-            lines.push(Line::from(vec![
-                Span::styled(format!("{} ", tr.t("plugins.address")), bold),
-                Span::raw(catalog.config.source.clone()),
-            ]));
-            if let Some(commit) = &catalog.commit {
-                lines.push(Line::from(vec![
-                    Span::styled(format!("{} ", tr.t("plugins.version")), bold),
-                    Span::raw(commit[..commit.len().min(7)].to_string()),
-                ]));
-            }
-            match &catalog.entries {
-                Ok(entries) => {
-                    let claude = entries
-                        .iter()
-                        .filter(|e| e.agent == AgentKind::Claude)
-                        .count();
-                    lines.push(Line::from(tr.f(
-                        "plugins.catalog_counts",
-                        &[("claude", &claude), ("codex", &(entries.len() - claude))],
-                    )));
-                }
-                Err(error) => lines.push(Line::styled(error.clone(), red)),
-            }
-            lines.push(Line::default());
-            lines.push(Line::styled(tr.t("plugins.catalogs_hint").to_string(), dim));
-        }
-        None => lines.extend(
-            tr.t("plugins.catalogs_empty")
-                .lines()
-                .map(|l| Line::from(l.to_string())),
-        ),
-    }
-    if let Some(error) = &view.error {
-        lines.push(Line::styled(error.clone(), red));
-    }
+    let lines = catalogs_details(view, tr);
     frame.render_widget(
         Paragraph::new(lines)
             .block(panel(
@@ -549,4 +526,50 @@ pub fn draw_catalogs(
             ),
         ],
     );
+}
+
+/// The right panel of «Catalogs»: the address, version and contents of the chosen one.
+fn catalogs_details(view: &CatalogsView, tr: &I18n) -> Vec<Line<'static>> {
+    let dim = theme::dim();
+    let red = theme::bad();
+    let bold = Style::new().add_modifier(Modifier::BOLD);
+    let mut lines = Vec::new();
+    match view.current() {
+        Some(catalog) => {
+            lines.push(Line::from(vec![
+                Span::styled(format!("{} ", tr.t("plugins.address")), bold),
+                Span::raw(catalog.config.source.clone()),
+            ]));
+            if let Some(commit) = &catalog.commit {
+                lines.push(Line::from(vec![
+                    Span::styled(format!("{} ", tr.t("plugins.version")), bold),
+                    Span::raw(commit[..commit.len().min(7)].to_string()),
+                ]));
+            }
+            match &catalog.entries {
+                Ok(entries) => {
+                    let claude = entries
+                        .iter()
+                        .filter(|e| e.agent == AgentKind::Claude)
+                        .count();
+                    lines.push(Line::from(tr.f(
+                        "plugins.catalog_counts",
+                        &[("claude", &claude), ("codex", &(entries.len() - claude))],
+                    )));
+                }
+                Err(error) => lines.push(Line::styled(error.clone(), red)),
+            }
+            lines.push(Line::default());
+            lines.push(Line::styled(tr.t("plugins.catalogs_hint").to_string(), dim));
+        }
+        None => lines.extend(
+            tr.t("plugins.catalogs_empty")
+                .lines()
+                .map(|l| Line::from(l.to_string())),
+        ),
+    }
+    if let Some(error) = &view.error {
+        lines.push(Line::styled(error.clone(), red));
+    }
+    lines
 }

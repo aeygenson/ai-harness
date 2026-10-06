@@ -29,35 +29,7 @@ impl App {
                 name,
                 hooks,
                 servers,
-            } => {
-                let old = self.roles.as_ref().and_then(|r| r.plugins().get(&name));
-                let more =
-                    old.is_none_or(|p| (hooks && !p.allow_hooks) || (servers && !p.allow_mcp));
-                if !more {
-                    // Forbidding needs no question; it fails while a role
-                    // still has the plugin.
-                    if self.allow_plugin(&name, hooks, servers).is_err() {
-                        let text = self.tr.f("plugins.forbid_used", &[("name", &name)]);
-                        self.message = Some(Message::error(text));
-                    }
-                    return;
-                }
-                let key = if old.is_some_and(|p| hooks && !p.allow_hooks) {
-                    "plugins.allow_hooks_text"
-                } else {
-                    "plugins.allow_servers_text"
-                };
-                let text = tr.f(key, &[("name", &name)]);
-                self.form = Some((
-                    Purpose::AllowPlugin {
-                        name,
-                        hooks,
-                        servers,
-                        give: None,
-                    },
-                    Form::new(tr.t("plugins.allow_title"), &text, tr.t("plugins.allow")),
-                ));
-            }
+            } => self.ask_to_allow_plugin(name, hooks, servers),
             A::OpenCatalog => self.open_plugin_catalog(),
             A::Search(query) => {
                 self.form = Some((
@@ -115,27 +87,62 @@ impl App {
                     ),
                 ));
             }
-            A::Open(name) => {
-                let path = self.plugins.as_ref().and_then(|tab| {
-                    let plugin = self.roles.as_ref()?.plugins().get(&name)?;
-                    Some(tab.folder(&name, plugin))
-                });
-                match path {
-                    Some(path) if path.is_dir() => {
-                        self.edit = Some(EditJob {
-                            name,
-                            path,
-                            copied: false,
-                            kind: EditKind::Plugin,
-                        });
-                    }
-                    Some(path) => {
-                        let text = tr.f("plugins.no_folder", &[("path", &path.display())]);
-                        self.message = Some(Message::error(text));
-                    }
-                    None => {}
-                }
+            A::Open(name) => self.open_plugin_folder(name),
+        }
+    }
+
+    /// Allows or forbids the plugin's hooks and servers; allowing more asks first.
+    fn ask_to_allow_plugin(&mut self, name: String, hooks: bool, servers: bool) {
+        let tr = &self.tr;
+        let old = self.roles.as_ref().and_then(|r| r.plugins().get(&name));
+        let more = old.is_none_or(|p| (hooks && !p.allow_hooks) || (servers && !p.allow_mcp));
+        if !more {
+            // Forbidding needs no question; it fails while a role
+            // still has the plugin.
+            if self.allow_plugin(&name, hooks, servers).is_err() {
+                let text = self.tr.f("plugins.forbid_used", &[("name", &name)]);
+                self.message = Some(Message::error(text));
             }
+            return;
+        }
+        let key = if old.is_some_and(|p| hooks && !p.allow_hooks) {
+            "plugins.allow_hooks_text"
+        } else {
+            "plugins.allow_servers_text"
+        };
+        let text = tr.f(key, &[("name", &name)]);
+        self.form = Some((
+            Purpose::AllowPlugin {
+                name,
+                hooks,
+                servers,
+                give: None,
+            },
+            Form::new(tr.t("plugins.allow_title"), &text, tr.t("plugins.allow")),
+        ));
+    }
+
+    /// Opens the plugin's folder in the editor, or says it is missing.
+    fn open_plugin_folder(&mut self, name: String) {
+        let tr = &self.tr;
+        let path = self.plugins.as_ref().and_then(|tab| {
+            let plugin = self.roles.as_ref()?.plugins().get(&name)?;
+            Some(tab.folder(&name, plugin))
+        });
+        match path {
+            Some(path) if path.is_dir() => {
+                self.edit = Some(EditJob {
+                    name,
+                    path,
+                    copied: false,
+                    kind: EditKind::Plugin,
+                });
+            }
+            Some(path) => {
+                let text = tr.f("plugins.no_folder", &[("path", &path.display())]);
+                self.message = Some(Message::error(text));
+            }
+            None => {}
         }
     }
 

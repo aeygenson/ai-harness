@@ -488,6 +488,44 @@ impl PluginsTab {
             Constraint::Length(1),
         ])
         .areas(area);
+        self.draw_role_line(frame, top, hits, tr, roles);
+
+        let [left, right] =
+            Layout::horizontal([Constraint::Percentage(35), Constraint::Percentage(65)])
+                .areas(main);
+        self.draw_plugin_list(frame, left, hits, tr, roles);
+
+        let current = self.current(roles);
+        let (title, lines) = match &current {
+            Some(name) => (format!(" {name} "), self.details(roles, name, tr)),
+            None => (
+                String::new(),
+                tr.t("plugins.empty")
+                    .lines()
+                    .map(|l| Line::from(l.to_string()))
+                    .collect(),
+            ),
+        };
+        frame.render_widget(
+            Paragraph::new(lines)
+                .block(panel(&title, false))
+                .wrap(Wrap { trim: false }),
+            right,
+        );
+
+        self.draw_role_buttons(frame, bottom, hits, tr, roles);
+        self.draw_plugin_buttons(frame, plugins_row, hits, tr, roles);
+    }
+
+    /// The role selector, with the role's agent on the right when there is room.
+    fn draw_role_line(
+        &self,
+        frame: &mut Frame,
+        top: Rect,
+        hits: &mut Hits,
+        tr: &I18n,
+        roles: &RolesTab,
+    ) {
         let role = self.role();
         let names: Vec<&str> = ROLES.iter().map(|r| r.as_str()).collect();
         selector(
@@ -510,10 +548,18 @@ impl PluginsTab {
                 );
             }
         }
+    }
 
-        let [left, right] =
-            Layout::horizontal([Constraint::Percentage(35), Constraint::Percentage(65)])
-                .areas(main);
+    /// The plugins the role can have, marked when it has them.
+    fn draw_plugin_list(
+        &self,
+        frame: &mut Frame,
+        left: Rect,
+        hits: &mut Hits,
+        tr: &I18n,
+        roles: &RolesTab,
+    ) {
+        let role = self.role();
         let dim = theme::dim();
         let red = theme::bad();
         let list = self.names(roles);
@@ -556,25 +602,19 @@ impl PluginsTab {
             self.at(roles),
             true,
         );
+    }
 
+    /// «Give» or «Take», «Save» and «Undo»: they change the role.
+    fn draw_role_buttons(
+        &self,
+        frame: &mut Frame,
+        bottom: Rect,
+        hits: &mut Hits,
+        tr: &I18n,
+        roles: &RolesTab,
+    ) {
+        let role = self.role();
         let current = self.current(roles);
-        let (title, lines) = match &current {
-            Some(name) => (format!(" {name} "), self.details(roles, name, tr)),
-            None => (
-                String::new(),
-                tr.t("plugins.empty")
-                    .lines()
-                    .map(|l| Line::from(l.to_string()))
-                    .collect(),
-            ),
-        };
-        frame.render_widget(
-            Paragraph::new(lines)
-                .block(panel(&title, false))
-                .wrap(Wrap { trim: false }),
-            right,
-        );
-
         let toggle = match &current {
             Some(name) if self.has(roles, name) => tr.f("plugins.take", &[("role", &role)]),
             _ => tr.f("plugins.give", &[("role", &role)]),
@@ -602,7 +642,19 @@ impl PluginsTab {
                 Rect::new(x.max(bottom.x), bottom.y, width.min(bottom.width), 1),
             );
         }
-        // The plugins themselves: they change harness.toml at once.
+    }
+
+    /// The buttons for the selected plugin itself; they change harness.toml at once.
+    fn draw_plugin_buttons(
+        &self,
+        frame: &mut Frame,
+        plugins_row: Rect,
+        hits: &mut Hits,
+        tr: &I18n,
+        roles: &RolesTab,
+    ) {
+        let busy = self.busy.as_deref();
+        let current = self.current(roles);
         let described = current
             .as_deref()
             .and_then(|name| roles.plugins().get(name).map(|p| (name, p)));
@@ -658,7 +710,6 @@ impl PluginsTab {
     fn details(&self, roles: &RolesTab, name: &str, tr: &I18n) -> Vec<Line<'static>> {
         let dim = theme::dim();
         let red = theme::bad();
-        let green = theme::ok();
         let bold = Style::new().add_modifier(Modifier::BOLD);
         let label = |key: &str| Span::styled(format!("{} ", tr.t(key)), bold);
         let mut lines = Vec::new();
@@ -704,6 +755,35 @@ impl PluginsTab {
         ]));
         lines.push(Line::default());
 
+        lines.extend(self.contents_lines(name, plugin, tr));
+
+        lines.push(Line::default());
+        let users: Vec<&str> = ROLES
+            .iter()
+            .filter(|r| {
+                roles
+                    .settings(**r)
+                    .is_some_and(|s| s.plugins.iter().any(|n| n == name))
+            })
+            .map(|r| r.as_str())
+            .collect();
+        let users = if users.is_empty() {
+            tr.t("plugins.no_roles").to_string()
+        } else {
+            users.join(", ")
+        };
+        lines.push(Line::from(vec![label("plugins.roles"), Span::raw(users)]));
+        lines
+    }
+
+    /// What the plugin `name` has inside, read from its folder, and what is allowed.
+    fn contents_lines(&self, name: &str, plugin: &PluginConfig, tr: &I18n) -> Vec<Line<'static>> {
+        let dim = theme::dim();
+        let red = theme::bad();
+        let green = theme::ok();
+        let bold = Style::new().add_modifier(Modifier::BOLD);
+        let label = |key: &str| Span::styled(format!("{} ", tr.t(key)), bold);
+        let mut lines = Vec::new();
         match self.details.get(name) {
             Some(Ok(details)) => {
                 if let Some(version) = &details.version {
@@ -750,23 +830,6 @@ impl PluginsTab {
             Some(Err(error)) => lines.push(Line::styled(error.clone(), red)),
             None => lines.push(Line::styled(tr.t("plugins.not_read").to_string(), dim)),
         }
-
-        lines.push(Line::default());
-        let users: Vec<&str> = ROLES
-            .iter()
-            .filter(|r| {
-                roles
-                    .settings(**r)
-                    .is_some_and(|s| s.plugins.iter().any(|n| n == name))
-            })
-            .map(|r| r.as_str())
-            .collect();
-        let users = if users.is_empty() {
-            tr.t("plugins.no_roles").to_string()
-        } else {
-            users.join(", ")
-        };
-        lines.push(Line::from(vec![label("plugins.roles"), Span::raw(users)]));
         lines
     }
 }
