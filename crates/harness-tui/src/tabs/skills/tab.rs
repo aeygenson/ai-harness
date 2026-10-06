@@ -343,9 +343,77 @@ impl SkillsTab {
         let [left, right] =
             Layout::horizontal([Constraint::Percentage(40), Constraint::Percentage(60)])
                 .areas(main);
+        let items = self.list_items(roles, tr);
+        let title = tr.f("skills.title", &[("role", &self.role())]);
+        let block = panel(&title, true);
+        let inner = block.inner(left);
+        let mut state = ListState::default().with_selected(Some(self.row));
+        frame.render_stateful_widget(
+            List::new(items)
+                .block(block)
+                .highlight_style(selected())
+                .highlight_symbol("▶ "),
+            left,
+            &mut state,
+        );
+        hits.add(
+            inner,
+            Target::List {
+                list: ListId::Skills,
+                first: state.offset(),
+            },
+        );
+        // The marks are buttons; they come after «▶ ».
+        for line in 0..inner.height {
+            let index = state.offset() + usize::from(line);
+            if self.optional_at(index).is_some() && inner.width > 5 {
+                hits.add(
+                    Rect::new(inner.x + 2, inner.y + line, 3, 1),
+                    Target::Button(ButtonId::Skill(SkillButton::Mark(index))),
+                );
+            }
+        }
+
+        self.draw_skill_text(frame, right, tr);
+
+        let restore = self
+            .current()
+            .is_some_and(|s| matches!(s.source, Source::Changed { .. }));
+        buttons(
+            frame,
+            bottom,
+            hits,
+            &[
+                (
+                    tr.t("skills.edit"),
+                    ButtonId::Skill(SkillButton::Edit),
+                    self.current().is_some(),
+                ),
+                (tr.t("skills.new"), ButtonId::Skill(SkillButton::New), true),
+                (
+                    tr.t("skills.restore"),
+                    ButtonId::Skill(SkillButton::Restore),
+                    restore,
+                ),
+                (tr.t("roles.save"), ButtonId::Save, roles.changed()),
+                (tr.t("roles.undo"), ButtonId::Undo, roles.changed()),
+            ],
+        );
+        if roles.changed() {
+            let note = tr.t("roles.unsaved");
+            let width = u16::try_from(note.chars().count()).unwrap_or(0);
+            let x = bottom.right().saturating_sub(width);
+            frame.render_widget(
+                Span::styled(note.to_string(), theme::warn()),
+                Rect::new(x.max(bottom.x), bottom.y, width.min(bottom.width), 1),
+            );
+        }
+    }
+
+    /// The rows of the skill list: headings, and skills with their mark and status.
+    fn list_items(&self, roles: &RolesTab, tr: &I18n) -> Vec<ListItem<'static>> {
         let dim = theme::dim();
-        let rows = self.rows();
-        let items: Vec<ListItem> = rows
+        self.rows()
             .iter()
             .map(|row| match row {
                 Row::Heading(key) => ListItem::new(Line::styled(
@@ -384,37 +452,12 @@ impl SkillsTab {
                     ]))
                 }
             })
-            .collect();
-        let title = tr.f("skills.title", &[("role", &self.role())]);
-        let block = panel(&title, true);
-        let inner = block.inner(left);
-        let mut state = ListState::default().with_selected(Some(self.row));
-        frame.render_stateful_widget(
-            List::new(items)
-                .block(block)
-                .highlight_style(selected())
-                .highlight_symbol("▶ "),
-            left,
-            &mut state,
-        );
-        hits.add(
-            inner,
-            Target::List {
-                list: ListId::Skills,
-                first: state.offset(),
-            },
-        );
-        // The marks are buttons; they come after «▶ ».
-        for line in 0..inner.height {
-            let index = state.offset() + usize::from(line);
-            if self.optional_at(index).is_some() && inner.width > 5 {
-                hits.add(
-                    Rect::new(inner.x + 2, inner.y + line, 3, 1),
-                    Target::Button(ButtonId::Skill(SkillButton::Mark(index))),
-                );
-            }
-        }
+            .collect()
+    }
 
+    /// The selected skill's text on the right, with a hint on how the role uses it.
+    fn draw_skill_text(&self, frame: &mut Frame, right: Rect, tr: &I18n) {
+        let dim = theme::dim();
         match self.current() {
             Some(skill) => {
                 let (status, _) = Self::status(skill, tr);
@@ -452,39 +495,6 @@ impl SkillsTab {
                 );
             }
             None => frame.render_widget(Paragraph::new("").block(panel("", false)), right),
-        }
-
-        let restore = self
-            .current()
-            .is_some_and(|s| matches!(s.source, Source::Changed { .. }));
-        buttons(
-            frame,
-            bottom,
-            hits,
-            &[
-                (
-                    tr.t("skills.edit"),
-                    ButtonId::Skill(SkillButton::Edit),
-                    self.current().is_some(),
-                ),
-                (tr.t("skills.new"), ButtonId::Skill(SkillButton::New), true),
-                (
-                    tr.t("skills.restore"),
-                    ButtonId::Skill(SkillButton::Restore),
-                    restore,
-                ),
-                (tr.t("roles.save"), ButtonId::Save, roles.changed()),
-                (tr.t("roles.undo"), ButtonId::Undo, roles.changed()),
-            ],
-        );
-        if roles.changed() {
-            let note = tr.t("roles.unsaved");
-            let width = u16::try_from(note.chars().count()).unwrap_or(0);
-            let x = bottom.right().saturating_sub(width);
-            frame.render_widget(
-                Span::styled(note.to_string(), theme::warn()),
-                Rect::new(x.max(bottom.x), bottom.y, width.min(bottom.width), 1),
-            );
         }
     }
 }
