@@ -78,16 +78,20 @@ pub fn rule_for(role: Role) -> WriteRule {
     }
 }
 
+/// Is `path` one that no role may change: the harness's own files or the
+/// files that give agents their instructions and settings (see [`ALWAYS_FORBIDDEN`])?
+/// The harness puts such a file back at once when an agent changed it.
+pub fn is_protected(path: &str) -> bool {
+    let parts = path_parts(path);
+    parts.contains(&"..") || parts.iter().any(|part| is_always_forbidden(part))
+}
+
 /// Can `role` change the file at `path` (relative to the project, with `/`)?
 pub fn may_write(role: Role, path: &str) -> bool {
-    // Git always writes `/`; an agent on Windows may write `\` too.
-    let parts: Vec<&str> = path.split(['/', '\\']).filter(|p| !p.is_empty()).collect();
-    if parts.contains(&"..") {
+    if is_protected(path) {
         return false;
     }
-    if parts.iter().any(|part| is_always_forbidden(part)) {
-        return false;
-    }
+    let parts = path_parts(path);
     match rule_for(role) {
         WriteRule::Anything => true,
         WriteRule::Nothing => false,
@@ -128,6 +132,12 @@ pub fn name_matches(pattern: &str, name: &str) -> bool {
     rest.ends_with(last)
 }
 
+/// The folder and file names of `path`. Git always writes `/`; an agent on
+/// Windows may write `\\` too.
+fn path_parts(path: &str) -> Vec<&str> {
+    path.split(['/', '\\']).filter(|p| !p.is_empty()).collect()
+}
+
 /// Is this one path part (a folder or file name) on the always forbidden list?
 fn is_always_forbidden(part: &str) -> bool {
     ALWAYS_FORBIDDEN
@@ -147,6 +157,16 @@ pub fn forbidden_changes(role: Role, changed: &[String]) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn protected_paths_are_the_always_forbidden_ones_at_any_depth() {
+        assert!(is_protected(".harness/harness.toml"));
+        assert!(is_protected("pkg/Claude.md"));
+        assert!(is_protected("sub\\.claude\\settings.json"));
+        assert!(is_protected("../outside.txt"));
+        assert!(!is_protected("src/main.rs"));
+        assert!(!is_protected("docs/claude-notes.md"));
+    }
 
     #[test]
     fn architect_writes_only_docs() {

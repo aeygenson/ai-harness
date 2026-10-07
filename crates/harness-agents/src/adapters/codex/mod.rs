@@ -2,7 +2,8 @@
 //!
 //! Isolation (docs/design.md, section 5.1):
 //! - an empty environment plus a short whitelist (see `process`);
-//! - `CODEX_HOME` points to `<project>/.harness/agents/codex/`, and
+//! - `CODEX_HOME` points to `<project>/.harness/agents/codex/`, which is
+//!   emptied before and after every role (see `agent_home`), and
 //!   `--ignore-user-config` / `--ignore-rules` skip every config and rules file,
 //!   so the agent sees no MCP servers, plugins, hooks or profiles;
 //! - login: the Agents tab («Sign in») runs `codex login` into
@@ -24,8 +25,7 @@
 //! `-c plugins={"<name>@harness"={enabled=true}}`. The `plugins` feature is on
 //! only for roles with plugins, `hooks` only if a plugin may have them; remote
 //! plugins and apps stay off. Codex's own bundled skills (one of them installs
-//! skills from GitHub) are always off, and the `skills` folder older runs left
-//! in `CODEX_HOME` is removed.
+//! skills from GitHub) are always off.
 
 mod home;
 
@@ -36,19 +36,16 @@ use harness_core::config::AgentKind;
 use harness_core::task::agent::{AgentOutcome, AgentRunner, RoleJob};
 use harness_core::task::handoff::Role;
 
+use crate::agent_home;
 use crate::launcher;
 use crate::process::{self, failed};
 use crate::role_settings::RoleSettings;
-use home::remove_extras;
 
 /// Where the agent's own settings live inside the project (ignored by git).
 pub const CONFIG_DIR: &str = ".harness/agents/codex";
 const AUTH_FILE: &str = "auth.json";
-/// Codex's plugin folder inside `CODEX_HOME`; cleared before and after each role.
+/// Codex's plugin folder inside `CODEX_HOME`.
 const PLUGINS_DIR: &str = "plugins";
-/// Codex's own skills folder inside `CODEX_HOME`. Older runs left the bundled
-/// skills there; the harness gives skills through the prompt, so it is cleared too.
-const SKILLS_DIR: &str = "skills";
 /// The marketplace name the harness's plugins are filed under.
 const MARKETPLACE: &str = "harness";
 /// The version folder Codex prefers over any other.
@@ -188,17 +185,17 @@ impl Codex {
 impl AgentRunner for Codex {
     async fn run(&self, job: &RoleJob) -> AgentOutcome {
         let mut log = self.settings.header(AgentKind::Codex, job);
-        let prepared = self.put_auth(job).and_then(|()| self.put_plugins(job));
+        let prepared = agent_home::fresh(&job.project_dir, CONFIG_DIR)
+            .and_then(|_| self.put_auth(job))
+            .and_then(|()| self.put_plugins(job));
         if let Err(e) = prepared {
-            self.take_auth_back(job);
-            remove_extras(job);
+            self.clean_up(job);
             return failed(log, format!("cannot prepare {CONFIG_DIR}: {e}"));
         }
         let secrets = match self.write_secrets(job.role) {
             Ok(dir) => dir,
             Err(e) => {
-                self.take_auth_back(job);
-                remove_extras(job);
+                self.clean_up(job);
                 return failed(log, format!("cannot write the role's secrets: {e}"));
             }
         };
@@ -206,8 +203,7 @@ impl AgentRunner for Codex {
         let hidden = self.settings.server_secrets(job.role);
         let result = process::run(command, &job.prompt, self.settings.timeout(), &hidden).await;
         drop(secrets);
-        self.take_auth_back(job);
-        remove_extras(job);
+        self.clean_up(job);
         let result = process::hide_secrets(result, hidden);
         let finished = match result {
             Ok(finished) => finished,
@@ -439,9 +435,9 @@ mod tests {
         let plugins = project.path().join(CONFIG_DIR).join(PLUGINS_DIR);
         // Something left from an earlier role or run is cleared.
         fs::create_dir_all(plugins.join("cache/harness/old/local")).unwrap();
-        let skills = project.path().join(CONFIG_DIR).join(SKILLS_DIR);
-        fs::create_dir_all(skills.join(".system/skill-installer")).unwrap();
+        fs::create_dir_all(project.path().join(CONFIG_DIR).join("skills")).unwrap();
 
+        agent_home::fresh(&job.project_dir, CONFIG_DIR).unwrap();
         codex.put_plugins(&job).unwrap();
         let copied = plugins.join("cache/harness/review/local");
         assert_eq!(
@@ -449,10 +445,10 @@ mod tests {
             "audit"
         );
         assert!(!plugins.join("cache/harness/old").exists());
-        assert!(!skills.exists());
+        assert!(!project.path().join(CONFIG_DIR).join("skills").exists());
 
-        remove_extras(&job);
-        assert!(!plugins.exists());
+        codex.clean_up(&job);
+        assert!(!project.path().join(CONFIG_DIR).exists());
         assert!(source.join("skills/audit/SKILL.md").exists());
     }
 

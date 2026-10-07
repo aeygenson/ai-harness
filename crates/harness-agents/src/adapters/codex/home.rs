@@ -8,13 +8,13 @@ use harness_core::plugins::copy_dir;
 use harness_core::task::agent::RoleJob;
 use harness_core::task::handoff::Role;
 
-use super::{Codex, AUTH_FILE, CONFIG_DIR, MARKETPLACE, PLUGINS_DIR, PLUGIN_VERSION, SKILLS_DIR};
-use crate::launcher;
+use super::{Codex, AUTH_FILE, CONFIG_DIR, MARKETPLACE, PLUGINS_DIR, PLUGIN_VERSION};
+use crate::{agent_home, launcher};
 
 impl Codex {
-    /// Leaves in Codex's plugin cache exactly this role's plugins.
+    /// Puts this role's plugins into Codex's plugin cache (the folder is empty
+    /// at this point, see `agent_home::fresh`).
     pub(super) fn put_plugins(&self, job: &RoleJob) -> io::Result<()> {
-        remove_extras(job);
         let cache = job
             .project_dir
             .join(CONFIG_DIR)
@@ -52,9 +52,9 @@ impl Codex {
         harness_platform::private::write(&dir.join(AUTH_FILE), &saved)
     }
 
-    /// Codex may refresh its login during the run. Keep the newest one, then
-    /// remove the copy so other roles' agents cannot read it.
-    pub(super) fn take_auth_back(&self, job: &RoleJob) {
+    /// Codex may refresh its login during the run: keep the newest one.
+    /// `clean_up` then removes the copy, so other roles' agents cannot read it.
+    fn take_auth_back(&self, job: &RoleJob) {
         let copy = job.project_dir.join(CONFIG_DIR).join(AUTH_FILE);
         if let Ok(bytes) = fs::read(&copy) {
             let still_json = serde_json::from_slice::<serde_json::Value>(&bytes).is_ok();
@@ -63,15 +63,12 @@ impl Codex {
                 let _ = harness_platform::private::write(&self.auth_dir.join(AUTH_FILE), &bytes);
             }
         }
-        let _ = fs::remove_file(copy);
     }
-}
 
-/// Removes Codex's plugin and skills folders, so the next role starts
-/// without plugins or skills left by an earlier run.
-pub(super) fn remove_extras(job: &RoleJob) {
-    let home = job.project_dir.join(CONFIG_DIR);
-    for dir in [PLUGINS_DIR, SKILLS_DIR] {
-        let _ = fs::remove_dir_all(home.join(dir));
+    /// After the role (or a failed start): keeps a refreshed login, then
+    /// removes Codex's whole folder, so nothing reaches the next role.
+    pub(super) fn clean_up(&self, job: &RoleJob) {
+        self.take_auth_back(job);
+        let _ = agent_home::remove(&job.project_dir, CONFIG_DIR);
     }
 }
