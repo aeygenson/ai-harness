@@ -204,7 +204,12 @@ pub fn apply(repo: &Repo, dir: &Path, ids: &[u32]) -> Result<Vec<u32>, OpsError>
     if chosen.is_empty() {
         return Ok(chosen);
     }
-    let mut paths = suggest::apply(&harness_dir, &found.proposals, &chosen)?;
+    let made = repo
+        .last_change_date(&format!("{HARNESS_DIR}/{RETROS_DIR}/{number}"))
+        .map(|day| format!(" of {day}"))
+        .unwrap_or_default();
+    let origin = format!("retro {number}{made}, approved by Lisa");
+    let mut paths = suggest::apply(&harness_dir, &found.proposals, &chosen, &origin)?;
     paths.push(Applied::add(dir, &chosen)?);
     let refs: Vec<&Path> = paths.iter().map(PathBuf::as_path).collect();
     let list: Vec<String> = chosen.iter().map(u32::to_string).collect();
@@ -303,7 +308,11 @@ mod tests {
         assert_eq!(apply(&repo, &second, &[1]).unwrap(), [1]);
         assert!(repo.changed_files().unwrap().is_empty(), "committed");
         let skill = repo.root().join(".harness/skills/empty-input.md");
-        assert!(skill.is_file());
+        // The skill says which retrospective it came from, and when.
+        let text = fs::read_to_string(&skill).unwrap();
+        let header = text.lines().nth(1).unwrap();
+        assert!(header.starts_with("origin: retro 002 of 20"), "{text}");
+        assert!(header.ends_with(", approved by Lisa"), "{text}");
         let toml = fs::read_to_string(repo.root().join(".harness/harness.toml")).unwrap();
         assert!(toml.contains("empty-input"), "{toml}");
         assert_eq!(list(&repo)[0].applied, [1]);

@@ -6,16 +6,18 @@ use std::path::{Path, PathBuf};
 use super::ApplyError;
 use crate::config::edit;
 use crate::config::{Config, CONFIG_FILE};
-use crate::retro::proposals::{FileChange, ProposalsFile, SkillList};
+use crate::retro::proposals::{with_origin, FileChange, ProposalsFile, SkillList};
 use crate::skills::Skills;
 
 /// Applies the chosen proposals: writes the skill files and adds the skills to
-/// the roles in harness.toml. If the result does not load, everything is put
-/// back. Returns the changed files.
+/// the roles in harness.toml. Every skill file written gets `origin` in its
+/// header, such as `retro 003 of 2026-10-07, approved by Lisa`. If the result does not load, everything is
+/// put back. Returns the changed files.
 pub fn apply(
     harness_dir: &Path,
     proposals: &ProposalsFile,
     ids: &[u32],
+    origin: &str,
 ) -> Result<Vec<PathBuf>, ApplyError> {
     let config_path = harness_dir.join(CONFIG_FILE);
     let old_config = fs::read_to_string(&config_path).map_err(|source| ApplyError::Io {
@@ -57,7 +59,7 @@ pub fn apply(
         let written = path
             .parent()
             .map_or(Ok(()), fs::create_dir_all)
-            .and_then(|()| fs::write(&path, content));
+            .and_then(|()| fs::write(&path, with_origin(content, origin)));
         if let Err(source) = written {
             result = Err(ApplyError::Io { path, source });
             break;

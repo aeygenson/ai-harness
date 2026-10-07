@@ -210,10 +210,15 @@ impl Proposal {
         let Some(new) = &self.content else {
             return FileChange::Unchanged;
         };
+        // The `origin:` line the harness added when it wrote the file is not
+        // part of the proposal, so it is left out of the comparison.
+        let new = without_origin(new);
         match fs::read_to_string(self.skill_path(harness_dir)) {
             Err(_) => FileChange::New,
-            Ok(old) if old.trim_end() == new.trim_end() => FileChange::Unchanged,
-            Ok(old) => FileChange::Changed { old },
+            Ok(old) if without_origin(&old).trim_end() == new.trim_end() => FileChange::Unchanged,
+            Ok(old) => FileChange::Changed {
+                old: without_origin(&old),
+            },
         }
     }
 
@@ -274,6 +279,39 @@ impl Proposal {
     }
 }
 
+/// The skill text with `origin: <origin>` as the first header line, so the
+/// Skills tab shows where the skill came from. An `origin:` line already in
+/// the text is dropped: only the harness says where a skill came from, never
+/// the agent that wrote the proposal.
+pub fn with_origin(text: &str, origin: &str) -> String {
+    let clean = without_origin(text);
+    match clean.strip_prefix("---\n") {
+        Some(rest) => format!("---\norigin: {origin}\n{rest}"),
+        None => clean,
+    }
+}
+
+/// The skill text without `origin:` lines in its header.
+fn without_origin(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut in_header = false;
+    for (index, line) in text.lines().enumerate() {
+        if index == 0 && line.trim() == "---" {
+            in_header = true;
+            out.push_str("---\n");
+            continue;
+        }
+        if in_header && line.trim() == "---" {
+            in_header = false;
+        } else if in_header && line.trim_start().starts_with("origin:") {
+            continue;
+        }
+        out.push_str(line);
+        out.push('\n');
+    }
+    out
+}
+
 /// A simple line diff: ` ` kept, `-` removed, `+` added lines.
 pub fn line_diff(old: &str, new: &str) -> String {
     let old: Vec<&str> = old.lines().collect();
@@ -311,6 +349,26 @@ pub fn line_diff(old: &str, new: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_harness_writes_where_a_skill_came_from_and_the_agent_cannot() {
+        let text = "---\ndescription: Check empty input.\norigin: Lisa wrote it\n---\nBody.\n";
+
+        let written = with_origin(text, "retro 003 of 2026-10-07, approved by Lisa");
+
+        assert_eq!(
+            written,
+            "---\norigin: retro 003 of 2026-10-07, approved by Lisa\n\
+             description: Check empty input.\n---\nBody.\n"
+        );
+        assert_eq!(
+            skills::split_header(&written).unwrap().0,
+            "Check empty input."
+        );
+        // Only header lines are dropped: the body may say "origin:".
+        let body = with_origin("---\ndescription: d\n---\norigin: x\n", "r");
+        assert!(body.ends_with("---\norigin: x\n"), "{body}");
+    }
 
     const SKILL: &str = "---\ndescription: Check empty input.\n---\nTest \"\" first.\n";
 
