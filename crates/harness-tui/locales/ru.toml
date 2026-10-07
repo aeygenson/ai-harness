@@ -443,6 +443,10 @@ contrast = "Контраст"
 terminal = "Терминал"
 
 [agents]
+computer = " Компьютер "
+tool_missing = "не найден"
+tool_old = "ниже {min}"
+tools_install = "Установить недостающее (можно запускать повторно):"
 title = " Агенты "
 about = " Об агенте "
 check = "Проверить снова"

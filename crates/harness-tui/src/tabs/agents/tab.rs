@@ -6,6 +6,7 @@ use ratatui::crossterm::event::KeyCode;
 
 use harness_agents::install::catalog::{self, Action, Status, CATALOG};
 use harness_agents::install::credentials;
+use harness_agents::install::tools::ToolStatus;
 use harness_core::config::AgentKind;
 
 #[derive(Debug)]
@@ -19,6 +20,8 @@ pub struct AgentsTab {
     pub selected: usize,
     /// The install or update that runs or ran last, with what it printed.
     pub job: Option<Job>,
+    /// The other programs the harness needs; empty until they were checked.
+    pub tools: Vec<ToolStatus>,
 }
 
 /// An install or update command, started from the tab.
@@ -66,6 +69,7 @@ impl AgentsTab {
             checking: false,
             selected: 0,
             job: None,
+            tools: Vec::new(),
         }
     }
 
@@ -123,7 +127,7 @@ impl AgentsTab {
         self.known.then(|| {
             self.statuses
                 .iter()
-                .filter(|s| s.installed() && s.login == Some(true))
+                .filter(|s| s.ready())
                 .filter_map(|s| s.entry.id.parse::<AgentKind>().ok())
                 .collect()
         })
@@ -155,6 +159,9 @@ pub type AgentChecker = fn(Option<&std::path::Path>) -> Vec<Status>;
 pub fn check(credentials_dir: Option<&std::path::Path>) -> Vec<Status> {
     catalog::check_all(credentials_dir)
 }
+
+/// Checks the other programs the harness needs (Git, Node.js, ...).
+pub type ToolChecker = fn() -> Vec<ToolStatus>;
 
 /// What a running install or update sends: a line it printed, or its end.
 #[derive(Debug)]

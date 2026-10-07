@@ -94,6 +94,9 @@ pub(crate) enum Command {
     /// Which agents of the catalog are installed here, their versions and
     /// logins, and how to install or update them.
     Agents,
+    /// Is everything the harness needs here? Programs (Git, Node.js, ...)
+    /// and agents, with what to do about anything missing.
+    Doctor,
     /// Used by Codex: start an MCP server from its private settings file.
     #[command(name = "mcp-exec", hide = true)]
     McpExec { file: PathBuf },

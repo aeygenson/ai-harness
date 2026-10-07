@@ -28,6 +28,12 @@ impl Status {
         self.path.is_some() && (self.entry.inside.is_none() || self.entry.runs())
     }
 
+    /// A role can use it now: the harness runs it, it is installed and a
+    /// login is saved.
+    pub fn ready(&self) -> bool {
+        self.entry.runs() && self.installed() && self.login == Some(true)
+    }
+
     /// The program this agent lives inside is here, but the agent itself is
     /// not usable yet (see [`Status::installed`]).
     pub fn host_only(&self) -> bool {

@@ -115,12 +115,32 @@ impl Env {
     fn app(&self, start: &Path) -> App {
         let mut app = App::new(Some(self.home.path().to_path_buf()), start);
         app.start_dir = self.code.path().canonicalize().unwrap();
+        // The real check asks the programs of this computer for their versions.
+        app.tool_checker = fake_tools;
         app
     }
 
     fn saved(&self) -> Projects {
         Projects::load(self.home.path()).unwrap()
     }
+}
+
+/// Git and an old Node.js are here, npx is not.
+fn fake_tools() -> Vec<harness_agents::install::tools::ToolStatus> {
+    use harness_agents::install::tools::{self, Tool};
+    let find = |tool: Tool| match tool {
+        Tool::Git => Some(PathBuf::from("/bin/git")),
+        Tool::Node => Some(PathBuf::from("/bin/node")),
+        Tool::Npx | Tool::Curl | Tool::Bubblewrap | Tool::Zed => None,
+    };
+    let version = |path: &Path| {
+        Ok(if path.ends_with("git") {
+            "git version 2.43.0".to_string()
+        } else {
+            "v20.11.1".to_string()
+        })
+    };
+    tools::check_with(&[Tool::Git, Tool::Node, Tool::Npx], &find, &version)
 }
 
 /// The bottom-line message as its text and whether it reports a problem.

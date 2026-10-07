@@ -45,6 +45,8 @@ impl App {
             agents: AgentsTab::new(),
             agent_checker: tabs::agents::check,
             agent_check: None,
+            tool_checker: harness_agents::install::tools::check,
+            tool_check: None,
             installer: tabs::agents::install,
             install_events: None,
             form: None,
