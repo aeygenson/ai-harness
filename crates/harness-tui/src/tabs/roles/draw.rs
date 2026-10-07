@@ -6,7 +6,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{ListItem, Paragraph};
 use ratatui::Frame;
 
-use harness_core::config::{independence, AgentKind};
+use harness_core::config::{independence, trifecta, AgentKind};
 use harness_core::task::handoff::Role;
 
 use super::tab::{Focus, RolesTab, Row, WHO};
@@ -128,6 +128,37 @@ impl RolesTab {
         lines
     }
 
+    /// A warning when the role runs commands and has MCP servers that talk
+    /// to the outside (see `harness_core::config::trifecta`); no lines otherwise.
+    fn outside_servers_warning(
+        &self,
+        who: Option<Role>,
+        tr: &I18n,
+    ) -> Vec<(Option<usize>, Line<'static>)> {
+        let Some(role) = who else {
+            return Vec::new();
+        };
+        let Some(settings) = self.roles.get(&role) else {
+            return Vec::new();
+        };
+        let servers = trifecta::outside_servers(role, settings, self.servers());
+        if servers.is_empty() {
+            return Vec::new();
+        }
+        let first = tr.f("roles.outside_servers", &[("servers", &servers.join(", "))]);
+        vec![
+            (None, Line::styled(first, theme::warn())),
+            (
+                None,
+                Line::styled(
+                    tr.t("roles.outside_servers_hint").to_string(),
+                    theme::warn(),
+                ),
+            ),
+            (None, Line::default()),
+        ]
+    }
+
     /// The lines of the details; clickable ones carry their row index.
     fn detail_lines(&self, tr: &I18n) -> Vec<(Option<usize>, Line<'static>)> {
         let bold = Style::new().add_modifier(Modifier::BOLD);
@@ -142,6 +173,7 @@ impl RolesTab {
         let settings = who.and_then(|role| self.roles.get(&role));
         let heading = |key: &str| (None, Line::styled(tr.t(key).to_string(), bold));
         lines.extend(self.same_reviewer_warning(who, tr));
+        lines.extend(self.outside_servers_warning(who, tr));
 
         lines.push(heading(if who.is_some() {
             "roles.agent"

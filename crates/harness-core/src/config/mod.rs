@@ -20,6 +20,7 @@ pub mod edit;
 pub mod independence;
 pub mod projects;
 pub mod save;
+pub mod trifecta;
 
 pub use agent_kind::{AgentKind, UnknownAgent};
 
