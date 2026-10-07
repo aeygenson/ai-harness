@@ -67,7 +67,14 @@ fn the_mcp_tab_gives_servers_to_roles() {
     // The Roles tab shows the same change.
     click(&mut app, "2 Roles");
     click(&mut app, "developer");
-    assert!(screen(&mut app).contains("[x] fetch"));
+    // The warnings above push the servers to the bottom; going down the
+    // rows scrolls the details until fetch shows.
+    key(&mut app, KeyCode::Tab);
+    for _ in 0..20 {
+        key(&mut app, KeyCode::Down);
+    }
+    let roles = screen(&mut app);
+    assert!(roles.contains("[x] fetch"), "{roles}");
     click(&mut app, "4 MCP");
     // Saving checks everything as before a run: the tester's unknown server
     // stops it.

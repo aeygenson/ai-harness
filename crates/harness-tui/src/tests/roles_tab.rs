@@ -207,3 +207,27 @@ fn security_on_the_developers_agent_and_model_is_warned_about() {
     assert!(same.contains("less independent"), "{same}");
     assert!(!other.contains(warning), "{other}");
 }
+
+#[test]
+fn a_role_with_commands_and_an_outside_server_is_warned_about() {
+    let env = Env::new();
+    let root = env.path("test");
+    project(&root);
+    let file = root.join(".harness/harness.toml");
+    let text = fs::read_to_string(&file).unwrap().replace(
+        "[roles.developer]\nagent = \"claude\"\n",
+        "[roles.developer]\nagent = \"claude\"\nmcp = [\"web\"]\n",
+    ) + "\n[mcp.web]\nurl = \"https://example.com/mcp\"\n";
+    fs::write(&file, text).unwrap();
+    let mut app = env.app(&root);
+    click(&mut app, "2 Roles");
+    let warning = "runs commands and reads from outside through: web";
+
+    click(&mut app, "developer  claude");
+    let developer = screen(&mut app);
+    click(&mut app, "tester     claude");
+    let tester = screen(&mut app);
+
+    assert!(developer.contains(warning), "{developer}");
+    assert!(!tester.contains(warning), "{tester}");
+}

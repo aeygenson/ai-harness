@@ -3,13 +3,14 @@
 //! something is missing. The TUI shows the same on the Agents tab. Inside a
 //! project it also checks the project's roles.
 
+use std::fmt::Write as _;
 use std::path::Path;
 
 use anyhow::{bail, Result};
 use harness_agents::install::catalog::{self, Status};
 use harness_agents::install::credentials;
 use harness_agents::install::tools::{self, Health, Tool, ToolStatus};
-use harness_core::config::{independence, Config};
+use harness_core::config::{independence, trifecta, Config};
 use harness_core::git::{Repo, HARNESS_DIR};
 
 /// Width of the name column, enough for «`DeepSeek` Harness».
@@ -50,7 +51,20 @@ fn roles_report(config: &Config) -> String {
     } else {
         "✓ Security uses another agent or model than the Developer.\n"
     };
-    format!("\nThis project's roles:\n{line}")
+    let mut text = format!("\nThis project's roles:\n{line}");
+    for (role, settings) in &config.roles {
+        let servers = trifecta::outside_servers(*role, settings, &config.mcp);
+        if !servers.is_empty() {
+            // Writing into a `String` cannot fail, so `let _ =` ignores the `Result`.
+            let _ = writeln!(
+                text,
+                "! The {role} runs commands and reads from outside through {}. Text from \
+                 there could tell it to send data out; give it only the servers it needs.",
+                servers.join(", ")
+            );
+        }
+    }
+    text
 }
 
 /// The report for `tools` and `agents`, and how many problems it found:
@@ -254,5 +268,19 @@ mod tests {
             "{same}"
         );
         assert!(other.contains("✓ Security uses another agent"), "{other}");
+    }
+
+    #[test]
+    fn a_role_with_commands_and_a_web_server_is_a_warning() {
+        let text = "[roles.tester]\nagent = \"claude\"\nmcp = [\"web\"]\n\
+                    [mcp.web]\nurl = \"https://example.com/mcp\"\n";
+        let config = Config::parse(text).unwrap();
+
+        let report = roles_report(&config);
+
+        assert!(
+            report.contains("! The tester runs commands and reads from outside through web."),
+            "{report}"
+        );
     }
 }
