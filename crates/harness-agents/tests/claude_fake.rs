@@ -1,11 +1,8 @@
-//! Runs the Claude Code adapter against a fake `claude`: a small shell script.
+//! Runs the Claude Code adapter against a fake `claude` (`harness-fake`).
 //! It checks the real process handling (environment, standard input, time-out,
 //! reading the output) without a subscription or internet.
 
-#![cfg(unix)]
-
 use std::fs;
-use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -42,12 +39,19 @@ fn setup() -> Setup {
     }
 }
 
-/// Writes an executable script and returns its path.
-fn fake_claude(dir: &Path, body: &str) -> PathBuf {
-    let path = dir.join("claude");
-    fs::write(&path, format!("#!/bin/sh\n{body}")).unwrap();
-    fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
-    path
+/// Puts a fake `claude` doing what `script` says into `dir`.
+fn fake_claude(dir: &Path, script: &str) -> PathBuf {
+    harness_fake::install(dir, "claude", script)
+}
+
+/// The fake's lines that do the architect's job: a design, a handoff, notes.
+fn architect_work() -> String {
+    format!(
+        "write docs/design.md\n# Design\nend\n\
+         write .harness/runs/task-001/inbox/handoff.json\n{HANDOFF}\nend\n\
+         write .harness/runs/task-001/inbox/notes.md\nDesign notes\nend\n\
+         print {{\"type\":\"result\",\"is_error\":false,\"result\":\"Done.\"}}\n"
+    )
 }
 
 fn new_task(repo: &Repo) -> (harness_core::task::store::TaskStore, TaskState) {
@@ -62,13 +66,11 @@ async fn a_well_behaved_agent_finishes_the_role() {
     let script = fake_claude(
         s.scratch.path(),
         &format!(
-            "env > {seen}.env\n\
-             cat > {seen}.prompt\n\
-             mkdir -p docs && echo '# Design' > docs/design.md\n\
-             cat > .harness/runs/task-001/inbox/handoff.json <<'JSON'\n{HANDOFF}\nJSON\n\
-             echo 'Design notes' > .harness/runs/task-001/inbox/notes.md\n\
-             echo '{{\"type\":\"result\",\"is_error\":false,\"result\":\"Done.\"}}'\n",
-            seen = seen.display()
+            "save-env {seen}.env\n\
+             save-stdin {seen}.prompt\n\
+             {work}",
+            seen = seen.display(),
+            work = architect_work()
         ),
     );
     std::env::set_var("SECRET_TEST_API_KEY", "must-not-leak");
@@ -107,8 +109,8 @@ async fn a_used_up_subscription_pauses_the_task() {
     let s = setup();
     let script = fake_claude(
         s.scratch.path(),
-        "cat > /dev/null\n\
-         echo '{\"type\":\"result\",\"is_error\":true,\"result\":\"Claude AI usage limit reached\"}'\n\
+        "read-stdin\n\
+         print {\"type\":\"result\",\"is_error\":true,\"result\":\"Claude AI usage limit reached\"}\n\
          exit 1\n",
     );
     let agent = ClaudeCode::new(Secret::new("t"), RoleSettings::default()).with_program(script);
@@ -177,13 +179,11 @@ async fn an_mcp_secret_the_agent_prints_is_hidden_in_the_log() {
     let script = fake_claude(
         s.scratch.path(),
         &format!(
-            "while [ \"$1\" != --mcp-config ]; do shift; done\n\
-             cat \"$2\"; echo\n\
-             cat > /dev/null\n\
-             cat > .harness/runs/task-001/inbox/handoff.json <<'JSON'\n{HANDOFF}\nJSON\n\
-             mkdir -p docs && echo '# Design' > docs/design.md\n\
-             echo 'notes' > .harness/runs/task-001/inbox/notes.md\n\
-             echo '{{\"type\":\"result\",\"is_error\":false,\"result\":\"Done.\"}}'\n"
+            "print-file ${{after:--mcp-config}}\n\
+             print\n\
+             read-stdin\n\
+             {}",
+            architect_work()
         ),
     );
     let server = McpServer {

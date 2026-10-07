@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/harness-platform", "crates/harness-core", "crates/harness-agents", "crates/harness-cli", "crates/harness-tui"]
+members = ["crates/harness-fake", "crates/harness-platform", "crates/harness-core", "crates/harness-agents", "crates/harness-cli", "crates/harness-tui"]
 
 # Lints shared by every crate (each crate's Cargo.toml says `[lints] workspace = true`).
 [workspace.lints.rust]

@@ -200,24 +200,24 @@ mod tests {
             .get_args()
             .all(|a| !a.to_string_lossy().contains("Pick")));
 
-        // `sh` and `false` stand in for a dialog that answers or is cancelled.
-        #[cfg(unix)]
-        {
-            let mut chosen = Command::new("sh");
-            chosen.args(["-c", "echo /home/me/code/app"]);
-            assert_eq!(
-                run_dialog(chosen),
-                Native::Chosen("/home/me/code/app".into())
-            );
-            // As macOS prints it: with a `/` at the end.
-            let mut chosen = Command::new("sh");
-            chosen.args(["-c", "echo /Users/me/code/app/"]);
-            assert_eq!(
-                run_dialog(chosen),
-                Native::Chosen("/Users/me/code/app".into())
-            );
-            assert_eq!(run_dialog(Command::new("false")), Native::Cancelled);
-        }
+        // Fake programs stand in for a dialog that answers or is cancelled.
+        let dir = tempfile::tempdir().unwrap();
+        let answering = harness_fake::install(dir.path(), "answer", "print $1\n");
+        let mut chosen = Command::new(&answering);
+        chosen.arg("/home/me/code/app");
+        assert_eq!(
+            run_dialog(chosen),
+            Native::Chosen("/home/me/code/app".into())
+        );
+        // As macOS prints it: with a `/` at the end.
+        let mut chosen = Command::new(&answering);
+        chosen.arg("/Users/me/code/app/");
+        assert_eq!(
+            run_dialog(chosen),
+            Native::Chosen("/Users/me/code/app".into())
+        );
+        let cancelling = harness_fake::install(dir.path(), "cancel", "exit 1\n");
+        assert_eq!(run_dialog(Command::new(cancelling)), Native::Cancelled);
         assert_eq!(
             run_dialog(Command::new("/no/such/dialog")),
             Native::Unavailable

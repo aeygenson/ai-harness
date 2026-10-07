@@ -44,30 +44,21 @@ pub fn search_with(curl: &Path, query: &str) -> Result<Vec<Entry>, String> {
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
+
     use super::*;
-    #[cfg(unix)]
-    use {std::fs, std::os::unix::fs::PermissionsExt};
 
     /// A fake curl that writes its arguments to a file and prints `answer`.
-    #[cfg(unix)] // a shell script stands in for the program
     fn fake_curl(dir: &Path, answer: &str) -> std::path::PathBuf {
-        let path = dir.join("curl");
-        let log = dir.join("args");
         fs::write(dir.join("answer"), answer).unwrap();
-        fs::write(
-            &path,
-            format!(
-                "#!/bin/sh\nprintf '%s\\n' \"$@\" > '{}'\ncat '{}'\n",
-                log.display(),
-                dir.join("answer").display()
-            ),
-        )
-        .unwrap();
-        fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
-        path
+        let script = format!(
+            "save-args {}\nprint-file {}\n",
+            dir.join("args").display(),
+            dir.join("answer").display()
+        );
+        harness_fake::install(dir, "curl", &script)
     }
 
-    #[cfg(unix)] // a shell script stands in for the program
     #[test]
     fn the_search_is_one_encoded_argument() {
         let dir = tempfile::tempdir().unwrap();
@@ -88,17 +79,14 @@ mod tests {
         assert!(!args.contains("search="), "{args}");
     }
 
-    #[cfg(unix)] // a shell script stands in for the program
     #[test]
     fn a_failing_curl_says_why() {
         let dir = tempfile::tempdir().unwrap();
-        let curl = dir.path().join("curl");
-        fs::write(
-            &curl,
-            "#!/bin/sh\necho 'Could not resolve host' >&2\nexit 6\n",
-        )
-        .unwrap();
-        fs::set_permissions(&curl, fs::Permissions::from_mode(0o755)).unwrap();
+        let curl = harness_fake::install(
+            dir.path(),
+            "curl",
+            "eprint Could not resolve host\nexit 6\n",
+        );
         let error = search_with(&curl, "x").unwrap_err();
         assert!(error.contains("Could not resolve host"), "{error}");
         assert!(search_with(&dir.path().join("none"), "x")

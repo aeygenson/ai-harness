@@ -374,6 +374,7 @@ version = "0.3.0"
 dependencies = [
  "getrandom",
  "harness-core",
+ "harness-fake",
  "harness-platform",
  "serde",
  "serde_json",
@@ -412,10 +413,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "harness-fake"
+version = "0.3.0"
+dependencies = [
+ "tempfile",
+]
+
+[[package]]
 name = "harness-platform"
 version = "0.3.0"
 dependencies = [
  "crossterm",
+ "harness-fake",
  "tempfile",
 ]
 

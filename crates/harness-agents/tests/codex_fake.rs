@@ -1,9 +1,6 @@
-//! Runs the Codex adapter against a fake `codex`: a small shell script.
-
-#![cfg(unix)]
+//! Runs the Codex adapter against a fake `codex` (`harness-fake`).
 
 use std::fs;
-use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
 use harness_agents::role_settings::RoleSettings;
@@ -46,11 +43,9 @@ fn setup() -> Setup {
     }
 }
 
-fn fake_codex(dir: &Path, body: &str) -> PathBuf {
-    let path = dir.join("codex");
-    fs::write(&path, format!("#!/bin/sh\n{body}")).unwrap();
-    fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
-    path
+/// Puts a fake `codex` doing what `script` says into `dir`.
+fn fake_codex(dir: &Path, script: &str) -> PathBuf {
+    harness_fake::install(dir, "codex", script)
 }
 
 fn new_task(repo: &Repo) -> (TaskStore, TaskState) {
@@ -66,13 +61,13 @@ async fn a_well_behaved_codex_finishes_the_role_and_keeps_a_refreshed_login() {
     let script = fake_codex(
         s.scratch.path(),
         &format!(
-            "env > {seen}.env\n\
-             cat > {seen}.prompt\n\
-             cp \"$CODEX_HOME/auth.json\" {seen}.auth\n\
-             echo '{{\"tokens\":\"new\"}}' > \"$CODEX_HOME/auth.json\"\n\
-             cat > .harness/runs/task-001/inbox/handoff.json <<'JSON'\n{HANDOFF}\nJSON\n\
-             echo '{{\"type\":\"thread.started\"}}'\n\
-             echo '{{\"type\":\"turn.completed\",\"usage\":{{}}}}'\n",
+            "save-env {seen}.env\n\
+             save-stdin {seen}.prompt\n\
+             copy ${{CODEX_HOME}}/auth.json {seen}.auth\n\
+             save-text ${{CODEX_HOME}}/auth.json {{\"tokens\":\"new\"}}\n\
+             write .harness/runs/task-001/inbox/handoff.json\n{HANDOFF}\nend\n\
+             print {{\"type\":\"thread.started\"}}\n\
+             print {{\"type\":\"turn.completed\",\"usage\":{{}}}}\n",
             seen = seen.display()
         ),
     );
@@ -115,8 +110,8 @@ async fn a_used_up_subscription_pauses_the_task() {
     let s = setup();
     let script = fake_codex(
         s.scratch.path(),
-        "cat > /dev/null\n\
-         echo '{\"type\":\"turn.failed\",\"error\":{\"message\":\"You have hit your usage limit.\"}}'\n\
+        "read-stdin\n\
+         print {\"type\":\"turn.failed\",\"error\":{\"message\":\"You have hit your usage limit.\"}}\n\
          exit 1\n",
     );
     let agent = Codex::new(&s.auth_dir, RoleSettings::default()).with_program(script);

@@ -1,0 +1,12 @@
+[package]
+name = "harness-fake"
+version = "0.3.0"
+edition = "2021"
+publish = false
+description = "A fake program for the harness's tests, the same on Linux, macOS and Windows."
+
+[dev-dependencies]
+tempfile = "3"
+
+[lints]
+workspace = true

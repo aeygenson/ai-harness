@@ -15,6 +15,7 @@ tempfile = "3"
 tokio = { version = "1", features = ["macros", "process", "time", "io-util"] }
 
 [dev-dependencies]
+harness-fake = { path = "../harness-fake" }
 tokio = { version = "1", features = ["macros", "rt", "process", "time", "io-util"] }
 
 [lints]
