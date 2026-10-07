@@ -28,6 +28,7 @@ purpose. Where a rule below differs from common Rust advice, the reason is given
 | `harness-agents` | Starting the agents. Folders: `adapters/` (one per agent, plus the mock), `mcp/` (check, OAuth sign-in, web bridge, registry), `install/` (catalog, logins, model lists); single files: `build`, `launcher`, `process`, `role_settings`, `team`. |
 | `harness-tui` | The full-screen Ratatui interface: `app/` (event loop, keyboard, mouse, forms, drawing), `tabs/` (one module or folder per tab), `ui/` (shared widgets, themes, translations), `tests/` (one test file per tab). |
 | `harness-cli` | The `harness` program (`clap`). |
+| `harness-fake` | Tests only: a small fake program (stands in for an agent, `curl` or an MCP server) that runs the same on Linux, macOS and Windows. |
 
 - Put OS-specific code (`#[cfg(unix)]`, `#[cfg(windows)]`) in `harness-platform`. Outside it,
   `#[cfg(...)]` is fine only in tests (for example a shell script standing in for an agent).
@@ -217,8 +218,9 @@ This program starts AI agents with access to the user's files, so security rules
 
 - Every new function or behaviour gets a unit test (`#[cfg(test)] mod tests` in the same
   file, `#[test]`, Arrange-Act-Assert). Bug fixes get a test that fails without the fix.
-- External things are faked: agents with the mock adapter or a small script, the file system
-  with `tempfile`, no network in normal tests.
+- External things are faked: agents with the mock adapter or `harness_fake::install` (a fake
+  program with a small script; shell scripts do not run on Windows), the file system with
+  `tempfile`, no network in normal tests.
 - Tests make real git commits in temporary repositories, so git needs a user name and email.
 - Tests that need real agents or the network are `#[ignore]` (see
   `crates/harness-agents/tests/live_install.rs`) and run only on request.

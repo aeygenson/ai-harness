@@ -318,29 +318,30 @@ mod tests {
         assert_eq!(clean_line("   \r"), "");
     }
 
-    #[cfg(unix)]
     #[test]
     fn a_command_runs_in_the_shell_and_its_lines_come_back() {
+        // `sh` and PowerShell write to standard error differently.
+        let both = if cfg!(windows) {
+            "echo one; [Console]::Error.WriteLine('two')"
+        } else {
+            "echo one; echo two >&2"
+        };
         let mut lines = Vec::new();
-        run_command("echo one; echo two >&2", |l| lines.push(l)).unwrap();
+        run_command(both, |l| lines.push(l)).unwrap();
         lines.sort();
         assert_eq!(lines, ["one", "two"]);
         let error = run_command("echo bad; exit 3", |_| {}).unwrap_err();
         assert!(error.contains('3'), "{error}");
     }
 
-    #[cfg(unix)]
     #[test]
     fn the_version_comes_from_the_program_itself() {
-        use std::os::unix::fs::PermissionsExt;
         let bin = tempfile::tempdir().unwrap();
-        let path = bin.path().join("fake");
-        fs::write(
-            &path,
-            "#!/bin/sh\ntest \"$1\" = --version && echo 'fake 4.5.6'\n",
-        )
-        .unwrap();
-        fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
+        let path = harness_fake::install(
+            bin.path(),
+            "fake",
+            "when-arg 1 --version print fake 4.5.6\n",
+        );
         assert_eq!(parse_version(&version_of(&path).unwrap()).unwrap(), "4.5.6");
     }
 }

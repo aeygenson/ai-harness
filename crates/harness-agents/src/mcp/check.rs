@@ -214,8 +214,6 @@ pub fn parse_tools(result: &Value) -> Vec<Tool> {
 mod tests {
     use super::*;
     use std::collections::BTreeMap;
-    #[cfg(unix)]
-    use {std::fs, std::os::unix::fs::PermissionsExt};
 
     #[test]
     fn tools_are_read_without_control_characters() {
@@ -232,43 +230,35 @@ mod tests {
         assert_eq!(tools[1].description.as_deref(), Some("Second line first"));
     }
 
-    /// A tiny MCP server in shell: answers initialize and two pages of
+    /// A tiny fake MCP server: answers initialize and two pages of
     /// tools/list; prints its secret to stderr when asked for a third.
-    #[cfg(unix)] // a shell script stands in for the program
     fn fake_server(dir: &Path, fail: bool) -> McpServer {
-        let script = dir.join("server.sh");
         let last = if fail {
-            r#"echo "boom $TOKEN" >&2; exit 3"#
+            "eprint boom ${TOKEN}\nexit 3"
         } else {
-            r#"echo '{"jsonrpc":"2.0","id":3,"result":{"tools":[{"name":"third"}]}}'"#
+            r#"print {"jsonrpc":"2.0","id":3,"result":{"tools":[{"name":"third"}]}}"#
         };
-        fs::write(
-            &script,
-            format!(
-                r#"#!/bin/sh
-read line
-echo '{{"jsonrpc":"2.0","method":"notifications/message","params":{{}}}}'
-echo '{{"jsonrpc":"2.0","id":1,"result":{{"protocolVersion":"2025-06-18","capabilities":{{"tools":{{}}}}}}}}'
-read line
-read line
-echo 'not json'
-echo '{{"jsonrpc":"2.0","id":2,"result":{{"tools":[{{"name":"first","description":"One."}},{{"name":"second"}}],"nextCursor":"p2"}}}}'
-read line
+        let script = format!(
+            r#"read-line
+print {{"jsonrpc":"2.0","method":"notifications/message","params":{{}}}}
+print {{"jsonrpc":"2.0","id":1,"result":{{"protocolVersion":"2025-06-18","capabilities":{{"tools":{{}}}}}}}}
+read-line
+read-line
+print not json
+print {{"jsonrpc":"2.0","id":2,"result":{{"tools":[{{"name":"first","description":"One."}},{{"name":"second"}}],"nextCursor":"p2"}}}}
+read-line
 {last}
 "#
-            ),
-        )
-        .unwrap();
-        fs::set_permissions(&script, fs::Permissions::from_mode(0o755)).unwrap();
+        );
+        let program = harness_fake::install(dir, "server", &script);
         McpServer {
             name: "fake".into(),
-            command: script.display().to_string(),
+            command: program.display().to_string(),
             args: vec![],
             env: [("TOKEN".to_string(), Secret::new("tok-12345678"))].into(),
         }
     }
 
-    #[cfg(unix)] // a shell script stands in for the program
     #[test]
     fn a_server_is_asked_for_all_pages_of_its_tools() {
         let dir = tempfile::tempdir().unwrap();
@@ -277,7 +267,6 @@ read line
         assert_eq!(names, ["first", "second", "third"]);
     }
 
-    #[cfg(unix)] // a shell script stands in for the program
     #[test]
     fn a_failing_server_says_why_without_its_secrets() {
         let dir = tempfile::tempdir().unwrap();
@@ -297,14 +286,14 @@ read line
             .contains("cannot start"));
     }
 
-    #[cfg(unix)] // `sleep` is a Unix program
     #[test]
     fn a_silent_server_runs_out_of_time() {
         let dir = tempfile::tempdir().unwrap();
+        let program = harness_fake::install(dir.path(), "silent", "sleep 30\n");
         let server = McpServer {
             name: "silent".into(),
-            command: "sleep".into(),
-            args: vec!["30".into()],
+            command: program.display().to_string(),
+            args: vec![],
             env: BTreeMap::default(),
         };
         let start = Instant::now();

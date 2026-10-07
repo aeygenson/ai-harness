@@ -271,16 +271,20 @@ mod tests {
         assert!(!looks_like_usage_limit("All tests pass."));
     }
 
-    #[cfg(unix)] // `sh` stands in for an agent
+    /// Puts a fake agent doing what `script` says into `dir`.
+    fn fake_agent(dir: &Path, script: &str) -> Command {
+        Command::new(harness_fake::install(dir, "agent", script))
+    }
+
     #[tokio::test]
     async fn lines_reach_the_live_log_with_secrets_hidden() {
+        let dir = tempfile::tempdir().unwrap();
         let (sink, lines) = std::sync::mpsc::channel();
         set_live_log(Some(sink));
-        let mut command = Command::new("sh");
-        command.args([
-            "-c",
-            "read x; echo \"live-test $x key-12345678\"; echo live-test err >&2",
-        ]);
+        let command = fake_agent(
+            dir.path(),
+            "read-stdin\nprint live-test ${stdin} key-12345678\neprint live-test err\n",
+        );
         let finished = run(
             command,
             "hello\n",
@@ -305,17 +309,11 @@ mod tests {
 
     /// Is the process with the id written in `pid_file` still running? A
     /// stopped process can take a moment to disappear, so this waits a little.
-    #[cfg(unix)]
     fn still_running(pid_file: &Path) -> bool {
         let pid = std::fs::read_to_string(pid_file).unwrap();
+        let pid = pid.trim();
         for _ in 0..40 {
-            let alive = Command::new("kill")
-                .args(["-0", pid.trim()])
-                .stderr(Stdio::null())
-                .status()
-                .unwrap()
-                .success();
-            if !alive {
+            if !is_running(pid) {
                 return false;
             }
             std::thread::sleep(Duration::from_millis(50));
@@ -323,21 +321,43 @@ mod tests {
         true
     }
 
-    /// An agent that starts `sleep 30` in the background and writes its id.
-    #[cfg(unix)]
-    fn agent_with_a_helper(pid_file: &Path, then: &str) -> Command {
-        let mut command = Command::new("sh");
-        let script = format!("sleep 30 & echo $! > '{}'; {then}", pid_file.display());
-        command.args(["-c", &script]);
-        command
+    /// Asks the system once whether process `pid` runs.
+    fn is_running(pid: &str) -> bool {
+        if cfg!(windows) {
+            // `tasklist` lists the process when it runs, else an "INFO" line.
+            let filter = format!("PID eq {pid}");
+            let output = Command::new("tasklist")
+                .args(["/FI", &filter, "/NH"])
+                .output()
+                .unwrap();
+            String::from_utf8_lossy(&output.stdout).contains(pid)
+        } else {
+            // `kill -0` sends no signal, it only checks that the process exists.
+            Command::new("kill")
+                .args(["-0", pid])
+                .stderr(Stdio::null())
+                .status()
+                .unwrap()
+                .success()
+        }
     }
 
-    #[cfg(unix)] // `sh` stands in for an agent
+    /// An agent that starts a sleeping helper (like `sleep 30 &`), writes its
+    /// id into `pid_file`, then runs the `then` line of the fake's script.
+    fn agent_with_a_helper(dir: &Path, pid_file: &Path, then: &str) -> Command {
+        let script = format!("spawn-sleep 30 {}\n{then}\n", pid_file.display());
+        fake_agent(dir, &script)
+    }
+
+    // Windows `taskkill /T` only finds processes whose parent still runs (see
+    // `harness_platform::process::kill_tree_of`), so there a helper left by a
+    // finished agent keeps running.
+    #[cfg(unix)]
     #[tokio::test]
     async fn what_a_finished_agent_left_running_is_stopped() {
         let dir = tempfile::tempdir().unwrap();
         let pid_file = dir.path().join("pid");
-        let command = agent_with_a_helper(&pid_file, "echo done");
+        let command = agent_with_a_helper(dir.path(), &pid_file, "print done");
         let start = std::time::Instant::now();
 
         // The helper keeps the agent's output open; without stopping it the
@@ -351,12 +371,11 @@ mod tests {
         assert!(!still_running(&pid_file));
     }
 
-    #[cfg(unix)] // `sh` stands in for an agent
     #[tokio::test]
     async fn a_slow_agent_is_stopped_with_everything_it_started() {
         let dir = tempfile::tempdir().unwrap();
         let pid_file = dir.path().join("pid");
-        let command = agent_with_a_helper(&pid_file, "wait");
+        let command = agent_with_a_helper(dir.path(), &pid_file, "wait");
 
         let error = run(command, "", Duration::from_millis(500), &[])
             .await
@@ -366,12 +385,11 @@ mod tests {
         assert!(!still_running(&pid_file));
     }
 
-    #[cfg(unix)] // `sh` stands in for an agent
     #[tokio::test]
     async fn when_the_harness_stops_waiting_the_agent_is_stopped() {
         let dir = tempfile::tempdir().unwrap();
         let pid_file = dir.path().join("pid");
-        let command = agent_with_a_helper(&pid_file, "wait");
+        let command = agent_with_a_helper(dir.path(), &pid_file, "wait");
 
         // Like Ctrl+C in the command line: the run is dropped half-way.
         tokio::select! {
@@ -382,11 +400,10 @@ mod tests {
         assert!(!still_running(&pid_file));
     }
 
-    #[cfg(unix)] // `sh` stands in for an agent
     #[tokio::test]
     async fn a_long_prompt_the_agent_never_reads_does_not_block() {
-        let mut command = Command::new("sh");
-        command.args(["-c", "sleep 30"]);
+        let dir = tempfile::tempdir().unwrap();
+        let command = fake_agent(dir.path(), "sleep 30\n");
         // Far more than a pipe holds (64 KB on Linux).
         let prompt = "x".repeat(1_000_000);
         let start = std::time::Instant::now();
@@ -399,11 +416,10 @@ mod tests {
         assert!(start.elapsed() < Duration::from_secs(10));
     }
 
-    #[cfg(unix)] // `sh` stands in for an agent
     #[tokio::test]
     async fn a_slow_agent_is_stopped() {
-        let mut command = Command::new("sh");
-        command.args(["-c", "sleep 5"]);
+        let dir = tempfile::tempdir().unwrap();
+        let command = fake_agent(dir.path(), "sleep 5\n");
         let error = run(command, "", Duration::from_millis(200), &[])
             .await
             .unwrap_err();

@@ -420,23 +420,15 @@ mod tests {
         assert!(!text.contains("wrong-key"), "{text}");
     }
 
-    #[cfg(unix)] // a shell script stands in for the program
     #[test]
     fn the_key_is_never_on_curls_command_line() {
-        use std::os::unix::fs::PermissionsExt;
-
         let dir = tempfile::tempdir().unwrap();
-        let curl = dir.path().join("curl");
         let log = dir.path().join("args");
-        std::fs::write(
-            &curl,
-            format!(
-                "#!/bin/sh\nprintf '%s\\n' \"$@\" >> '{}'\necho 'curl: (7) refused tok-12345678' >&2\nexit 7\n",
-                log.display()
-            ),
-        )
-        .unwrap();
-        std::fs::set_permissions(&curl, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let script = format!(
+            "append-args {}\neprint curl: (7) refused tok-12345678\nexit 7\n",
+            log.display()
+        );
+        let curl = harness_fake::install(dir.path(), "curl", &script);
         let mut bridge = bridge("https://example.com/mcp", "tok-12345678");
         bridge.curl = curl;
         let output = Output::default();

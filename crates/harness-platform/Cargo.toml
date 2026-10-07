@@ -8,6 +8,7 @@ edition = "2021"
 crossterm = "0.29"
 
 [dev-dependencies]
+harness-fake = { path = "../harness-fake" }
 tempfile = "3"
 
 [lints]

@@ -308,29 +308,22 @@ mod tests {
         assert!(models[0].default && models[0].efforts.is_empty());
     }
 
-    #[cfg(unix)]
     #[test]
     fn an_agent_is_asked_with_a_copy_of_its_login_and_a_failure_hides_the_key() {
-        use std::os::unix::fs::PermissionsExt;
         let creds = tempfile::tempdir().unwrap();
         let bin = tempfile::tempdir().unwrap();
         fs::create_dir_all(creds.path().join("codex")).unwrap();
         fs::write(creds.path().join("codex/auth.json"), "{\"login\":1}").unwrap();
         credentials::save_token(creds.path(), "deepseek", &Secret::new("sk-secret")).unwrap();
-        let script = |name: &str, body: &str| {
-            let path = bin.path().join(name);
-            fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
-            fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
-            path
-        };
+        let script = |name: &str, script: &str| harness_fake::install(bin.path(), name, script);
         let programs = Programs {
             codex: script(
                 "codex",
-                r#"test "$1 $2" = "debug models" || exit 3
-grep -q login "$CODEX_HOME/auth.json" || exit 4
-echo '{"models":[{"slug":"gpt-x","visibility":"list","supported_reasoning_levels":[{"effort":"low"}]}]}'"#,
+                r#"need-args debug models else 3
+need-text ${CODEX_HOME}/auth.json login else 4
+print {"models":[{"slug":"gpt-x","visibility":"list","supported_reasoning_levels":[{"effort":"low"}]}]}"#,
             ),
-            curl: script("curl", "cat \"${5#@}\" >&2; exit 22"),
+            curl: script("curl", "eprint-file ${5#@}\nexit 22"),
             ..Programs::default()
         };
         let list = ask(AgentKind::Codex, creds.path(), &programs).unwrap();

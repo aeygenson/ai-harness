@@ -417,23 +417,20 @@ mod tests {
         );
     }
 
-    #[cfg(unix)]
     #[tokio::test]
     async fn a_run_reads_the_prompt_and_reports_success_by_exit_code() {
         use harness_core::task::agent::RunEnd;
-        use std::os::unix::fs::PermissionsExt;
 
         let dir = tempfile::tempdir().unwrap();
-        // A fake dsh: prints its home's key file name and what it read.
-        let program = dir.path().join("dsh");
-        fs::write(
-            &program,
-            "#!/bin/sh\ntask=$(cat)\n\
-             test -f \"$DSH_HOME/.credentials.yaml\" || exit 2\n\
-             echo '{\"type\":\"final\",\"text\":\"done: '\"$task\"'\"}'\n",
-        )
-        .unwrap();
-        fs::set_permissions(&program, fs::Permissions::from_mode(0o755)).unwrap();
+        let bin = dir.path().join("bin");
+        // A fake dsh: needs its home's key file and prints what it read.
+        let program = harness_fake::install(
+            &bin,
+            "dsh",
+            "read-stdin\n\
+             need-file ${DSH_HOME}/.credentials.yaml else 2\n\
+             print {\"type\":\"final\",\"text\":\"done: ${stdin}\"}\n",
+        );
         let mut job = job(Role::Tester);
         job.project_dir = dir.path().to_path_buf();
         let dsh = Dsh::new(Secret::new("k"), RoleSettings::default()).with_program(&program);
@@ -442,11 +439,11 @@ mod tests {
         assert!(outcome.log.contains("done: do it"), "{}", outcome.log);
         assert!(outcome.log.starts_with("agent: dsh"), "{}", outcome.log);
 
-        fs::write(
-            &program,
-            "#!/bin/sh\ncat >/dev/null\necho 'dsh: TRANSPORT: rate limit reached' >&2\nexit 1\n",
-        )
-        .unwrap();
+        harness_fake::install(
+            &bin,
+            "dsh",
+            "read-stdin\neprint dsh: TRANSPORT: rate limit reached\nexit 1\n",
+        );
         let outcome = dsh.run(&job).await;
         assert_eq!(outcome.end, RunEnd::UsageLimit);
         assert!(

@@ -1,9 +1,6 @@
-//! Runs the Antigravity adapter against a fake `agy`: a small shell script.
-
-#![cfg(unix)]
+//! Runs the Antigravity adapter against a fake `agy` (`harness-fake`).
 
 use std::fs;
-use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
 use harness_agents::role_settings::RoleSettings;
@@ -50,11 +47,9 @@ fn setup() -> Setup {
     }
 }
 
-fn fake_agy(dir: &Path, body: &str) -> PathBuf {
-    let path = dir.join("agy");
-    fs::write(&path, format!("#!/bin/sh\n{body}")).unwrap();
-    fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
-    path
+/// Puts a fake `agy` doing what `script` says into `dir`.
+fn fake_agy(dir: &Path, script: &str) -> PathBuf {
+    harness_fake::install(dir, "agy", script)
 }
 
 fn new_task(repo: &Repo) -> (TaskStore, TaskState) {
@@ -69,14 +64,14 @@ async fn a_well_behaved_agy_finishes_the_role_in_a_throwaway_home() {
     let script = fake_agy(
         s.scratch.path(),
         &format!(
-            "env > {seen}.env\n\
-             printf '%s' \"$2\" > {seen}.prompt\n\
-             echo \"$HOME\" > {seen}.home\n\
-             ls \"$HOME/.gemini/antigravity-cli\" > {seen}.files\n\
-             cp \"$HOME/.gemini/antigravity-cli/settings.json\" {seen}.settings\n\
-             cat > .harness/runs/task-001/inbox/handoff.json <<'JSON'\n{HANDOFF}\nJSON\n\
-             echo '{{\"event\":\"init\"}}'\n\
-             echo '{{\"event\":\"result\",\"result\":{{\"status\":\"SUCCESS\",\"response\":\"done\"}}}}'\n",
+            "save-env {seen}.env\n\
+             save-text {seen}.prompt $2\n\
+             save-text {seen}.home ${{HOME}}\n\
+             list ${{HOME}}/.gemini/antigravity-cli {seen}.files\n\
+             copy ${{HOME}}/.gemini/antigravity-cli/settings.json {seen}.settings\n\
+             write .harness/runs/task-001/inbox/handoff.json\n{HANDOFF}\nend\n\
+             print {{\"event\":\"init\"}}\n\
+             print {{\"event\":\"result\",\"result\":{{\"status\":\"SUCCESS\",\"response\":\"done\"}}}}\n",
             seen = seen.display()
         ),
     );
@@ -122,7 +117,7 @@ async fn a_used_up_quota_pauses_the_task() {
     let s = setup();
     let script = fake_agy(
         s.scratch.path(),
-        "echo 'AGY_ERROR: {\"status\":\"RESOURCE_EXHAUSTED\",\"retryable\":false}' >&2\n\
+        "eprint AGY_ERROR: {\"status\":\"RESOURCE_EXHAUSTED\",\"retryable\":false}\n\
          exit 3\n",
     );
     let agent = Antigravity::new(&s.auth_dir, RoleSettings::default()).with_program(script);
@@ -141,8 +136,8 @@ async fn a_run_cut_short_by_a_permission_says_so() {
     // What agy 1.2.12 printed when a command needed a permission it could not ask for.
     let script = fake_agy(
         s.scratch.path(),
-        "echo '{\"event\":\"result\",\"result\":{\"status\":\"SUCCESS\",\"response\":\"\",\
-         \"denied_actions\":[{\"action\":\"command\",\"display_name\":\"RunCommand\"}]}}'\n",
+        "print {\"event\":\"result\",\"result\":{\"status\":\"SUCCESS\",\"response\":\"\",\
+         \"denied_actions\":[{\"action\":\"command\",\"display_name\":\"RunCommand\"}]}}\n",
     );
     let agent = Antigravity::new(&s.auth_dir, RoleSettings::default()).with_program(script);
     let (store, mut state) = new_task(&s.repo);
@@ -167,7 +162,7 @@ async fn a_missing_login_is_shown_from_stderr() {
     let s = setup();
     let script = fake_agy(
         s.scratch.path(),
-        "echo 'error: authentication required' >&2\nexit 1\n",
+        "eprint error: authentication required\nexit 1\n",
     );
     let agent = Antigravity::new(&s.auth_dir, RoleSettings::default()).with_program(script);
     let (store, mut state) = new_task(&s.repo);
