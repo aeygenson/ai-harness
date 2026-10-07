@@ -252,7 +252,10 @@ mod tests {
 
         let before = watched.snapshot().unwrap();
 
-        assert!(before.check_and_restore(&watched).unwrap().is_empty());
+        assert_eq!(
+            before.check_and_restore(&watched).unwrap(),
+            Changes::default()
+        );
     }
 
     #[test]
@@ -301,7 +304,7 @@ mod tests {
         // Everything is back in the folders, so a second check is quiet
         // there; the home files still differ from the first snapshot.
         let again = before.check_and_restore(&watched).unwrap();
-        assert!(again.put_back.is_empty());
+        assert_eq!(again.put_back, Vec::<PathBuf>::new());
     }
 
     // Making a link needs extra rights on Windows, so this runs on Linux and macOS.
