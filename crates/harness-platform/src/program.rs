@@ -108,7 +108,22 @@ fn in_usual_places(name: &str, home: Option<&Path>) -> Option<PathBuf> {
 /// Can a program here run its commands in a sandbox? On Linux that takes
 /// bubblewrap (`bwrap`) in `PATH`; macOS and Windows need no extra program.
 pub fn sandbox_ready() -> bool {
-    !cfg!(target_os = "linux") || in_path("bwrap").is_some()
+    sandbox_program().is_none_or(|program| in_path(program).is_some())
+}
+
+/// The extra program a sandbox needs on this system: `bwrap` on Linux,
+/// nothing on macOS and Windows.
+pub fn sandbox_program() -> Option<&'static str> {
+    cfg!(target_os = "linux").then_some("bwrap")
+}
+
+/// The one command that installs or updates the harness with Git, Node.js
+/// and Zed on this system (see `install/`). Running it again is safe.
+pub fn installer_command() -> &'static str {
+    on_this_system(
+        "curl -fsSL https://raw.githubusercontent.com/aeygenson/ai-harness/main/install/install.sh | bash",
+        "irm https://raw.githubusercontent.com/aeygenson/ai-harness/main/install/install.ps1 | iex",
+    )
 }
 
 /// `unix` on Linux and macOS, `windows` on Windows: for things written
@@ -193,6 +208,21 @@ mod tests {
         } else {
             assert!(sandbox_ready());
         }
+        assert_eq!(sandbox_program().is_some(), cfg!(target_os = "linux"));
+    }
+
+    #[test]
+    fn the_installer_command_fits_this_system() {
+        let script = if cfg!(windows) {
+            "install.ps1"
+        } else {
+            "install.sh"
+        };
+        assert!(
+            installer_command().contains(script),
+            "{}",
+            installer_command()
+        );
     }
 
     #[test]

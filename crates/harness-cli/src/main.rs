@@ -19,10 +19,12 @@
 //! harness retro show 004               the notes and proposals, with diffs
 //! harness retro apply 004 1 3          apply proposals 1 and 3
 //! harness tui                          full-screen window: tasks, settings, projects
+//! harness doctor                       is everything the harness needs installed?
 //! ```
 
 mod catalogs;
 mod cli;
+mod doctor;
 mod info;
 mod login;
 mod retro;
@@ -83,6 +85,7 @@ async fn main() -> Result<()> {
             agents();
             Ok(())
         }
+        Command::Doctor => doctor::doctor(),
         Command::Tui => {
             // Inside a project it opens that project, anywhere else the last one.
             let start =

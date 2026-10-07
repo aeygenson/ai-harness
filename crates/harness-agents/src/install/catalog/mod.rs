@@ -83,7 +83,7 @@ pub fn check_with(
 }
 
 /// What `<program> --version` prints.
-fn version_of(program: &Path) -> Result<String, String> {
+pub(crate) fn version_of(program: &Path) -> Result<String, String> {
     let dir = std::env::temp_dir();
     let mut command = crate::process::base_command(program, &dir);
     command.arg("--version");

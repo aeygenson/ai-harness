@@ -8,6 +8,7 @@ use ratatui::Frame;
 
 use harness_agents::install::catalog::{Action, Status};
 
+use super::computer::computer_height;
 use super::tab::{AgentsTab, Job};
 use crate::tabs::tasks::draw_list;
 use crate::ui::i18n::I18n;
@@ -60,6 +61,12 @@ impl AgentsTab {
         let [left, right] =
             Layout::horizontal([Constraint::Percentage(38), Constraint::Percentage(62)])
                 .areas(main);
+        // The agent list on top, the «Computer» panel below it, never more
+        // than half of the column.
+        let computer = computer_height(&self.computer_lines(tr), left.width).min(left.height / 2);
+        let [left, computer_area] =
+            Layout::vertical([Constraint::Min(0), Constraint::Length(computer)]).areas(left);
+        self.draw_computer(frame, computer_area, tr);
 
         let items: Vec<ListItem> = self
             .statuses

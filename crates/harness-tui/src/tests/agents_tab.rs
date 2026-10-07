@@ -45,7 +45,28 @@ fn the_agents_tab_shows_the_catalog_with_what_is_installed() {
         std::thread::sleep(Duration::from_millis(20));
     }
     assert!(app.agents.known && !app.agents.checking);
+    for _ in 0..100 {
+        app.tick();
+        if !app.agents.tools.is_empty() {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
     let text = screen_of_width(&mut app, 160);
+    // Under the list: the other programs, and how to get what is missing.
+    let installer = harness_platform::program::installer_command();
+    for part in [
+        "Computer",
+        "✓ Git 2.43.0",
+        "! Node.js 20.11.1 · older than 22.19",
+        "✗ npx not found",
+        "Install what is missing",
+        // The whole command fits in the panel (it wraps at its spaces).
+        installer.split(' ').next().unwrap(),
+        installer.split(' ').next_back().unwrap(),
+    ] {
+        assert!(text.contains(part), "missing {part:?} in:\n{text}");
+    }
     for part in [
         "8 Agents",
         "✓ Claude Code",

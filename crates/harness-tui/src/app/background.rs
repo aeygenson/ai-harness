@@ -59,6 +59,22 @@ impl App {
         });
         self.agents.checking = true;
         self.agent_check = Some(rx);
+        // The other programs (Git, Node.js, ...) are looked at alongside.
+        let (tx, rx) = mpsc::channel();
+        let tool_checker = self.tool_checker;
+        std::thread::spawn(move || {
+            let _ = tx.send(tool_checker());
+        });
+        self.tool_check = Some(rx);
+    }
+
+    /// The check of the other programs has finished.
+    fn take_tool_check(&mut self) {
+        let Some(tools) = look(self.tool_check.as_ref()).answer_or(Vec::new()) else {
+            return;
+        };
+        self.tool_check = None;
+        self.agents.tools = tools;
     }
 
     /// Runs a confirmed install or update in the background; its lines come in `tick`.
@@ -139,6 +155,7 @@ impl App {
         self.take_plugin_job();
         self.take_install_events();
         self.take_agent_check();
+        self.take_tool_check();
         self.take_models();
         self.take_mcp_check();
         self.take_registry_search();

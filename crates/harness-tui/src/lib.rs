@@ -40,7 +40,8 @@ mod tabs;
 mod ui;
 
 use crate::ui::message::Message;
-use tabs::agents::{AgentChecker, AgentsTab, Installer, JobEvent};
+use harness_agents::install::tools::ToolStatus;
+use tabs::agents::{AgentChecker, AgentsTab, Installer, JobEvent, ToolChecker};
 use tabs::mcp::McpTab;
 use tabs::plugins::PluginsTab;
 use tabs::projects::picker::Browser;
@@ -268,6 +269,11 @@ struct App {
     agent_checker: AgentChecker,
     /// The answer of that check, while it runs.
     agent_check: Option<mpsc::Receiver<Vec<harness_agents::install::catalog::Status>>>,
+    /// Checks the other programs the harness needs (Git, Node.js, ...);
+    /// tests give a fake one.
+    tool_checker: ToolChecker,
+    /// The answer of that check, while it runs.
+    tool_check: Option<mpsc::Receiver<Vec<ToolStatus>>>,
     /// Runs an agent's install or update command; tests give a fake one.
     installer: Installer,
     /// What that command prints, while it runs.

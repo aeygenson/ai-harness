@@ -451,6 +451,10 @@ contrast = "Contrast"
 terminal = "Terminal"
 
 [agents]
+computer = " Computer "
+tool_missing = "not found"
+tool_old = "older than {min}"
+tools_install = "Install what is missing (safe to run again):"
 title = " Agents "
 about = " About the agent "
 check = "Check again"

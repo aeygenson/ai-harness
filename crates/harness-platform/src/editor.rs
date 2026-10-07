@@ -134,6 +134,11 @@ fn find_zed(places: &Places) -> Option<PathBuf> {
     candidates.into_iter().find(|p| p.is_file())
 }
 
+/// Where Zed is on this computer, if it is installed.
+pub fn zed() -> Option<PathBuf> {
+    with_places(find_zed)
+}
+
 /// The command that opens `file` in Zed and returns at once; `None` without Zed.
 pub fn viewer(file: &Path) -> Option<Command> {
     with_places(|places| viewer_with(file, places))
