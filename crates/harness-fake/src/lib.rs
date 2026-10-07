@@ -38,10 +38,22 @@
 //! stops the program with code 101 and a message on standard error.
 
 use std::fs;
+use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
+use std::thread;
+use std::time::Duration;
 
 /// Where `build.rs` put the compiled fake program.
 const PROGRAM: &str = env!("HARNESS_FAKE_PROGRAM");
+
+/// With this variable the program only sleeps that many seconds (the same
+/// name as in `src/program.rs`).
+const SLEEP_VARIABLE: &str = "HARNESS_FAKE_SLEEP";
+
+/// How many times a busy copy is tried before the test gives up: 200 tries
+/// 5 ms apart wait a whole second, far longer than the instant it is busy.
+const BUSY_TRIES: u32 = 200;
 
 /// Puts a fake program called `name` into `dir`, doing what `script` says.
 ///
@@ -58,22 +70,46 @@ pub fn install(dir: &Path, name: &str, script: &str) -> PathBuf {
     // A program installed earlier under this name goes first: it may be a
     // link to `PROGRAM`, and copying over it would change `PROGRAM` itself.
     let _ = fs::remove_file(&program);
-    // A hard link writes nothing. A copy opens the new file for writing, and
-    // on Linux another test starting a program at that moment holds that
-    // file open for an instant, so starting the copy can fail with "Text
-    // file busy". The copy is only for a folder on another disk.
+    // A hard link writes nothing, so it is ready at once. It works only on
+    // the disk of `target/`; elsewhere (often `/tmp`) the program is copied.
     if fs::hard_link(PROGRAM, &program).is_err() {
         // `fs::copy` keeps the "executable" permission on Unix.
         fs::copy(PROGRAM, &program).expect("cannot copy the fake program");
+        wait_until_it_starts(&program);
     }
     fs::write(dir.join(format!("{name}.fake")), script).expect("cannot write the fake's script");
     program
 }
 
+/// Waits until a fresh copy of the program can be started.
+///
+/// The copy was open for writing. On Linux a test that starts a program at
+/// that moment in another thread holds that open file for an instant (from
+/// its `fork` to its `exec`), and while it does, starting the copy fails
+/// with "Text file busy". Once one start succeeds nobody holds it any more:
+/// the file is closed here, so later `fork`s cannot get it.
+fn wait_until_it_starts(program: &Path) {
+    for _ in 0..BUSY_TRIES {
+        let started = Command::new(program)
+            .env(SLEEP_VARIABLE, "0")
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+        match started {
+            Ok(_) => return,
+            Err(e) if e.kind() == ErrorKind::ExecutableFileBusy => {
+                thread::sleep(Duration::from_millis(5));
+            }
+            Err(e) => panic!("cannot start the fake program {}: {e}", program.display()),
+        }
+    }
+    panic!("the fake program {} stayed busy", program.display());
+}
+
 #[cfg(test)]
 mod tests {
     use std::io::Write;
-    use std::process::{Command, Stdio};
 
     use super::*;
 
