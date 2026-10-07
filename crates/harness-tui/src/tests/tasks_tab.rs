@@ -503,3 +503,34 @@ fn the_same_task_sent_twice_is_not_started_again() {
     assert!(!tasks.is_running());
     assert!(!root.join(".harness/runs/task-002").exists());
 }
+
+#[test]
+fn the_task_and_each_step_show_what_the_agents_spent() {
+    let env = Env::new();
+    let root = env.path("test");
+    project(&root);
+    let round = root.join(".harness/runs/task-001/round-01");
+    let claude = "{\"type\":\"result\",\"total_cost_usd\":0.4,\
+                  \"usage\":{\"input_tokens\":9000,\"output_tokens\":1000}}\n";
+    fs::write(round.join("01-architect/agent.log"), claude).unwrap();
+    let codex = "{\"type\":\"turn.completed\",\
+                 \"usage\":{\"input_tokens\":4000,\"output_tokens\":1000}}\n";
+    fs::write(round.join("03-developer/agent.log"), codex).unwrap();
+    let mut app = env.app(&root);
+
+    click(&mut app, "r1 architect");
+    let architect = screen(&mut app);
+    click(&mut app, "r1 developer");
+    let developer = screen(&mut app);
+    click(&mut app, "r1 human");
+    let human = screen(&mut app);
+
+    // The whole task: both costs added, the cost only from the step that had one.
+    assert!(architect.contains("· $0.40 · 15k tokens"), "{architect}");
+    assert!(
+        architect.contains("Spent: $0.40 · 10k tokens"),
+        "{architect}"
+    );
+    assert!(developer.contains("Spent: 5k tokens"), "{developer}");
+    assert!(!human.contains("Spent:"), "{human}");
+}

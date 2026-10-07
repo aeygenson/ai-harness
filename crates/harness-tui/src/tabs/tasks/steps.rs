@@ -1,5 +1,6 @@
 //! The steps of a task as the tab shows them: list rows, the step's text and its files.
 
+use std::fs;
 use std::path::Path;
 
 use anyhow::Result;
@@ -9,12 +10,13 @@ use ratatui::widgets::ListItem;
 
 use harness_core::config::AgentKind;
 use harness_core::git::{Repo, HARNESS_DIR};
+use harness_core::retro::usage::{self, Usage};
 use harness_core::task::handoff::{FileAction, NextStep, Role};
 use harness_core::task::store::{Step, TaskStore};
 use harness_core::task::{Stage, WaitReason};
 
 use super::tab::{Artifact, TaskView, TasksTab};
-use crate::tabs::tasks::labels::{next_name, severity_label, verdict_span};
+use crate::tabs::tasks::labels::{next_name, severity_label, usage_label, verdict_span};
 use crate::ui::i18n::I18n;
 use crate::ui::theme;
 
@@ -83,6 +85,32 @@ impl TasksTab {
         }
         files
     }
+
+    /// The tokens and cost the agent of `step` printed in its `agent.log`;
+    /// `None` if it printed none or there is no log yet.
+    pub(super) fn step_usage(&self, step: &Step) -> Option<Usage> {
+        let dir = self.root.join(&step.dir);
+        if let Some(known) = self.usages.borrow().get(&dir) {
+            return *known;
+        }
+        // No log yet is not remembered: it may still be written.
+        let log = fs::read_to_string(dir.join("agent.log")).ok()?;
+        let found = usage::from_log(&log);
+        self.usages.borrow_mut().insert(dir, found);
+        found
+    }
+
+    /// What all steps of `task` spent, for its title: « · $1.20 · 155k
+    /// tokens», or nothing when no step's agent reported it.
+    pub(super) fn task_spent(&self, task: &TaskView, tr: &I18n) -> String {
+        let mut total: Option<Usage> = None;
+        for found in task.steps.iter().filter_map(|step| self.step_usage(step)) {
+            total.get_or_insert_with(Usage::default).add(found);
+        }
+        total
+            .map(|usage| format!(" · {}", usage_label(&usage, tr)))
+            .unwrap_or_default()
+    }
 }
 
 /// Is it `role`'s turn in the task, or is Lisa's answer for `role` awaited?
@@ -143,7 +171,13 @@ pub(super) fn step_item(step: &Step, tr: &I18n) -> ListItem<'static> {
 }
 
 /// The step in full; `files` become links. Also the line of each link.
-pub(super) fn step_text(step: &Step, files: &[Artifact], tr: &I18n) -> (Text<'static>, Vec<usize>) {
+/// `usage` is what the step's agent reported spending, if anything.
+pub(super) fn step_text(
+    step: &Step,
+    files: &[Artifact],
+    usage: Option<Usage>,
+    tr: &I18n,
+) -> (Text<'static>, Vec<usize>) {
     let h = &step.handoff;
     let bold = Style::new().add_modifier(Modifier::BOLD);
     let mut lines = vec![
@@ -154,6 +188,10 @@ pub(super) fn step_text(step: &Step, files: &[Artifact], tr: &I18n) -> (Text<'st
         ]),
         Line::from(h.summary.clone()),
     ];
+    if let Some(usage) = usage {
+        let spent = tr.f("tasks.spent", &[("usage", &usage_label(&usage, tr))]);
+        lines.push(Line::styled(spent, theme::dim()));
+    }
     if !h.issues.is_empty() {
         lines.push(Line::default());
         lines.push(Line::styled(tr.t("tasks.issues").to_string(), bold));
