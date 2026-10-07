@@ -30,6 +30,7 @@ use std::path::{Path, PathBuf};
 use crate::git::{GitError, Repo};
 use crate::skills::Skills;
 use crate::task::agent::{AgentRunner, RoleJob, RunEnd};
+use crate::task::facts;
 use crate::task::handoff::{Handoff, Role, Verdict};
 use crate::task::permissions;
 use crate::task::prompt;
@@ -118,7 +119,7 @@ pub async fn run_watching<A: AgentRunner>(
         let mut failure_logs: Vec<PathBuf> = Vec::new();
         for _ in 0..ATTEMPTS_PER_ROLE {
             let before = Before::take(repo, setup.watched)?;
-            let job = prepare_job(repo.root(), store, state, role, setup.skills)?;
+            let job = prepare_job(repo, store, state, role, setup.skills)?;
             let outcome = agent.run(&job).await;
             if let Some(stop) = before.check(repo, setup.watched, role)? {
                 return Ok(stop);
@@ -206,27 +207,27 @@ fn commit_failure_logs(
 }
 
 fn prepare_job(
-    project_dir: &Path,
+    repo: &Repo,
     store: &TaskStore,
     state: &TaskState,
     role: Role,
     skills: &Skills,
 ) -> Result<RoleJob, StoreError> {
     let output_dir = store.prepare_inbox()?;
-    let history = store.history()?;
-    let prompt = prompt::build(
-        role,
-        &store.description()?,
-        state,
-        history.last(),
-        &output_dir,
-        &skills.for_role(role),
-    );
+    let steps = store.steps()?;
+    let facts = facts::text(repo, &steps);
+    let context = prompt::Context {
+        description: &store.description()?,
+        previous: steps.last().map(|step| &step.handoff),
+        facts: &facts,
+        skills: &skills.for_role(role),
+    };
+    let prompt = prompt::build(role, state, context, &output_dir);
     Ok(RoleJob {
         task_id: state.task_id.clone(),
         round: state.round,
         role,
-        project_dir: project_dir.to_path_buf(),
+        project_dir: repo.root().to_path_buf(),
         prompt,
         output_dir,
     })
