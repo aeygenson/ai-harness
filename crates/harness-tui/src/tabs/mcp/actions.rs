@@ -8,11 +8,16 @@ use harness_agents::install::credentials;
 use harness_core::config;
 use harness_core::config::McpConfig;
 use harness_core::mcp::tools::{self, Tool, ToolList};
+use harness_core::text;
 
 use crate::tabs::roles::RolesTab;
 use crate::ui::message::Message;
 use crate::ui::Form;
 use crate::{server_form, App, Purpose};
+
+/// The changed tools' names in a message are cut after this many characters,
+/// so a server with hundreds of tools cannot fill the screen.
+const MAX_NAMES_CHARS: usize = 300;
 
 impl App {
     /// «Check»: the server starts in the background and is asked for its
@@ -80,18 +85,53 @@ impl App {
                     tools,
                 };
                 match &self.home {
-                    Some(home) => match tools::save(home, server, &list) {
-                        Ok(()) => Message::info(
-                            self.tr
-                                .f("mcp.checked", &[("name", &name), ("count", &count)]),
-                        ),
-                        Err(error) => Message::error(error.to_string()),
-                    },
+                    Some(home) => {
+                        let before = tools::load(home, name, server);
+                        match tools::save(home, server, &list) {
+                            Ok(()) => match before {
+                                Some(before) => self.tools_message(name, &before, &list),
+                                None => Message::info(
+                                    self.tr
+                                        .f("mcp.checked", &[("name", &name), ("count", &count)]),
+                                ),
+                            },
+                            Err(error) => Message::error(error.to_string()),
+                        }
+                    }
                     None => Message::error(self.tr.t("errors.no_home")),
                 }
             }
             Err(error) => Message::error(error),
         });
+    }
+
+    /// The message after a check of a server that was checked before: how
+    /// many tools, or a warning when they are not the same as last time.
+    fn tools_message(&self, name: &str, before: &ToolList, now: &ToolList) -> Message {
+        let found = tools::changes(&before.tools, &now.tools);
+        if found.is_empty() {
+            let count = now.tools.len();
+            return Message::info(
+                self.tr
+                    .f("mcp.checked", &[("name", &name), ("count", &count)]),
+            );
+        }
+        let mut parts = Vec::new();
+        for (key, names) in [
+            ("mcp.tools_added", &found.added),
+            ("mcp.tools_removed", &found.removed),
+            ("mcp.tools_rewritten", &found.changed),
+        ] {
+            if !names.is_empty() {
+                // Tool names come from the server: cleaned before they are shown.
+                let list = text::safe_line(&names.join(", "), MAX_NAMES_CHARS);
+                parts.push(self.tr.f(key, &[("list", &list)]));
+            }
+        }
+        Message::error(self.tr.f(
+            "mcp.tools_changed",
+            &[("name", &name), ("changes", &parts.join("; "))],
+        ))
     }
 
     /// Signs in to the web server `name` in the background: the browser
