@@ -7,6 +7,7 @@
 pub mod agent;
 pub mod facts;
 pub mod handoff;
+pub mod manifest;
 pub mod orchestrator;
 pub mod permissions;
 pub mod prompt;

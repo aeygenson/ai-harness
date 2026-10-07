@@ -16,6 +16,7 @@
 mod create;
 mod guard;
 mod human;
+mod job;
 mod protect;
 mod size;
 mod stop;
@@ -25,20 +26,22 @@ pub use human::record_human_decision;
 pub use size::oversized_changes;
 pub use stop::{RunError, StopReason};
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
+use crate::config::{AgentKind, Config};
 use crate::git::{GitError, Repo};
 use crate::skills::Skills;
-use crate::task::agent::{AgentRunner, RoleJob, RunEnd};
-use crate::task::facts;
+use crate::task::agent::{AgentRunner, RunEnd};
 use crate::task::handoff::{Handoff, Role, Verdict};
+use crate::task::manifest::AgentFacts;
 use crate::task::permissions;
-use crate::task::prompt;
 use crate::task::store::{StoreError, TaskStore};
 use crate::task::tripwire::Watched;
 use crate::task::{Stage, TaskState};
 use crate::text;
 use guard::Before;
+use job::prepare_job;
 
 /// How many times one role may try before the harness gives up and asks Lisa.
 pub const ATTEMPTS_PER_ROLE: u32 = 2;
@@ -62,21 +65,46 @@ pub async fn run<A: AgentRunner>(
     state: &mut TaskState,
     agent: &A,
 ) -> Result<StopReason, RunError> {
-    run_with_skills(repo, store, state, agent, &Skills::none()).await
+    let watched = Watched::for_repo(repo)?;
+    let setup = RunSetup {
+        skills: &Skills::none(),
+        watched: &watched,
+        agents: AgentFacts {
+            config: None,
+            versions: &BTreeMap::new(),
+        },
+    };
+    run_watching(repo, store, state, agent, setup).await
 }
 
-/// Like [`run`], but every role also gets its skills from `harness.toml`.
-pub async fn run_with_skills<A: AgentRunner>(
+/// A project's settings for [`run_project`].
+#[derive(Debug, Clone, Copy)]
+pub struct Project<'a> {
+    /// The project's `harness.toml`.
+    pub config: &'a Config,
+    /// The roles' skills from `harness.toml`.
+    pub skills: &'a Skills,
+    /// What each agent's `--version` said, for the steps' manifests.
+    pub agent_versions: &'a BTreeMap<AgentKind, String>,
+}
+
+/// Like [`run`], with the project's skills and settings: every role gets its
+/// skills, and every step's manifest names the agent, model and versions.
+pub async fn run_project<A: AgentRunner>(
     repo: &Repo,
     store: &TaskStore,
     state: &mut TaskState,
     agent: &A,
-    skills: &Skills,
+    project: Project<'_>,
 ) -> Result<StopReason, RunError> {
     let watched = Watched::for_repo(repo)?;
     let setup = RunSetup {
-        skills,
+        skills: project.skills,
         watched: &watched,
+        agents: AgentFacts {
+            config: Some(project.config),
+            versions: project.agent_versions,
+        },
     };
     run_watching(repo, store, state, agent, setup).await
 }
@@ -88,9 +116,11 @@ pub struct RunSetup<'a> {
     pub skills: &'a Skills,
     /// The files the tripwire watches (see [`crate::task::tripwire`]).
     pub watched: &'a Watched,
+    /// The settings and versions the steps' manifests record.
+    pub agents: AgentFacts<'a>,
 }
 
-/// Like [`run_with_skills`], with the files the tripwire watches given
+/// Like [`run_project`], with the files the tripwire watches given
 /// (tests watch a temporary home folder instead of the real one).
 pub async fn run_watching<A: AgentRunner>(
     repo: &Repo,
@@ -119,7 +149,7 @@ pub async fn run_watching<A: AgentRunner>(
         let mut failure_logs: Vec<PathBuf> = Vec::new();
         for _ in 0..ATTEMPTS_PER_ROLE {
             let before = Before::take(repo, setup.watched)?;
-            let job = prepare_job(repo, store, state, role, setup.skills)?;
+            let (job, manifest) = prepare_job(repo, store, state, role, setup)?;
             let outcome = agent.run(&job).await;
             if let Some(stop) = before.check(repo, setup.watched, role)? {
                 return Ok(stop);
@@ -171,6 +201,7 @@ pub async fn run_watching<A: AgentRunner>(
             match accept_inbox(store, state)? {
                 Acceptance::Accepted { handoff, step_dir } => {
                     store.save_log(&step_dir, &outcome.log)?;
+                    store.save_manifest(&step_dir, &manifest)?;
                     repo.commit_all(&commit_message(&handoff))?;
                     accepted = true;
                     break;
@@ -204,33 +235,6 @@ fn commit_failure_logs(
     let paths: Vec<&Path> = logs.iter().map(PathBuf::as_path).collect();
     repo.commit_paths(&paths, &message)?;
     Ok(())
-}
-
-fn prepare_job(
-    repo: &Repo,
-    store: &TaskStore,
-    state: &TaskState,
-    role: Role,
-    skills: &Skills,
-) -> Result<RoleJob, StoreError> {
-    let output_dir = store.prepare_inbox()?;
-    let steps = store.steps()?;
-    let facts = facts::text(repo, &steps);
-    let context = prompt::Context {
-        description: &store.description()?,
-        previous: steps.last().map(|step| &step.handoff),
-        facts: &facts,
-        skills: &skills.for_role(role),
-    };
-    let prompt = prompt::build(role, state, context, &output_dir);
-    Ok(RoleJob {
-        task_id: state.task_id.clone(),
-        round: state.round,
-        role,
-        project_dir: repo.root().to_path_buf(),
-        prompt,
-        output_dir,
-    })
 }
 
 /// Was the agent's handoff taken into the task?

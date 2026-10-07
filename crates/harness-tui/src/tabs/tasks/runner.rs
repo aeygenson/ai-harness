@@ -16,7 +16,7 @@ use harness_core::config::Config;
 use harness_core::git::{Repo, HARNESS_DIR};
 use harness_core::skills::Skills;
 use harness_core::task::handoff::{NextStep, Role, Verdict};
-use harness_core::task::orchestrator::{self, StopReason};
+use harness_core::task::orchestrator::{self, Project, StopReason};
 use harness_core::task::store::{next_task_id, TaskStore};
 use harness_core::text;
 use tokio::sync::oneshot;
@@ -256,8 +256,13 @@ fn work(job: Job, events: &Sender<Event>, stop: oneshot::Receiver<()>) -> Result
     let Some((team, skills)) = agents else {
         return Ok(Outcome { task, stop: None });
     };
+    let project = Project {
+        config: &config,
+        skills: &skills,
+        agent_versions: team.versions(),
+    };
     let stop = run_until_stopped(
-        orchestrator::run_with_skills(&repo, &store, &mut state, &team, &skills),
+        orchestrator::run_project(&repo, &store, &mut state, &team, project),
         stop,
     )?
     .map_err(|e| text(&e))?;
