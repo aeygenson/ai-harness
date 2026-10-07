@@ -11,6 +11,7 @@ pub mod permissions;
 pub mod prompt;
 pub mod routes;
 pub mod store;
+pub mod tripwire;
 
 use std::fmt;
 

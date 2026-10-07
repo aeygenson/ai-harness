@@ -1,7 +1,7 @@
 //! `harness task new`, `run`, `approve`, `reject` and `status`: moving a task
 //! through the roles.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context, Result};
 use harness_agents::build::build_team;
@@ -123,11 +123,39 @@ fn explain(stop: &StopReason, task_id: &str) -> String {
             log.display(),
             files.join("\n  ")
         ),
+        StopReason::HiddenChanges {
+            role,
+            put_back,
+            reported,
+        } => hidden_changes_text(*role, put_back, reported),
         StopReason::GitConfigChanged(role) => format!(
             "The {role:?} changed the project's git settings (.git/config). The old settings \
              are back; its other changes are left uncommitted for you to check."
         ),
     }
+}
+
+/// What `StopReason::HiddenChanges` says: git's files that were put back,
+/// and files outside the project Lisa should look at herself.
+fn hidden_changes_text(role: Role, put_back: &[PathBuf], reported: &[PathBuf]) -> String {
+    let list = |files: &[PathBuf]| -> String {
+        let lines: Vec<String> = files.iter().map(|f| f.display().to_string()).collect();
+        format!("\n  {}", lines.join("\n  "))
+    };
+    let mut text = format!("The {role:?} changed files that git does not show.");
+    if !put_back.is_empty() {
+        text.push_str("\nGit's own files (hooks, info/), now put back as they were:");
+        text.push_str(&list(put_back));
+    }
+    if !reported.is_empty() {
+        text.push_str(
+            "\nFiles outside the project, NOT put back; check them yourself (if you \
+             changed them during the run, all is well):",
+        );
+        text.push_str(&list(reported));
+    }
+    text.push_str("\nThe role's project changes are left uncommitted for you to check.");
+    text
 }
 
 /// `harness approve` / `harness reject`: writes Lisa's decision as a handoff
@@ -170,4 +198,24 @@ pub(crate) fn status(project: &Path, task_id: &str) -> Result<()> {
         );
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn hidden_changes_say_what_was_put_back_and_what_lisa_must_check() {
+        let text = hidden_changes_text(
+            Role::Developer,
+            &[PathBuf::from("/p/.git/hooks/pre-commit")],
+            &[PathBuf::from("/home/lisa/.bashrc")],
+        );
+
+        assert!(text.contains("put back as they were:\n  /p/.git/hooks/pre-commit"));
+        assert!(text.contains("NOT put back"));
+        assert!(text.contains("\n  /home/lisa/.bashrc"));
+        let only_hooks = hidden_changes_text(Role::Tester, &[PathBuf::from("h")], &[]);
+        assert!(!only_hooks.contains("outside the project"));
+    }
 }

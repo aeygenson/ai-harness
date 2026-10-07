@@ -78,6 +78,7 @@ stop_forbidden = "{task}: the {role} changed files it may not touch ({files}); t
 stop_too_large = "{task}: the {role} made files too big to commit ({files}); usually this is build output: add it to .gitignore or delete it, commit or remove the rest, then choose «Continue»"
 stop_committed = "{task}: the {role} made a git commit itself; check git log before going on"
 stop_protected = "{task}: the {role} changed files no role may change ({files}); they are put back, what it wrote is in {log}, its other changes are left uncommitted for you to check"
+stop_hidden = "{task}: the {role} changed files git does not show. Git's hooks put back: {put_back}. Outside the project, NOT put back, check them yourself (all is well if you changed them): {reported}. Its project changes are left uncommitted"
 stop_git_config = "{task}: the {role} changed the project's git settings (.git/config); the old ones are back, its other changes are left uncommitted for you to check"
 [roles]
 title = " Roles "

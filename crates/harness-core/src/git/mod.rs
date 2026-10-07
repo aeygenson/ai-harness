@@ -125,6 +125,14 @@ impl Repo {
         }
     }
 
+    /// Git's own folder shared by all worktrees of the repository (usually
+    /// `.git`), where its hooks and `info/` live.
+    pub fn git_common_dir(&self) -> Result<PathBuf, GitError> {
+        let path = self.git(&["rev-parse", "--git-common-dir"])?;
+        // A relative answer is relative to the project; `join` keeps an absolute one as it is.
+        Ok(self.root.join(path.trim()))
+    }
+
     /// Puts back the settings file that [`Repo::local_config`] read earlier.
     pub fn restore_local_config(&self, bytes: &[u8]) -> Result<(), GitError> {
         let path = self.local_config_path()?;
