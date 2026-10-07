@@ -61,9 +61,9 @@ fn the_agents_tab_shows_the_catalog_with_what_is_installed() {
         "! Node.js 20.11.1 · older than 22.19",
         "✗ npx not found",
         "Install what is missing",
-        &installer[..10],
-        // The whole command fits in the panel.
-        &installer[installer.len() - 4..],
+        // The whole command fits in the panel (it wraps at its spaces).
+        installer.split(' ').next().unwrap(),
+        installer.split(' ').next_back().unwrap(),
     ] {
         assert!(text.contains(part), "missing {part:?} in:\n{text}");
     }
