@@ -11,6 +11,7 @@ mod entries;
 mod install;
 mod status;
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -32,6 +33,25 @@ pub fn check_all(credentials_dir: Option<&Path>) -> Vec<Status> {
         &version_of,
         credentials_dir,
     )
+}
+
+/// The versions of the agents in `agents`, for the steps' manifests; an
+/// agent that is missing or does not say its version is left out.
+pub fn versions(agents: &[AgentKind]) -> BTreeMap<AgentKind, String> {
+    let entries: Vec<Entry> = CATALOG
+        .iter()
+        .filter(|entry| agents.iter().any(|agent| agent.as_str() == entry.id))
+        .copied()
+        .collect();
+    check_with(
+        &entries,
+        &harness_platform::program::find,
+        &version_of,
+        None,
+    )
+    .into_iter()
+    .filter_map(|status| Some((status.entry.id.parse().ok()?, status.version?)))
+    .collect()
 }
 
 /// [`check_all`] for `entries`, with how a program is found and asked for
@@ -133,6 +153,11 @@ pub fn older(version: &str, min: &str) -> bool {
 mod tests {
     use super::entries::for_npm;
     use super::*;
+
+    #[test]
+    fn no_agents_need_no_versions() {
+        assert_eq!(versions(&[]), BTreeMap::new());
+    }
     use std::collections::HashSet;
     use std::fs;
 

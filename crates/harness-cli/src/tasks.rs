@@ -9,7 +9,7 @@ use harness_core::config::Config;
 use harness_core::git::HARNESS_DIR;
 use harness_core::skills::Skills;
 use harness_core::task::handoff::{NextStep, Role, Verdict};
-use harness_core::task::orchestrator::{self, StopReason};
+use harness_core::task::orchestrator::{self, Project, StopReason};
 use harness_core::task::{Stage, WaitReason};
 use harness_platform::stop::StopSignals;
 
@@ -68,7 +68,12 @@ pub(crate) async fn run(project: &Path, task_id: &str) -> Result<()> {
     let agent = build_team(&config, repo.root())?;
     let (store, mut state) = open_task(&repo, task_id)?;
     println!("Running {task_id} (round {})...", state.round);
-    let stop = orchestrator::run_with_skills(&repo, &store, &mut state, &agent, &skills).await?;
+    let project = Project {
+        config: &config,
+        skills: &skills,
+        agent_versions: agent.versions(),
+    };
+    let stop = orchestrator::run_project(&repo, &store, &mut state, &agent, project).await?;
     println!("{}", explain(&stop, task_id));
     Ok(())
 }

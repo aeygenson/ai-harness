@@ -7,7 +7,7 @@
 //!   task.md              the task description
 //!   state.json           the current TaskState
 //!   round-01/
-//!     01-architect/      handoff.json + notes.md
+//!     01-architect/      handoff.json, notes.md, agent.log, manifest.json
 //!     02-human/
 //!     03-developer/
 //!   round-02/
@@ -29,6 +29,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use crate::task::handoff::{Handoff, Role};
+use crate::task::manifest::{Manifest, MANIFEST_FILE};
 use crate::task::{TaskState, TransitionError};
 use files::{
     create_dir, io_error, read_handoff, read_json, read_notes, sorted_subdirs, to_json,
@@ -151,6 +152,16 @@ impl TaskStore {
     /// Saves what the agent printed next to its handoff, as `agent.log`.
     pub fn save_log(&self, step_dir: &Path, log: &str) -> Result<(), StoreError> {
         write_new(&step_dir.join(LOG_FILE), log)
+    }
+
+    /// Saves `manifest` as `manifest.json` in `step_dir` (see [`crate::task::manifest`]).
+    pub fn save_manifest(&self, step_dir: &Path, manifest: &Manifest) -> Result<(), StoreError> {
+        let path = step_dir.join(MANIFEST_FILE);
+        let json = serde_json::to_string_pretty(manifest).map_err(|source| StoreError::Json {
+            path: path.clone(),
+            source,
+        })?;
+        write_new(&path, &(json + "\n"))
     }
 
     /// Saves the log of a failed attempt as `failures/round-01-architect-1.log`,

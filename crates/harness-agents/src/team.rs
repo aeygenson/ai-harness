@@ -1,8 +1,9 @@
 //! A team: each role runs with its own agent, as chosen in `harness.toml`.
 //! For example the Developer on Claude Code and the Tester on Codex.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
+use harness_core::config::AgentKind;
 use harness_core::task::agent::{AgentOutcome, AgentRunner, RoleJob};
 use harness_core::task::handoff::Role;
 
@@ -44,6 +45,7 @@ impl AgentRunner for AnyAgent {
 #[derive(Debug, Default)]
 pub struct Team {
     agents: HashMap<Role, AnyAgent>,
+    versions: BTreeMap<AgentKind, String>,
 }
 
 impl Team {
@@ -56,6 +58,17 @@ impl Team {
     pub fn with(mut self, role: Role, agent: AnyAgent) -> Self {
         self.agents.insert(role, agent);
         self
+    }
+
+    /// Remembers what the agents' `--version` said, for the steps' manifests.
+    pub fn with_versions(mut self, versions: BTreeMap<AgentKind, String>) -> Self {
+        self.versions = versions;
+        self
+    }
+
+    /// The agents' versions given to [`Team::with_versions`]; empty if none.
+    pub fn versions(&self) -> &BTreeMap<AgentKind, String> {
+        &self.versions
     }
 }
 

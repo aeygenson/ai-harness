@@ -298,6 +298,14 @@ impl Config {
         })
     }
 
+    /// Every agent some role uses, each once.
+    pub fn agents(&self) -> Vec<AgentKind> {
+        let mut agents: Vec<AgentKind> = self.roles.values().map(|role| role.agent).collect();
+        agents.sort();
+        agents.dedup();
+        agents
+    }
+
     /// The settings of one AI role; every AI role must have them.
     pub fn role(&self, role: Role) -> Result<&RoleConfig, ConfigError> {
         self.roles.get(&role).ok_or(ConfigError::MissingRole(role))
@@ -307,6 +315,17 @@ impl Config {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn each_agent_of_the_roles_is_listed_once() {
+        let config = Config::parse(
+            "[roles.architect]\nagent = \"codex\"\n[roles.developer]\nagent = \"claude\"\n\
+             [roles.tester]\nagent = \"codex\"\n",
+        )
+        .unwrap();
+
+        assert_eq!(config.agents(), [AgentKind::Claude, AgentKind::Codex]);
+    }
 
     #[test]
     fn the_default_config_is_valid() {

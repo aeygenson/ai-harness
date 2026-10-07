@@ -84,7 +84,8 @@ fn setup() -> Setup {
         &bin,
         "claude",
         &format!(
-            "spawn-sleep 60 {}\nsave-text {} yes\nsleep 60\n",
+            // `--version` (asked once when the team is built) only answers.
+            "when-arg 1 --version exit 0\nspawn-sleep 60 {}\nsave-text {} yes\nsleep 60\n",
             helper_pid.display(),
             ready.display()
         ),

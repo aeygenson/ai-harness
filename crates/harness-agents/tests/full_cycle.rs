@@ -2,6 +2,7 @@
 //! Files in `tests/` are integration tests: they use the crates from outside,
 //! exactly like the CLI will.
 
+use std::collections::BTreeMap;
 use std::fs;
 use std::process::Command;
 
@@ -9,6 +10,7 @@ use harness_agents::{MockAgent, MockStep};
 use harness_core::git::Repo;
 use harness_core::skills::Skills;
 use harness_core::task::handoff::{Handoff, NextStep, Role, Verdict};
+use harness_core::task::manifest::AgentFacts;
 use harness_core::task::orchestrator::{
     self, create_task, record_human_decision, RunSetup, StopReason, ATTEMPTS_PER_ROLE,
     MAX_CHANGE_BYTES,
@@ -307,6 +309,15 @@ async fn the_work_of_each_role_is_committed_with_its_handoff() {
     );
     assert!(show.contains("src/parser.rs"), "{show}");
     assert!(show.contains(".harness/runs/task-001/round-01/01-developer/handoff.json"));
+    // With its manifest: the role and a fingerprint of its prompt.
+    assert!(show.contains(".harness/runs/task-001/round-01/01-developer/manifest.json"));
+    let manifest = fs::read_to_string(
+        repo.root()
+            .join(".harness/runs/task-001/round-01/01-developer/manifest.json"),
+    )
+    .unwrap();
+    assert!(manifest.contains("\"role\": \"developer\""), "{manifest}");
+    assert!(manifest.contains("\"prompt\": \""), "{manifest}");
     assert!(!show.contains("tests/parser.rs"), "{show}");
     assert!(!show.contains("inbox"), "{show}");
 }
@@ -571,6 +582,10 @@ async fn hooks_and_files_outside_the_project_are_noticed() {
     let setup = RunSetup {
         skills: &Skills::none(),
         watched: &watched,
+        agents: AgentFacts {
+            config: None,
+            versions: &BTreeMap::new(),
+        },
     };
     let stop = orchestrator::run_watching(&repo, &store, &mut state, &agent, setup)
         .await

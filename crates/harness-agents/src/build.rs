@@ -12,6 +12,7 @@ use harness_core::plugins::{Plugin, Plugins};
 use harness_core::retro::suggest;
 use harness_core::task::handoff::Role;
 
+use crate::install::catalog;
 use crate::install::credentials::{self, Secret};
 use crate::role_settings::RoleSettings;
 use crate::{adapters::dsh, Antigravity, AnyAgent, ClaudeCode, Codex, Dsh, Team};
@@ -42,7 +43,8 @@ pub const ROLES: [Role; 4] = [
 ];
 
 /// The team from harness.toml: each role gets the agent, model, MCP servers
-/// and plugins set there.
+/// and plugins set there. Asks each agent for its `--version` (for the steps'
+/// manifests), so the programs run once briefly.
 pub fn build_team(config: &Config, project_dir: &Path) -> Result<Team, BuildError> {
     let dir = credentials::default_dir().ok_or_else(|| problem("HOME is not set"))?;
     let servers = McpServers::load(config, |name| crate::mcp::oauth::mcp_secret(&dir, name))
@@ -65,7 +67,7 @@ pub fn build_team(config: &Config, project_dir: &Path) -> Result<Team, BuildErro
         )?;
         team = team.with(role, agent);
     }
-    Ok(team)
+    Ok(team.with_versions(catalog::versions(&config.agents())))
 }
 
 /// The `[retro]` agent: the read-only rules of the security role, and no MCP
