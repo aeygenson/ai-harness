@@ -85,7 +85,7 @@ async fn main() -> Result<()> {
             agents();
             Ok(())
         }
-        Command::Doctor => doctor::doctor(),
+        Command::Doctor => doctor::doctor(project),
         Command::Tui => {
             // Inside a project it opens that project, anywhere else the last one.
             let start =

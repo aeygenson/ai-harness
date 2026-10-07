@@ -17,6 +17,7 @@
 
 mod agent_kind;
 pub mod edit;
+pub mod independence;
 pub mod projects;
 pub mod save;
 
