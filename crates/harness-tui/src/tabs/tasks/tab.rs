@@ -32,6 +32,7 @@ use std::path::{Path, PathBuf};
 use harness_core::config::{AgentKind, Config, RoleConfig};
 use harness_core::git::HARNESS_DIR;
 use harness_core::models::{self, ModelList};
+use harness_core::retro::usage::Usage;
 use harness_core::task::handoff::Role;
 use harness_core::task::store::{self, Step};
 use harness_core::task::TaskState;
@@ -120,6 +121,9 @@ pub struct TasksTab {
     /// The files of each step's commit, by step folder; a step is only kept
     /// here once its commit is there.
     pub(super) commits: RefCell<HashMap<PathBuf, Vec<(char, String)>>>,
+    /// The tokens and cost in each step's `agent.log`, by step folder. A log
+    /// does not change once written, so each is read only once.
+    pub(super) usages: RefCell<HashMap<PathBuf, Option<Usage>>>,
 }
 
 impl TasksTab {
@@ -148,6 +152,7 @@ impl TasksTab {
             open: None,
             zoom: None,
             commits: RefCell::default(),
+            usages: RefCell::default(),
         };
         tab.reload();
         tab.step = tab.last_step();

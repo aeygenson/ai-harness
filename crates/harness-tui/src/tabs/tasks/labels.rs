@@ -1,6 +1,7 @@
 //! The words the Tasks tab shows for a stage, a verdict, a severity and the
 //! next step, in Lisa's language.
 
+use harness_core::retro::usage::Usage;
 use harness_core::task::handoff::{NextStep, Severity, Verdict};
 use harness_core::task::{Stage, WaitReason};
 use ratatui::style::Color;
@@ -61,6 +62,26 @@ pub fn next_name(next: NextStep, tr: &I18n) -> &str {
     }
 }
 
+/// «$1.20 · 155k tokens», or only the tokens when the agent gave no cost.
+pub fn usage_label(usage: &Usage, tr: &I18n) -> String {
+    let count = short_number(usage.input_tokens + usage.output_tokens);
+    let tokens = tr.f("tasks.tokens", &[("count", &count)]);
+    match usage.cost_usd {
+        Some(usd) => format!("${usd:.2} · {tokens}"),
+        None => tokens,
+    }
+}
+
+/// `950`, `155k` or `2.3M`: token counts are large, a rough number is enough.
+fn short_number(number: u64) -> String {
+    match number {
+        0..1_000 => number.to_string(),
+        1_000..1_000_000 => format!("{}k", number / 1_000),
+        // Whole numbers only: the tenths are the remainder's first digit.
+        _ => format!("{}.{}M", number / 1_000_000, number % 1_000_000 / 100_000),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -77,5 +98,26 @@ mod tests {
         assert_eq!(short_stage(Stage::Done, &tr), "готово");
         assert_eq!(next_name(NextStep::Done, &tr), "готово");
         assert_eq!(severity_label(Severity::High, &tr).0, "высокая");
+    }
+
+    #[test]
+    fn token_counts_are_shortened() {
+        assert_eq!(short_number(950), "950");
+        assert_eq!(short_number(155_400), "155k");
+        assert_eq!(short_number(2_345_678), "2.3M");
+    }
+
+    #[test]
+    fn the_cost_is_shown_only_when_the_agent_gave_it() {
+        let tr = I18n::load(None);
+        let mut usage = Usage {
+            input_tokens: 150_000,
+            output_tokens: 5_000,
+            cost_usd: Some(1.2),
+        };
+
+        assert_eq!(usage_label(&usage, &tr), "$1.20 · 155k tokens");
+        usage.cost_usd = None;
+        assert_eq!(usage_label(&usage, &tr), "155k tokens");
     }
 }

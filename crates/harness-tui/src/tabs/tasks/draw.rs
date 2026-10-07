@@ -77,6 +77,7 @@ impl TasksTab {
             0 => String::new(),
             n => tr.f("tasks.failures", &[("count", &n)]),
         };
+        let spent = self.task_spent(task, tr);
         let title = tr.f(
             "tasks.header",
             &[
@@ -85,6 +86,7 @@ impl TasksTab {
                 ("max", &task.state.max_rounds),
                 ("stage", &stage_label(task.state.stage, tr)),
                 ("failures", &failures),
+                ("usage", &spent),
             ],
         );
         let title = self.zoom_title(Zoom::Steps, &title, steps_area, hits);
@@ -148,7 +150,8 @@ impl TasksTab {
     ) {
         let (title, text, links) = match task.steps.get(self.step) {
             Some(step) => {
-                let (text, links) = step_text(step, &self.artifacts(step), tr);
+                let usage = self.step_usage(step);
+                let (text, links) = step_text(step, &self.artifacts(step), usage, tr);
                 let title = tr.f(
                     "tasks.step",
                     &[("round", &step.handoff.round), ("role", &step.handoff.role)],
