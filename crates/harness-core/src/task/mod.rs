@@ -5,6 +5,7 @@
 //! `orchestrator` (the run loop) and `store` (saving tasks to disk).
 
 pub mod agent;
+pub mod facts;
 pub mod handoff;
 pub mod orchestrator;
 pub mod permissions;
