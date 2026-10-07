@@ -184,3 +184,26 @@ fn models_and_levels_come_from_the_agents_lists() {
     assert!(text.contains("(•) agent's default"), "{text}");
     assert!(!text.contains("Effort"), "{text}");
 }
+
+#[test]
+fn security_on_the_developers_agent_and_model_is_warned_about() {
+    let env = Env::new();
+    let root = env.path("test");
+    project(&root);
+    let mut app = env.app(&root);
+    click(&mut app, "2 Roles");
+    let warning = "Developer and Security use the same agent and model";
+
+    // A new project gives every role Claude with its default model.
+    click(&mut app, "architect  claude");
+    let architect = screen(&mut app);
+    click(&mut app, "security   claude");
+    let same = screen(&mut app);
+    click(&mut app, "( ) codex ");
+    let other = screen(&mut app);
+
+    assert!(!architect.contains(warning), "{architect}");
+    assert!(same.contains(warning), "{same}");
+    assert!(same.contains("less independent"), "{same}");
+    assert!(!other.contains(warning), "{other}");
+}

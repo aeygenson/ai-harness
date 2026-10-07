@@ -6,7 +6,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{ListItem, Paragraph};
 use ratatui::Frame;
 
-use harness_core::config::AgentKind;
+use harness_core::config::{independence, AgentKind};
 use harness_core::task::handoff::Role;
 
 use super::tab::{Focus, RolesTab, Row, WHO};
@@ -107,6 +107,27 @@ impl RolesTab {
         }
     }
 
+    /// A warning on the Developer and Security when both use the same agent
+    /// and model (see `harness_core::config::independence`); no lines otherwise.
+    fn same_reviewer_warning(
+        &self,
+        who: Option<Role>,
+        tr: &I18n,
+    ) -> Vec<(Option<usize>, Line<'static>)> {
+        let shown = matches!(who, Some(Role::Developer | Role::Security))
+            && independence::security_same_as_developer(&self.roles);
+        if !shown {
+            return Vec::new();
+        }
+        let mut lines: Vec<(Option<usize>, Line<'static>)> =
+            ["roles.same_reviewer", "roles.same_reviewer_hint"]
+                .into_iter()
+                .map(|key| (None, Line::styled(tr.t(key).to_string(), theme::warn())))
+                .collect();
+        lines.push((None, Line::default()));
+        lines
+    }
+
     /// The lines of the details; clickable ones carry their row index.
     fn detail_lines(&self, tr: &I18n) -> Vec<(Option<usize>, Line<'static>)> {
         let bold = Style::new().add_modifier(Modifier::BOLD);
@@ -120,6 +141,7 @@ impl RolesTab {
         let who = self.who();
         let settings = who.and_then(|role| self.roles.get(&role));
         let heading = |key: &str| (None, Line::styled(tr.t(key).to_string(), bold));
+        lines.extend(self.same_reviewer_warning(who, tr));
 
         lines.push(heading(if who.is_some() {
             "roles.agent"

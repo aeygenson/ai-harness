@@ -1,18 +1,23 @@
 //! `harness doctor`: is everything the harness needs on this computer? The
 //! programs (Git, Node.js, ...) and the agents, each with what to do when
-//! something is missing. The TUI shows the same on the Agents tab.
+//! something is missing. The TUI shows the same on the Agents tab. Inside a
+//! project it also checks the project's roles.
+
+use std::path::Path;
 
 use anyhow::{bail, Result};
 use harness_agents::install::catalog::{self, Status};
 use harness_agents::install::credentials;
 use harness_agents::install::tools::{self, Health, Tool, ToolStatus};
+use harness_core::config::{independence, Config};
+use harness_core::git::{Repo, HARNESS_DIR};
 
 /// Width of the name column, enough for «`DeepSeek` Harness».
 const NAME_WIDTH: usize = 18;
 
 /// Checks the computer, prints what was found and fails when something
 /// required is missing (so a script can tell).
-pub(crate) fn doctor() -> Result<()> {
+pub(crate) fn doctor(project: &Path) -> Result<()> {
     println!("Checking this computer…");
     let dir = credentials::default_dir();
     let (tools, agents) = std::thread::scope(|scope| {
@@ -22,10 +27,30 @@ pub(crate) fn doctor() -> Result<()> {
     });
     let (text, problems) = report(&tools, &agents);
     print!("{text}");
+    if let Some(config) = project_config(project) {
+        print!("{}", roles_report(&config));
+    }
     if problems > 0 {
         bail!("{problems} problem(s) to fix, see above");
     }
     Ok(())
+}
+
+/// The settings of the project `dir` is in; `None` outside a project.
+fn project_config(dir: &Path) -> Option<Config> {
+    let repo = Repo::open(dir).ok()?;
+    Config::load(&repo.root().join(HARNESS_DIR)).ok()
+}
+
+/// What the project's roles look like: only warnings, never a problem.
+fn roles_report(config: &Config) -> String {
+    let line = if independence::security_same_as_developer(&config.roles) {
+        "! Security uses the same agent and model as the Developer, so its check is less \
+         independent. Better give it another agent (harness tui, Roles tab).\n"
+    } else {
+        "✓ Security uses another agent or model than the Developer.\n"
+    };
+    format!("\nThis project's roles:\n{line}")
 }
 
 /// The report for `tools` and `agents`, and how many problems it found:
@@ -121,7 +146,7 @@ fn agent_line(status: &Status) -> String {
 
 #[cfg(test)]
 mod tests {
-    use std::path::{Path, PathBuf};
+    use std::path::PathBuf;
 
     use super::*;
 
@@ -208,5 +233,26 @@ mod tests {
         );
         assert!(text.contains("not signed in: press «Sign in»"), "{text}");
         assert!(text.contains("✗ No agent is ready"), "{text}");
+    }
+
+    #[test]
+    fn security_on_the_developers_agent_and_model_is_a_warning() {
+        let text = "[roles.developer]\nagent = \"claude\"\n\
+                    [roles.security]\nagent = \"claude\"\n";
+        let mut config = Config::parse(text).unwrap();
+
+        let same = roles_report(&config);
+        config
+            .roles
+            .get_mut(&harness_core::task::handoff::Role::Security)
+            .unwrap()
+            .agent = harness_core::config::AgentKind::Codex;
+        let other = roles_report(&config);
+
+        assert!(
+            same.contains("! Security uses the same agent and model"),
+            "{same}"
+        );
+        assert!(other.contains("✓ Security uses another agent"), "{other}");
     }
 }

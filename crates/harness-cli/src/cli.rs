@@ -95,7 +95,8 @@ pub(crate) enum Command {
     /// logins, and how to install or update them.
     Agents,
     /// Is everything the harness needs here? Programs (Git, Node.js, ...)
-    /// and agents, with what to do about anything missing.
+    /// and agents, with what to do about anything missing; inside a project
+    /// also whether Security checks the work with another agent or model.
     Doctor,
     /// Used by Codex: start an MCP server from its private settings file.
     #[command(name = "mcp-exec", hide = true)]
