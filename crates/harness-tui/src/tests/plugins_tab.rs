@@ -132,7 +132,7 @@ fn the_plugins_tab_gives_allows_and_removes_plugins() {
 
     other_agents_get_their_own_plugins(&mut app);
 
-    // «Open in Zed» opens the folder; what was changed there is committed.
+    // «Open in editor» opens the folder; what was changed there is committed.
     click(&mut app, " architect ");
     key(&mut app, KeyCode::Char('e'));
     let job = app.edit.take().unwrap();

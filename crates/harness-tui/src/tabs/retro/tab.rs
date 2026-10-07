@@ -8,13 +8,13 @@
 //! │> [x] 1 Teach ...  ││ # Retrospective: all                                │
 //! │  ✓   2 Check ...  ││ ...                                                 │
 //! └───────────────────┘└─────────────────────────────────────────────────────┘
-//!  [ Generate ] [ Open in Zed ] [ Choose ] [ Apply chosen ]
+//!  [ Generate ] [ Open in editor ] [ Choose ] [ Apply chosen ]
 //! ```
 //!
 //! «Generate» does what `harness retro --all --suggest` does, in the
 //! background: the statistics of every task, then the `[retro]` agent reads
 //! the whole history (every handoff, note and agent log) and writes its
-//! lessons and its proposals for the skills. The text opens in Zed for
+//! lessons and its proposals for the skills. The text opens in the editor for
 //! editing. Proposals Lisa chooses are applied after a confirmation.
 
 use std::collections::{BTreeSet, VecDeque};

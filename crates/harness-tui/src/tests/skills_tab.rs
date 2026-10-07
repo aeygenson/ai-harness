@@ -38,7 +38,7 @@ fn the_skills_tab_shows_each_roles_base_and_the_skills_to_choose() {
         "[ ] crash-recovery",
         "built-in",
         "common · built-in",
-        " Edit in Zed ",
+        " Edit in editor ",
     ] {
         assert!(text.contains(part), "missing {part:?} in:\n{text}");
     }

@@ -179,6 +179,7 @@ enum Pick {
 /// Opens the TUI and runs until `q`. It starts with `start` if that folder is
 /// a harness project, otherwise with the project opened last.
 pub fn run(start: &Path) -> Result<()> {
+    app::terminal::check_size()?;
     let mut app = App::new(projects::harness_home(), start);
     app.native = true;
     // Which agents are installed: asked once at the start, in the background.

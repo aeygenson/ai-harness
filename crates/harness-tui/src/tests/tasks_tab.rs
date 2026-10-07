@@ -382,7 +382,7 @@ fn files_of_a_step_open_in_zed_with_a_click() {
     app.viewer = |_| Some(std::process::Command::new("true"));
     let text = screen(&mut app);
     for part in [
-        "Files (click: open in Zed):",
+        "Files (click: open in the editor):",
         "~ src/parser.rs",
         "+ docs/parser.md",
         "· notes.md",
