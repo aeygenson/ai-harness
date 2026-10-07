@@ -3,10 +3,13 @@
 
 use std::io;
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use anyhow::{bail, Result};
 use harness_platform::editor;
+use harness_platform::stop::StopSignals;
 use ratatui::crossterm::cursor::Hide;
 use ratatui::crossterm::event::{
     self, DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
@@ -46,10 +49,40 @@ fn check_size_of(columns: u16, rows: u16) -> Result<()> {
     Ok(())
 }
 
-/// Draws the app and hands it every key, click and paste until Lisa quits.
-pub(crate) fn event_loop(terminal: &mut DefaultTerminal, app: &mut App) -> Result<()> {
+/// Starts catching the system's stop signals (the terminal window closed,
+/// `kill`; see `harness_platform::stop`) and returns a flag a thread sets
+/// when one comes. Without it the TUI would die at once and leave a running
+/// agent behind; with it the event loop ends normally, and closing the app
+/// stops the agent with everything it started.
+pub(crate) fn watch_stop_signals() -> io::Result<Arc<AtomicBool>> {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()?;
+    // Listening starts here, before this function returns: `enter` makes
+    // the runtime current for this block, which `listen` needs.
+    let mut signals = {
+        let _inside = runtime.enter();
+        StopSignals::listen()?
+    };
+    let stop = Arc::new(AtomicBool::new(false));
+    let flag = Arc::clone(&stop);
+    // The thread waits until a signal comes, or until the program ends.
+    std::thread::spawn(move || {
+        runtime.block_on(signals.recv());
+        flag.store(true, Ordering::SeqCst);
+    });
+    Ok(stop)
+}
+
+/// Draws the app and hands it every key, click and paste until Lisa quits or
+/// `stop` is set (see [`watch_stop_signals`]).
+pub(crate) fn event_loop(
+    terminal: &mut DefaultTerminal,
+    app: &mut App,
+    stop: &AtomicBool,
+) -> Result<()> {
     let mut loaded = Instant::now();
-    while !app.quit {
+    while !app.quit && !stop.load(Ordering::SeqCst) {
         terminal.draw(|frame| app.draw(frame))?;
         if event::poll(Duration::from_millis(250))? {
             match event::read()? {
@@ -143,6 +176,26 @@ fn take_terminal_back(terminal: &mut DefaultTerminal) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // Sending a signal to the test program itself works only on Linux and macOS.
+    #[cfg(unix)]
+    #[test]
+    fn a_closed_terminal_sets_the_stop_flag_instead_of_killing_the_tui() {
+        let stop = watch_stop_signals().unwrap();
+        assert!(!stop.load(Ordering::SeqCst));
+
+        let status = std::process::Command::new("kill")
+            .args(["-HUP", &std::process::id().to_string()])
+            .status()
+            .unwrap();
+        assert!(status.success());
+
+        let start = Instant::now();
+        while !stop.load(Ordering::SeqCst) {
+            assert!(start.elapsed() < Duration::from_secs(10), "not noticed");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
 
     #[test]
     fn a_terminal_without_size_is_refused() {

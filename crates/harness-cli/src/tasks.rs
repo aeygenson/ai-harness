@@ -3,7 +3,7 @@
 
 use std::path::Path;
 
-use anyhow::{bail, Result};
+use anyhow::{bail, Context, Result};
 use harness_agents::build::build_team;
 use harness_core::config::Config;
 use harness_core::git::HARNESS_DIR;
@@ -11,6 +11,7 @@ use harness_core::skills::Skills;
 use harness_core::task::handoff::{NextStep, Role, Verdict};
 use harness_core::task::orchestrator::{self, StopReason};
 use harness_core::task::{Stage, WaitReason};
+use harness_platform::stop::StopSignals;
 
 use crate::{open_repo, open_task};
 
@@ -37,20 +38,22 @@ pub(crate) fn new_task(
     Ok(())
 }
 
-/// Waits for `work` (which runs agents) until it ends or Lisa presses Ctrl+C.
+/// Waits for `work` (which runs agents) until it ends or the harness is asked
+/// to stop: Ctrl+C, the terminal window closed, `kill` (see `harness_platform::stop`).
 ///
-/// Each agent runs in its own process group, so the terminal's Ctrl+C reaches
-/// only the harness. Here the harness stops waiting, which drops `work`, and
-/// dropping it stops the running agent with everything it started (see
+/// Each agent runs in its own process group, so these signals reach only the
+/// harness. Here the harness stops waiting, which drops `work`, and dropping
+/// it stops the running agent with everything it started (see
 /// `harness_agents::process::run`).
-pub(crate) async fn until_ctrl_c(
+pub(crate) async fn until_stopped(
     work: impl std::future::Future<Output = Result<()>>,
 ) -> Result<()> {
+    let mut signals = StopSignals::listen().context("cannot listen for Ctrl+C")?;
     // `select!` waits for whichever finishes first and drops the other one.
     tokio::select! {
         result = work => result,
-        _ = tokio::signal::ctrl_c() => {
-            bail!("stopped by Ctrl+C; the agent and everything it started were stopped")
+        () = signals.recv() => {
+            bail!("stopped (Ctrl+C or the terminal closed); the agent and everything it started were stopped")
         }
     }
 }

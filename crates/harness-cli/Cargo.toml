@@ -18,6 +18,7 @@ tokio = { version = "1", features = ["macros", "rt", "signal"] }
 harness-tui = { path = "../harness-tui" }
 
 [dev-dependencies]
+harness-fake = { path = "../harness-fake" }
 tempfile = "3"
 
 [lints]

@@ -53,7 +53,7 @@ use crate::info::{agents, models};
 use crate::login::login;
 use crate::retro::{retro, retro_apply, retro_show};
 use crate::secrets::{list_secrets, mcp_login, set_secret};
-use crate::tasks::{decide, new_task, run, status, until_ctrl_c};
+use crate::tasks::{decide, new_task, run, status, until_stopped};
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
@@ -67,7 +67,7 @@ async fn main() -> Result<()> {
         Command::Marketplace { command } => marketplace(command),
         Command::Plugin { command } => plugin(project, command),
         Command::Task { command } => task(project, command),
-        Command::Run { task_id } => until_ctrl_c(run(project, &task_id)).await,
+        Command::Run { task_id } => until_stopped(run(project, &task_id)).await,
         Command::Approve { task_id, to, notes } => {
             decide(project, &task_id, Verdict::Approved, to, &notes)
         }
@@ -78,7 +78,7 @@ async fn main() -> Result<()> {
         Command::Retro(args) => match args.command {
             Some(RetroCommand::Show { number }) => retro_show(project, &number),
             Some(RetroCommand::Apply { number, ids }) => retro_apply(project, &number, &ids),
-            None => until_ctrl_c(retro(project, args.task_id.as_deref(), args.suggest)).await,
+            None => until_stopped(retro(project, args.task_id.as_deref(), args.suggest)).await,
         },
         Command::Models { refresh } => models(refresh),
         Command::Agents => {
