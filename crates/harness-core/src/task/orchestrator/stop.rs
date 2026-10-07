@@ -23,7 +23,8 @@ pub enum StopReason {
         /// Why the last attempt failed, ready to show to Lisa.
         problem: String,
     },
-    /// [`MAX_STEPS_PER_RUN`](super::MAX_STEPS_PER_RUN) roles ran in this call; run again to continue.
+    /// [`MAX_STEPS_PER_RUN`](super::MAX_STEPS_PER_RUN) roles ran in this call;
+    /// run again to continue.
     StepLimitReached,
     /// The project had uncommitted changes before a role started. Lisa commits
     /// or removes them, then runs again.
