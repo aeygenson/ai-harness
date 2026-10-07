@@ -391,6 +391,7 @@ dependencies = [
  "clap",
  "harness-agents",
  "harness-core",
+ "harness-fake",
  "harness-platform",
  "harness-tui",
  "serde_json",
@@ -426,6 +427,7 @@ dependencies = [
  "crossterm",
  "harness-fake",
  "tempfile",
+ "tokio",
 ]
 
 [[package]]

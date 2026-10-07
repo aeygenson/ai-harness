@@ -5,6 +5,7 @@
 //! - [`env`]: the variables an agent inherits, and the ones a server may not set;
 //! - [`private`]: files and folders only Lisa can read;
 //! - [`process`]: stopping a program with everything it started, or becoming it;
+//! - [`stop`]: noticing that the system asks the harness to stop (terminal closed);
 //! - [`open`]: opening an address in the browser;
 //! - [`program`]: finding a program by name (`codex.cmd` on Windows);
 //! - [`path`]: paths written with `/`, as git writes them;
@@ -24,4 +25,5 @@ pub mod path;
 pub mod private;
 pub mod process;
 pub mod program;
+pub mod stop;
 pub mod terminal;

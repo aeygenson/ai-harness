@@ -19,7 +19,7 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use harness_core::config::projects;
 use harness_core::config::{AgentKind, McpConfig};
 use harness_core::git::HARNESS_DIR;
@@ -181,6 +181,9 @@ enum Pick {
 /// a harness project, otherwise with the project opened last.
 pub fn run(start: &Path) -> Result<()> {
     app::terminal::check_size()?;
+    // First of all: from here on, closing the window no longer kills the TUI
+    // while an agent runs; the app is closed normally instead.
+    let stop = app::terminal::watch_stop_signals().context("cannot listen for stop signals")?;
     let mut app = App::new(projects::harness_home(), start);
     app.native = true;
     // Which agents are installed: asked once at the start, in the background.
@@ -194,7 +197,7 @@ pub fn run(start: &Path) -> Result<()> {
     }));
     // A pasted text arrives as one event, so its line breaks do not send it.
     execute!(io::stdout(), EnableMouseCapture, EnableBracketedPaste)?;
-    let result = app::terminal::event_loop(&mut terminal, &mut app);
+    let result = app::terminal::event_loop(&mut terminal, &mut app, &stop);
     let _ = execute!(io::stdout(), DisableMouseCapture, DisableBracketedPaste);
     ratatui::restore();
     result

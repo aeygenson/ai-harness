@@ -3,6 +3,11 @@ name = "harness-platform"
 version = "0.3.0"
 edition = "2021"
 
+# Only for catching the stop signals (see `stop`): the rest of the harness
+# already runs on tokio, so this adds no new crate.
+[dependencies]
+tokio = { version = "1", features = ["signal", "macros", "rt"] }
+
 # Only for reading a secret on Windows, which has no `stty`.
 [target.'cfg(windows)'.dependencies]
 crossterm = "0.29"
@@ -10,6 +15,7 @@ crossterm = "0.29"
 [dev-dependencies]
 harness-fake = { path = "../harness-fake" }
 tempfile = "3"
+tokio = { version = "1", features = ["signal", "macros", "rt", "time"] }
 
 [lints]
 workspace = true
