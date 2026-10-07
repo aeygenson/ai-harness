@@ -1,5 +1,7 @@
 //! Sending the message: starting the roles in the background and showing how they ended.
 
+use std::path::PathBuf;
+
 use anyhow::Result;
 
 use harness_core::task::handoff::{NextStep, Role, Verdict};
@@ -192,9 +194,41 @@ fn outcome_text(outcome: &Outcome, tr: &I18n) -> Message {
                 ("log", &log.display().to_string()),
             ],
         )),
+        StopReason::HiddenChanges {
+            role: r,
+            put_back,
+            reported,
+        } => Message::error(tr.f(
+            "tasks.stop_hidden",
+            &[
+                ("task", task),
+                ("role", &role(r)),
+                ("put_back", &paths(put_back)),
+                ("reported", &paths(reported)),
+            ],
+        )),
         StopReason::GitConfigChanged(r) => Message::error(tr.f(
             "tasks.stop_git_config",
             &[("task", task), ("role", &role(r))],
         )),
+    }
+}
+/// Paths for a message, separated by commas; `-` when there are none.
+fn paths(files: &[PathBuf]) -> String {
+    if files.is_empty() {
+        return "-".to_string();
+    }
+    let shown: Vec<String> = files.iter().map(|f| f.display().to_string()).collect();
+    shown.join(", ")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn paths_are_joined_and_none_is_a_dash() {
+        assert_eq!(paths(&[]), "-");
+        assert_eq!(paths(&[PathBuf::from("a/b"), PathBuf::from("c")]), "a/b, c");
     }
 }

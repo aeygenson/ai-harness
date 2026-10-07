@@ -4,21 +4,26 @@
 //!
 //! 1. Before: the project must have no uncommitted changes, so everything that
 //!    changes afterwards was done by this role.
-//! 2. After: files no role may change (agent instructions and settings, the
-//!    harness's own files) are put back at once; then the changed files are
+//! 2. After: git's hooks and a few files outside the project are compared
+//!    with before (see [`crate::task::tripwire`]); files no role may change
+//!    (agent instructions and settings, the harness's own files) are put back
+//!    at once; then the changed files are
 //!    checked against the role's permissions and against [`MAX_CHANGE_BYTES`],
 //!    so build output never lands in git.
 //! 3. If the role's work is accepted, everything is committed:
 //!    `task-001 round 2: tester (rejected) - ...`. A failed attempt is thrown away.
 
 mod create;
+mod guard;
 mod human;
 mod protect;
 mod size;
+mod stop;
 
 pub use create::{create_task, create_task_anyway, same_task, words};
 pub use human::record_human_decision;
 pub use size::oversized_changes;
+pub use stop::{RunError, StopReason};
 
 use std::path::{Path, PathBuf};
 
@@ -29,8 +34,10 @@ use crate::task::handoff::{Handoff, Role, Verdict};
 use crate::task::permissions;
 use crate::task::prompt;
 use crate::task::store::{StoreError, TaskStore};
-use crate::task::{Stage, TaskState, WaitReason};
+use crate::task::tripwire::Watched;
+use crate::task::{Stage, TaskState};
 use crate::text;
+use guard::Before;
 
 /// How many times one role may try before the harness gives up and asks Lisa.
 pub const ATTEMPTS_PER_ROLE: u32 = 2;
@@ -43,87 +50,6 @@ pub const MAX_CHANGE_BYTES: u64 = 50 * 1024 * 1024;
 
 /// Safety net: never run more than this many roles in one call to `run`.
 pub const MAX_STEPS_PER_RUN: u32 = 50;
-
-/// Why `run` returned.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum StopReason {
-    /// The task is finished.
-    Done,
-    /// The task waits for Lisa, for the reason given.
-    WaitingForHuman(WaitReason),
-    /// The subscription's usage limit stopped this role; run again later.
-    UsageLimitReached(Role),
-    /// The role did not produce an acceptable handoff after every attempt.
-    RoleFailed {
-        /// The role that failed.
-        role: Role,
-        /// Why the last attempt failed, ready to show to Lisa.
-        problem: String,
-    },
-    /// [`MAX_STEPS_PER_RUN`] roles ran in this call; run again to continue.
-    StepLimitReached,
-    /// The project had uncommitted changes before a role started. Lisa commits
-    /// or removes them, then runs again.
-    DirtyWorkingTree(Vec<String>),
-    /// The role changed files it may not touch. The changes are left in place,
-    /// uncommitted, so Lisa can look at them.
-    ForbiddenChanges {
-        /// The role that made the changes.
-        role: Role,
-        /// The forbidden files, as paths inside the project.
-        files: Vec<String>,
-    },
-    /// The role's change is too big to commit (see [`MAX_CHANGE_BYTES`]):
-    /// each entry is a file or folder and its size in bytes, `.` meaning the
-    /// change as a whole. Everything is left in place, uncommitted, so Lisa
-    /// can add it to `.gitignore` or delete it.
-    TooLarge {
-        /// The role that made the change.
-        role: Role,
-        /// Each too big file or folder with its size in bytes.
-        files: Vec<(String, u64)>,
-    },
-    /// The agent made a git commit itself, which agents must never do.
-    AgentCommitted(Role),
-    /// The agent changed files no role may change: agent instructions and
-    /// settings (`CLAUDE.md`, `.claude/`, ...) or the harness's own files
-    /// (`.harness/`). They are put back at once, so they never reach the next
-    /// role; what the agent wrote is in `log`. Its other changes are left
-    /// uncommitted for Lisa to look at.
-    ProtectedFilesChanged {
-        /// The role that made the changes.
-        role: Role,
-        /// The protected files it changed, as paths inside the project.
-        files: Vec<String>,
-        /// The failure log with what the agent wrote in them.
-        log: PathBuf,
-    },
-    /// The agent changed the repository's settings (`.git/config`), where a
-    /// setting can make git run any command. The old settings are put back;
-    /// the role's other changes are left uncommitted for Lisa to look at.
-    GitConfigChanged(Role),
-}
-
-/// A real problem of the harness itself, not a mistake of an agent.
-#[derive(Debug, thiserror::Error)]
-pub enum RunError {
-    /// Saving or reading the task's files failed.
-    #[error(transparent)]
-    Store(#[from] StoreError),
-    /// A git command failed.
-    #[error(transparent)]
-    Git(#[from] GitError),
-    /// An unfinished task already has this text: a second one is not created.
-    #[error(
-        "{task} already has this text and is not done ({stage}); continue it or change the text"
-    )]
-    SameTask {
-        /// The id of the unfinished task, for example `task-001`.
-        task: String,
-        /// Where that task is now, as text for Lisa.
-        stage: String,
-    },
-}
 
 /// Runs roles until the task is done or someone has to look at it.
 ///
@@ -146,6 +72,32 @@ pub async fn run_with_skills<A: AgentRunner>(
     agent: &A,
     skills: &Skills,
 ) -> Result<StopReason, RunError> {
+    let watched = Watched::for_repo(repo)?;
+    let setup = RunSetup {
+        skills,
+        watched: &watched,
+    };
+    run_watching(repo, store, state, agent, setup).await
+}
+
+/// What every role of a run gets besides the agent.
+#[derive(Debug, Clone, Copy)]
+pub struct RunSetup<'a> {
+    /// The roles' skills from `harness.toml`.
+    pub skills: &'a Skills,
+    /// The files the tripwire watches (see [`crate::task::tripwire`]).
+    pub watched: &'a Watched,
+}
+
+/// Like [`run_with_skills`], with the files the tripwire watches given
+/// (tests watch a temporary home folder instead of the real one).
+pub async fn run_watching<A: AgentRunner>(
+    repo: &Repo,
+    store: &TaskStore,
+    state: &mut TaskState,
+    agent: &A,
+    setup: RunSetup<'_>,
+) -> Result<StopReason, RunError> {
     repo.ensure_harness_ignores()?;
     for _ in 0..MAX_STEPS_PER_RUN {
         let role = match state.stage {
@@ -165,18 +117,11 @@ pub async fn run_with_skills<A: AgentRunner>(
         // the agent's changes.
         let mut failure_logs: Vec<PathBuf> = Vec::new();
         for _ in 0..ATTEMPTS_PER_ROLE {
-            let head = repo.head()?;
-            let config = repo.local_config()?;
-            let job = prepare_job(repo.root(), store, state, role, skills)?;
+            let before = Before::take(repo, setup.watched)?;
+            let job = prepare_job(repo.root(), store, state, role, setup.skills)?;
             let outcome = agent.run(&job).await;
-
-            // First of all, before git runs again with the agent's settings.
-            if repo.local_config()? != config {
-                repo.restore_local_config(&config)?;
-                return Ok(StopReason::GitConfigChanged(role));
-            }
-            if repo.head()? != head {
-                return Ok(StopReason::AgentCommitted(role));
+            if let Some(stop) = before.check(repo, setup.watched, role)? {
+                return Ok(stop);
             }
             if let Some(stop) =
                 protect::put_back_protected(repo, store, state, role, &mut failure_logs)?
