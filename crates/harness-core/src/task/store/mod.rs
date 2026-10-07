@@ -88,6 +88,14 @@ pub struct Step {
     pub notes: String,
 }
 
+impl Step {
+    /// What the agent printed in this step (`agent.log`); `None` if there is
+    /// no log, as for Lisa's decisions.
+    pub fn agent_log(&self) -> Option<String> {
+        fs::read_to_string(self.dir.join(LOG_FILE)).ok()
+    }
+}
+
 /// Access to one task's folder.
 #[derive(Debug)]
 pub struct TaskStore {

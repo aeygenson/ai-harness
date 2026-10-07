@@ -2,6 +2,7 @@
 
 use std::fmt::Write as _;
 
+use super::usage::Usage;
 use super::{SkillSetting, Stats};
 use crate::task::handoff::Severity;
 
@@ -15,6 +16,7 @@ impl Stats {
         self.returns_markdown(&mut md);
         self.issues_markdown(&mut md);
         self.skills_markdown(&mut md);
+        self.usage_markdown(&mut md);
         md
     }
 
@@ -144,6 +146,46 @@ impl Stats {
             }
         }
     }
+
+    /// The «Tokens and cost» table: what each role's agent reported.
+    fn usage_markdown(&self, md: &mut String) {
+        md.push_str("\n## Tokens and cost\n\n");
+        if self.usage.is_empty() {
+            md.push_str("No agent reported its usage.\n");
+            return;
+        }
+        md.push_str("| Role | Input tokens | Output tokens | Cost |\n");
+        md.push_str("|---|---|---|---|\n");
+        let mut total = Usage::default();
+        for (role, usage) in &self.usage {
+            total.add(*usage);
+            let _ = writeln!(
+                md,
+                "| {} | {} | {} | {} |",
+                role.as_str(),
+                usage.input_tokens,
+                usage.output_tokens,
+                cost(usage.cost_usd)
+            );
+        }
+        let _ = writeln!(
+            md,
+            "| all | {} | {} | {} |",
+            total.input_tokens,
+            total.output_tokens,
+            cost(total.cost_usd)
+        );
+        md.push_str(
+            "\nOnly Claude Code reports a cost; with a subscription it is what the \
+             same work would cost through the API. Codex reports tokens only, and \
+             steps of other agents are not counted.\n",
+        );
+    }
+}
+
+/// `$0.25`, or `—` when the agent did not report a cost.
+fn cost(cost_usd: Option<f64>) -> String {
+    cost_usd.map_or_else(|| "—".to_string(), |usd| format!("${usd:.2}"))
 }
 
 pub(super) fn severity_name(severity: Severity) -> &'static str {

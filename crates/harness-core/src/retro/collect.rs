@@ -2,6 +2,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use super::usage::Usage;
 use super::{
     stage_text, RepeatedIssue, Return, RoleStats, Scope, SeverityCounts, SkillSetting, SkillUse,
     Stats, TaskHistory, TaskSummary,
@@ -18,6 +19,7 @@ impl Stats {
         let mut issues = SeverityCounts::default();
         let mut repeated: BTreeMap<String, RepeatedIssue> = BTreeMap::new();
         let mut used: BTreeMap<(Role, String), usize> = BTreeMap::new();
+        let mut usage: BTreeMap<Role, Usage> = BTreeMap::new();
         let mut summaries = Vec::new();
 
         for task in tasks {
@@ -63,6 +65,9 @@ impl Stats {
                     *used.entry((handoff.role, skill.to_string())).or_default() += 1;
                 }
             }
+            for (&role, &found) in &task.usage {
+                usage.entry(role).or_default().add(found);
+            }
             for &(_, role) in &task.failures {
                 roles.entry(role).or_default().failed_attempts += 1;
             }
@@ -103,6 +108,7 @@ impl Stats {
             issues,
             repeated_issues: repeated,
             skills: config.map(|c| skill_uses(c, &used)).unwrap_or_default(),
+            usage,
         }
     }
 }

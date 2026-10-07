@@ -6,7 +6,8 @@
 //! - how many rounds each task took and where it stopped;
 //! - what each role decided, and who sent work back to whom;
 //! - which problems (`issues`) were found, and which came up more than once;
-//! - which skills the roles used, and which were configured but never used.
+//! - which skills the roles used, and which were configured but never used;
+//! - how many tokens each role used and what it cost (see `usage`).
 //!
 //! The result is saved in `.harness/retros/<NNN>/` as `stats.md` (for Lisa)
 //! and `stats.json` (for programs, and later for the Retrospective role).
@@ -17,6 +18,8 @@
 pub mod ops;
 pub mod proposals;
 pub mod suggest;
+
+pub mod usage;
 
 mod collect;
 mod markdown;
@@ -32,6 +35,7 @@ use serde::Serialize;
 use crate::task::handoff::{Handoff, Role, Severity};
 use crate::task::store::{self, StoreError, TaskStore};
 use crate::task::{Stage, TaskState, WaitReason};
+use usage::Usage;
 
 /// Folder inside `.harness/` where retrospectives are saved.
 pub const RETROS_DIR: &str = "retros";
@@ -67,16 +71,27 @@ pub struct TaskHistory {
     pub handoffs: Vec<Handoff>,
     /// Failed attempts: (round, role).
     pub failures: Vec<(u32, Role)>,
+    /// Tokens and cost of each role's steps, from their `agent.log`; roles
+    /// whose agent reports no usage are missing.
+    pub usage: BTreeMap<Role, Usage>,
 }
 
 impl TaskHistory {
     /// Reads one task's state, handoffs and failed attempts from `runs_dir`.
     pub fn load(runs_dir: &Path, task_id: &str) -> Result<Self, StoreError> {
         let (store, state) = TaskStore::open(runs_dir, task_id)?;
+        let steps = store.steps()?;
+        let mut usage: BTreeMap<Role, Usage> = BTreeMap::new();
+        for step in &steps {
+            if let Some(found) = step.agent_log().as_deref().and_then(usage::from_log) {
+                usage.entry(step.handoff.role).or_default().add(found);
+            }
+        }
         Ok(Self {
             state,
-            handoffs: store.history()?,
+            handoffs: steps.into_iter().map(|step| step.handoff).collect(),
             failures: store.failures()?,
+            usage,
         })
     }
 
@@ -134,7 +149,9 @@ impl From<Scope> for String {
 }
 
 /// Everything the retrospective counted. Saved as `stats.json`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+//
+// Not `Eq`: the cost in `usage` is a fraction (`f64`).
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Stats {
     /// Which tasks were counted: all of them or one.
     pub scope: Scope,
@@ -150,6 +167,8 @@ pub struct Stats {
     pub repeated_issues: Vec<RepeatedIssue>,
     /// Empty when harness.toml could not be read.
     pub skills: Vec<SkillUse>,
+    /// Tokens and cost of each role, summed over all counted tasks.
+    pub usage: BTreeMap<Role, Usage>,
 }
 
 /// The numbers for one task, as one row of the task table.
@@ -369,6 +388,7 @@ mod tests {
             },
             handoffs,
             failures: vec![],
+            usage: BTreeMap::new(),
         }
     }
 
@@ -557,6 +577,7 @@ mod tests {
             "{empty}"
         );
         assert!(empty.contains("No skills configured or used."), "{empty}");
+        assert!(empty.contains("No agent reported its usage."), "{empty}");
     }
 
     #[test]
@@ -574,13 +595,25 @@ mod tests {
                 NextStep::To(Role::Human),
             )
         };
-        store.record(&mut state, &design, "").unwrap();
+        let step = store.record(&mut state, &design, "").unwrap();
+        let claude_result = "{\"type\":\"result\",\"total_cost_usd\":1.5,\
+                             \"usage\":{\"input_tokens\":7,\"output_tokens\":3}}\n";
+        fs::write(step.join("agent.log"), claude_result).unwrap();
         store.save_failure_log(1, Role::Architect, "boom").unwrap();
 
         let tasks = TaskHistory::load_all(&runs).unwrap();
         assert_eq!(tasks.len(), 1);
         assert_eq!(tasks[0].handoffs, [design]);
         assert_eq!(tasks[0].failures, [(1, Role::Architect)]);
+        let architect = Usage {
+            input_tokens: 7,
+            output_tokens: 3,
+            cost_usd: Some(1.5),
+        };
+        assert_eq!(
+            tasks[0].usage,
+            BTreeMap::from([(Role::Architect, architect)])
+        );
 
         let task_stats = Stats::collect(Scope::All, &tasks, None);
         let first = task_stats.save(harness).unwrap();
@@ -593,6 +626,10 @@ mod tests {
             serde_json::from_str(&fs::read_to_string(first.join("stats.json")).unwrap()).unwrap();
         assert_eq!(json["scope"], "all");
         assert_eq!(json["roles"]["architect"]["failed_attempts"], 1);
+        assert_eq!(json["usage"]["architect"]["cost_usd"], 1.5);
+        assert!(task_stats
+            .to_markdown()
+            .contains("| architect | 7 | 3 | $1.50 |\n| all | 7 | 3 | $1.50 |"));
         assert_eq!(
             fs::read_to_string(first.join("stats.md")).unwrap(),
             task_stats.to_markdown()
