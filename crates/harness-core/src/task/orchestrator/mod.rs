@@ -4,13 +4,16 @@
 //!
 //! 1. Before: the project must have no uncommitted changes, so everything that
 //!    changes afterwards was done by this role.
-//! 2. After: the changed files are checked against the role's permissions
-//!    and against [`MAX_CHANGE_BYTES`], so build output never lands in git.
+//! 2. After: files no role may change (agent instructions and settings, the
+//!    harness's own files) are put back at once; then the changed files are
+//!    checked against the role's permissions and against [`MAX_CHANGE_BYTES`],
+//!    so build output never lands in git.
 //! 3. If the role's work is accepted, everything is committed:
 //!    `task-001 round 2: tester (rejected) - ...`. A failed attempt is thrown away.
 
 mod create;
 mod human;
+mod protect;
 mod size;
 
 pub use create::{create_task, create_task_anyway, same_task, words};
@@ -82,6 +85,19 @@ pub enum StopReason {
     },
     /// The agent made a git commit itself, which agents must never do.
     AgentCommitted(Role),
+    /// The agent changed files no role may change: agent instructions and
+    /// settings (`CLAUDE.md`, `.claude/`, ...) or the harness's own files
+    /// (`.harness/`). They are put back at once, so they never reach the next
+    /// role; what the agent wrote is in `log`. Its other changes are left
+    /// uncommitted for Lisa to look at.
+    ProtectedFilesChanged {
+        /// The role that made the changes.
+        role: Role,
+        /// The protected files it changed, as paths inside the project.
+        files: Vec<String>,
+        /// The failure log with what the agent wrote in them.
+        log: PathBuf,
+    },
     /// The agent changed the repository's settings (`.git/config`), where a
     /// setting can make git run any command. The old settings are put back;
     /// the role's other changes are left uncommitted for Lisa to look at.
@@ -161,6 +177,11 @@ pub async fn run_with_skills<A: AgentRunner>(
             }
             if repo.head()? != head {
                 return Ok(StopReason::AgentCommitted(role));
+            }
+            if let Some(stop) =
+                protect::put_back_protected(repo, store, state, role, &mut failure_logs)?
+            {
+                return Ok(stop);
             }
             match &outcome.end {
                 RunEnd::Succeeded => {}

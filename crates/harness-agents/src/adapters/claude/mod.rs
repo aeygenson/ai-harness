@@ -4,7 +4,8 @@
 //! - an empty environment plus a short whitelist, so API keys from the terminal
 //!   never reach the agent;
 //! - `CLAUDE_CONFIG_DIR` points to `<project>/.harness/agents/claude/`, so the
-//!   agent does not see `~/.claude` (plugins, MCP servers, hooks, memory);
+//!   agent does not see `~/.claude` (plugins, MCP servers, hooks, memory); the
+//!   folder is emptied before and after every role (see `agent_home`);
 //! - login only through the token saved by the Agents tab («Sign in»); Claude
 //!   Code removes the token from every command it runs (see [`HIDE_TOKEN`]);
 //! - the role's tools and file rules are given as flags, and anything not
@@ -16,6 +17,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
 
+use crate::agent_home;
 use crate::install::credentials::Secret;
 use crate::process::{self, failed};
 use crate::role_settings::RoleSettings;
@@ -149,11 +151,10 @@ impl ClaudeCode {
         Ok(file)
     }
 
-    /// Writes the agent's settings file from scratch, so manual changes there
-    /// never survive to the next run.
+    /// Empties the agent's settings folder and writes only the role's settings
+    /// file, so nothing an earlier role left there reaches this one.
     fn prepare_config_dir(&self, job: &RoleJob) -> std::io::Result<()> {
-        let dir = job.project_dir.join(CONFIG_DIR);
-        fs::create_dir_all(&dir)?;
+        let dir = agent_home::fresh(&job.project_dir, CONFIG_DIR)?;
         fs::write(dir.join("settings.json"), self.settings(job.role))
     }
 
@@ -173,7 +174,16 @@ impl AgentRunner for ClaudeCode {
         if let Err(e) = self.prepare_config_dir(job) {
             return failed(log, format!("cannot prepare {CONFIG_DIR}: {e}"));
         }
+        let outcome = self.run_prepared(job, log).await;
+        // Nothing the agent wrote there may reach the next role.
+        let _ = agent_home::remove(&job.project_dir, CONFIG_DIR);
+        outcome
+    }
+}
 
+impl ClaudeCode {
+    /// Runs the role once its settings folder is ready.
+    async fn run_prepared(&self, job: &RoleJob, mut log: String) -> AgentOutcome {
         let mcp_file = if self.settings.servers(job.role).is_empty() {
             None
         } else {

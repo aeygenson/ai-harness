@@ -6,6 +6,7 @@
 //! catalog, saved logins and model lists. The single files are shared by all of them.
 
 pub mod adapters;
+pub mod agent_home;
 pub mod build;
 pub mod install;
 pub mod launcher;

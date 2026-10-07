@@ -6,6 +6,7 @@
 
 mod history;
 mod remote;
+mod restore;
 
 pub use remote::{fetch, head_commit};
 

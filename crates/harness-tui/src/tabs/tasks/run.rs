@@ -179,6 +179,19 @@ fn outcome_text(outcome: &Outcome, tr: &I18n) -> Message {
             "tasks.stop_committed",
             &[("task", task), ("role", &role(r))],
         )),
+        StopReason::ProtectedFilesChanged {
+            role: r,
+            files,
+            log,
+        } => Message::error(tr.f(
+            "tasks.stop_protected",
+            &[
+                ("task", task),
+                ("role", &role(r)),
+                ("files", &files.join(", ")),
+                ("log", &log.display().to_string()),
+            ],
+        )),
         StopReason::GitConfigChanged(r) => Message::error(tr.f(
             "tasks.stop_git_config",
             &[("task", task), ("role", &role(r))],
