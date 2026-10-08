@@ -190,7 +190,7 @@ pub fn run(start: &Path) -> Result<()> {
     let stop = app::terminal::watch_stop_signals().context("cannot listen for stop signals")?;
     let mut app = App::new(projects::harness_home(), start);
     app.native = true;
-    app.splash = app::splash::Splash::Open;
+    app.splash.open = app.splash.at_start;
     // Which agents are installed: asked once at the start, in the background.
     app.check_agents();
     let mut terminal = ratatui::init();

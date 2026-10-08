@@ -72,10 +72,11 @@ impl App {
             signing: None,
             plugin_job: None,
             official_catalog: tabs::plugins::catalog::OFFICIAL.to_string(),
-            splash: crate::app::splash::Splash::Closed,
+            splash: crate::app::splash::Splash::default(),
             quit_warned: false,
             quit: false,
         };
+        app.splash.at_start = crate::app::splash::shown_at_start(app.home.as_deref());
         let saved = app
             .home
             .as_deref()

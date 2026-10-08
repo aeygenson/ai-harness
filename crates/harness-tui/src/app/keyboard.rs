@@ -2,7 +2,6 @@
 
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-use crate::app::splash::Splash;
 use crate::tabs::mcp::{McpButton, McpTab};
 use crate::tabs::plugins::{PluginButton, PluginsTab};
 use crate::tabs::projects::picker::FolderButton;
@@ -120,7 +119,7 @@ impl App {
             KeyCode::Char('q') | KeyCode::Esc => self.quit = true,
             KeyCode::Char('L') | KeyCode::F(2) => self.press(ButtonId::Language),
             KeyCode::Char('T') | KeyCode::F(3) => self.press(ButtonId::Theme),
-            KeyCode::Char('?') | KeyCode::F(1) => self.splash = Splash::Open,
+            KeyCode::Char('H' | '?') | KeyCode::F(1) => self.splash.open = true,
             KeyCode::Char(c @ '1'..='8') => {
                 let index = usize::from(c as u8 - b'1');
                 self.show(TABS[index].0);
@@ -264,7 +263,7 @@ impl App {
     /// A window over the tabs (the start window, the folder browser, a form)
     /// gets the key first; `false` when none is open.
     fn window_key(&mut self, code: KeyCode) -> bool {
-        if self.splash == Splash::Open {
+        if self.splash.open {
             self.splash_key(code);
         } else if self.browser.is_some() {
             self.browser_key(code);

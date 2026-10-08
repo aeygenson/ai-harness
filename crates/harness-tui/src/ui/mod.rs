@@ -123,6 +123,8 @@ pub enum ButtonId {
     HarnessUpdate,
     /// «Start»: closes the start window.
     CloseSplash,
+    /// The start window's box «Show this window at start».
+    SplashAtStart,
 }
 
 /// Where the clickable things were drawn in the last frame. Drawing fills it,

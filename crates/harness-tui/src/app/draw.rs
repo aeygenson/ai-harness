@@ -40,7 +40,7 @@ impl App {
         if let Some((_, browser)) = &self.browser {
             browser.draw(frame, &mut self.hits, &self.tr);
         }
-        if self.splash == crate::app::splash::Splash::Open {
+        if self.splash.open {
             self.draw_splash(frame);
         }
     }

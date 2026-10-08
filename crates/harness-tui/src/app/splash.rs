@@ -1,6 +1,9 @@
-//! The window shown when the harness starts (and on `?` or F1): the version,
+//! The window shown when the harness starts (and on H, `?` or F1): the version,
 //! whether a newer one is out with its update button, and the first steps
-//! and keys. Any key or click closes it.
+//! and keys. Any key or click closes it; Space or a click on its box decides
+//! whether it opens at the next start (kept as `splash` in `tui.toml`).
+
+use std::path::Path;
 
 use ratatui::crossterm::event::KeyCode;
 use ratatui::layout::{Constraint, Flex, Layout, Rect};
@@ -10,33 +13,73 @@ use ratatui::Frame;
 
 use harness_agents::install::update::VERSION;
 
-use crate::ui::{buttons, clear, keys, panel, theme, wrapped_lines, ButtonId, Target};
+use crate::ui::message::Message;
+use crate::ui::{buttons, clear, i18n, keys, panel, theme, wrapped_lines, ButtonId, Target};
 use crate::App;
 
-/// Whether the start window is over the screen.
+/// The start window: open now, and whether it opens when the harness starts.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Splash {
-    Open,
-    Closed,
+pub(crate) struct Splash {
+    pub(crate) open: bool,
+    pub(crate) at_start: bool,
+}
+
+impl Default for Splash {
+    fn default() -> Self {
+        Self {
+            open: false,
+            at_start: true,
+        }
+    }
+}
+
+/// The `tui.toml` setting that turns the window off at start: `splash = "off"`.
+const SETTING: &str = "splash";
+
+/// Does the window open at start? Yes, unless it was switched off in `home`.
+pub(crate) fn shown_at_start(home: Option<&Path>) -> bool {
+    home.and_then(|home| i18n::saved_setting(home, SETTING))
+        .is_none_or(|value| value != "off")
 }
 
 /// The window's widest size: the steps read well in this many columns.
 const SPLASH_WIDTH: u16 = 76;
 
 impl App {
-    /// A key while the window is open: `u` updates (when offered), any other key only closes it.
+    /// A key while the window is open: Space ticks its box, `u` updates
+    /// (when offered), any other key only closes it.
     pub(crate) fn splash_key(&mut self, code: KeyCode) {
-        self.splash = Splash::Closed;
-        if keys::latin(code) == KeyCode::Char('u') {
-            self.press(ButtonId::HarnessUpdate);
+        match keys::latin(code) {
+            KeyCode::Char(' ') => self.toggle_splash_at_start(),
+            KeyCode::Char('u') => {
+                self.splash.open = false;
+                self.press(ButtonId::HarnessUpdate);
+            }
+            _ => self.splash.open = false,
         }
     }
 
-    /// A click while the window is open: its update button updates, any other place only closes it.
+    /// A click while the window is open: its box and update button do their
+    /// work, any other place only closes it.
     pub(crate) fn splash_click(&mut self, hit: Option<(Target, u16)>) {
-        self.splash = Splash::Closed;
-        if let Some((Target::Button(ButtonId::HarnessUpdate), _)) = hit {
-            self.press(ButtonId::HarnessUpdate);
+        match hit {
+            Some((Target::Button(ButtonId::SplashAtStart), _)) => self.toggle_splash_at_start(),
+            Some((Target::Button(ButtonId::HarnessUpdate), _)) => {
+                self.splash.open = false;
+                self.press(ButtonId::HarnessUpdate);
+            }
+            _ => self.splash.open = false,
+        }
+    }
+
+    /// Switches whether the window opens at start, and remembers it in `tui.toml`.
+    pub(crate) fn toggle_splash_at_start(&mut self) {
+        self.splash.at_start = !self.splash.at_start;
+        let value = if self.splash.at_start { "on" } else { "off" };
+        if let Some(home) = &self.home {
+            if let Err(error) = i18n::save_setting(home, SETTING, value) {
+                self.message = Some(Message::error(error));
+            }
         }
     }
 
@@ -78,6 +121,15 @@ impl App {
         items.push((self.tr.t("splash.start"), ButtonId::CloseSplash, true));
         let row = Rect::new(inner.x, inner.bottom().saturating_sub(1), inner.width, 1);
         buttons(frame, row, &mut self.hits, &items);
+        // The box, at the right of the buttons' row.
+        let mark = if self.splash.at_start { "[x]" } else { "[ ]" };
+        let label = format!("{mark} {}", self.tr.t("splash.at_start"));
+        let width = u16::try_from(label.chars().count())
+            .unwrap_or(0)
+            .min(row.width);
+        let rect = Rect::new(row.right().saturating_sub(width), row.y, width, 1);
+        frame.render_widget(Span::styled(label, theme::dim()), rect);
+        self.hits.add(rect, Target::Button(ButtonId::SplashAtStart));
     }
 
     /// The window's text: what the harness is, its version, first steps and keys.

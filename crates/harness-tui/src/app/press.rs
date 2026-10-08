@@ -20,7 +20,8 @@ impl App {
             ButtonId::AgentRemove => self.ask_to_run_agent_command(true),
             ButtonId::AgentSignIn => self.sign_in_agent(),
             ButtonId::HarnessUpdate => self.ask_to_update_harness(),
-            ButtonId::CloseSplash => self.splash = crate::app::splash::Splash::Closed,
+            ButtonId::CloseSplash => self.splash.open = false,
+            ButtonId::SplashAtStart => self.toggle_splash_at_start(),
             ButtonId::RefreshModels => self.ask_for_models(),
             ButtonId::Mcp(button) => {
                 if let (Some(mcp), Some(roles)) = (&mut self.mcp, &mut self.roles) {
