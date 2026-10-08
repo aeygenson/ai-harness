@@ -101,9 +101,16 @@ irm https://raw.githubusercontent.com/aeygenson/ai-harness/main/install/install.
 ```
 
 The installer adds what is missing (Git, Node.js, the Zed editor and the `harness` program)
-and updates what is old, so running it again later is the update. It also adds
-**AI Harness** to your applications. Agents are installed and signed in on the **Agents**
-tab, using the subscriptions you already have.
+and updates what is old. It also adds **AI Harness** to your applications. After that the
+harness updates itself: the TUI shows its version and offers a newer release in its top bar
+(«Update Harness» on the Agents tab), and `harness update` does the same from the command
+line. Agents are installed and signed in on the **Agents** tab, using the subscriptions you
+already have.
+
+To remove the harness, run `install/uninstall.sh` (macOS, Linux) or `install/uninstall.ps1`
+(Windows) the same way as the installer. Your projects and `~/.harness` (logins, settings)
+stay, so installing again finds everything; add `--purge` (Windows:
+`$env:HARNESS_PURGE = "1"` first) to remove `~/.harness` too.
 
 Then open the interface:
 
@@ -184,6 +191,6 @@ and checks keep it honest, and a person stays in charge of the decisions that ma
 
 ## Status
 
-Version 0.4.0. The core flow, four agents, the TUI, MCP, plugins, retrospectives and the
+Version 0.5.0. The core flow, four agents, the TUI, MCP, plugins, retrospectives and the
 installers all work and are used on Linux. macOS and Windows pass CI; live testing on
 those systems is in progress.

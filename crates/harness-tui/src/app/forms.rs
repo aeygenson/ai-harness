@@ -82,6 +82,10 @@ impl App {
                 self.run_agent_command(name, *action, command.clone());
                 Ok(())
             }
+            Purpose::UpdateHarness => {
+                self.run_harness_update();
+                Ok(())
+            }
             Purpose::Remove(path) => self.remove_project(&path.clone()),
         };
         if let Err(error) = result {

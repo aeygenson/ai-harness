@@ -98,6 +98,14 @@ pub(crate) enum Command {
     /// and agents, with what to do about anything missing; inside a project
     /// also whether Security checks the work with another agent or model.
     Doctor,
+    /// Update the harness to the newest release from GitHub; with --check,
+    /// only say whether there is a newer one. The installer is needed only
+    /// for the first install.
+    Update {
+        /// Only check, do not install.
+        #[arg(long)]
+        check: bool,
+    },
     /// Used by Codex: start an MCP server from its private settings file.
     #[command(name = "mcp-exec", hide = true)]
     McpExec { file: PathBuf },

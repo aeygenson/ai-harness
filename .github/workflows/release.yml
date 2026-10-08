@@ -6,7 +6,8 @@
 # Start it from the Actions tab («Run workflow», give a version like 0.1.0)
 # or by pushing a tag `v0.1.0`. The files always have the same names, so
 #   https://github.com/aeygenson/ai-harness/releases/latest/download/<file>
-# is always the newest one.
+# is always the newest one. Afterwards every installed harness offers the
+# new version itself («Update Harness» in the TUI, `harness update`).
 name: Release
 
 on:
@@ -57,6 +58,11 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y musl-tools
       - name: Build
         shell: bash
+        # Marks the program as a release build for this system: only such a
+        # program replaces itself with `harness update` (crates/harness-agents/
+        # src/install/update.rs), and the name tells it which archive to take.
+        env:
+          HARNESS_RELEASE_TARGET: ${{ matrix.target }}
         run: |
           # On Windows the C runtime goes into harness.exe, so it runs on a
           # fresh Windows without the Visual C++ Redistributable.
@@ -99,6 +105,8 @@ jobs:
           else
             tag="${GITHUB_REF_NAME}"
           fi
+          # `harness update` reads the newest version number from here.
+          echo "${tag#v}" > dist/version.txt
           (cd dist && sha256sum * > SHA256SUMS.txt)
           gh release create "$tag" dist/* \
             --target "$GITHUB_SHA" \
@@ -123,6 +131,14 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "harness.exe does not run" }
           $link = Join-Path ([Environment]::GetFolderPath("Desktop")) "AI Harness.lnk"
           if (-not (Test-Path $link)) { throw "no desktop shortcut" }
+      - name: Remove with the uninstall script
+        shell: powershell
+        run: |
+          Get-Content install/uninstall.ps1 -Raw | Invoke-Expression
+          $exe = Join-Path $env:LOCALAPPDATA "Programs\harness\harness.exe"
+          if (Test-Path $exe) { throw "harness.exe is still there" }
+          $link = Join-Path ([Environment]::GetFolderPath("Desktop")) "AI Harness.lnk"
+          if (Test-Path $link) { throw "the desktop shortcut is still there" }
 
   check-unix:
     needs: release
@@ -137,3 +153,7 @@ jobs:
         run: |
           HARNESS_ONLY=harness bash install/install.sh
           "$HOME/.local/bin/harness" --version
+      - name: Remove with the uninstall script
+        run: |
+          bash install/uninstall.sh
+          if [ -e "$HOME/.local/bin/harness" ]; then echo "harness is still there"; exit 1; fi

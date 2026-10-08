@@ -251,6 +251,7 @@ impl App {
                 KeyCode::Char('i') | KeyCode::Enter => self.press(ButtonId::AgentRun),
                 KeyCode::Delete => self.press(ButtonId::AgentRemove),
                 KeyCode::Char('l') => self.press(ButtonId::AgentSignIn),
+                KeyCode::Char('u') => self.press(ButtonId::HarnessUpdate),
                 code => self.agents.on_key(code),
             },
             Tab::Projects => match code {

@@ -20,6 +20,7 @@
 //! harness retro apply 004 1 3          apply proposals 1 and 3
 //! harness tui                          full-screen window: tasks, settings, projects
 //! harness doctor                       is everything the harness needs installed?
+//! harness update                       install the newest release (--check: only look)
 //! ```
 
 mod catalogs;
@@ -30,6 +31,7 @@ mod login;
 mod retro;
 mod secrets;
 mod tasks;
+mod update;
 
 use std::fs;
 use std::path::Path;
@@ -86,6 +88,7 @@ async fn main() -> Result<()> {
             Ok(())
         }
         Command::Doctor => doctor::doctor(project),
+        Command::Update { check } => update::update(check),
         Command::Tui => {
             // Inside a project it opens that project, anywhere else the last one.
             let start =

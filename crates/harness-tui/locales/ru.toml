@@ -13,6 +13,7 @@ projects = "Проекты"
 agents = "Агенты"
 no_project = "нет проекта"
 new_project = "+ Новый проект"
+update_harness = "↑ Обновить до {version}"
 no_open_project = "Проект не открыт. Откройте или создайте его на вкладке «Проекты» (7)."
 
 [footer]
@@ -516,6 +517,15 @@ sign_in_back = "Нажмите Enter, чтобы вернуться в harness�
 signed_in = "{name}: вход сохранён"
 sign_in_failed = "{name}: вход не сохранён ({error})"
 job_removed = "{name} удалён"
+run_update_harness = "Обновить Harness"
+harness_newest = "последняя версия"
+harness_newer = "вышла {version}: «Обновить Harness» (u)"
+harness_installed = "{version} установлена: закройте harness (q) и откройте снова"
+harness_no_check = "сейчас не удаётся проверить новую версию"
+harness_source = "собран из исходного кода: обновляется так же"
+harness_updated = "AI Harness {version} установлен: закройте harness (q) и откройте снова"
+confirm_update_harness = "Обновить AI Harness до {version}?"
+confirm_update_harness_text = "Harness скачает версию {version} со страницы Releases на GitHub, сверит её с SHA256SUMS.txt и поставит на место этой программы:\n\n  {path}\n\nРабота продолжится как есть; новая версия запустится при следующем открытии harness. Меняется только программа: проекты, настройки и входы остаются."
 
 [errors]
 no_home = "Не задана переменная HOME, поэтому harness не находит ~/.harness"

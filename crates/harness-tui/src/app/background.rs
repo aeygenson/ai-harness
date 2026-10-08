@@ -12,7 +12,7 @@ use crate::{App, Tab};
 
 /// What came from a background thread since the last look.
 #[derive(Debug, PartialEq)]
-enum Arrived<T> {
+pub(crate) enum Arrived<T> {
     /// Nothing yet: the thread is still working (or no job is running).
     Nothing,
     /// The thread's answer.
@@ -24,7 +24,7 @@ enum Arrived<T> {
 impl<T> Arrived<T> {
     /// The answer, or `stopped` when the thread ended without one; `None` while
     /// it still works.
-    fn answer_or(self, stopped: T) -> Option<T> {
+    pub(crate) fn answer_or(self, stopped: T) -> Option<T> {
         match self {
             Arrived::Nothing => None,
             Arrived::Answer(answer) => Some(answer),
@@ -34,7 +34,7 @@ impl<T> Arrived<T> {
 }
 
 /// Looks without waiting whether the job behind `rx` has answered.
-fn look<T>(rx: Option<&mpsc::Receiver<T>>) -> Arrived<T> {
+pub(crate) fn look<T>(rx: Option<&mpsc::Receiver<T>>) -> Arrived<T> {
     let Some(rx) = rx else {
         return Arrived::Nothing;
     };
@@ -66,6 +66,7 @@ impl App {
             let _ = tx.send(tool_checker());
         });
         self.tool_check = Some(rx);
+        self.check_release();
     }
 
     /// The check of the other programs has finished.
@@ -96,6 +97,7 @@ impl App {
             command,
             lines: Vec::new(),
             done: None,
+            harness: false,
         });
         self.install_events = Some(rx);
         self.message = Some(Message::info(
@@ -138,7 +140,16 @@ impl App {
                 (Ok(()), Action::Update) => "agents.job_updated",
                 (Ok(()), Action::Remove) => "agents.job_removed",
             };
-            let text = self.tr.f(key, &[("name", &job.name)]);
+            let mut text = self.tr.f(key, &[("name", &job.name)]);
+            // The new harness runs only after a restart: say so, and stop offering it.
+            let release = &mut self.agents.release;
+            let version = release.available().map(str::to_string);
+            if let (true, Ok(()), Some(version)) = (job.harness, &result, version) {
+                text = self
+                    .tr
+                    .f("agents.harness_updated", &[("version", &version)]);
+                release.installed = Some(version);
+            }
             self.message = Some(if result.is_err() {
                 Message::error(text)
             } else {
@@ -156,6 +167,7 @@ impl App {
         self.take_install_events();
         self.take_agent_check();
         self.take_tool_check();
+        self.take_release_check();
         self.take_models();
         self.take_mcp_check();
         self.take_registry_search();
