@@ -58,24 +58,6 @@ jobs:
             if ($errors) { Write-Host $file; $errors | ForEach-Object { Write-Host $_ }; exit 1 }
           }
 
-  # TEMPORARY: the full Windows install twice; the second run must skip.
-  full-install:
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: First run
-        shell: powershell
-        run: Get-Content install/install.ps1 -Raw | Invoke-Expression
-      - name: Second run
-        shell: powershell
-        run: |
-          $clock = [Diagnostics.Stopwatch]::StartNew()
-          Get-Content install/install.ps1 -Raw | Invoke-Expression
-          Write-Host "Second run: $([int]$clock.Elapsed.TotalSeconds)s"
-          $exe = Join-Path $env:LOCALAPPDATA "Programs\harness\harness.exe"
-          & $exe --version
-          if ($LASTEXITCODE -ne 0) { throw "harness.exe does not run" }
-
   # The Agents tab's real commands on each system: install an agent with
   # the maker's command, find it, update it, remove it (see
   # crates/harness-agents/tests/live_install.rs).
