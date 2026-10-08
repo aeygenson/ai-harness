@@ -70,17 +70,55 @@ function Install-AiHarness {
         if ($LASTEXITCODE -ne 0) { throw "the installer from $url failed" }
     }
 
+    # A long, quiet step (winget) runs with a spinner and the seconds it has
+    # taken, so the window never looks frozen. The program's own output goes
+    # to files; the result has its exit code and its last lines.
+    function Spin($text, $program, [string[]]$arguments) {
+        $out = [IO.Path]::GetTempFileName()
+        $err = [IO.Path]::GetTempFileName()
+        $clock = [Diagnostics.Stopwatch]::StartNew()
+        $process = Start-Process -FilePath $program -ArgumentList $arguments -NoNewWindow `
+            -PassThru -RedirectStandardOutput $out -RedirectStandardError $err
+        # Reading Handle once keeps ExitCode readable after the program ends
+        # (a known quirk of Start-Process -PassThru).
+        $null = $process.Handle
+        # Without a console (CI, a log file) there is nothing to animate.
+        $animate = -not [Console]::IsOutputRedirected
+        $frames = "|", "/", "-", "\"
+        $frame = 0
+        while (-not $process.HasExited) {
+            if ($animate) {
+                $seconds = [int]$clock.Elapsed.TotalSeconds
+                Write-Host -NoNewline ("`r    {0} {1} ({2}s) " -f $frames[$frame % 4], $text, $seconds)
+                $frame++
+            }
+            Start-Sleep -Milliseconds 200
+        }
+        $process.WaitForExit()
+        if ($animate) { Write-Host -NoNewline ("`r" + (" " * ($text.Length + 16)) + "`r") }
+        Write-Host ("    {0}: done ({1}s)" -f $text, [int]$clock.Elapsed.TotalSeconds)
+        $lines = @(Get-Content $out, $err -Tail 20 -ErrorAction SilentlyContinue)
+        Remove-Item $out, $err -Force -ErrorAction SilentlyContinue
+        [pscustomobject]@{ Code = $process.ExitCode; Lines = $lines }
+    }
+
     function Winget-Package($id, $name) {
-        & winget list --id $id --exact --accept-source-agreements *> $null
-        if ($LASTEXITCODE -eq 0) {
-            Say "${name}: checking for a newer version"
-            & winget upgrade --id $id --exact --silent --accept-package-agreements --accept-source-agreements *> $null
+        # The full path: Start-Process does not always find winget's alias by name.
+        $winget = (Get-Command winget).Source
+        $agree = "--accept-source-agreements"
+        $found = Spin "${name}: looking for it" $winget @("list", "--id", $id, "--exact", $agree)
+        if ($found.Code -eq 0) {
+            $step = Spin "${name}: checking for a newer version" $winget `
+                @("upgrade", "--id", $id, "--exact", "--silent", "--accept-package-agreements", $agree)
             # Not 0 also when there is simply nothing newer.
-            if ($LASTEXITCODE -eq 0) { Warn "updated" } else { Warn "already the newest" }
+            if ($step.Code -eq 0) { Warn "updated" } else { Warn "already the newest" }
         } else {
-            Say "${name}: installing"
-            & winget install --id $id --exact --silent --accept-package-agreements --accept-source-agreements
-            if ($LASTEXITCODE -ne 0) { throw "winget could not install $name ($id)" }
+            $step = Spin "${name}: installing" $winget `
+                @("install", "--id", $id, "--exact", "--silent", "--accept-package-agreements", $agree)
+            if ($step.Code -ne 0) {
+                $step.Lines | ForEach-Object { Write-Host "      $_" }
+                throw "winget could not install $name ($id)"
+            }
         }
     }
 
@@ -92,6 +130,7 @@ function Install-AiHarness {
         if (-not (Has "winget")) {
             throw "winget was not found. Install «App Installer» from the Microsoft Store and run this command again."
         }
+        Say "Git, Node.js, Zed: installing or updating with winget (a few minutes)"
         Winget-Package "Git.Git" "Git"
         Winget-Package "OpenJS.NodeJS.LTS" "Node.js"
         Winget-Package "ZedIndustries.Zed" "Zed"
