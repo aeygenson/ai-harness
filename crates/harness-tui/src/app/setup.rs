@@ -72,6 +72,7 @@ impl App {
             signing: None,
             plugin_job: None,
             official_catalog: tabs::plugins::catalog::OFFICIAL.to_string(),
+            splash: crate::app::splash::Splash::Closed,
             quit_warned: false,
             quit: false,
         };

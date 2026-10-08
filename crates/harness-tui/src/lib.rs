@@ -190,6 +190,7 @@ pub fn run(start: &Path) -> Result<()> {
     let stop = app::terminal::watch_stop_signals().context("cannot listen for stop signals")?;
     let mut app = App::new(projects::harness_home(), start);
     app.native = true;
+    app.splash = app::splash::Splash::Open;
     // Which agents are installed: asked once at the start, in the background.
     app.check_agents();
     let mut terminal = ratatui::init();
@@ -324,6 +325,8 @@ struct App {
     plugin_job: Option<mpsc::Receiver<PluginJob>>,
     /// The catalog added by itself when there is none.
     official_catalog: String,
+    /// The start window is open (see `app/splash.rs`).
+    splash: app::splash::Splash,
     /// `q` was pressed once with unsaved changes.
     quit_warned: bool,
     quit: bool,

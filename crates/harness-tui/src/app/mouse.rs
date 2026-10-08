@@ -6,6 +6,7 @@ use std::time::Instant;
 
 use ratatui::crossterm::event::{KeyCode, MouseButton, MouseEvent, MouseEventKind};
 
+use crate::app::splash::Splash;
 use crate::tabs::mcp::{McpButton, McpCatalogButton};
 use crate::tabs::plugins::{PluginButton, PluginCatalogButton};
 use crate::tabs::retro::{self, RetroButton};
@@ -19,6 +20,9 @@ impl App {
     pub(crate) fn on_mouse(&mut self, mouse: MouseEvent) {
         let hit = self.hits.at(mouse.column, mouse.row);
         match mouse.kind {
+            MouseEventKind::Down(MouseButton::Left) if self.splash == Splash::Open => {
+                self.splash_click(hit);
+            }
             MouseEventKind::Down(MouseButton::Left) => {
                 let now = Instant::now();
                 let double = matches!(

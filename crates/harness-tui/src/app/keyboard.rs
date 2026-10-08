@@ -2,6 +2,7 @@
 
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
+use crate::app::splash::Splash;
 use crate::tabs::mcp::{McpButton, McpTab};
 use crate::tabs::plugins::{PluginButton, PluginsTab};
 use crate::tabs::projects::picker::FolderButton;
@@ -35,12 +36,7 @@ impl App {
             return;
         }
         let quit_warned = std::mem::take(&mut self.quit_warned);
-        if self.browser.is_some() {
-            self.browser_key(key.code);
-            return;
-        }
-        if self.form.is_some() {
-            self.form_key(key.code);
+        if self.window_key(key.code) {
             return;
         }
         // Writing the message: every key is text, except these.
@@ -124,6 +120,7 @@ impl App {
             KeyCode::Char('q') | KeyCode::Esc => self.quit = true,
             KeyCode::Char('L') | KeyCode::F(2) => self.press(ButtonId::Language),
             KeyCode::Char('T') | KeyCode::F(3) => self.press(ButtonId::Theme),
+            KeyCode::Char('?') | KeyCode::F(1) => self.splash = Splash::Open,
             KeyCode::Char(c @ '1'..='8') => {
                 let index = usize::from(c as u8 - b'1');
                 self.show(TABS[index].0);
@@ -262,6 +259,21 @@ impl App {
                 code => self.projects.on_key(code),
             },
         }
+    }
+
+    /// A window over the tabs (the start window, the folder browser, a form)
+    /// gets the key first; `false` when none is open.
+    fn window_key(&mut self, code: KeyCode) -> bool {
+        if self.splash == Splash::Open {
+            self.splash_key(code);
+        } else if self.browser.is_some() {
+            self.browser_key(code);
+        } else if self.form.is_some() {
+            self.form_key(code);
+        } else {
+            return false;
+        }
+        true
     }
 
     /// Keys while the folder browser is open.

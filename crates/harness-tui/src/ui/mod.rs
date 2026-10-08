@@ -8,7 +8,7 @@ pub(crate) mod theme;
 
 mod form;
 
-pub(crate) use form::Form;
+pub(crate) use form::{wrapped_lines, Form};
 
 use ratatui::layout::Rect;
 use ratatui::style::Style;
@@ -119,8 +119,10 @@ pub enum ButtonId {
     AgentRemove,
     /// «Sign in» for the agent selected on the Agents tab.
     AgentSignIn,
-    /// «Update Harness», on the Agents tab and in the top bar.
+    /// «Update Harness», on the Agents tab, in the top bar and in the start window.
     HarnessUpdate,
+    /// «Start»: closes the start window.
+    CloseSplash,
 }
 
 /// Where the clickable things were drawn in the last frame. Drawing fills it,

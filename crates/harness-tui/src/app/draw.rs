@@ -40,6 +40,9 @@ impl App {
         if let Some((_, browser)) = &self.browser {
             browser.draw(frame, &mut self.hits, &self.tr);
         }
+        if self.splash == crate::app::splash::Splash::Open {
+            self.draw_splash(frame);
+        }
     }
 
     /// The open tab, or a placeholder when it needs a project and none is open.

@@ -227,7 +227,7 @@ impl Form {
 }
 
 /// How many rows `line` takes when wrapped at words to `width` columns.
-fn wrapped_lines(line: &str, width: usize) -> usize {
+pub fn wrapped_lines(line: &str, width: usize) -> usize {
     let mut rows = 1;
     let mut used = 0;
     for word in line.split(' ') {
