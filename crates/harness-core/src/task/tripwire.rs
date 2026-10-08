@@ -45,6 +45,13 @@ pub const HOME_FILES: &[&str] = &[
 /// attributes and excludes. (`config` is checked separately.)
 const GIT_FOLDERS: &[&str] = &["hooks", "info"];
 
+/// Files in those folders that git writes by itself: `info/refs` is the list
+/// of branches that `git update-server-info` keeps for serving over plain
+/// HTTP. Newer git (2.5x) runs a repack in the background after a commit,
+/// and the repack rewrites this file, maybe while the next role runs. It
+/// holds no command, so a change to it is not a reason to stop.
+const GIT_OWN_FILES: &[&str] = &["info/refs"];
+
 /// A file bigger than this is remembered by its size and the time it was
 /// last changed instead of its whole content: the `harness` program is tens
 /// of MB, and reading it twice per role would be slow. (A program that also
@@ -60,6 +67,8 @@ pub struct Watched {
     pub restored_folders: Vec<PathBuf>,
     /// Single files that are only reported (see [`HOME_FILES`]).
     pub reported_files: Vec<PathBuf>,
+    /// Files inside the restored folders that are not watched (see [`GIT_OWN_FILES`]).
+    pub ignored_files: Vec<PathBuf>,
 }
 
 impl Watched {
@@ -74,9 +83,11 @@ impl Watched {
         if let Ok(program) = std::env::current_exe() {
             reported_files.push(program);
         }
+        let ignored_files = GIT_OWN_FILES.iter().map(|name| common.join(name)).collect();
         Ok(Self {
             restored_folders,
             reported_files,
+            ignored_files,
         })
     }
 
@@ -85,6 +96,9 @@ impl Watched {
         let mut files = BTreeMap::new();
         for folder in &self.restored_folders {
             add_tree(folder, &mut files)?;
+        }
+        for file in &self.ignored_files {
+            files.remove(file);
         }
         for file in &self.reported_files {
             // A file Lisa keeps private from the harness must not stop every role.
@@ -238,8 +252,9 @@ mod tests {
 
     fn watched(dir: &Path) -> Watched {
         Watched {
-            restored_folders: vec![dir.join("hooks")],
+            restored_folders: vec![dir.join("hooks"), dir.join("info")],
             reported_files: vec![dir.join("home/.bashrc"), dir.join("home/.gitconfig")],
+            ignored_files: vec![dir.join("info/refs")],
         }
     }
 
@@ -256,6 +271,24 @@ mod tests {
             before.check_and_restore(&watched).unwrap(),
             Changes::default()
         );
+    }
+
+    #[test]
+    fn info_refs_that_git_rewrites_by_itself_is_not_a_change() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::create_dir_all(dir.path().join("info")).unwrap();
+        fs::write(dir.path().join("info/exclude"), "# excludes").unwrap();
+        let watched = watched(dir.path());
+        let before = watched.snapshot().unwrap();
+
+        // What a background `git repack` does after a commit.
+        fs::write(dir.path().join("info/refs"), "abc123\trefs/heads/main\n").unwrap();
+
+        assert_eq!(
+            before.check_and_restore(&watched).unwrap(),
+            Changes::default()
+        );
+        assert!(dir.path().join("info/refs").exists(), "it is left alone");
     }
 
     #[test]
@@ -346,6 +379,7 @@ mod tests {
         let watched = Watched {
             restored_folders: Vec::new(),
             reported_files: vec![program.clone()],
+            ignored_files: Vec::new(),
         };
         let before = watched.snapshot().unwrap();
 
