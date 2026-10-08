@@ -9,6 +9,8 @@ use harness_agents::install::credentials;
 use harness_agents::install::tools::ToolStatus;
 use harness_core::config::AgentKind;
 
+use super::release::HarnessRelease;
+
 #[derive(Debug)]
 pub struct AgentsTab {
     /// One per catalog entry, in the catalog's order.
@@ -22,6 +24,8 @@ pub struct AgentsTab {
     pub job: Option<Job>,
     /// The other programs the harness needs; empty until they were checked.
     pub tools: Vec<ToolStatus>,
+    /// The harness's own version and whether a newer one is out.
+    pub release: HarnessRelease,
 }
 
 /// An install or update command, started from the tab.
@@ -33,6 +37,8 @@ pub struct Job {
     pub lines: Vec<String>,
     /// `None` while it runs.
     pub done: Option<Result<(), String>>,
+    /// The job updates the harness itself, not an agent.
+    pub harness: bool,
 }
 
 /// The most lines of a command's output kept.
@@ -70,6 +76,7 @@ impl AgentsTab {
             selected: 0,
             job: None,
             tools: Vec::new(),
+            release: HarnessRelease::of_this_program(),
         }
     }
 
@@ -101,6 +108,14 @@ impl AgentsTab {
         }
         let (action, command) = status.action()?;
         Some((status, action, command?))
+    }
+
+    /// The version «Update Harness» would install: only while nothing else runs.
+    pub fn harness_update(&self) -> Option<&str> {
+        if self.job.as_ref().is_some_and(Job::running) {
+            return None;
+        }
+        self.release.available()
     }
 
     /// The agent «Sign in» would sign in to: one the harness runs and that

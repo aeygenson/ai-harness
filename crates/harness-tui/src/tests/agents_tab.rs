@@ -370,3 +370,102 @@ fn an_agent_without_an_adapter_says_loudly_it_is_not_implemented() {
     app.agents.select(0);
     assert!(!screen_of_width(&mut app, 160).contains("ПОКА НЕ РЕАЛИЗОВАНО"));
 }
+
+/// Says that release 9.9.9 is out.
+#[expect(
+    clippy::unnecessary_wraps,
+    reason = "a fake must match the `ReleaseChecker` function type"
+)]
+fn newer_release() -> Result<Option<String>, String> {
+    Ok(Some("9.9.9".into()))
+}
+
+/// The Agents tab, with the harness checked against `checker`.
+fn release_app(env: &Env, from_source: bool) -> App {
+    let mut app = env.app(env.code.path());
+    app.agent_checker = fake_agents;
+    app.release_checker = newer_release;
+    app.updater = |tx| {
+        let _ = tx.send(JobEvent::Line("Downloading 9.9.9".into()));
+        let _ = tx.send(JobEvent::Done(Ok(())));
+    };
+    app.agents.release.from_source = from_source;
+    key(&mut app, KeyCode::Char('8'));
+    wait_for_agents(&mut app);
+    for _ in 0..200 {
+        app.tick();
+        if app.release_check.is_none() {
+            return app;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    panic!("the release was not checked");
+}
+
+#[test]
+fn a_newer_harness_is_offered_in_the_top_bar_and_installed_after_confirming() {
+    use harness_agents::install::update::VERSION;
+    let env = Env::new();
+    let mut app = release_app(&env, false);
+    key(&mut app, KeyCode::Char('7'));
+    let text = screen(&mut app);
+    assert!(text.contains("↑ Update to 9.9.9"), "{text}");
+    assert!(!text.contains(&format!("v{VERSION}")), "{text}");
+
+    // The button in the top bar opens the Agents tab and asks first.
+    click(&mut app, "↑ Update to 9.9.9");
+    assert_eq!(app.tab, Tab::Agents);
+    let (_, form) = app.form.as_ref().unwrap();
+    assert!(
+        form.title.contains("Update AI Harness to 9.9.9?"),
+        "{}",
+        form.title
+    );
+    assert!(form.text.contains("SHA256SUMS.txt"), "{}", form.text);
+    key(&mut app, KeyCode::Enter);
+    assert!(app.agents.job.as_ref().unwrap().running());
+    wait_for_agents(&mut app);
+
+    let (message, problem) = shown(&app);
+    assert!(!problem);
+    assert!(
+        message.contains("AI Harness 9.9.9 is installed"),
+        "{message}"
+    );
+    let text = screen_of_width(&mut app, 160);
+    let installed = format!("AI Harness {VERSION} · 9.9.9 installed: close the harness");
+    for part in [installed.as_str(), "Downloading 9.9.9", "$ harness update"] {
+        assert!(text.contains(part), "missing {part:?} in:\n{text}");
+    }
+    // Installed once: not offered again until the harness is opened anew.
+    assert!(!text.contains("↑ Update to"), "{text}");
+    key(&mut app, KeyCode::Char('u'));
+    assert!(app.form.is_none());
+}
+
+#[test]
+fn the_agents_tab_says_when_a_newer_harness_is_out() {
+    use harness_agents::install::update::VERSION;
+    let env = Env::new();
+    let mut app = release_app(&env, false);
+    let text = screen_of_width(&mut app, 160);
+    let line = format!("! AI Harness {VERSION} · 9.9.9 is out: «Update Harness» (u)");
+    assert!(text.contains(&line), "{text}");
+    // The key does what the button does.
+    key(&mut app, KeyCode::Char('u'));
+    let (_, form) = app.form.as_ref().unwrap();
+    assert!(form.title.contains("9.9.9"), "{}", form.title);
+}
+
+#[test]
+fn a_harness_built_from_source_shows_its_version_but_no_update() {
+    use harness_agents::install::update::VERSION;
+    let env = Env::new();
+    let mut app = release_app(&env, true);
+    let text = screen_of_width(&mut app, 160);
+    assert!(text.contains(&format!("v{VERSION}")), "{text}");
+    assert!(text.contains("built from the source code"), "{text}");
+    assert!(!text.contains("↑ Update to"), "{text}");
+    key(&mut app, KeyCode::Char('u'));
+    assert!(app.form.is_none());
+}

@@ -126,6 +126,20 @@ pub fn installer_command() -> &'static str {
     )
 }
 
+/// The `tar` program that unpacks the harness's own release archives. On
+/// Windows that is the system's own `tar.exe` (in `System32` since Windows 10),
+/// which also unpacks `.zip`; another `tar` in `PATH` (for example Git's GNU
+/// tar) cannot, and reads `C:` as the name of another computer.
+pub fn tar() -> PathBuf {
+    let system = std::env::var_os("SystemRoot")
+        .map(|root| Path::new(&root).join("System32").join("tar.exe"))
+        .filter(|path| path.is_file());
+    match system {
+        Some(path) if cfg!(windows) => path,
+        _ => resolve("tar"),
+    }
+}
+
 /// `unix` on Linux and macOS, `windows` on Windows: for things written
 /// differently per system, such as an installer command.
 pub fn on_this_system<T>(unix: T, windows: T) -> T {
@@ -209,6 +223,13 @@ mod tests {
             assert!(sandbox_ready());
         }
         assert_eq!(sandbox_program().is_some(), cfg!(target_os = "linux"));
+    }
+
+    #[test]
+    fn tar_is_found() {
+        let tar = tar();
+        let name = tar.file_name().unwrap().to_string_lossy().to_lowercase();
+        assert!(name.starts_with("tar"), "{}", tar.display());
     }
 
     #[test]

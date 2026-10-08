@@ -101,8 +101,10 @@ irm https://raw.githubusercontent.com/aeygenson/ai-harness/main/install/install.
 ```
 
 The installer adds what is missing (Git, Node.js, the Zed editor and the `harness` program)
-and updates what is old, so running it again later is the update. It also adds
-**AI Harness** to your applications. Agents are installed and signed in on the **Agents**
+and updates what is old. It also adds **AI Harness** to your applications. After that the
+harness updates itself: the TUI shows its version and offers a newer release in its top bar
+(«Update Harness» on the Agents tab), and `harness update` does the same from the command
+line. Agents are installed and signed in on the **Agents**
 tab, using the subscriptions you already have.
 
 Then open the interface:

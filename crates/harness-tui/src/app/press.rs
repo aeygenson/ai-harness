@@ -19,6 +19,7 @@ impl App {
             ButtonId::AgentRun => self.ask_to_run_agent_command(false),
             ButtonId::AgentRemove => self.ask_to_run_agent_command(true),
             ButtonId::AgentSignIn => self.sign_in_agent(),
+            ButtonId::HarnessUpdate => self.ask_to_update_harness(),
             ButtonId::RefreshModels => self.ask_for_models(),
             ButtonId::Mcp(button) => {
                 if let (Some(mcp), Some(roles)) = (&mut self.mcp, &mut self.roles) {

@@ -5,7 +5,8 @@
 #   curl -fsSL https://raw.githubusercontent.com/aeygenson/ai-harness/main/install/install.sh | bash
 #
 # What is missing is installed, what is old is updated, what is new is left
-# alone, so running the same command again later is the update.
+# alone, so running the same command again is safe. The harness itself
+# updates from inside later («Update Harness» in the TUI, `harness update`).
 #
 #   Git, Node.js      Homebrew on a Mac, the system's packages on Linux
 #   Zed               Homebrew on a Mac, Zed's own installer on Linux

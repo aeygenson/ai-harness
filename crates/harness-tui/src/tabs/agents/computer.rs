@@ -1,6 +1,6 @@
-//! The «Computer» panel under the agent list: the other programs the harness
-//! needs (Git, Node.js, ...), the same check as `harness doctor`, and the
-//! installer command when something is missing.
+//! The «Computer» panel under the agent list: the harness's own version, the
+//! other programs the harness needs (Git, Node.js, ...), the same check as
+//! `harness doctor`, and the installer command when something is missing.
 
 use ratatui::layout::Rect;
 use ratatui::text::{Line, Span};
@@ -8,21 +8,25 @@ use ratatui::widgets::{Paragraph, Wrap};
 use ratatui::Frame;
 
 use harness_agents::install::tools::{Health, ToolStatus};
+use harness_agents::install::update::VERSION;
 
+use super::release::{HarnessRelease, HARNESS_NAME};
 use super::tab::AgentsTab;
 use crate::ui::i18n::I18n;
 use crate::ui::{panel, theme};
 
 impl AgentsTab {
-    /// The panel's lines: one per program, then the fix if one is needed.
+    /// The panel's lines: the harness, one per program, then the fix if one is needed.
     pub fn computer_lines(&self, tr: &I18n) -> Vec<Line<'static>> {
+        let mut lines = vec![harness_line(&self.release, tr)];
         if self.tools.is_empty() {
-            return vec![Line::styled(
+            lines.push(Line::styled(
                 tr.t("agents.checking").to_string(),
                 theme::dim(),
-            )];
+            ));
+            return lines;
         }
-        let mut lines: Vec<Line> = self.tools.iter().map(|s| tool_line(s, tr)).collect();
+        lines.extend(self.tools.iter().map(|s| tool_line(s, tr)));
         if self.tools.iter().any(|s| s.health() != Health::Good) {
             lines.push(Line::from(tr.t("agents.tools_install").to_string()));
             lines.push(Line::styled(
@@ -79,6 +83,40 @@ fn wrapped_rows(text: &str, width: usize) -> usize {
         }
     }
     rows
+}
+
+/// `✓ AI Harness 0.4.0 · newest`, `! AI Harness 0.4.0 · 0.5.0 is out: …`.
+fn harness_line(release: &HarnessRelease, tr: &I18n) -> Line<'static> {
+    let (mark, style, about) = if let Some(version) = &release.installed {
+        let about = tr.f("agents.harness_installed", &[("version", version)]);
+        ("✓", theme::ok(), about)
+    } else if release.from_source {
+        ("✓", theme::ok(), tr.t("agents.harness_source").to_string())
+    } else {
+        match &release.newer {
+            None => ("…", theme::dim(), String::new()),
+            Some(Ok(None)) => ("✓", theme::ok(), tr.t("agents.harness_newest").to_string()),
+            Some(Ok(Some(version))) => {
+                let about = tr.f("agents.harness_newer", &[("version", version)]);
+                ("!", theme::warn(), about)
+            }
+            Some(Err(_)) => (
+                "?",
+                theme::dim(),
+                tr.t("agents.harness_no_check").to_string(),
+            ),
+        }
+    };
+    let about = if about.is_empty() {
+        about
+    } else {
+        format!("· {about}")
+    };
+    Line::from(vec![
+        Span::styled(format!("{mark} "), style),
+        Span::raw(format!("{HARNESS_NAME} {VERSION} ")),
+        Span::styled(about, style),
+    ])
 }
 
 /// `✓ Git 2.43.0`, `! Node.js 20.1.0 · older than 22.19`, `✗ npx · not found`.

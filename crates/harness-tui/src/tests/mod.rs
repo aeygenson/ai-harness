@@ -117,6 +117,11 @@ impl Env {
         app.start_dir = self.code.path().canonicalize().unwrap();
         // The real check asks the programs of this computer for their versions.
         app.tool_checker = fake_tools;
+        // The real ones ask GitHub and replace the harness's own file.
+        app.release_checker = || Ok(None);
+        app.updater = |tx| {
+            let _ = tx.send(JobEvent::Done(Err("no updates in tests".into())));
+        };
         app
     }
 

@@ -1,14 +1,17 @@
 //! The Agents tab's work: signing in, installing, updating and removing agents,
-//! and asking them which models they offer.
+//! asking them which models they offer, and updating the harness itself.
 
 use std::sync::mpsc;
 
 use harness_agents::install::credentials;
 use harness_core::models::{self};
 
+use super::release::HARNESS_NAME;
+use super::Job;
+use crate::app::background::look;
 use crate::ui::message::Message;
 use crate::ui::Form;
-use crate::{Answers, App, Purpose};
+use crate::{Answers, App, Purpose, Tab};
 
 impl App {
     /// Back from `harness login`: say how it went and look at the logins again.
@@ -69,6 +72,70 @@ impl App {
                 command,
             },
             form,
+        ));
+    }
+
+    /// Asks in the background whether a newer harness is out.
+    pub(crate) fn check_release(&mut self) {
+        if self.release_check.is_some() {
+            return;
+        }
+        let (tx, rx) = mpsc::channel();
+        let checker = self.release_checker;
+        std::thread::spawn(move || {
+            let _ = tx.send(checker());
+        });
+        self.release_check = Some(rx);
+    }
+
+    /// The check for a newer harness has answered.
+    pub(crate) fn take_release_check(&mut self) {
+        let stopped = Err(self.tr.t("errors.check_stopped").to_string());
+        let Some(answer) = look(self.release_check.as_ref()).answer_or(stopped) else {
+            return;
+        };
+        self.release_check = None;
+        self.agents.release.newer = Some(answer);
+    }
+
+    /// «Update Harness»: opens the Agents tab, where the update shows its
+    /// steps, and asks first.
+    pub(crate) fn ask_to_update_harness(&mut self) {
+        let Some(version) = self.agents.harness_update().map(str::to_string) else {
+            return;
+        };
+        self.show(Tab::Agents);
+        let program = std::env::current_exe().unwrap_or_default();
+        let tr = &self.tr;
+        let text = tr.f(
+            "agents.confirm_update_harness_text",
+            &[("version", &version), ("path", &program.display())],
+        );
+        let title = tr.f("agents.confirm_update_harness", &[("version", &version)]);
+        let form = Form::new(&title, &text, tr.t("agents.run_update"));
+        self.form = Some((Purpose::UpdateHarness, form));
+    }
+
+    /// Runs the confirmed update in the background, like an agent's update:
+    /// its steps come in `tick`.
+    pub(crate) fn run_harness_update(&mut self) {
+        if self.install_events.is_some() || self.agents.harness_update().is_none() {
+            return;
+        }
+        let (tx, rx) = mpsc::channel();
+        let updater = self.updater;
+        std::thread::spawn(move || updater(&tx));
+        self.agents.job = Some(Job {
+            name: HARNESS_NAME,
+            action: harness_agents::install::catalog::Action::Update,
+            command: "harness update".to_string(),
+            lines: Vec::new(),
+            done: None,
+            harness: true,
+        });
+        self.install_events = Some(rx);
+        self.message = Some(Message::info(
+            self.tr.f("agents.job_running", &[("name", &HARNESS_NAME)]),
         ));
     }
 

@@ -119,6 +119,8 @@ pub enum ButtonId {
     AgentRemove,
     /// «Sign in» for the agent selected on the Agents tab.
     AgentSignIn,
+    /// «Update Harness», on the Agents tab and in the top bar.
+    HarnessUpdate,
 }
 
 /// Where the clickable things were drawn in the last frame. Drawing fills it,
@@ -179,6 +181,7 @@ fn is_primary(id: ButtonId) -> bool {
     matches!(
         id,
         ButtonId::Ok
+            | ButtonId::HarnessUpdate
             | ButtonId::Send
             | ButtonId::Save
             | ButtonId::UseProject

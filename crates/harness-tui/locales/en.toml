@@ -20,6 +20,7 @@ projects = "Projects"
 agents = "Agents"
 no_project = "no project"
 new_project = "+ New project"
+update_harness = "↑ Update to {version}"
 no_open_project = "No project is open. Open or create one on the «Projects» tab (7)."
 
 [footer]
@@ -524,6 +525,15 @@ sign_in_back = "Press Enter to come back to harness…"
 signed_in = "{name}: login saved"
 sign_in_failed = "{name}: no login saved ({error})"
 job_removed = "{name} removed"
+run_update_harness = "Update Harness"
+harness_newest = "the newest"
+harness_newer = "{version} is out: «Update Harness» (u)"
+harness_installed = "{version} installed: close the harness (q) and open it again"
+harness_no_check = "cannot check for a newer version now"
+harness_source = "built from the source code: update it the same way"
+harness_updated = "AI Harness {version} is installed: close the harness (q) and open it again"
+confirm_update_harness = "Update AI Harness to {version}?"
+confirm_update_harness_text = "The harness downloads version {version} from its Releases page on GitHub, checks it against SHA256SUMS.txt and puts it in the place of this program:\n\n  {path}\n\nThe harness keeps working as it is; the new version starts the next time you open it. Only the program changes: projects, settings and logins stay."
 
 [errors]
 no_home = "HOME is not set, so the harness cannot find ~/.harness"

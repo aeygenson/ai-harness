@@ -41,7 +41,9 @@ mod ui;
 
 use crate::ui::message::Message;
 use harness_agents::install::tools::ToolStatus;
-use tabs::agents::{AgentChecker, AgentsTab, Installer, JobEvent, ToolChecker};
+use tabs::agents::{
+    AgentChecker, AgentsTab, Installer, JobEvent, ReleaseChecker, ToolChecker, Updater,
+};
 use tabs::mcp::McpTab;
 use tabs::plugins::PluginsTab;
 use tabs::projects::picker::Browser;
@@ -132,6 +134,8 @@ enum Purpose {
         action: harness_agents::install::catalog::Action,
         command: String,
     },
+    /// Install the newer harness in the place of this one.
+    UpdateHarness,
 }
 
 /// What a download in the background brought.
@@ -281,6 +285,12 @@ struct App {
     installer: Installer,
     /// What that command prints, while it runs.
     install_events: Option<mpsc::Receiver<JobEvent>>,
+    /// Asks whether a newer harness is out; tests give a fake one.
+    release_checker: ReleaseChecker,
+    /// The answer of that check, while it runs.
+    release_check: Option<mpsc::Receiver<Result<Option<String>, String>>>,
+    /// Installs the newer harness; tests give a fake one.
+    updater: Updater,
     form: Option<(Purpose, Form)>,
     /// The folder browser, when the system has no folder dialog.
     browser: Option<(Pick, Browser)>,

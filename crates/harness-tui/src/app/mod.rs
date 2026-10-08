@@ -2,7 +2,7 @@
 //! keyboard and mouse, buttons, forms, background jobs and drawing the screen.
 //! Each file adds methods to `App`.
 
-mod background;
+pub(crate) mod background;
 mod draw;
 mod edits;
 mod forms;

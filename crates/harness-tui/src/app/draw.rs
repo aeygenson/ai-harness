@@ -1,6 +1,7 @@
 //! Drawing the whole screen: the tab bar, the open tab, the form on top and the
 //! footer with messages and hot keys.
 
+use harness_agents::install::update::VERSION;
 use harness_core::config::projects::name_of;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Modifier, Style};
@@ -191,11 +192,20 @@ impl App {
         // On the right: always at hand, whichever tab is open.
         let right = Rect::new(x, area.y, area.right().saturating_sub(x), 1);
         let theme_label = format!("◐ {}", self.tr.t(theme::current().name));
-        let mut items = [
+        // A newer harness is offered first; otherwise the version is shown before the buttons.
+        let update = self
+            .agents
+            .harness_update()
+            .map(|version| self.tr.f("tabs.update_harness", &[("version", &version)]));
+        let mut items = Vec::with_capacity(4);
+        if let Some(label) = &update {
+            items.push((label.as_str(), ButtonId::HarnessUpdate));
+        }
+        items.extend([
             (self.tr.t("tabs.new_project"), ButtonId::NewProject),
             (self.tr.label(), ButtonId::Language),
             (theme_label.as_str(), ButtonId::Theme),
-        ];
+        ]);
         let width = |items: &[(&str, ButtonId)]| -> u16 {
             items
                 .iter()
@@ -204,7 +214,13 @@ impl App {
         };
         // In a narrow window the theme button shows only its sign.
         if width(&items) >= right.width {
-            items[2].0 = "◐";
+            if let Some(last) = items.last_mut() {
+                last.0 = "◐";
+            }
+        }
+        // Narrower still: a newer harness is offered alone.
+        if update.is_some() && width(&items) >= right.width {
+            items.truncate(1);
         }
         let width = width(&items);
         let start = right.right().saturating_sub(width);
@@ -212,6 +228,12 @@ impl App {
             let area = Rect::new(start, area.y, width, 1);
             let items: Vec<_> = items.iter().map(|(l, id)| (*l, *id, true)).collect();
             buttons(frame, area, &mut self.hits, &items);
+        }
+        let version = format!("v{VERSION} ");
+        let version_width = u16::try_from(version.chars().count()).unwrap_or(0);
+        if update.is_none() && start.saturating_sub(version_width) > right.x {
+            let rect = Rect::new(start - version_width, area.y, version_width, 1);
+            frame.render_widget(Span::styled(version, theme::dim()), rect);
         }
     }
 }

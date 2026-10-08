@@ -56,6 +56,11 @@ impl AgentsTab {
                     ButtonId::AgentSignIn,
                     self.sign_in_target().is_some(),
                 ),
+                (
+                    tr.t("agents.run_update_harness"),
+                    ButtonId::HarnessUpdate,
+                    self.harness_update().is_some(),
+                ),
             ],
         );
         let [left, right] =
