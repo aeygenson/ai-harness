@@ -24,7 +24,18 @@ update_harness = "↑ Update to {version}"
 no_open_project = "No project is open. Open or create one on the «Projects» tab (7)."
 
 [footer]
-hint = "1–8 tabs · ↑↓ select · wheel scroll · {copy}+mouse copy · L language · T theme · q quit"
+hint = "1–8 tabs · ↑↓ select · wheel scroll · {copy}+mouse copy · L language · T theme · H help · q quit"
+
+[splash]
+about = "A team of AI roles works on your project: Architect, Developer, Tester and Security, each run by a console agent you choose."
+version = "Version {version}"
+checking = "checking for a newer version…"
+newer = "{version} is out: «↑ Update» below (u)"
+steps_title = "First steps"
+steps = "1. Agents (8): install the agents you have a subscription for and sign in.\n2. Projects (7): open a project folder or create a new one.\n3. Roles (2): choose the agent and model of each role.\n4. Tasks (1): describe a task and run it; you approve the design and the result."
+keys = "1–8 tabs · ↑↓ select · Enter open · L language · T theme · H this window · q quit"
+start = "Start"
+at_start = "Show at start (Space)"
 
 [tasks]
 title = " Tasks "

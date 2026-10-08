@@ -19,6 +19,9 @@ impl App {
     pub(crate) fn on_mouse(&mut self, mouse: MouseEvent) {
         let hit = self.hits.at(mouse.column, mouse.row);
         match mouse.kind {
+            MouseEventKind::Down(MouseButton::Left) if self.splash.open => {
+                self.splash_click(hit);
+            }
             MouseEventKind::Down(MouseButton::Left) => {
                 let now = Instant::now();
                 let double = matches!(

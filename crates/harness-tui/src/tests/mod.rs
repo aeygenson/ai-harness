@@ -29,6 +29,7 @@ mod projects_tab;
 mod retro_tab;
 mod roles_tab;
 mod skills_tab;
+mod splash;
 mod tasks_tab;
 
 fn handoff(role: Role, verdict: Verdict, next: NextStep, summary: &str) -> Handoff {
