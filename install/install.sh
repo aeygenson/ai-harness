@@ -43,6 +43,38 @@ fail() {
 }
 has() { command -v "$1" >/dev/null 2>&1; }
 
+# A long, quiet step (Homebrew, a download) runs with a spinner and the
+# seconds it has taken, so the window never looks frozen. Its own output goes
+# to a file and is shown only when the step fails. The step must not ask
+# anything: its keyboard is closed.
+spin() { # spin <message> <command> [arguments...]
+    local text="$1" log pid start code=0 frame=0
+    local frames=('|' '/' '-' '\')
+    shift
+    log="$(mktemp)"
+    start=$SECONDS
+    "$@" >"$log" 2>&1 </dev/null &
+    pid=$!
+    # Without a terminal (CI, a log file) there is nothing to animate.
+    if [ -t 1 ]; then
+        while kill -0 "$pid" 2>/dev/null; do
+            printf '\r    %s %s (%ds) ' "${frames[frame % 4]}" "$text" $((SECONDS - start))
+            frame=$((frame + 1))
+            sleep 0.2
+        done
+        printf '\r\033[K'
+    fi
+    wait "$pid" || code=$?
+    if [ "$code" = 0 ]; then
+        printf '    \033[32m✓\033[0m %s (%ds)\n' "$text" $((SECONDS - start))
+    else
+        printf '    \033[31m✗\033[0m %s (%ds)\n' "$text" $((SECONDS - start))
+        tail -n 20 "$log" | sed 's/^/      /'
+    fi
+    rm -f "$log"
+    return "$code"
+}
+
 # Questions (sudo's password, Homebrew's «Press RETURN») must come from the
 # keyboard: with `curl | bash` the standard input is the script itself.
 from_keyboard() {
@@ -90,11 +122,10 @@ before_of() { printf '%s' "$BEFORE" | grep "^$1|" | cut -d'|' -f2-; }
 
 brew_package() { # brew_package <name> [--cask]
     if brew list "$@" >/dev/null 2>&1; then
-        say "$1: checking for a newer version"
-        brew upgrade "$@" >/dev/null 2>&1 && note "up to date" || note "already the newest"
+        # Not 0 also when there is simply nothing newer.
+        spin "$1: checking for a newer version" brew upgrade "$@" || true
     else
-        say "$1: installing"
-        brew install "$@" || fail "Homebrew could not install $1"
+        spin "$1: installing" brew install "$@" || fail "Homebrew could not install $1"
     fi
 }
 
@@ -107,7 +138,9 @@ mac_basics() {
         [ -x "$prefix/bin/brew" ] && eval "$("$prefix/bin/brew" shellenv)" && break
     done
     has brew || fail "Homebrew was installed but is not found; open a new Terminal and run again"
-    brew update >/dev/null 2>&1 || true
+    say "Git, Node.js, Zed: installing or updating with Homebrew (a few minutes)"
+    # The first `brew update` in a while can take minutes.
+    spin "Homebrew: updating its list of programs" brew update || true
     brew_package git
     brew_package node
     brew_package zed --cask
@@ -116,10 +149,10 @@ mac_basics() {
 # The system's package manager; `sudo` asks for the password once.
 linux_packages() {
     if has apt-get; then
-        from_keyboard sudo apt-get update -qq
-        from_keyboard sudo apt-get install -y -qq "$@"
+        from_keyboard sudo apt-get update -q
+        from_keyboard sudo apt-get install -y -q "$@"
     elif has dnf; then
-        from_keyboard sudo dnf install -y -q "$@"
+        from_keyboard sudo dnf install -y "$@"
     elif has pacman; then
         from_keyboard sudo pacman -S --needed --noconfirm "$@"
     elif has zypper; then
@@ -155,7 +188,7 @@ linux_node() {
     [ -n "$file" ] || fail "cannot find Node.js on nodejs.org"
     rm -rf "$NODE_DIR"
     mkdir -p "$NODE_DIR"
-    curl -fsSL "$base/$file" | tar -xJ -C "$NODE_DIR" --strip-components 1 ||
+    spin "Node.js: downloading" download "$base/$file" "$NODE_DIR" -J --strip-components 1 ||
         fail "cannot download Node.js"
     for program in node npm npx; do ln -sf "$NODE_DIR/bin/$program" "$BIN/$program"; done
 }
@@ -177,6 +210,13 @@ linux_basics() {
 
 # --- The harness ---------------------------------------------------------
 
+# Downloads an archive and unpacks it into a folder (extra arguments go to tar).
+download() { # download <url> <folder> [tar arguments...]
+    local url="$1" folder="$2"
+    shift 2
+    curl -fsSL "$url" | tar -x "$@" -C "$folder"
+}
+
 release_target() {
     case "$SYSTEM-$ARCH" in
         mac-arm64) echo aarch64-apple-darwin ;;
@@ -189,10 +229,11 @@ release_target() {
 
 harness_ready() {
     local target="$1" tmp
-    say "harness: downloading the newest version"
+    say "harness: the newest version"
     tmp="$(mktemp -d)"
-    curl -fsSL "https://github.com/$REPO/releases/latest/download/harness-$target.tar.gz" |
-        tar -xz -C "$tmp" || fail "cannot download the harness for $target"
+    spin "harness: downloading" \
+        download "https://github.com/$REPO/releases/latest/download/harness-$target.tar.gz" "$tmp" -z ||
+        fail "cannot download the harness for $target"
     install -m 755 "$tmp/harness" "$BIN/harness"
     mkdir -p "$HOME/.local/share/ai-harness"
     cp "$tmp/ai-harness-256.png" "$HOME/.local/share/ai-harness/" 2>/dev/null || true

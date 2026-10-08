@@ -58,6 +58,29 @@ jobs:
             if ($errors) { Write-Host $file; $errors | ForEach-Object { Write-Host $_ }; exit 1 }
           }
 
+  # TEMPORARY: the full install (winget, Homebrew) with the spinner, once.
+  full-install:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install everything (Windows)
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          Get-Content install/install.ps1 -Raw | Invoke-Expression
+          $exe = Join-Path $env:LOCALAPPDATA "Programs\harness\harness.exe"
+          & $exe --version
+          if ($LASTEXITCODE -ne 0) { throw "harness.exe does not run" }
+      - name: Install everything (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          bash install/install.sh
+          "$HOME/.local/bin/harness" --version
+
   # The Agents tab's real commands on each system: install an agent with
   # the maker's command, find it, update it, remove it (see
   # crates/harness-agents/tests/live_install.rs).
