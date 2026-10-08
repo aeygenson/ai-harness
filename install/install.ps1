@@ -3,8 +3,8 @@
 #
 #   irm https://raw.githubusercontent.com/aeygenson/ai-harness/main/install/install.ps1 | iex
 #
-# What is missing is installed, what is old is updated, what is new is left
-# alone, so running the same command again is safe. The harness itself
+# What is missing is installed and what is already there is left as it is,
+# so running the same command again is safe and quick. The harness itself
 # updates from inside later («Update Harness» in the TUI, `harness update`);
 # uninstall.ps1 removes it.
 #
@@ -102,23 +102,28 @@ function Install-AiHarness {
         [pscustomobject]@{ Code = $process.ExitCode; Lines = $lines }
     }
 
-    function Winget-Package($id, $name) {
+    # Installs a program with winget unless it is already there. A program
+    # already installed is left as it is (not updated), so a second run is
+    # quick. $command is the program's command, the quickest check; without
+    # one, winget's own list is asked.
+    function Winget-Package($id, $name, $command) {
+        if ($command -and (Has $command)) {
+            Write-Host "    ${name}: already installed"
+            return
+        }
         # The full path: Start-Process does not always find winget's alias by name.
         $winget = (Get-Command winget).Source
         $agree = "--accept-source-agreements"
         $found = Spin "${name}: looking for it" $winget @("list", "--id", $id, "--exact", $agree)
         if ($found.Code -eq 0) {
-            $step = Spin "${name}: checking for a newer version" $winget `
-                @("upgrade", "--id", $id, "--exact", "--silent", "--accept-package-agreements", $agree)
-            # Not 0 also when there is simply nothing newer.
-            if ($step.Code -eq 0) { Warn "updated" } else { Warn "already the newest" }
-        } else {
-            $step = Spin "${name}: installing" $winget `
-                @("install", "--id", $id, "--exact", "--silent", "--accept-package-agreements", $agree)
-            if ($step.Code -ne 0) {
-                $step.Lines | ForEach-Object { Write-Host "      $_" }
-                throw "winget could not install $name ($id)"
-            }
+            Write-Host "    ${name}: already installed"
+            return
+        }
+        $step = Spin "${name}: installing" $winget `
+            @("install", "--id", $id, "--exact", "--silent", "--accept-package-agreements", $agree)
+        if ($step.Code -ne 0) {
+            $step.Lines | ForEach-Object { Write-Host "      $_" }
+            throw "winget could not install $name ($id)"
         }
     }
 
@@ -130,10 +135,10 @@ function Install-AiHarness {
         if (-not (Has "winget")) {
             throw "winget was not found. Install «App Installer» from the Microsoft Store and run this command again."
         }
-        Say "Git, Node.js, Zed: installing or updating with winget (a few minutes)"
-        Winget-Package "Git.Git" "Git"
-        Winget-Package "OpenJS.NodeJS.LTS" "Node.js"
-        Winget-Package "ZedIndustries.Zed" "Zed"
+        Say "Git, Node.js, Zed: installing the missing ones with winget"
+        Winget-Package "Git.Git" "Git" "git"
+        Winget-Package "OpenJS.NodeJS.LTS" "Node.js" "node"
+        Winget-Package "ZedIndustries.Zed" "Zed" $null
         Update-Path
     }
 
