@@ -4,8 +4,8 @@
 #
 #   curl -fsSL https://raw.githubusercontent.com/aeygenson/ai-harness/main/install/install.sh | bash
 #
-# What is missing is installed, what is old is updated, what is new is left
-# alone, so running the same command again is safe. The harness itself
+# What is missing is installed and what is already there is left as it is,
+# so running the same command again is safe and quick. The harness itself
 # updates from inside later («Update Harness» in the TUI, `harness update`);
 # uninstall.sh removes it.
 #
@@ -120,13 +120,31 @@ before_of() { printf '%s' "$BEFORE" | grep "^$1|" | cut -d'|' -f2-; }
 
 # --- Git, Node.js, Zed ---------------------------------------------------
 
+# Whether a program is there already, from Homebrew or from elsewhere (the
+# Mac's own git is only a stub that asks to install the developer tools, so
+# for git only Homebrew's counts).
+mac_installed() { # mac_installed <name> [--cask]
+    case "$1" in
+        node) has node && return 0 ;;
+        zed) [ -d /Applications/Zed.app ] || [ -d "$HOME/Applications/Zed.app" ] && return 0 ;;
+    esac
+    brew list "$@" >/dev/null 2>&1
+}
+
+# Installs a program with Homebrew unless it is already there. A program
+# already installed is left as it is (not updated), so a second run is quick.
+BREW_UPDATED=0
 brew_package() { # brew_package <name> [--cask]
-    if brew list "$@" >/dev/null 2>&1; then
-        # Not 0 also when there is simply nothing newer.
-        spin "$1: checking for a newer version" brew upgrade "$@" || true
-    else
-        spin "$1: installing" brew install "$@" || fail "Homebrew could not install $1"
+    if mac_installed "$@"; then
+        note "$1: already installed"
+        return
     fi
+    # Only before the first install: it can take minutes.
+    if [ "$BREW_UPDATED" = 0 ]; then
+        spin "Homebrew: updating its list of programs" brew update || true
+        BREW_UPDATED=1
+    fi
+    spin "$1: installing" brew install "$@" || fail "Homebrew could not install $1"
 }
 
 mac_basics() {
@@ -138,9 +156,7 @@ mac_basics() {
         [ -x "$prefix/bin/brew" ] && eval "$("$prefix/bin/brew" shellenv)" && break
     done
     has brew || fail "Homebrew was installed but is not found; open a new Terminal and run again"
-    say "Git, Node.js, Zed: installing or updating with Homebrew (a few minutes)"
-    # The first `brew update` in a while can take minutes.
-    spin "Homebrew: updating its list of programs" brew update || true
+    say "Git, Node.js, Zed: installing the missing ones with Homebrew"
     brew_package git
     brew_package node
     brew_package zed --cask
@@ -194,18 +210,26 @@ linux_node() {
 }
 
 linux_basics() {
-    say "Git, curl, bubblewrap: installing or updating with the system's packages"
     # xz unpacks Node.js; Debian and Ubuntu call it xz-utils. Bubblewrap lets
     # Claude Code hide its login from the commands the agent runs.
-    if has apt-get; then
-        linux_packages git curl xz-utils bubblewrap
+    if has git && has curl && has xz && has bwrap; then
+        note "Git, curl, xz, bubblewrap: already installed"
     else
-        linux_packages git curl xz bubblewrap
+        say "Git, curl, xz, bubblewrap: installing with the system's packages"
+        if has apt-get; then
+            linux_packages git curl xz-utils bubblewrap
+        else
+            linux_packages git curl xz bubblewrap
+        fi
     fi
     linux_node
-    # Zed's own installer puts it in ~/.local and also updates it.
-    say "Zed: installing the newest"
-    run_installer https://zed.dev/install.sh
+    # Zed's own installer puts it in ~/.local/bin.
+    if has zed; then
+        note "Zed: already installed"
+    else
+        say "Zed: installing"
+        run_installer https://zed.dev/install.sh
+    fi
 }
 
 # --- The harness ---------------------------------------------------------
