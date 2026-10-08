@@ -5,7 +5,8 @@
 #
 # What is missing is installed, what is old is updated, what is new is left
 # alone, so running the same command again is safe. The harness itself
-# updates from inside later («Update Harness» in the TUI, `harness update`).
+# updates from inside later («Update Harness» in the TUI, `harness update`);
+# uninstall.ps1 removes it.
 #
 #   Git, Node.js, Zed      through winget (comes with Windows)
 #   harness                the ready program from the Releases page

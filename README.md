@@ -104,8 +104,13 @@ The installer adds what is missing (Git, Node.js, the Zed editor and the `harnes
 and updates what is old. It also adds **AI Harness** to your applications. After that the
 harness updates itself: the TUI shows its version and offers a newer release in its top bar
 («Update Harness» on the Agents tab), and `harness update` does the same from the command
-line. Agents are installed and signed in on the **Agents**
-tab, using the subscriptions you already have.
+line. Agents are installed and signed in on the **Agents** tab, using the subscriptions you
+already have.
+
+To remove the harness, run `install/uninstall.sh` (macOS, Linux) or `install/uninstall.ps1`
+(Windows) the same way as the installer. Your projects and `~/.harness` (logins, settings)
+stay, so installing again finds everything; add `--purge` (Windows:
+`$env:HARNESS_PURGE = "1"` first) to remove `~/.harness` too.
 
 Then open the interface:
 

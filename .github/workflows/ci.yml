@@ -36,13 +36,13 @@ jobs:
         run: cargo fmt --all -- --check
       - name: Install script for macOS and Linux
         if: matrix.os != 'windows-latest'
-        run: bash -n install/install.sh
+        run: bash -n install/install.sh install/uninstall.sh
       - name: Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: Test
         run: cargo test --workspace --no-fail-fast
 
-  # The Windows install script must at least be valid PowerShell.
+  # The Windows install and uninstall scripts must at least be valid PowerShell.
   install-script:
     name: install.ps1
     runs-on: windows-latest
@@ -51,10 +51,12 @@ jobs:
       - name: Parse
         shell: powershell
         run: |
-          $errors = $null
-          [System.Management.Automation.Language.Parser]::ParseFile(
-            (Resolve-Path install/install.ps1), [ref]$null, [ref]$errors) | Out-Null
-          if ($errors) { $errors | ForEach-Object { Write-Host $_ }; exit 1 }
+          foreach ($file in "install/install.ps1", "install/uninstall.ps1") {
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile(
+              (Resolve-Path $file), [ref]$null, [ref]$errors) | Out-Null
+            if ($errors) { Write-Host $file; $errors | ForEach-Object { Write-Host $_ }; exit 1 }
+          }
 
   # The Agents tab's real commands on each system: install an agent with
   # the maker's command, find it, update it, remove it (see

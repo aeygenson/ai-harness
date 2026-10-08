@@ -131,6 +131,14 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "harness.exe does not run" }
           $link = Join-Path ([Environment]::GetFolderPath("Desktop")) "AI Harness.lnk"
           if (-not (Test-Path $link)) { throw "no desktop shortcut" }
+      - name: Remove with the uninstall script
+        shell: powershell
+        run: |
+          Get-Content install/uninstall.ps1 -Raw | Invoke-Expression
+          $exe = Join-Path $env:LOCALAPPDATA "Programs\harness\harness.exe"
+          if (Test-Path $exe) { throw "harness.exe is still there" }
+          $link = Join-Path ([Environment]::GetFolderPath("Desktop")) "AI Harness.lnk"
+          if (Test-Path $link) { throw "the desktop shortcut is still there" }
 
   check-unix:
     needs: release
@@ -145,3 +153,7 @@ jobs:
         run: |
           HARNESS_ONLY=harness bash install/install.sh
           "$HOME/.local/bin/harness" --version
+      - name: Remove with the uninstall script
+        run: |
+          bash install/uninstall.sh
+          if [ -e "$HOME/.local/bin/harness" ]; then echo "harness is still there"; exit 1; fi
