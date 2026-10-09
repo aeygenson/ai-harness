@@ -501,7 +501,7 @@ mod tests {
         let proposal = file.get(1).unwrap();
         assert_eq!(proposal.task.as_deref(), Some("Add a check"));
         assert_eq!(proposal.file_change(dir.path()), FileChange::Unchanged);
-        assert!(proposal.missing_roles(&config).is_empty());
+        assert_eq!(proposal.missing_roles(&config), Vec::<RoleSkill>::new());
         let text = proposal.describe(dir.path(), &config);
         assert!(
             text.contains("New task for the team:\nAdd a check"),

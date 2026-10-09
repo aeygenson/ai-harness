@@ -390,7 +390,7 @@ mod tests {
 
         let task = fs::read_to_string(repo.runs_dir().join("task-002/task.md")).unwrap();
         assert!(task.contains(text), "{task}");
-        assert!(repo.changed_files().unwrap().is_empty(), "committed");
+        assert_eq!(repo.changed_files().unwrap(), Vec::<String>::new());
         assert_eq!(list(&repo)[0].applied, [1]);
         // Applied once only: no second task.
         assert_eq!(apply(&repo, &retro, &[1]).unwrap(), Vec::<u32>::new());
