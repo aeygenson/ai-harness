@@ -1,9 +1,15 @@
-//! Skill changes proposed by the Retrospective (`proposals.json`).
+//! Changes proposed by the Retrospective (`proposals.json`).
 //!
-//! The Retrospective may only propose changes to skills: a new or changed file
-//! in `.harness/skills/`, and adding a skill to a role's `skills` or
-//! `always_skills`. Role prompts, permissions, agents, MCP servers and plugins
-//! are not part of the format, so they cannot be proposed at all.
+//! A proposal is one of two kinds:
+//! - a skill change: a new or changed file in `.harness/skills/`, and adding a
+//!   skill to a role's `skills` or `always_skills`;
+//! - a task for the team (`task`): applying it creates a new task, which the
+//!   roles then do with their usual permissions and checks. This is how an idea
+//!   such as "add a check to CI" is proposed: the Retrospective never changes
+//!   code, scripts or CI itself.
+//!
+//! Role prompts, permissions, agents, MCP servers and plugins are not part of
+//! the format, so they cannot be proposed at all.
 //!
 //! ```json
 //! {
@@ -15,13 +21,20 @@
 //!       "skill": "empty-input",
 //!       "content": "---\ndescription: Check empty input.\n---\nEvery parser...",
 //!       "roles": [{ "role": "developer", "list": "skills" }]
+//!     },
+//!     {
+//!       "id": 2,
+//!       "summary": "Check formatting in CI",
+//!       "reason": "The tester rejected task-004 and task-006 for formatting.",
+//!       "task": "Add a CI step that fails when the code is not formatted..."
 //!     }
 //!   ]
 //! }
 //! ```
 //!
 //! `content` is the whole new text of `.harness/skills/<skill>.md`; without it
-//! the file stays as it is. Nothing changes until Lisa runs `harness retro apply`.
+//! the file stays as it is. A proposal has either `skill` or `task`, never both.
+//! Nothing changes until Lisa runs `harness retro apply`.
 
 use std::collections::BTreeSet;
 use std::fmt::Write as _;
@@ -38,6 +51,9 @@ use crate::text;
 /// A skill file bigger than this is refused: a skill is a short note.
 pub const MAX_SKILL_BYTES: usize = 20_000;
 
+/// A proposed task text bigger than this is refused: a task is a short request.
+pub const MAX_TASK_BYTES: usize = 20_000;
+
 /// The whole `proposals.json`.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -46,7 +62,7 @@ pub struct ProposalsFile {
     pub proposals: Vec<Proposal>,
 }
 
-/// One proposed change to a skill, as written in `proposals.json`.
+/// One proposed change, as written in `proposals.json`: a skill or a task.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Proposal {
@@ -56,8 +72,12 @@ pub struct Proposal {
     pub summary: String,
     /// What in the history this is based on.
     pub reason: String,
-    /// The skill name; its file is `.harness/skills/<skill>.md`.
-    pub skill: String,
+    /// The skill name, for a skill change; its file is `.harness/skills/<skill>.md`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub skill: Option<String>,
+    /// The text of a new task for the team, for a task proposal.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub task: Option<String>,
     /// The whole new text of the skill file; `None` leaves the file as it is.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub content: Option<String>,
@@ -127,6 +147,8 @@ impl ProposalsFile {
         for proposal in &mut self.proposals {
             proposal.summary = text::safe(&proposal.summary);
             proposal.reason = text::safe(&proposal.reason);
+            // `as_deref_mut` would not help here: `safe` makes a new `String`.
+            proposal.task = proposal.task.as_deref().map(text::safe);
         }
     }
 
@@ -161,7 +183,15 @@ impl Proposal {
         if self.summary.trim().is_empty() {
             return Err(invalid("the summary is empty".into()));
         }
-        skills::check_name(&self.skill).map_err(|e| invalid(e.to_string()))?;
+        let skill = match (&self.skill, &self.task) {
+            (Some(_), Some(_)) => {
+                return Err(invalid("it has both a skill and a task".into()));
+            }
+            (None, None) => return Err(invalid("it has neither a skill nor a task".into())),
+            (None, Some(task)) => return self.check_task(task),
+            (Some(skill), None) => skill,
+        };
+        skills::check_name(skill).map_err(|e| invalid(e.to_string()))?;
         if let Some(text) = &self.content {
             if text.len() > MAX_SKILL_BYTES {
                 return Err(invalid(format!(
@@ -174,10 +204,9 @@ impl Proposal {
                 ));
             }
         } else {
-            if !self.skill_path(harness_dir).is_file() {
+            if !skill_file(harness_dir, skill).is_file() {
                 return Err(invalid(format!(
-                    "skill {} does not exist and the proposal has no content",
-                    self.skill
+                    "skill {skill} does not exist and the proposal has no content"
                 )));
             }
             if self.roles.is_empty() {
@@ -198,22 +227,39 @@ impl Proposal {
         Ok(())
     }
 
-    /// `.harness/skills/<skill>.md`.
-    pub fn skill_path(&self, harness_dir: &Path) -> PathBuf {
-        harness_dir
-            .join(SKILLS_DIR)
-            .join(format!("{}.md", self.skill))
+    /// A task proposal needs a short, non-empty text and nothing about skills.
+    fn check_task(&self, task: &str) -> Result<(), ProposalError> {
+        let problem = if task.trim().is_empty() {
+            "the task text is empty".to_string()
+        } else if task.len() > MAX_TASK_BYTES {
+            format!("the task text is longer than {MAX_TASK_BYTES} bytes")
+        } else if self.content.is_some() || !self.roles.is_empty() {
+            "a task proposal cannot also change skills".to_string()
+        } else {
+            return Ok(());
+        };
+        Err(ProposalError::Invalid {
+            id: self.id,
+            problem,
+        })
     }
 
-    /// What would happen to the skill file.
+    /// `.harness/skills/<skill>.md`, or `None` for a task proposal.
+    pub fn skill_path(&self, harness_dir: &Path) -> Option<PathBuf> {
+        self.skill
+            .as_deref()
+            .map(|skill| skill_file(harness_dir, skill))
+    }
+
+    /// What would happen to the skill file; a task proposal changes none.
     pub fn file_change(&self, harness_dir: &Path) -> FileChange {
-        let Some(new) = &self.content else {
+        let (Some(new), Some(path)) = (&self.content, self.skill_path(harness_dir)) else {
             return FileChange::Unchanged;
         };
         // The `origin:` line the harness added when it wrote the file is not
         // part of the proposal, so it is left out of the comparison.
         let new = without_origin(new);
-        match fs::read_to_string(self.skill_path(harness_dir)) {
+        match fs::read_to_string(path) {
             Err(_) => FileChange::New,
             Ok(old) if without_origin(&old).trim_end() == new.trim_end() => FileChange::Unchanged,
             Ok(old) => FileChange::Changed {
@@ -222,8 +268,11 @@ impl Proposal {
         }
     }
 
-    /// The role lists that do not have the skill yet.
+    /// The role lists that do not have the skill yet; none for a task proposal.
     pub fn missing_roles(&self, config: &Config) -> Vec<RoleSkill> {
+        let Some(skill) = &self.skill else {
+            return Vec::new();
+        };
         self.roles
             .iter()
             .filter(|given| {
@@ -234,16 +283,24 @@ impl Proposal {
                     SkillList::Skills => &settings.skills,
                     SkillList::AlwaysSkills => &settings.always_skills,
                 };
-                !list.contains(&self.skill)
+                !list.contains(skill)
             })
             .copied()
             .collect()
     }
 
-    /// A readable description of every change, with a diff of the skill file.
+    /// A readable description of every change: the diff of the skill file and
+    /// the new roles, or the text of the proposed task.
     pub fn describe(&self, harness_dir: &Path, config: &Config) -> String {
         let mut text = format!("{}\nWhy: {}\n", self.summary, self.reason);
-        let file = format!(".harness/{SKILLS_DIR}/{}.md", self.skill);
+        let Some(skill) = &self.skill else {
+            if let Some(task) = &self.task {
+                // Writing into a `String` cannot fail, so `let _ =` ignores the `Result`.
+                let _ = write!(text, "New task for the team:\n{task}\n");
+            }
+            return text;
+        };
+        let file = format!(".harness/{SKILLS_DIR}/{skill}.md");
         match (self.file_change(harness_dir), &self.content) {
             (FileChange::New, Some(new)) => {
                 // Writing into a `String` cannot fail, so `let _ =` ignores the `Result`.
@@ -272,11 +329,16 @@ impl Proposal {
                 text,
                 "harness.toml: [roles.{}] {list} += \"{}\"{already}",
                 given.role.as_str(),
-                self.skill
+                skill
             );
         }
         text
     }
+}
+
+/// `.harness/skills/<skill>.md`.
+fn skill_file(harness_dir: &Path, skill: &str) -> PathBuf {
+    harness_dir.join(SKILLS_DIR).join(format!("{skill}.md"))
 }
 
 /// The skill text with `origin: <origin>` as the first header line, so the
@@ -394,7 +456,8 @@ mod tests {
             id,
             summary: "Do better".into(),
             reason: "It went wrong".into(),
-            skill: skill.into(),
+            skill: Some(skill.into()),
+            task: None,
             content: content.map(str::to_string),
             roles: roles.to_vec(),
         }
@@ -424,6 +487,50 @@ mod tests {
         assert_eq!(file.proposals.len(), 2);
         assert_eq!(file.get(1).unwrap().roles, [DEVELOPER, TESTER_ALWAYS]);
         ProposalsFile::parse(r#"{"proposals": []}"#, dir.path(), &config).unwrap();
+    }
+
+    #[test]
+    fn a_task_proposal_has_a_task_text_and_nothing_about_skills() {
+        let (dir, config) = project();
+        let parse = |body: &str| {
+            let text =
+                format!(r#"{{"proposals": [{{"id": 1, "summary": "s", "reason": "r", {body}}}]}}"#);
+            ProposalsFile::parse(&text, dir.path(), &config)
+        };
+        let file = parse(r#""task": "Add a check""#).unwrap();
+        let proposal = file.get(1).unwrap();
+        assert_eq!(proposal.task.as_deref(), Some("Add a check"));
+        assert_eq!(proposal.file_change(dir.path()), FileChange::Unchanged);
+        assert!(proposal.missing_roles(&config).is_empty());
+        let text = proposal.describe(dir.path(), &config);
+        assert!(
+            text.contains("New task for the team:\nAdd a check"),
+            "{text}"
+        );
+
+        for (body, problem) in [
+            (
+                r#""task": "x", "skill": "style""#,
+                "both a skill and a task",
+            ),
+            (
+                r#""content": "---\ndescription: d\n---\n""#,
+                "neither a skill nor a task",
+            ),
+            (r#""task": "  ""#, "the task text is empty"),
+            (
+                r#""task": "x", "roles": [{"role": "tester", "list": "skills"}]"#,
+                "cannot also change skills",
+            ),
+        ] {
+            let error = parse(body).unwrap_err().to_string();
+            assert!(error.contains(problem), "{body}: {error}");
+        }
+        let long = format!(r#""task": "{}""#, "a".repeat(MAX_TASK_BYTES + 1));
+        assert!(parse(&long)
+            .unwrap_err()
+            .to_string()
+            .contains("longer than"));
     }
 
     #[test]

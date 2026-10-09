@@ -2,7 +2,7 @@
 
 use super::*;
 
-/// The retrospective's agent: it writes its lessons and one proposal.
+/// The retrospective's agent: it writes its lessons, a skill and a task proposal.
 #[expect(
     clippy::unnecessary_wraps,
     reason = "a fake must match the `RetroBuilder` function type"
@@ -18,6 +18,11 @@ fn mock_retro(
         "skill": "empty-input",
         "content": "---\ndescription: Check empty input.\n---\nCheck it first.\n",
         "roles": [{"role": "developer", "list": "skills"}]
+    }, {
+        "id": 2,
+        "summary": "Check formatting in CI",
+        "reason": "task-001 was rejected for formatting",
+        "task": "Add a CI step that checks formatting."
     }]}"#;
     Ok(AnyAgent::Mock(MockAgent::new().then(
         Role::Security,
@@ -78,6 +83,38 @@ fn apply_the_proposal(app: &mut App, root: &Path, repo: &Repo) {
     assert_eq!(
         app.message.as_ref().unwrap().text,
         "This proposal is already applied"
+    );
+}
+
+/// A task proposal shows its text; applying it creates a task for the team.
+fn apply_the_task(app: &mut App, root: &Path, repo: &Repo) {
+    click(app, "[ ] 2 Check");
+    let text = screen(app);
+    assert!(text.contains("New task for the team:"), "{text}");
+    assert!(
+        text.contains("Add a CI step that checks formatting."),
+        "{text}"
+    );
+    key(app, KeyCode::Char(' '));
+    click(app, " Apply chosen (1) ");
+    let text = screen(app);
+    assert!(text.contains("a new task for the team"), "{text}");
+    key(app, KeyCode::Enter);
+    let (message, problem) = shown(app);
+    assert!(
+        !problem && message.starts_with("Applied and committed: 2."),
+        "{message}"
+    );
+    let task = fs::read_to_string(root.join(".harness/runs/task-002/task.md")).unwrap();
+    assert!(
+        task.contains("Add a CI step that checks formatting."),
+        "{task}"
+    );
+    assert_eq!(repo.changed_files().unwrap(), Vec::<String>::new());
+    let text = screen(app);
+    assert!(
+        text.contains("✓ Applied: a task for the team was created"),
+        "{text}"
     );
 }
 
@@ -151,6 +188,7 @@ fn a_retrospective_is_generated_edited_and_its_proposals_applied() {
     assert!(text.contains("[ ] 1 Teach the developer"), "{text}");
 
     apply_the_proposal(&mut app, &root, &repo);
+    apply_the_task(&mut app, &root, &repo);
 
     // «Open in editor»: what Lisa writes there is committed.
     key(&mut app, KeyCode::Char('e'));

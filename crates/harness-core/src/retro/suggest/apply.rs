@@ -1,4 +1,5 @@
-//! Applying the proposals Lisa picked: skill files and the skill lists in harness.toml.
+//! Applying the skill proposals Lisa picked: skill files and the skill lists in
+//! harness.toml. Task proposals are applied in `retro::ops::apply`.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -35,9 +36,13 @@ pub fn apply(
     }
     let mut text = old_config.clone();
     for proposal in &chosen {
+        // A task proposal has no skill: there is nothing to add for it here.
+        let Some(skill) = &proposal.skill else {
+            continue;
+        };
         for given in proposal.missing_roles(&config) {
             let always = given.list == SkillList::AlwaysSkills;
-            text = edit::add_role_skill(&text, given.role, &proposal.skill, always)?;
+            text = edit::add_role_skill(&text, given.role, skill, always)?;
         }
     }
 
@@ -45,10 +50,11 @@ pub fn apply(
     let mut backups: Vec<(PathBuf, Option<String>)> = Vec::new();
     let mut result = Ok(());
     for proposal in &chosen {
-        let path = proposal.skill_path(harness_dir);
-        let (FileChange::New | FileChange::Changed { .. }, Some(content)) =
-            (proposal.file_change(harness_dir), &proposal.content)
-        else {
+        let (Some(path), FileChange::New | FileChange::Changed { .. }, Some(content)) = (
+            proposal.skill_path(harness_dir),
+            proposal.file_change(harness_dir),
+            &proposal.content,
+        ) else {
             continue;
         };
         if backups.iter().any(|(p, _)| p == &path) {
