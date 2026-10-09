@@ -116,12 +116,15 @@ pub fn prompt(
 
     let _ = write!(
         text,
-        "\nYou may propose only skills: a new skill file, a new text for an existing \
-         one, and giving a skill to a role. You cannot propose changes to role \
+        "\nYou may propose two kinds of change. A skill: a new skill file, a new \
+         text for an existing one, and giving a skill to a role. A task for the \
+         team: a short request (like a task Lisa would write) that the architect, \
+         developer, tester and security then do; use it for a check, a test or a \
+         piece of tooling the project needs. You cannot propose changes to role \
          prompts, permissions, agents, models, MCP servers or plugins; write such \
          ideas in retro.md. Every proposal must say what in the history it is based \
          on. Few good proposals are better than many; propose nothing if nothing is \
-         needed. A skill should be short and concrete.\n\n\
+         needed. A skill or a task should be short and concrete.\n\n\
          Do not change any file of the project. Write exactly two files into {out}:\n\
          - {RETRO_MD}: a short retrospective for Lisa with these sections: What \
          went well; What went badly (repeated problems first); Checks; Access to \
@@ -129,12 +132,13 @@ pub fn prompt(
          - {PROPOSALS_JSON}: your proposals, exactly in this format (JSON, these \
          fields only):\n{example}\n\
          Fields: id (1, 2, ...), summary (one line: what changes), reason (what in \
-         the history it is based on), skill (the skill name), content (optional: \
-         the whole new text of the skill file; leave it out to keep the file as it \
-         is), roles (optional: roles that get the skill, list \"skills\" or \
-         \"always_skills\"). Use {{\"proposals\": []}} if you propose nothing.\n\
-         Write retro.md, and the summary and reason of each proposal, in \
-         {language}; skill files stay in English.\n\
+         the history it is based on), then either skill (the skill name), content \
+         (optional: the whole new text of the skill file; leave it out to keep the \
+         file as it is) and roles (optional: roles that get the skill, list \
+         \"skills\" or \"always_skills\"), or task (the text of the new task). \
+         Use {{\"proposals\": []}} if you propose nothing.\n\
+         Write retro.md, the summary and reason of each proposal, and task texts \
+         in {language}; skill files stay in English.\n\
          Do not commit to git; the harness does that.\n",
         out = output_dir.display(),
         example = EXAMPLE,
@@ -145,13 +149,13 @@ pub fn prompt(
 /// What the Retrospective looks for in the history, beyond better skill texts.
 ///
 /// The ideas come from the `retro` skill of mattpocock/skills (MIT): improve the
-/// roles' environment, not only their instructions. Only skills can be proposed;
-/// everything else stays advice in `retro.md` for Lisa.
+/// roles' environment, not only their instructions. A check becomes a task
+/// proposal; everything else that is not a skill stays advice in `retro.md`.
 const WHAT_TO_LOOK_FOR: &str = "\nLook in the history for these, most harmful first:\n\
 - Checks: a mistake a linter, a test, a type check or a CI step could have \
 caught (for example the tester rejecting the same kind of defect twice). When a \
-mistake can be caught mechanically, describe the check under Checks in retro.md \
-instead of adding a rule to a skill.\n\
+mistake can be caught mechanically, propose a task that adds the check, and \
+mention it under Checks in retro.md, instead of adding a rule to a skill.\n\
 - Lines that do nothing: a skill rule the roles follow anyway, or one that never \
 helped. Proposing a shorter text for a skill is as useful as a new skill.\n\
 - Missing information: a role guessed because it could not see something it \
@@ -169,6 +173,12 @@ pub(super) const EXAMPLE: &str = r#"{
       "skill": "empty-input",
       "content": "---\ndescription: Check empty and missing input before using it.\n---\nEvery function that parses input must handle an empty string...\n",
       "roles": [{ "role": "developer", "list": "skills" }]
+    },
+    {
+      "id": 2,
+      "summary": "Check formatting in CI",
+      "reason": "The tester rejected task-004 and task-006 only because the code was not formatted.",
+      "task": "Add a CI step that runs the project's formatter in check mode and fails when a file is not formatted."
     }
   ]
 }"#;

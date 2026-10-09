@@ -13,7 +13,8 @@ use crate::git::{GitError, Repo, HARNESS_DIR};
 use crate::retro::proposals::ProposalsFile;
 use crate::retro::suggest::{self, Applied, ApplyError, PROPOSALS_JSON, RETRO_MD};
 use crate::retro::{RetroError, Scope, Stats, TaskHistory, RETROS_DIR};
-use crate::task::store::StoreError;
+use crate::task::orchestrator::{self, RunError};
+use crate::task::store::{next_task_id, StoreError};
 
 const STATS_MD: &str = "stats.md";
 const STATS_JSON: &str = "stats.json";
@@ -51,6 +52,9 @@ pub enum OpsError {
     /// A proposal could not be applied.
     #[error(transparent)]
     Apply(#[from] ApplyError),
+    /// The task a proposal asks for could not be created.
+    #[error(transparent)]
+    Task(#[from] RunError),
     /// A git command failed.
     #[error(transparent)]
     Git(#[from] GitError),
@@ -170,8 +174,10 @@ pub fn check_clean(repo: &Repo) -> Result<(), OpsError> {
     }
 }
 
-/// Applies the proposals `ids` of the retrospective in `dir`: skill files,
-/// the roles' skills in harness.toml, `applied.json`, then one commit.
+/// Applies the proposals `ids` of the retrospective in `dir`. Skill proposals
+/// change skill files and the roles' skills in harness.toml, all in one commit.
+/// Each task proposal then creates a new task (its own commit, see
+/// [`orchestrator::create_task`]). `applied.json` records every applied id.
 /// Proposals applied before are skipped; returns the ids applied now.
 pub fn apply(repo: &Repo, dir: &Path, ids: &[u32]) -> Result<Vec<u32>, OpsError> {
     let harness_dir = repo.root().join(HARNESS_DIR);
@@ -204,20 +210,63 @@ pub fn apply(repo: &Repo, dir: &Path, ids: &[u32]) -> Result<Vec<u32>, OpsError>
     if chosen.is_empty() {
         return Ok(chosen);
     }
+    // An unknown id stays with the skills, where `suggest::apply` reports it.
+    let (tasks, skills): (Vec<u32>, Vec<u32>) = chosen.iter().partition(|id| {
+        found
+            .proposals
+            .get(**id)
+            .is_some_and(|proposal| proposal.task.is_some())
+    });
     let made = repo
         .last_change_date(&format!("{HARNESS_DIR}/{RETROS_DIR}/{number}"))
         .map(|day| format!(" of {day}"))
         .unwrap_or_default();
-    let origin = format!("retro {number}{made}, approved by Lisa");
-    let mut paths = suggest::apply(&harness_dir, &found.proposals, &chosen, &origin)?;
-    paths.push(Applied::add(dir, &chosen)?);
-    let refs: Vec<&Path> = paths.iter().map(PathBuf::as_path).collect();
-    let list: Vec<String> = chosen.iter().map(u32::to_string).collect();
+    if !skills.is_empty() {
+        let origin = format!("retro {number}{made}, approved by Lisa");
+        let mut paths = suggest::apply(&harness_dir, &found.proposals, &skills, &origin)?;
+        paths.push(Applied::add(dir, &skills)?);
+        let refs: Vec<&Path> = paths.iter().map(PathBuf::as_path).collect();
+        let list: Vec<String> = skills.iter().map(u32::to_string).collect();
+        repo.commit_paths(
+            &refs,
+            &format!("harness: retro {number}, apply {}", list.join(", ")),
+        )?;
+    }
+    let mut done = skills;
+    for id in tasks {
+        create_proposed_task(repo, dir, &number, &found.proposals, id)?;
+        done.push(id);
+    }
+    Ok(done)
+}
+
+/// Creates the task that proposal `id` asks for and marks the proposal applied.
+/// One task at a time, each with its own commits, so a failure leaves the tasks
+/// made before it in place and recorded.
+fn create_proposed_task(
+    repo: &Repo,
+    dir: &Path,
+    number: &str,
+    proposals: &ProposalsFile,
+    id: u32,
+) -> Result<(), OpsError> {
+    let harness_dir = repo.root().join(HARNESS_DIR);
+    let config = Config::load(&harness_dir).map_err(ApplyError::from)?;
+    let proposal = proposals.get(id).ok_or(ApplyError::UnknownId(id))?;
+    proposal
+        .check(&harness_dir, &config)
+        .map_err(ApplyError::from)?;
+    let Some(text) = &proposal.task else {
+        return Ok(());
+    };
+    let task_id = next_task_id(&repo.runs_dir())?;
+    orchestrator::create_task(repo, &task_id, text, config.max_rounds)?;
+    let path = Applied::add(dir, &[id])?;
     repo.commit_paths(
-        &refs,
-        &format!("harness: retro {number}, apply {}", list.join(", ")),
+        &[&path],
+        &format!("harness: retro {number}, apply {id} ({task_id})"),
     )?;
-    Ok(chosen)
+    Ok(())
 }
 
 #[cfg(test)]
@@ -266,7 +315,8 @@ mod tests {
                 id: 1,
                 summary: "Teach the developer to check empty input".into(),
                 reason: "task-001".into(),
-                skill: "empty-input".into(),
+                skill: Some("empty-input".into()),
+                task: None,
                 content: Some("---\ndescription: Check empty input.\n---\nCheck it.\n".into()),
                 roles: vec![RoleSkill {
                     role: Role::Developer,
@@ -318,5 +368,32 @@ mod tests {
         assert_eq!(list(&repo)[0].applied, [1]);
         // Applied once only.
         assert_eq!(apply(&repo, &second, &[1]).unwrap(), Vec::<u32>::new());
+    }
+
+    #[test]
+    fn a_task_proposal_creates_a_task_for_the_team() {
+        let (_dir, repo) = project();
+        crate::task::orchestrator::create_task(&repo, "task-001", "Build a parser", 5).unwrap();
+        let (retro, _) = save_stats(&repo, None, None).unwrap();
+        let text = "Add a CI step that checks formatting.";
+        fs::write(
+            retro.join(PROPOSALS_JSON),
+            format!(
+                r#"{{"proposals": [{{"id": 1, "summary": "s", "reason": "r", "task": "{text}"}}]}}"#
+            ),
+        )
+        .unwrap();
+        fs::write(retro.join(RETRO_MD), "Went well.").unwrap();
+        repo.commit_all("agent wrote").unwrap();
+
+        assert_eq!(apply(&repo, &retro, &[1]).unwrap(), [1]);
+
+        let task = fs::read_to_string(repo.runs_dir().join("task-002/task.md")).unwrap();
+        assert!(task.contains(text), "{task}");
+        assert_eq!(repo.changed_files().unwrap(), Vec::<String>::new());
+        assert_eq!(list(&repo)[0].applied, [1]);
+        // Applied once only: no second task.
+        assert_eq!(apply(&repo, &retro, &[1]).unwrap(), Vec::<u32>::new());
+        assert!(!repo.runs_dir().join("task-003").exists());
     }
 }

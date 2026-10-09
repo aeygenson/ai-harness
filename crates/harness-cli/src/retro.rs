@@ -114,8 +114,8 @@ pub(crate) fn retro_show(project: &Path, number: &str) -> Result<()> {
     Ok(())
 }
 
-/// `harness retro apply <number> <ids>`: applies the chosen proposals to the
-/// skills and `harness.toml`, then commits.
+/// `harness retro apply <number> <ids>`: applies the chosen proposals (skills
+/// and `harness.toml`, or new tasks for the team), then commits.
 pub(crate) fn retro_apply(project: &Path, number: &str, ids: &[u32]) -> Result<()> {
     let repo = open_repo(project)?;
     let dir = retro_dir(&repo, number)?;
@@ -128,6 +128,7 @@ pub(crate) fn retro_apply(project: &Path, number: &str, ids: &[u32]) -> Result<(
             println!("Proposal {id} is already applied.");
         } else if let Some(proposal) = found.proposals.get(*id) {
             let file = match proposal.file_change(&harness_dir) {
+                _ if proposal.task.is_some() => " (new task; start it with harness run)",
                 FileChange::New => " (new skill file)",
                 FileChange::Changed { .. } => " (skill file changed)",
                 FileChange::Unchanged => "",

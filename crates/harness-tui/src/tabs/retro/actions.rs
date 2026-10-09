@@ -70,8 +70,12 @@ impl App {
                         (FileChange::Changed { .. }, Some(_)) => Some("retro.changed_skill"),
                         _ => None,
                     };
+                    let Some(skill) = &proposal.skill else {
+                        let _ = write!(text, "\n   {}", tr.t("retro.new_task"));
+                        continue;
+                    };
                     if let Some(key) = file {
-                        let _ = write!(text, "\n   {}", tr.f(key, &[("name", &proposal.skill)]));
+                        let _ = write!(text, "\n   {}", tr.f(key, &[("name", skill)]));
                     }
                     let roles: Vec<&str> = config
                         .as_ref()
@@ -86,7 +90,7 @@ impl App {
                             "\n   {}",
                             tr.f(
                                 "retro.given_to",
-                                &[("name", &proposal.skill), ("roles", &roles.join(", "))]
+                                &[("name", skill), ("roles", &roles.join(", "))]
                             )
                         );
                     }
@@ -131,6 +135,10 @@ impl App {
             retro.reload();
         }
         self.reload_skills(None);
+        // A task proposal creates a task: show it on the «Tasks» tab.
+        if let Some(tasks) = &mut self.tasks {
+            tasks.reload();
+        }
         Ok(())
     }
 

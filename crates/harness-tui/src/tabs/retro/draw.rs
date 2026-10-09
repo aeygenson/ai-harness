@@ -184,7 +184,10 @@ impl RetroTab {
                         "{}\n{}\n\n✓ {}\n",
                         proposal.summary,
                         proposal.reason,
-                        tr.f("retro.was_applied", &[("name", &proposal.skill)])
+                        match &proposal.skill {
+                            Some(skill) => tr.f("retro.was_applied", &[("name", skill)]),
+                            None => tr.t("retro.task_was_created").to_string(),
+                        }
                     ),
                     Some(config) => proposal.describe(&harness_dir, config),
                     None => format!("{}\n{}\n", proposal.summary, proposal.reason),
