@@ -112,6 +112,8 @@ pub fn prompt(
         );
     }
 
+    text.push_str(WHAT_TO_LOOK_FOR);
+
     let _ = write!(
         text,
         "\nYou may propose only skills: a new skill file, a new text for an existing \
@@ -121,8 +123,9 @@ pub fn prompt(
          on. Few good proposals are better than many; propose nothing if nothing is \
          needed. A skill should be short and concrete.\n\n\
          Do not change any file of the project. Write exactly two files into {out}:\n\
-         - {RETRO_MD}: a short retrospective for Lisa: what went well, what went \
-         badly, repeated problems, and ideas that are not skills.\n\
+         - {RETRO_MD}: a short retrospective for Lisa with these sections: What \
+         went well; What went badly (repeated problems first); Checks; Access to \
+         information; Other ideas. Leave a section out when you have nothing for it.\n\
          - {PROPOSALS_JSON}: your proposals, exactly in this format (JSON, these \
          fields only):\n{example}\n\
          Fields: id (1, 2, ...), summary (one line: what changes), reason (what in \
@@ -138,6 +141,24 @@ pub fn prompt(
     );
     text
 }
+
+/// What the Retrospective looks for in the history, beyond better skill texts.
+///
+/// The ideas come from the `retro` skill of mattpocock/skills (MIT): improve the
+/// roles' environment, not only their instructions. Only skills can be proposed;
+/// everything else stays advice in `retro.md` for Lisa.
+const WHAT_TO_LOOK_FOR: &str = "\nLook in the history for these, most harmful first:\n\
+- Checks: a mistake a linter, a test, a type check or a CI step could have \
+caught (for example the tester rejecting the same kind of defect twice). When a \
+mistake can be caught mechanically, describe the check under Checks in retro.md \
+instead of adding a rule to a skill.\n\
+- Lines that do nothing: a skill rule the roles follow anyway, or one that never \
+helped. Proposing a shorter text for a skill is as useful as a new skill.\n\
+- Missing information: a role guessed because it could not see something it \
+needed (a build log, test output, documentation). Describe it under Access to \
+information in retro.md.\n\
+- Navigation: a role spent long finding the right files. A short skill that \
+points to them can help.\n";
 
 pub(super) const EXAMPLE: &str = r#"{
   "proposals": [
