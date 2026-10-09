@@ -458,6 +458,9 @@ mod tests {
             "You cannot propose changes to role prompts, permissions",
             "\"list\": \"skills\"",
             "in Russian; skill files stay in English",
+            "describe the check under Checks in retro.md",
+            "Proposing a shorter text for a skill is as useful as a new skill.",
+            "Checks; Access to information; Other ideas",
         ] {
             assert!(text.contains(part), "missing {part:?} in:\n{text}");
         }
