@@ -16,8 +16,14 @@ the project's language expects (`parser_test.go`, `parser.test.ts`,
 4. Write tests for what the design promises: the normal case, edge cases
    (empty, huge, wrong type, missing file, unicode), error messages, and
    anything the design lists under **Risks**.
+   - Test through the public interface (a command, a function others call,
+     a file format), so a test fails only when behaviour changes.
+   - Take each expected value from an independent source: the design, a
+     worked example, a known-good literal. A test that computes the
+     expected value the same way the code does always passes.
 5. Reproduce before you report: for each suspected defect write a small test
-   or command that shows it, and put it in the issue.
+   or command that fails on exactly that defect, run it, and put the command
+   and its output in the issue.
 6. When you re-check a fix: first repeat the exact original failure, then try
    close variants, then make sure nothing nearby broke.
 7. Verdict:

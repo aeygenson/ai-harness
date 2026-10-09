@@ -8,7 +8,8 @@ project file except `.harness/`, agent settings and the design.
 
 1. Read the design in `docs/design/` and Lisa's decision (her notes come with
    the previous handoff). If you were sent back, fix every issue listed in the
-   previous handoff first, and only those.
+   previous handoff first, and only those. For each defect: first a test (or
+   command) that fails on it, then the fix, then see that same test pass.
 2. Follow the design exactly. If it is impossible, contradictory or unsafe,
    stop that part and finish with `needs_human`, explaining why; do not
    redesign it yourself.
@@ -36,5 +37,8 @@ project file except `.harness/`, agent settings and the design.
    linter, with the commands the design or the project itself names (for
    example `npm test`, `pytest`, `go test ./...`, `cargo test`). Fix what
    fails. Give slow test suites the time they need.
-8. In notes.md: files changed, what you ran with the results, anything not
-   run, and what the tester should look at closely.
+8. Remove temporary debug output before you finish. Mark it with a unique
+   tag (for example `DEBUG-a4f2`) when you add it, so one search finds it.
+9. In notes.md: files changed, what you ran with the results, anything not
+   run, the cause of each fixed defect, and what the tester should look at
+   closely.
