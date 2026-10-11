@@ -45,13 +45,26 @@ fn project_config(dir: &Path) -> Option<Config> {
 
 /// What the project's roles look like: only warnings, never a problem.
 fn roles_report(config: &Config) -> String {
-    let line = if independence::security_same_as_developer(&config.roles) {
-        "! Security uses the same agent and model as the Developer, so its check is less \
-         independent. Better give it another agent (harness tui, Roles tab).\n"
-    } else {
-        "✓ Security uses another agent or model than the Developer.\n"
-    };
-    let mut text = format!("\nThis project's roles:\n{line}");
+    let mut text = String::from("\nThis project's roles:\n");
+    // A role the project does not set up has nothing to compare.
+    for reviewer in independence::REVIEWERS
+        .into_iter()
+        .filter(|role| config.roles.contains_key(role))
+    {
+        if independence::same_as_developer(&config.roles, reviewer) {
+            let _ = writeln!(
+                text,
+                "! The {reviewer} uses the same agent and model as the Developer, so its \
+                 check is less independent. Better give it another agent (harness tui, \
+                 Roles tab)."
+            );
+        } else {
+            let _ = writeln!(
+                text,
+                "✓ The {reviewer} uses another agent or model than the Developer."
+            );
+        }
+    }
     for (role, settings) in &config.roles {
         let servers = trifecta::outside_servers(*role, settings, &config.mcp);
         if !servers.is_empty() {
@@ -250,8 +263,9 @@ mod tests {
     }
 
     #[test]
-    fn security_on_the_developers_agent_and_model_is_a_warning() {
+    fn reviewers_on_the_developers_agent_and_model_are_a_warning() {
         let text = "[roles.developer]\nagent = \"claude\"\n\
+                    [roles.tester]\nagent = \"claude\"\n\
                     [roles.security]\nagent = \"claude\"\n";
         let mut config = Config::parse(text).unwrap();
 
@@ -264,10 +278,21 @@ mod tests {
         let other = roles_report(&config);
 
         assert!(
-            same.contains("! Security uses the same agent and model"),
+            same.contains("! The security uses the same agent and model"),
             "{same}"
         );
-        assert!(other.contains("✓ Security uses another agent"), "{other}");
+        assert!(
+            same.contains("! The tester uses the same agent and model"),
+            "{same}"
+        );
+        assert!(
+            other.contains("✓ The security uses another agent"),
+            "{other}"
+        );
+        assert!(
+            other.contains("! The tester uses the same agent"),
+            "{other}"
+        );
     }
 
     #[test]

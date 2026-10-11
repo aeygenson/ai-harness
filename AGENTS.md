@@ -252,6 +252,10 @@ Run exactly what CI runs:
 - [ ] If `install/install.sh` changed: `bash -n install/install.sh`
 - [ ] New public items have doc comments; changed behaviour is reflected in `docs/`
 - [ ] No commented-out code, debug output or secrets
+- [ ] The `pre-pr-check` skill is done (`.agents/skills/pre-pr-check/SKILL.md`: weakened
+      checks, a mutation that a test catches, dependency changes)
+- [ ] A change to permissions, secrets, the tripwire, process stopping or a file format had
+      a `doubt-review` (`.agents/skills/doubt-review/SKILL.md`)
 
 ---
 

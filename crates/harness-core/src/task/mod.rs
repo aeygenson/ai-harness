@@ -2,7 +2,8 @@
 //!
 //! The folder holds the rest of running a task: `handoff` (what a role hands
 //! over), `routes`, `prompt`, `permissions`, `agent` (the adapter interface),
-//! `orchestrator` (the run loop) and `store` (saving tasks to disk).
+//! `orchestrator` (the run loop), `store` (saving tasks to disk), and `facts`
+//! and `weakened` (what earlier steps really changed, read from git).
 
 pub mod agent;
 pub mod facts;
@@ -14,6 +15,7 @@ pub mod prompt;
 pub mod routes;
 pub mod store;
 pub mod tripwire;
+pub mod weakened;
 
 use std::fmt;
 

@@ -9,6 +9,9 @@
 //! difference from what the handoff says is pointed out. A difference is not
 //! a reason to refuse the work (agents are often a little inaccurate), only
 //! something for the next role to look at.
+//!
+//! The same commit also shows whether a step weakened the project's checks
+//! (a skipped test, a silenced linter); see [`crate::task::weakened`].
 
 use std::fmt::Write as _;
 use std::path::Path;
@@ -16,6 +19,7 @@ use std::path::Path;
 use crate::git::{Repo, HARNESS_DIR};
 use crate::task::handoff::{FileAction, FileChange, Role};
 use crate::task::store::Step;
+use crate::task::weakened::{self, Sign, MAX_SIGNS_SHOWN};
 use crate::text;
 
 /// At most this many files are named for one step, so a step that changed
@@ -72,10 +76,7 @@ fn compare(listed: &[FileChange], changed: &[Changed]) -> Mismatch {
 /// The project files the commit of `step` changed, without the harness's own
 /// records in `.harness/`. `None` if the step has no commit yet.
 fn changed_by(repo: &Repo, step: &Step) -> Option<Vec<Changed>> {
-    let handoff = step.dir.join("handoff.json");
-    let relative = handoff.strip_prefix(repo.root()).unwrap_or(&handoff);
-    let relative = relative.to_str()?.replace('\\', "/");
-    let files = repo.files_of_commit_adding(&relative)?;
+    let files = repo.files_of_commit_adding(&handoff_path(repo, step)?)?;
     Some(
         files
             .into_iter()
@@ -85,8 +86,54 @@ fn changed_by(repo: &Repo, step: &Step) -> Option<Vec<Changed>> {
     )
 }
 
+/// The step's `handoff.json` relative to the project, with `/`: the commit
+/// that added it is the step's commit.
+fn handoff_path(repo: &Repo, step: &Step) -> Option<String> {
+    let handoff = step.dir.join("handoff.json");
+    let relative = handoff.strip_prefix(repo.root()).unwrap_or(&handoff);
+    Some(relative.to_str()?.replace('\\', "/"))
+}
+
+/// The lines about weakened checks in the step's commit, or an empty string
+/// when there are none. A diff that cannot be read is said so: "not checked"
+/// must never look the same as "nothing found".
+fn weakened_text(repo: &Repo, step: &Step) -> String {
+    let patch = handoff_path(repo, step).and_then(|path| repo.patch_of_commit_adding(&path));
+    let Some(patch) = patch else {
+        return "  Its diff could not be read, so it was not checked for weakened tests \
+                or checks.\n"
+            .to_string();
+    };
+    let signs = weakened::signs(&patch, HARNESS_DIR);
+    if signs.is_empty() {
+        return String::new();
+    }
+    let mut text = "  Signs that it may have weakened the project's checks (look at each; \
+                    it can be right, but it needs a reason):\n"
+        .to_string();
+    for sign in signs.iter().take(MAX_SIGNS_SHOWN) {
+        text.push_str(&sign_line(sign));
+    }
+    if signs.len() > MAX_SIGNS_SHOWN {
+        let _ = writeln!(text, "    and {} more", signs.len() - MAX_SIGNS_SHOWN);
+    }
+    text
+}
+
+/// `    test skipped: tests/a.rs (2 lines)\n`
+fn sign_line(sign: &Sign) -> String {
+    let lines = if sign.lines == 1 { "line" } else { "lines" };
+    format!(
+        "    {}: {} ({} {lines})\n",
+        sign.kind,
+        text::safe_line(&sign.path, MAX_PATH_CHARS),
+        sign.lines
+    )
+}
+
 /// The "facts from the harness" part of the prompt: for every AI step so
-/// far, the files its commit changed and where its handoff disagrees.
+/// far, the files its commit changed, where its handoff disagrees, and
+/// signs that it weakened the project's checks.
 /// Empty when there is no such step yet.
 pub fn text(repo: &Repo, steps: &[Step]) -> String {
     let mut text = String::new();
@@ -114,13 +161,14 @@ pub fn text(repo: &Repo, steps: &[Step]) -> String {
                 paths(&mismatch.not_changed)
             );
         }
+        text.push_str(&weakened_text(repo, step));
     }
     if text.is_empty() {
         return text;
     }
     format!(
         "Facts from the harness (taken from git; no agent wrote them). \
-         Files each earlier step really changed:\n{text}\n"
+         What each earlier step really changed:\n{text}\n"
     )
 }
 
@@ -294,13 +342,35 @@ mod tests {
         assert_eq!(
             facts,
             "Facts from the harness (taken from git; no agent wrote them). \
-             Files each earlier step really changed:\n\
+             What each earlier step really changed:\n\
              - round 1, developer: created src/app.txt, created src/backdoor.txt\n\
              \x20 Its handoff does not mention these changed files: src/backdoor.txt\n\
              \x20 Its handoff lists these files, but the step did not change them: \
              tests/app_test.txt\n\
              - round 1, developer: no commit found\n\n"
         );
+    }
+
+    #[test]
+    fn the_facts_point_at_a_test_the_step_switched_off() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = Repo::init(dir.path()).unwrap();
+        write(&repo, "tests/app.rs", "#[test]\nfn works() {}\n");
+        repo.commit_all("first").unwrap();
+        write(&repo, "tests/app.rs", "#[test]\n#[ignore]\nfn works() {}\n");
+        let developer = committed_step(
+            &repo,
+            "01-developer",
+            Role::Developer,
+            &[listed("tests/app.rs", FileAction::Modified)],
+        );
+
+        let facts = text(&repo, &[developer]);
+
+        assert!(facts.contains(
+            "  Signs that it may have weakened the project's checks (look at each; \
+             it can be right, but it needs a reason):\n    test skipped: tests/app.rs (1 line)\n"
+        ));
     }
 
     #[test]
