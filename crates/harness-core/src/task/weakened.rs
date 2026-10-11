@@ -311,7 +311,7 @@ mod tests {
     fn a_clean_change_has_no_signs() {
         let patch = file_patch("src/a.rs", &["fn a() -> u8 { 1 }"], &["fn a() -> u8 { 0 }"]);
 
-        assert!(signs(&patch, ".harness").is_empty());
+        assert_eq!(signs(&patch, ".harness"), Vec::<Sign>::new());
     }
 
     #[test]
@@ -360,14 +360,14 @@ mod tests {
         ]
         .concat();
 
-        assert!(signs(&patch, ".harness").is_empty());
+        assert_eq!(signs(&patch, ".harness"), Vec::<Sign>::new());
     }
 
     #[test]
     fn the_harness_records_are_left_out() {
         let patch = file_patch(".harness/runs/t/notes.json", &["todo!()"], &[]);
 
-        assert!(signs(&patch, ".harness").is_empty());
+        assert_eq!(signs(&patch, ".harness"), Vec::<Sign>::new());
     }
 
     #[test]
@@ -411,7 +411,7 @@ mod tests {
         ]
         .concat();
 
-        assert!(signs(&patch, ".harness").is_empty());
+        assert_eq!(signs(&patch, ".harness"), Vec::<Sign>::new());
     }
 
     #[test]
