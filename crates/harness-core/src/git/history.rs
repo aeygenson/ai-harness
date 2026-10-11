@@ -23,13 +23,7 @@ impl Repo {
     /// deleted. `None` if no commit added it. Renames count as a deleted
     /// and an added file.
     pub fn files_of_commit_adding(&self, added: &str) -> Option<Vec<(char, String)>> {
-        let commit = self
-            .git_literal(&["log", "-1", "--diff-filter=A", "--format=%H", "--", added])
-            .ok()?;
-        let commit = commit.trim();
-        if commit.is_empty() {
-            return None;
-        }
+        let commit = self.commit_adding(added)?;
         let out = self
             .git(&[
                 "show",
@@ -37,7 +31,7 @@ impl Repo {
                 "--name-status",
                 "-z",
                 "--format=",
-                commit,
+                &commit,
             ])
             .ok()?;
         // `-z` gives "status\0path\0" pairs and never quotes paths.
@@ -50,6 +44,35 @@ impl Repo {
             files.push((status.chars().next().unwrap_or('M'), path.to_string()));
         }
         Some(files)
+    }
+
+    /// The changes of the commit that added `added` as a unified diff without
+    /// context lines (`-U0`). `None` if no commit added it or git failed.
+    /// Renames count as a deleted and an added file.
+    pub fn patch_of_commit_adding(&self, added: &str) -> Option<String> {
+        let commit = self.commit_adding(added)?;
+        self.git(&[
+            "show",
+            "--no-renames",
+            // An agent could have set up its own diff program or text
+            // converter in the project's git settings; these run nothing.
+            "--no-ext-diff",
+            "--no-textconv",
+            "--no-color",
+            "--unified=0",
+            "--format=",
+            &commit,
+        ])
+        .ok()
+    }
+
+    /// The hash of the commit that added `added`, or `None`.
+    fn commit_adding(&self, added: &str) -> Option<String> {
+        let commit = self
+            .git_literal(&["log", "-1", "--diff-filter=A", "--format=%H", "--", added])
+            .ok()?;
+        let commit = commit.trim();
+        (!commit.is_empty()).then(|| commit.to_string())
     }
 
     /// The day of the last commit that changed `path` (relative to the

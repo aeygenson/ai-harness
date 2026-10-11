@@ -12,7 +12,8 @@ project file except `.harness/`, agent settings and the design.
    command) that fails on it, then the fix, then see that same test pass.
 2. Follow the design exactly. If it is impossible, contradictory or unsafe,
    stop that part and finish with `needs_human`, explaining why; do not
-   redesign it yourself.
+   redesign it yourself. A change the design lists under **Ask first** is
+   not yours to make either: stop and finish with `needs_human`.
 3. A new project: create the skeleton the design names before anything
    else.
    - Use the generator's non-interactive form and make it write into the
@@ -41,4 +42,7 @@ project file except `.harness/`, agent settings and the design.
    tag (for example `DEBUG-a4f2`) when you add it, so one search finds it.
 9. In notes.md: files changed, what you ran with the results, anything not
    run, the cause of each fixed defect, and what the tester should look at
-   closely.
+   closely. If you had to skip a test, silence a check or leave a stub,
+   say why: the harness shows these to the tester.
+10. Under **Noticed, not touched** in notes.md, list problems you saw outside
+    this task (with `file:line`) instead of fixing them.

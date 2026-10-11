@@ -209,6 +209,24 @@ fn security_on_the_developers_agent_and_model_is_warned_about() {
 }
 
 #[test]
+fn a_tester_on_the_developers_agent_and_model_is_warned_about() {
+    let env = Env::new();
+    let root = env.path("test");
+    project(&root);
+    let mut app = env.app(&root);
+    click(&mut app, "2 Roles");
+    let warning = "Developer and Tester use the same agent and model";
+
+    click(&mut app, "tester     claude");
+    let same = screen(&mut app);
+    click(&mut app, "( ) codex ");
+    let other = screen(&mut app);
+
+    assert!(same.contains(warning), "{same}");
+    assert!(!other.contains(warning), "{other}");
+}
+
+#[test]
 fn a_role_with_commands_and_an_outside_server_is_warned_about() {
     let env = Env::new();
     let root = env.path("test");

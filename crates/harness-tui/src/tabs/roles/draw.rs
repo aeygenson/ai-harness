@@ -107,24 +107,35 @@ impl RolesTab {
         }
     }
 
-    /// A warning on the Developer and Security when both use the same agent
-    /// and model (see `harness_core::config::independence`); no lines otherwise.
+    /// A warning on the Developer and on a reviewer (Tester, Security) when
+    /// the reviewer uses the same agent and model as the Developer (see
+    /// `harness_core::config::independence`); no lines otherwise.
     fn same_reviewer_warning(
         &self,
         who: Option<Role>,
         tr: &I18n,
     ) -> Vec<(Option<usize>, Line<'static>)> {
-        let shown = matches!(who, Some(Role::Developer | Role::Security))
-            && independence::security_same_as_developer(&self.roles);
-        if !shown {
-            return Vec::new();
+        let mut lines: Vec<(Option<usize>, Line<'static>)> = Vec::new();
+        for (reviewer, keys) in [
+            (
+                Role::Tester,
+                ["roles.same_tester", "roles.same_tester_hint"],
+            ),
+            (
+                Role::Security,
+                ["roles.same_reviewer", "roles.same_reviewer_hint"],
+            ),
+        ] {
+            let shown = (who == Some(Role::Developer) || who == Some(reviewer))
+                && independence::same_as_developer(&self.roles, reviewer);
+            if shown {
+                lines.extend(
+                    keys.into_iter()
+                        .map(|key| (None, Line::styled(tr.t(key).to_string(), theme::warn()))),
+                );
+                lines.push((None, Line::default()));
+            }
         }
-        let mut lines: Vec<(Option<usize>, Line<'static>)> =
-            ["roles.same_reviewer", "roles.same_reviewer_hint"]
-                .into_iter()
-                .map(|key| (None, Line::styled(tr.t(key).to_string(), theme::warn())))
-                .collect();
-        lines.push((None, Line::default()));
         lines
     }
 

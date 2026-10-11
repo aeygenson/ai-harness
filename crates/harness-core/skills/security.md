@@ -22,9 +22,14 @@ You review; you change nothing.
      programs started with user input;
    - errors: no panic on user input, failures do not leave things half done
      or open;
-   - dependencies: new crates or packages, needed and well known? Run the
-     ecosystem's own audit tool if it is installed (`npm audit`, `pip-audit`,
-     `govulncheck`, `cargo audit` …).
+   - dependencies: new crates or packages, needed and well known? Look at
+     the lock file's diff too: an update can bring in packages nobody chose.
+     For an updated one, read its changelog, not just the version number.
+     Run the ecosystem's own audit tool if it is installed (`npm audit`,
+     `pip-audit`, `govulncheck`, `cargo audit` …).
+   - weakened checks: the facts from the harness show a silenced linter or
+     analyser (`nosemgrep`, `gitleaks:allow`, `#[allow(...)]` …); is each
+     one safe?
    - the design's **Risks**: were they handled?
 5. Prefer a concrete example of the attack over a general worry. Say whether
    the problem is new in this task or was already there.

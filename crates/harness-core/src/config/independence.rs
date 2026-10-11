@@ -11,18 +11,20 @@ use std::collections::BTreeMap;
 use super::RoleConfig;
 use crate::task::handoff::Role;
 
-/// Does the Security role use the same agent and model as the Developer?
+/// The roles that check the Developer's work and should see it with other eyes.
+pub const REVIEWERS: [Role; 2] = [Role::Tester, Role::Security];
+
+/// Does `reviewer` use the same agent and model as the Developer?
 ///
 /// A missing model means "the agent's default": two defaults of one agent
 /// are the same model. When one role names a model and the other uses the
 /// default, nobody can tell, so that is not counted as the same.
-pub fn security_same_as_developer(roles: &BTreeMap<Role, RoleConfig>) -> bool {
-    let (Some(developer), Some(security)) =
-        (roles.get(&Role::Developer), roles.get(&Role::Security))
+pub fn same_as_developer(roles: &BTreeMap<Role, RoleConfig>, reviewer: Role) -> bool {
+    let (Some(developer), Some(reviewer)) = (roles.get(&Role::Developer), roles.get(&reviewer))
     else {
         return false;
     };
-    developer.agent == security.agent && developer.model == security.model
+    developer.agent == reviewer.agent && developer.model == reviewer.model
 }
 
 #[cfg(test)]
@@ -47,6 +49,18 @@ mod tests {
     }
 
     #[test]
+    fn the_tester_is_checked_like_security() {
+        let roles = BTreeMap::from([
+            (Role::Developer, role(AgentKind::Claude, None)),
+            (Role::Tester, role(AgentKind::Claude, None)),
+            (Role::Security, role(AgentKind::Codex, None)),
+        ]);
+
+        assert!(same_as_developer(&roles, Role::Tester));
+        assert!(!same_as_developer(&roles, Role::Security));
+    }
+
+    #[test]
     fn the_same_agent_and_model_is_not_independent() {
         let same = roles(
             role(AgentKind::Claude, Some("opus")),
@@ -54,8 +68,8 @@ mod tests {
         );
         let both_default = roles(role(AgentKind::Codex, None), role(AgentKind::Codex, None));
 
-        assert!(security_same_as_developer(&same));
-        assert!(security_same_as_developer(&both_default));
+        assert!(same_as_developer(&same, Role::Security));
+        assert!(same_as_developer(&both_default, Role::Security));
     }
 
     #[test]
@@ -70,9 +84,9 @@ mod tests {
             role(AgentKind::Claude, None),
         );
 
-        assert!(!security_same_as_developer(&other_agent));
-        assert!(!security_same_as_developer(&other_model));
-        assert!(!security_same_as_developer(&unknown));
-        assert!(!security_same_as_developer(&BTreeMap::new()));
+        assert!(!same_as_developer(&other_agent, Role::Security));
+        assert!(!same_as_developer(&other_model, Role::Security));
+        assert!(!same_as_developer(&unknown, Role::Security));
+        assert!(!same_as_developer(&BTreeMap::new(), Role::Security));
     }
 }

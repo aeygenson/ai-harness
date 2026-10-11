@@ -106,6 +106,12 @@ pub fn may_write(role: Role, path: &str) -> bool {
     }
 }
 
+/// Is `path` a test file: one inside a `tests` folder, or named like a
+/// test (see [`TEST_FILE_NAMES`])? These are the files the Tester may write.
+pub fn is_test_file(path: &str) -> bool {
+    may_write(Role::Tester, path)
+}
+
 /// Does the file name `name` match `pattern`, where `*` stands for any
 /// letters, also none? `*_test.*` matches `parser_test.go`.
 pub fn name_matches(pattern: &str, name: &str) -> bool {
@@ -157,6 +163,15 @@ pub fn forbidden_changes(role: Role, changed: &[String]) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_files_are_the_ones_the_tester_may_write() {
+        assert!(is_test_file("tests/parse.rs"));
+        assert!(is_test_file("web/app.test.ts"));
+        assert!(is_test_file("pkg/parse_test.go"));
+        assert!(!is_test_file("src/parse.rs"));
+        assert!(!is_test_file(".harness/tests/x.rs"));
+    }
 
     #[test]
     fn protected_paths_are_the_always_forbidden_ones_at_any_depth() {

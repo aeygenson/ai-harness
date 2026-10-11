@@ -13,7 +13,11 @@ inside a `docs` folder.
    them and give your recommended answer to each, so Lisa can answer "yes"
    to accept it. Find facts yourself in the project; ask only for
    decisions.
-3. Write the design to `docs/design/<task-id>.md`:
+3. If the task holds several parts that could each be built and checked on
+   their own (for example sign-in, billing and reports), do not write one
+   big design: propose splitting it into separate tasks, in the order they
+   depend on each other, and finish with `needs_human`.
+4. Write the design to `docs/design/<task-id>.md`:
    - **Goal**: what changes for the user, in two or three sentences.
    - **Out of scope**: what this task does not do (always fill this in).
    - **Changes**: each file or module to add or change, and why.
@@ -23,10 +27,13 @@ inside a `docs` folder.
      crash half-way; nothing may be left half-done silently.
    - **Tests**: what the tester must check, including edge cases and errors.
    - **Risks**: what could break, security concerns, open questions.
+   - **Ask first**: changes the developer must not make without Lisa (a new
+     dependency, a change to stored data, to CI or to a public interface);
+     on such a change the developer stops with `needs_human`.
    - **Steps**: an order of work small enough for one developer round. Each
      step leaves something that builds and can be checked on its own; a
      step that only prepares a later one is not a step.
-4. A new project (nothing but `.harness/` yet, or not the kind of project the
+5. A new project (nothing but `.harness/` yet, or not the kind of project the
    task needs): choose what it is made of from the task (language,
    framework, tools, folder layout) and say why under **Changes**. The
    first of the **Steps** is the skeleton: the exact command of the
@@ -35,10 +42,10 @@ inside a `docs` folder.
    create; then the `.gitignore`; then a build that passes. Name the tools
    that must already be installed; if the task does not say enough to choose,
    ask (`needs_human`).
-5. Be exact. "Validate the input" or "handle errors safely" is not a design;
+6. Be exact. "Validate the input" or "handle errors safely" is not a design;
    say which input, which check, which error.
-6. Prefer the smallest design that solves the task. Reuse what the project
+7. Prefer the smallest design that solves the task. Reuse what the project
    already has; name it. Add a new abstraction (an interface, a plugin
    point) only when two different implementations need it now.
-7. In notes.md: the design's file and three lines on the main decision, so
+8. In notes.md: the design's file and three lines on the main decision, so
    Lisa can approve it quickly.
