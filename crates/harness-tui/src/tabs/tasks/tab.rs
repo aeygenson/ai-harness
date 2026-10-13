@@ -18,7 +18,7 @@
 //! only; they start from what `harness.toml` says and `harness.toml` is not
 //! changed.
 //!
-//! «To» lists a new task (the architect starts it), Lisa's answer to one of
+//! «To» lists a new task (its workflow's first role starts it), Lisa's answer to one of
 //! the roles and approving and finishing the task; what the selected task
 //! cannot take now is grey. The roles then run in the background (see
 //! `runner`) and the live log shows what the agent prints. What is saved in
@@ -34,6 +34,7 @@ use harness_core::git::HARNESS_DIR;
 use harness_core::models::{self, ModelList};
 use harness_core::retro::usage::Usage;
 use harness_core::task::handoff::Role;
+use harness_core::task::scenario::Scenario;
 use harness_core::task::store::{self, Step};
 use harness_core::task::TaskState;
 
@@ -82,6 +83,8 @@ pub struct TasksTab {
     pub(super) root: PathBuf,
     /// `~/.harness`, where the agents' model lists are kept.
     home: Option<PathBuf>,
+    /// The project's scenario: «To» lists its roles.
+    pub(super) scenario: Scenario,
     /// What `harness.toml` says about each role.
     pub(super) settings: BTreeMap<Role, RoleConfig>,
     /// The models each agent said it has.
@@ -131,6 +134,7 @@ impl TasksTab {
         let mut tab = Self {
             root: root.to_path_buf(),
             home: home.map(Path::to_path_buf),
+            scenario: Scenario::default(),
             settings: BTreeMap::new(),
             models: BTreeMap::new(),
             tasks: Vec::new(),
@@ -189,6 +193,7 @@ impl TasksTab {
         };
         match Config::load(&harness_dir) {
             Ok(config) => {
+                self.scenario = config.scenario;
                 self.settings = config.roles.clone();
                 for (role, settings) in &config.roles {
                     self.roles.push((

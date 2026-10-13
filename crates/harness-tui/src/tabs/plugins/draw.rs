@@ -10,7 +10,6 @@ use super::catalog_draw::draw_catalog;
 use super::catalogs_draw::draw_catalogs;
 use super::tab::{PluginButton, PluginsTab};
 use crate::tabs::roles::RolesTab;
-use crate::tabs::skills::ROLES;
 use crate::tabs::tasks::draw_list;
 use crate::ui::i18n::I18n;
 use crate::ui::theme;
@@ -26,7 +25,7 @@ impl PluginsTab {
         roles: &RolesTab,
     ) {
         let busy = self.busy.as_deref();
-        let role_label = self.role().as_str();
+        let role_label = self.role(roles).as_str();
         if let Some(view) = &self.catalogs {
             draw_catalogs(view, frame, area, hits, tr, busy);
             return;
@@ -80,8 +79,8 @@ impl PluginsTab {
         tr: &I18n,
         roles: &RolesTab,
     ) {
-        let role = self.role();
-        let names: Vec<&str> = ROLES.iter().map(|r| r.as_str()).collect();
+        let role = self.role(roles);
+        let names: Vec<&str> = roles.scenario_roles().iter().map(|r| r.as_str()).collect();
         selector(
             frame,
             top,
@@ -113,7 +112,7 @@ impl PluginsTab {
         tr: &I18n,
         roles: &RolesTab,
     ) {
-        let role = self.role();
+        let role = self.role(roles);
         let dim = theme::dim();
         let red = theme::bad();
         let list = self.names(roles);
@@ -167,7 +166,7 @@ impl PluginsTab {
         tr: &I18n,
         roles: &RolesTab,
     ) {
-        let role = self.role();
+        let role = self.role(roles);
         let current = self.current(roles);
         let toggle = match &current {
             Some(name) if self.has(roles, name) => tr.f("plugins.take", &[("role", &role)]),

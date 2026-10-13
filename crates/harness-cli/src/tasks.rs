@@ -30,7 +30,13 @@ pub(crate) fn new_task(
     } else {
         orchestrator::create_task
     };
-    let (store, _) = create(&repo, task_id, description, config.max_rounds)?;
+    let (store, _) = create(
+        &repo,
+        task_id,
+        description,
+        config.scenario.default_workflow(),
+        config.max_rounds,
+    )?;
     println!(
         "Created {}. Next: harness run {task_id}",
         store.dir().display()
@@ -164,8 +170,9 @@ fn hidden_changes_text(role: Role, put_back: &[PathBuf], reported: &[PathBuf]) -
 }
 
 /// `harness approve` / `harness reject`: writes Lisa's decision as a handoff
-/// from the role `human`. Without `--to`, an approved design goes to the
-/// developer and a role that asked for help gets the task back.
+/// from the role `human`. Without `--to`, approved work goes where the task's
+/// workflow says (a design goes to the developer) and a role that asked for
+/// help gets the task back.
 pub(crate) fn decide(
     project: &Path,
     task_id: &str,
@@ -178,7 +185,9 @@ pub(crate) fn decide(
     let next = match to {
         Some(next) => next,
         None => match state.stage {
-            Stage::WaitingForHuman(WaitReason::ApproveDesign) => NextStep::To(Role::Developer),
+            Stage::WaitingForHuman(WaitReason::ApproveDesign) => {
+                NextStep::To(state.workflow.after_approval())
+            }
             Stage::WaitingForHuman(WaitReason::RoleAskedForHelp(role)) => NextStep::To(role),
             _ => bail!("say who continues with --to <role|done>"),
         },

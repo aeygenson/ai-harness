@@ -1,8 +1,8 @@
 //! The state of one task and the rules for moving it forward (the state machine).
 //!
 //! The folder holds the rest of running a task: `handoff` (what a role hands
-//! over), `routes`, `prompt`, `permissions`, `agent` (the adapter interface),
-//! `orchestrator` (the run loop), `store` (saving tasks to disk), and `facts`
+//! over), `scenario` (the kind of project and the task's workflow), `routes`,
+//! `prompt`, `permissions`, `agent` (the adapter interface), `orchestrator` (the run loop), `store` (saving tasks to disk), and `facts`
 //! and `weakened` (what earlier steps really changed, read from git).
 
 pub mod agent;
@@ -13,6 +13,7 @@ pub mod orchestrator;
 pub mod permissions;
 pub mod prompt;
 pub mod routes;
+pub mod scenario;
 pub mod store;
 pub mod tripwire;
 pub mod weakened;
@@ -22,6 +23,7 @@ use std::fmt;
 use serde::{Deserialize, Serialize};
 
 use crate::task::handoff::{Handoff, NextStep, Role, Verdict, SCHEMA_VERSION};
+use crate::task::scenario::Workflow;
 
 /// Default limit on how many rounds a task may take before Lisa must step in.
 pub const DEFAULT_MAX_ROUNDS: u32 = 5;
@@ -55,6 +57,10 @@ pub enum Stage {
 pub struct TaskState {
     /// The task's id and folder name, for example `task-001`.
     pub task_id: String,
+    /// The path the task takes through the roles; a task saved before
+    /// workflows existed has none in `state.json` and reads as `task`.
+    #[serde(default)]
+    pub workflow: Workflow,
     /// The current round, starting at 1; each rejected handoff adds one.
     pub round: u32,
     /// After this many rounds the task stops and waits for Lisa.
@@ -156,13 +162,14 @@ impl fmt::Display for TransitionError {
 impl std::error::Error for TransitionError {}
 
 impl TaskState {
-    /// A new task always starts with the architect in round 1.
-    pub fn new(task_id: impl Into<String>, max_rounds: u32) -> Self {
+    /// A new task starts in round 1 with the first role of its workflow.
+    pub fn new(task_id: impl Into<String>, workflow: Workflow, max_rounds: u32) -> Self {
         Self {
             task_id: task_id.into(),
+            workflow,
             round: 1,
             max_rounds,
-            stage: Stage::Working(Role::Architect),
+            stage: Stage::Working(workflow.start()),
         }
     }
 
@@ -209,7 +216,12 @@ impl TaskState {
         if handoff.verdict == Verdict::Rejected && handoff.issues.is_empty() {
             return Err(TransitionError::RejectedWithoutIssues);
         }
-        if !routes::is_allowed(handoff.role, handoff.verdict, handoff.next_role) {
+        if !routes::is_allowed(
+            self.workflow,
+            handoff.role,
+            handoff.verdict,
+            handoff.next_role,
+        ) {
             return Err(TransitionError::RouteNotAllowed {
                 role: handoff.role,
                 verdict: handoff.verdict,
@@ -269,7 +281,7 @@ mod tests {
     }
 
     fn new_task() -> TaskState {
-        TaskState::new("task-001", DEFAULT_MAX_ROUNDS)
+        TaskState::new("task-001", Workflow::Task, DEFAULT_MAX_ROUNDS)
     }
 
     #[test]
@@ -288,6 +300,26 @@ mod tests {
         }
         assert_eq!(task.stage, Stage::Done);
         assert_eq!(task.round, 1);
+    }
+
+    #[test]
+    fn a_new_task_starts_with_the_first_role_of_its_workflow() {
+        let task = new_task();
+        assert_eq!(task.workflow, Workflow::Task);
+        assert_eq!(task.stage, Stage::Working(Workflow::Task.start()));
+    }
+
+    #[test]
+    fn a_state_saved_before_workflows_reads_as_the_task_workflow() {
+        // Arrange: a state.json as older versions wrote it, without `workflow`.
+        let mut old = serde_json::to_value(new_task()).unwrap();
+        old.as_object_mut().unwrap().remove("workflow").unwrap();
+
+        // Act
+        let state: TaskState = serde_json::from_value(old).unwrap();
+
+        // Assert
+        assert_eq!(state, new_task());
     }
 
     #[test]

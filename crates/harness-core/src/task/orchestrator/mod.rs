@@ -283,6 +283,7 @@ mod tests {
     use std::fs;
 
     use super::*;
+    use crate::task::scenario::Workflow;
 
     #[test]
     fn only_the_most_exact_oversized_path_is_named() {
@@ -339,10 +340,24 @@ mod tests {
     fn the_same_text_does_not_make_a_second_unfinished_task() {
         let dir = tempfile::tempdir().unwrap();
         let repo = Repo::init(dir.path()).unwrap();
-        create_task(&repo, "task-001", "Fix the demo:\n  two defects.", 5).unwrap();
+        create_task(
+            &repo,
+            "task-001",
+            "Fix the demo:\n  two defects.",
+            Workflow::Task,
+            5,
+        )
+        .unwrap();
 
         // A copy that differs only in spaces and line breaks is the same task.
-        let error = create_task(&repo, "task-002", "Fix the demo: two defects.\n", 5).unwrap_err();
+        let error = create_task(
+            &repo,
+            "task-002",
+            "Fix the demo: two defects.\n",
+            Workflow::Task,
+            5,
+        )
+        .unwrap_err();
         assert!(
             matches!(&error, RunError::SameTask { task, .. } if task == "task-001"),
             "{error:?}"
@@ -354,8 +369,22 @@ mod tests {
         assert!(!repo.runs_dir().join("task-002").exists());
 
         // Another text is a new task; on purpose, the same text too.
-        create_task(&repo, "task-002", "Fix the demo: one defect.", 5).unwrap();
-        create_task_anyway(&repo, "task-003", "Fix the demo: two defects.", 5).unwrap();
+        create_task(
+            &repo,
+            "task-002",
+            "Fix the demo: one defect.",
+            Workflow::Task,
+            5,
+        )
+        .unwrap();
+        create_task_anyway(
+            &repo,
+            "task-003",
+            "Fix the demo: two defects.",
+            Workflow::Task,
+            5,
+        )
+        .unwrap();
 
         // A finished task may be given again.
         let runs = repo.runs_dir();
@@ -370,6 +399,13 @@ mod tests {
             same_task(&runs, "Fix the demo: two defects.").unwrap(),
             None
         );
-        create_task(&repo, "task-004", "Fix the demo: two defects.", 5).unwrap();
+        create_task(
+            &repo,
+            "task-004",
+            "Fix the demo: two defects.",
+            Workflow::Task,
+            5,
+        )
+        .unwrap();
     }
 }

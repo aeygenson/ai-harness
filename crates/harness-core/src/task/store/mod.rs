@@ -30,6 +30,7 @@ use std::path::{Path, PathBuf};
 
 use crate::task::handoff::{Handoff, Role};
 use crate::task::manifest::{Manifest, MANIFEST_FILE};
+use crate::task::scenario::Workflow;
 use crate::task::{TaskState, TransitionError};
 use files::{
     create_dir, io_error, read_handoff, read_json, read_notes, sorted_subdirs, to_json,
@@ -103,11 +104,12 @@ pub struct TaskStore {
 }
 
 impl TaskStore {
-    /// Creates the folder for a new task and saves its first state.
+    /// Creates the folder for a new task that follows `workflow` and saves its first state.
     pub fn create(
         runs_dir: &Path,
         task_id: &str,
         description: &str,
+        workflow: Workflow,
         max_rounds: u32,
     ) -> Result<(Self, TaskState), StoreError> {
         check_task_id(task_id)?;
@@ -118,7 +120,7 @@ impl TaskStore {
         create_dir(&dir)?;
 
         let store = Self { dir };
-        let state = TaskState::new(task_id, max_rounds);
+        let state = TaskState::new(task_id, workflow, max_rounds);
         write_new(&store.dir.join(TASK_FILE), description)?;
         store.save_state(&state)?;
         Ok((store, state))
@@ -325,7 +327,14 @@ mod tests {
     }
 
     fn new_task(runs: &Path) -> (TaskStore, TaskState) {
-        TaskStore::create(runs, "task-001", "Build a parser", DEFAULT_MAX_ROUNDS).unwrap()
+        TaskStore::create(
+            runs,
+            "task-001",
+            "Build a parser",
+            Workflow::Task,
+            DEFAULT_MAX_ROUNDS,
+        )
+        .unwrap()
     }
 
     #[test]
@@ -341,7 +350,8 @@ mod tests {
     fn cannot_create_the_same_task_twice() {
         let runs = tempfile::tempdir().unwrap();
         new_task(runs.path());
-        let err = TaskStore::create(runs.path(), "task-001", "again", 5).unwrap_err();
+        let err =
+            TaskStore::create(runs.path(), "task-001", "again", Workflow::Task, 5).unwrap_err();
         assert!(matches!(err, StoreError::TaskExists(_)));
     }
 
@@ -349,7 +359,7 @@ mod tests {
     fn refuses_unsafe_task_ids() {
         let runs = tempfile::tempdir().unwrap();
         for bad in ["", "../escape", "Task 1", "a/b"] {
-            let err = TaskStore::create(runs.path(), bad, "x", 5).unwrap_err();
+            let err = TaskStore::create(runs.path(), bad, "x", Workflow::Task, 5).unwrap_err();
             assert!(matches!(err, StoreError::InvalidTaskId(_)), "{bad:?}");
         }
     }
@@ -402,8 +412,8 @@ mod tests {
         let runs = tempfile::tempdir().unwrap();
         assert_eq!(next_task_id(runs.path()).unwrap(), "task-001");
         new_task(runs.path());
-        TaskStore::create(runs.path(), "task-009", "x", 5).unwrap();
-        TaskStore::create(runs.path(), "csv-parser", "x", 5).unwrap();
+        TaskStore::create(runs.path(), "task-009", "x", Workflow::Task, 5).unwrap();
+        TaskStore::create(runs.path(), "csv-parser", "x", Workflow::Task, 5).unwrap();
         assert_eq!(next_task_id(runs.path()).unwrap(), "task-010");
     }
 
@@ -415,7 +425,7 @@ mod tests {
             Vec::<String>::new()
         );
         let (store, _) = new_task(runs.path());
-        TaskStore::create(runs.path(), "task-002", "x", 5).unwrap();
+        TaskStore::create(runs.path(), "task-002", "x", Workflow::Task, 5).unwrap();
         fs::create_dir(runs.path().join("not-a-task")).unwrap();
         assert_eq!(task_ids(runs.path()).unwrap(), ["task-001", "task-002"]);
 

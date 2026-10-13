@@ -8,7 +8,7 @@ use ratatui::Frame;
 
 use harness_core::skills::{self, LibrarySkill, Source};
 
-use super::tab::{Row, SkillButton, SkillsTab, AGENT_NOTE, ROLES};
+use super::tab::{Row, SkillButton, SkillsTab, AGENT_NOTE};
 use crate::tabs::roles::RolesTab;
 use crate::ui::i18n::I18n;
 use crate::ui::theme;
@@ -53,7 +53,7 @@ impl SkillsTab {
         ])
         .areas(area);
 
-        let names: Vec<&str> = ROLES.iter().map(|r| r.as_str()).collect();
+        let names: Vec<&str> = self.roles().iter().map(|r| r.as_str()).collect();
         selector(
             frame,
             top,

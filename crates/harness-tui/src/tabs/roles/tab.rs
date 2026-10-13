@@ -21,15 +21,6 @@ use harness_core::models::{self, ModelList};
 use harness_core::skills;
 use harness_core::task::handoff::Role;
 
-/// The roles in the list, `None` is `[retro]`.
-pub const WHO: [Option<Role>; 5] = [
-    Some(Role::Architect),
-    Some(Role::Developer),
-    Some(Role::Tester),
-    Some(Role::Security),
-    None,
-];
-
 /// A line of the details that can be clicked or chosen with Enter.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Row {
@@ -174,8 +165,20 @@ impl RolesTab {
         self.roles != self.saved.roles || self.retro != self.saved.retro
     }
 
+    /// The AI roles of the project's scenario, in the order of the flow.
+    pub fn scenario_roles(&self) -> &'static [Role] {
+        self.saved.scenario.roles()
+    }
+
+    /// The rows of the list: the scenario's roles, then `None` for `[retro]`.
+    pub(super) fn list(&self) -> Vec<Option<Role>> {
+        let roles = self.scenario_roles().iter().copied().map(Some);
+        roles.chain([None]).collect()
+    }
+
     pub(super) fn who(&self) -> Option<Role> {
-        WHO[self.selected.min(WHO.len() - 1)]
+        let list = self.list();
+        list[self.selected.min(list.len() - 1)]
     }
 
     /// The agent and model of the selected role or of `[retro]`.

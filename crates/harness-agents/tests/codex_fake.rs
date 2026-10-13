@@ -8,6 +8,7 @@ use harness_agents::Codex;
 use harness_core::git::Repo;
 use harness_core::task::handoff::Role;
 use harness_core::task::orchestrator::{self, create_task, StopReason};
+use harness_core::task::scenario::Workflow;
 use harness_core::task::store::TaskStore;
 use harness_core::task::{TaskState, WaitReason, DEFAULT_MAX_ROUNDS};
 use tempfile::TempDir;
@@ -49,7 +50,14 @@ fn fake_codex(dir: &Path, script: &str) -> PathBuf {
 }
 
 fn new_task(repo: &Repo) -> (TaskStore, TaskState) {
-    create_task(repo, "task-001", "Design a parser", DEFAULT_MAX_ROUNDS).unwrap()
+    create_task(
+        repo,
+        "task-001",
+        "Design a parser",
+        Workflow::Task,
+        DEFAULT_MAX_ROUNDS,
+    )
+    .unwrap()
 }
 
 #[tokio::test]

@@ -8,7 +8,6 @@ use harness_core::plugins::{self};
 
 use super::tab::PluginsTab;
 use crate::tabs::roles::RolesTab;
-use crate::tabs::skills::ROLES;
 use crate::ui::i18n::I18n;
 use crate::ui::theme;
 
@@ -45,7 +44,7 @@ impl PluginsTab {
             } else {
                 "plugins.agent_has_none_long"
             };
-            let why = tr.f(key, &[("role", &self.role()), ("agent", &agent_name)]);
+            let why = tr.f(key, &[("role", &self.role(roles)), ("agent", &agent_name)]);
             lines.push(Line::styled(why, dim));
         }
         let from = match (&plugin.source, &plugin.commit) {
@@ -65,7 +64,8 @@ impl PluginsTab {
         lines.extend(self.contents_lines(name, plugin, tr));
 
         lines.push(Line::default());
-        let users: Vec<&str> = ROLES
+        let users: Vec<&str> = roles
+            .scenario_roles()
             .iter()
             .filter(|r| {
                 roles

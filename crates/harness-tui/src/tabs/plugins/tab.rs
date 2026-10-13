@@ -31,12 +31,11 @@ use harness_core::task::handoff::Role;
 
 use crate::tabs::plugins::catalog::{CatalogView, CatalogsView, Unusable};
 use crate::tabs::roles::RolesTab;
-use crate::tabs::skills::ROLES;
 
 /// A button of the Plugins tab's plugin list, clicked or chosen with a key.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PluginButton {
-    /// A role of the selector, an index into `ROLES`.
+    /// A role of the selector, an index into the scenario's roles.
     Role(usize),
     /// Give the selected plugin to the role, or take it away.
     Toggle,
@@ -112,7 +111,7 @@ pub enum Action {
 #[derive(Debug)]
 pub struct PluginsTab {
     root: PathBuf,
-    /// The role chosen at the top, an index into `ROLES`.
+    /// The role chosen at the top, an index into the scenario's roles.
     pub(crate) role: usize,
     /// The selected plugin of the list.
     pub(crate) row: usize,
@@ -160,13 +159,17 @@ impl PluginsTab {
         self.root.join(plugins::relative_path(name, plugin))
     }
 
-    pub fn role(&self) -> Role {
-        ROLES[self.role.min(ROLES.len() - 1)]
+    /// The selected role of the selector, one of the scenario's roles.
+    pub fn role(&self, roles: &RolesTab) -> Role {
+        let list = roles.scenario_roles();
+        list[self.role.min(list.len() - 1)]
     }
 
     /// The agent the role runs on, if the role is set up.
     pub(super) fn agent(&self, roles: &RolesTab) -> Option<AgentKind> {
-        roles.settings(self.role()).map(|settings| settings.agent)
+        roles
+            .settings(self.role(roles))
+            .map(|settings| settings.agent)
     }
 
     /// The plugins in the list: those for the role's agent, those the role
@@ -174,7 +177,7 @@ impl PluginsTab {
     pub fn names(&self, roles: &RolesTab) -> Vec<String> {
         let agent = self.agent(roles);
         let listed = roles
-            .settings(self.role())
+            .settings(self.role(roles))
             .map_or(&[][..], |s| s.plugins.as_slice());
         let mut names: Vec<String> = roles
             .plugins()
@@ -204,8 +207,8 @@ impl PluginsTab {
         self.names(roles).get(self.at(roles)).cloned()
     }
 
-    pub fn choose_role(&mut self, index: usize) {
-        if index < ROLES.len() && index != self.role {
+    pub fn choose_role(&mut self, index: usize, roles: &RolesTab) {
+        if index < roles.scenario_roles().len() && index != self.role {
             self.role = index;
             // The list is in another order for another agent.
             self.row = 0;
@@ -229,7 +232,7 @@ impl PluginsTab {
 
     pub(super) fn has(&self, roles: &RolesTab, name: &str) -> bool {
         roles
-            .settings(self.role())
+            .settings(self.role(roles))
             .is_some_and(|s| s.plugins.iter().any(|n| n == name))
     }
 

@@ -354,6 +354,7 @@ mod tests {
     use crate::config::Config;
     use crate::task::handoff::Issue;
     use crate::task::handoff::{NextStep, Verdict};
+    use crate::task::scenario::Workflow;
 
     fn handoff(role: Role, verdict: Verdict, next: NextStep) -> Handoff {
         Handoff {
@@ -382,6 +383,7 @@ mod tests {
         TaskHistory {
             state: TaskState {
                 task_id: id.into(),
+                workflow: Workflow::Task,
                 round: 2,
                 max_rounds: 5,
                 stage,
@@ -586,7 +588,8 @@ mod tests {
         let harness = project.path();
         let runs = harness.join("runs");
         fs::create_dir(&runs).unwrap();
-        let (store, mut state) = TaskStore::create(&runs, "task-001", "x", 5).unwrap();
+        let (store, mut state) =
+            TaskStore::create(&runs, "task-001", "x", Workflow::Task, 5).unwrap();
         let design = Handoff {
             task_id: "task-001".into(),
             ..handoff(

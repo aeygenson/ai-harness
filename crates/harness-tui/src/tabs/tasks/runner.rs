@@ -235,8 +235,14 @@ fn work(job: Job, events: &Sender<Event>, stop: oneshot::Receiver<()>) -> Result
     let (store, mut state) = match request {
         Request::New(description) => {
             let id = next_task_id(&runs).map_err(|e| text(&e))?;
-            orchestrator::create_task(&repo, &id, &description, config.max_rounds)
-                .map_err(|e| text(&e))?
+            orchestrator::create_task(
+                &repo,
+                &id,
+                &description,
+                config.scenario.default_workflow(),
+                config.max_rounds,
+            )
+            .map_err(|e| text(&e))?
         }
         Request::Decide {
             task,

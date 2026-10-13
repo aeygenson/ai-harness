@@ -7,4 +7,4 @@ mod actions;
 mod draw;
 mod tab;
 
-pub(crate) use tab::{Action, SkillButton, SkillsTab, ROLES};
+pub(crate) use tab::{Action, SkillButton, SkillsTab};

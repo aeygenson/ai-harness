@@ -10,7 +10,7 @@ use crate::tabs::roles::RolesTab;
 impl McpTab {
     /// Can the role get the selected server now? `Err` says why not.
     pub(super) fn can_give(&self, roles: &RolesTab, name: &str) -> Result<(), &'static str> {
-        let settings = roles.settings(self.role()).ok_or("mcp.no_role")?;
+        let settings = roles.settings(self.role(roles)).ok_or("mcp.no_role")?;
         let on = settings.mcp.iter().any(|n| n == name);
         match roles.servers().get(name) {
             // A server the role has can always be taken away.
@@ -28,7 +28,7 @@ impl McpTab {
             return Ok(());
         };
         self.can_give(roles, &name)?;
-        roles.toggle_mcp(self.role(), &name);
+        roles.toggle_mcp(self.role(roles), &name);
         Ok(())
     }
 
@@ -36,8 +36,10 @@ impl McpTab {
         match key {
             KeyCode::Up | KeyCode::Char('k') => self.move_by(-1, roles),
             KeyCode::Down | KeyCode::Char('j') => self.move_by(1, roles),
-            KeyCode::Left | KeyCode::Char('h') => self.choose_role(self.role.saturating_sub(1)),
-            KeyCode::Right | KeyCode::Char('l') => self.choose_role(self.role + 1),
+            KeyCode::Left | KeyCode::Char('h') => {
+                self.choose_role(self.role.saturating_sub(1), roles);
+            }
+            KeyCode::Right | KeyCode::Char('l') => self.choose_role(self.role + 1, roles),
             KeyCode::Char('n') => return self.press(McpButton::New, roles),
             KeyCode::Char('f') => return self.open_catalog(),
             KeyCode::Char('i') => return self.press(McpButton::SignIn, roles),
@@ -54,7 +56,7 @@ impl McpTab {
         let current = self.current(roles);
         match id {
             McpButton::Role(index) => {
-                self.choose_role(index);
+                self.choose_role(index, roles);
                 Action::None
             }
             McpButton::New => Action::New,

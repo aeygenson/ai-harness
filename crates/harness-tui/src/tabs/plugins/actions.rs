@@ -150,7 +150,7 @@ impl App {
     /// by itself.
     fn open_plugin_catalog(&mut self) {
         let agent = match (&self.plugins, &self.roles) {
-            (Some(plugins), Some(roles)) => roles.settings(plugins.role()).map(|s| s.agent),
+            (Some(plugins), Some(roles)) => roles.settings(plugins.role(roles)).map(|s| s.agent),
             _ => return,
         };
         let view = catalog::CatalogView::load(self.home.as_deref(), agent);
@@ -192,12 +192,15 @@ impl App {
         if self.roles_unsaved() {
             return;
         }
-        let (Some(root), Some(home), Some(plugins)) =
-            (self.project.clone(), self.home.clone(), &self.plugins)
-        else {
+        let (Some(root), Some(home), Some(plugins), Some(roles)) = (
+            self.project.clone(),
+            self.home.clone(),
+            &self.plugins,
+            &self.roles,
+        ) else {
             return;
         };
-        let give = give.then(|| plugins.role());
+        let give = give.then(|| plugins.role(roles));
         let name = entry.name.clone();
         let label = self.tr.f("plugins.adding", &[("name", &name)]);
         self.start_plugin_job(label, move || {

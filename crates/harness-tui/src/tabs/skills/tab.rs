@@ -32,14 +32,7 @@ use harness_core::config::{AgentKind, Config};
 use harness_core::git::HARNESS_DIR;
 use harness_core::skills::{self, LibrarySkill, Source};
 use harness_core::task::handoff::Role;
-
-/// The roles the selector offers, in the order of the flow.
-pub const ROLES: [Role; 4] = [
-    Role::Architect,
-    Role::Developer,
-    Role::Tester,
-    Role::Security,
-];
+use harness_core::task::scenario::Scenario;
 
 /// How the names of the agents' notes start.
 pub(super) const AGENT_NOTE: &str = "agent-";
@@ -47,7 +40,7 @@ pub(super) const AGENT_NOTE: &str = "agent-";
 /// A button of the Skills tab, clicked or chosen with a key.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SkillButton {
-    /// A role of the selector, an index into `ROLES`.
+    /// A role of the selector, an index into the scenario's roles.
     Role(usize),
     Edit,
     New,
@@ -80,8 +73,10 @@ pub(super) enum Row {
 #[derive(Debug)]
 pub struct SkillsTab {
     root: PathBuf,
-    /// The role chosen at the top, an index into `ROLES`.
+    /// The role chosen at the top, an index into the scenario's roles.
     pub(crate) role: usize,
+    /// The project's scenario: its roles are the selector's.
+    scenario: Scenario,
     pub(super) library: Vec<LibrarySkill>,
     /// Each role's agent.
     pub(super) roles: BTreeMap<Role, AgentKind>,
@@ -96,6 +91,7 @@ impl SkillsTab {
         let mut tab = Self {
             root: root.to_path_buf(),
             role: 0,
+            scenario: Scenario::default(),
             library: Vec::new(),
             roles: BTreeMap::new(),
             row: 1,
@@ -115,6 +111,7 @@ impl SkillsTab {
         self.problem = None;
         match Config::load(&harness_dir) {
             Ok(config) => {
+                self.scenario = config.scenario;
                 for (role, settings) in config.roles {
                     self.roles.insert(role, settings.agent);
                 }
@@ -124,8 +121,14 @@ impl SkillsTab {
         self.select_named(keep.as_deref());
     }
 
+    /// The roles the selector offers: the scenario's, in the order of the flow.
+    pub(super) fn roles(&self) -> &'static [Role] {
+        self.scenario.roles()
+    }
+
     pub(super) fn role(&self) -> Role {
-        ROLES[self.role.min(ROLES.len() - 1)]
+        let roles = self.roles();
+        roles[self.role.min(roles.len() - 1)]
     }
 
     /// The agent of the chosen role, `claude` if harness.toml has no such role.
@@ -180,7 +183,7 @@ impl SkillsTab {
 
     /// Chooses the role at `index` of the selector.
     pub fn choose_role(&mut self, index: usize) {
-        if index < ROLES.len() && index != self.role {
+        if index < self.roles().len() && index != self.role {
             let keep = self.current().map(|s| s.name.clone());
             self.role = index;
             // The role's own skill follows the role; another skill stays.
