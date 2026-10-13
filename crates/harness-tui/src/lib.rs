@@ -203,8 +203,14 @@ pub fn run(start: &Path) -> Result<()> {
     // A pasted text arrives as one event, so its line breaks do not send it.
     execute!(io::stdout(), EnableMouseCapture, EnableBracketedPaste)?;
     let result = app::terminal::event_loop(&mut terminal, &mut app, &stop);
+    // Stop the agents first (dropping the app does that). When the terminal
+    // window is gone, giving the terminal back below fails, and ratatui then
+    // panics while printing the error to the closed window: a running agent
+    // must not depend on that going well.
+    drop(app);
     let _ = execute!(io::stdout(), DisableMouseCapture, DisableBracketedPaste);
-    ratatui::restore();
+    // `try_restore` returns the error instead of printing it like `restore`.
+    let _ = ratatui::try_restore();
     result
 }
 

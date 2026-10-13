@@ -8,6 +8,11 @@ edition = "2021"
 [dependencies]
 tokio = { version = "1", features = ["signal", "macros", "rt"] }
 
+# Only for noticing a closed terminal (see `input`) without `unsafe`: its safe
+# `poll`. crossterm already brings this crate in, so it adds nothing new.
+[target.'cfg(unix)'.dependencies]
+rustix = { version = "1.1", features = ["event"] }
+
 # Only for reading a secret on Windows, which has no `stty`.
 [target.'cfg(windows)'.dependencies]
 crossterm = "0.29"

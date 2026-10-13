@@ -9,6 +9,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::{bail, Result};
 use harness_platform::editor;
+use harness_platform::input::{self, Input};
 use harness_platform::stop::StopSignals;
 use ratatui::crossterm::cursor::Hide;
 use ratatui::crossterm::event::{
@@ -25,6 +26,10 @@ use crate::App;
 
 /// How often the open project is read again.
 const RELOAD_EVERY: Duration = Duration::from_secs(3);
+
+/// How long one turn of the loop waits for a key before it ticks (the
+/// spinner, a finished agent): short enough that the screen looks alive.
+const WAIT_FOR_INPUT: Duration = Duration::from_millis(250);
 
 /// Stops with a clear error when the terminal has no size (0x0).
 ///
@@ -74,8 +79,8 @@ pub(crate) fn watch_stop_signals() -> io::Result<Arc<AtomicBool>> {
     Ok(stop)
 }
 
-/// Draws the app and hands it every key, click and paste until Lisa quits or
-/// `stop` is set (see [`watch_stop_signals`]).
+/// Draws the app and hands it every key, click and paste until Lisa quits,
+/// `stop` is set (see [`watch_stop_signals`]) or the terminal is closed.
 pub(crate) fn event_loop(
     terminal: &mut DefaultTerminal,
     app: &mut App,
@@ -84,12 +89,21 @@ pub(crate) fn event_loop(
     let mut loaded = Instant::now();
     while !app.quit && !stop.load(Ordering::SeqCst) {
         terminal.draw(|frame| app.draw(frame))?;
-        if event::poll(Duration::from_millis(250))? {
-            match event::read()? {
-                Event::Key(key) if key.kind == KeyEventKind::Press => app.on_key(key),
-                Event::Mouse(mouse) => app.on_mouse(mouse),
-                Event::Paste(text) => app.on_paste(&text),
-                _ => {}
+        match input::wait_for_input(WAIT_FOR_INPUT)? {
+            // The window is gone: end like a stop signal, which stops the agent.
+            Input::Closed => break,
+            Input::Nothing => {}
+            // One read may bring several events (a paste, fast typing); crossterm
+            // keeps the extra ones, so take everything it has before drawing.
+            Input::Ready => {
+                while event::poll(Duration::ZERO)? {
+                    handle(app, event::read()?);
+                }
+            }
+            Input::Unwatched => {
+                if event::poll(WAIT_FOR_INPUT)? {
+                    handle(app, event::read()?);
+                }
             }
         }
         app.tick();
@@ -110,6 +124,16 @@ pub(crate) fn event_loop(
         }
     }
     Ok(())
+}
+
+/// Hands one key, click or paste to the app.
+fn handle(app: &mut App, event: Event) {
+    match event {
+        Event::Key(key) if key.kind == KeyEventKind::Press => app.on_key(key),
+        Event::Mouse(mouse) => app.on_mouse(mouse),
+        Event::Paste(text) => app.on_paste(&text),
+        _ => {}
+    }
 }
 
 /// Gives the terminal to the editor and takes it back when the editor is closed.
