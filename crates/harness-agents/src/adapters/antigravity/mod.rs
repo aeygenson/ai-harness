@@ -319,6 +319,8 @@ mod tests {
         assert_eq!(deny(Role::Developer), commands(&for_all));
         assert_eq!(deny(Role::Tester), commands(&for_all));
         assert_eq!(deny(Role::Security), commands(&readers));
+        // Lisa is never run as an agent; if she were, she would be a reader.
+        assert_eq!(deny(Role::Human), commands(&readers));
     }
 
     #[test]

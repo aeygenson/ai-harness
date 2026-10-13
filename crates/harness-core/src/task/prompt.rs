@@ -11,7 +11,7 @@ use std::path::Path;
 
 use crate::skills::RoleSkills;
 use crate::task::handoff::{FileAction, FileChange, Handoff, NextStep, Role, Verdict};
-use crate::task::permissions::{self, WriteRule};
+use crate::task::permissions::WriteRule;
 use crate::task::routes;
 use crate::task::TaskState;
 
@@ -100,7 +100,7 @@ fn previous_text(previous: &Handoff) -> String {
 
 /// What the role may change in the project, as one line of the prompt.
 fn write_rule_text(role: Role) -> String {
-    match permissions::rule_for(role) {
+    match role.spec().writes {
         WriteRule::Anything => {
             "You may change any project file except .harness/ and agent settings.\n".to_string()
         }

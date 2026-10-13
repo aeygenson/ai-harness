@@ -231,9 +231,9 @@ fn toml_value(value: impl Into<serde_json::Value>) -> String {
 }
 
 /// Roles that run commands such as `cargo test` or `cargo audit` may need to
-/// download crates. The Architect only reads and writes documents.
+/// download packages; see [`Role::spec`].
 fn needs_network(role: Role) -> bool {
-    matches!(role, Role::Developer | Role::Tester | Role::Security)
+    role.spec().network
 }
 
 /// How the turn ended, from `--json` output: `{"type":"turn.completed",...}` or

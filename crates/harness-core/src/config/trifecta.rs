@@ -18,6 +18,7 @@ use std::collections::BTreeMap;
 use super::{McpConfig, RoleConfig};
 use crate::mcp::SECRET_PREFIX;
 use crate::task::handoff::Role;
+use crate::task::permissions::Commands;
 
 /// The MCP servers of `role` that talk to the outside, when the role also
 /// runs commands; empty when there is nothing to warn about.
@@ -39,15 +40,12 @@ pub fn outside_servers(
         .collect()
 }
 
-/// Does the role run commands, with the network on? This mirrors the
-/// agents' adapters. Security counts too: Claude Code lets it run only a
-/// list of scanners, but Codex and the others give it a whole shell. The
-/// Architect only reads and writes documents.
+/// Does the role run commands? A role limited to checks counts too: Claude
+/// Code lets it run only a list of scanners, but Codex and the others give
+/// it a whole shell. A role without commands (the Architect) is not counted,
+/// as before, although only Claude Code takes its shell away.
 fn runs_commands(role: Role) -> bool {
-    match role {
-        Role::Developer | Role::Tester | Role::Security => true,
-        Role::Architect | Role::Human => false,
-    }
+    role.spec().commands != Commands::Nothing
 }
 
 /// Does the server reach the outside world? A server on the web does, and

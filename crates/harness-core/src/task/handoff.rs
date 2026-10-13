@@ -20,6 +20,8 @@ pub const MAX_TEXT_CHARS: usize = 4000;
 pub const MAX_NAME_CHARS: usize = 500;
 
 /// Who wrote a handoff: one of the four AI roles, or Lisa's own decision.
+///
+/// What each role may do is [`Role::spec`] (in `task::permissions`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Role {

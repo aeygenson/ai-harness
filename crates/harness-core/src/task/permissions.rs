@@ -1,8 +1,9 @@
-//! Which files each role may change. The harness checks this with `git status`
-//! after every role, so a rule holds even if an agent ignores its prompt.
+//! What each role may do: which files it may change, which commands it may
+//! run and whether it reaches the network ([`Role::spec`]). The harness checks
+//! the files with `git status` after every role, so that rule holds even if
+//! an agent ignores its prompt.
 //!
-//! These are the defaults from docs/design.md (section 3). Later a project will be
-//! able to change them in `.harness/harness.toml`.
+//! These are the rights from docs/design.md (section 3).
 
 use crate::task::handoff::Role;
 
@@ -60,21 +61,75 @@ pub enum WriteRule {
     Nothing,
 }
 
-/// What `role` may write; the same rule for every agent.
-pub fn rule_for(role: Role) -> WriteRule {
-    match role {
-        Role::Architect => WriteRule::Only {
-            folders: &["docs"],
-            files: &[],
-        },
-        Role::Developer => WriteRule::Anything,
-        Role::Tester => WriteRule::Only {
-            folders: &["tests"],
-            files: TEST_FILE_NAMES,
-        },
-        // Security only reads. Lisa's decisions are written by the harness itself,
-        // never by an agent.
-        Role::Security | Role::Human => WriteRule::Nothing,
+/// May a role run commands, and which ones.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Commands {
+    /// The role needs no commands: it only reads and writes files.
+    Nothing,
+    /// Only a reviewer's checks, such as `git diff` or a vulnerability scanner.
+    Checks,
+    /// Any command, such as building and running the tests.
+    Any,
+}
+
+/// Everything a role is meant to do. Each agent's adapter turns it into what
+/// that agent can enforce, and none of them is a full sandbox: Claude Code
+/// gets tools and `Edit` rules from `writes` and `commands` (a role with a
+/// shell can still write anywhere), Codex gets `network`, Antigravity turns
+/// `commands` into a deny list, `dsh` gets none of it. After the role the
+/// harness checks the changed project files with git; that check does not
+/// see ignored files or files outside the project.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RoleSpec {
+    /// Which project files the role may change.
+    pub writes: WriteRule,
+    /// Which commands the role may run.
+    pub commands: Commands,
+    /// May the role reach the network, for example to download packages.
+    pub network: bool,
+}
+
+// Rust allows an `impl` block for a type in any module of the crate that
+// defines it, so the roles' rights can live here, next to the file checks.
+impl Role {
+    /// What this role may do. The one place where the roles' rights are written.
+    pub fn spec(self) -> RoleSpec {
+        match self {
+            Role::Architect => RoleSpec {
+                writes: WriteRule::Only {
+                    folders: &["docs"],
+                    files: &[],
+                },
+                commands: Commands::Nothing,
+                network: false,
+            },
+            Role::Developer => RoleSpec {
+                writes: WriteRule::Anything,
+                commands: Commands::Any,
+                network: true,
+            },
+            Role::Tester => RoleSpec {
+                writes: WriteRule::Only {
+                    folders: &["tests"],
+                    files: TEST_FILE_NAMES,
+                },
+                commands: Commands::Any,
+                network: true,
+            },
+            // Security only reads, but runs scanners that may download
+            // vulnerability databases.
+            Role::Security => RoleSpec {
+                writes: WriteRule::Nothing,
+                commands: Commands::Checks,
+                network: true,
+            },
+            // Lisa's decisions are written by the harness itself, never by an agent.
+            Role::Human => RoleSpec {
+                writes: WriteRule::Nothing,
+                commands: Commands::Nothing,
+                network: false,
+            },
+        }
     }
 }
 
@@ -92,7 +147,7 @@ pub fn may_write(role: Role, path: &str) -> bool {
         return false;
     }
     let parts = path_parts(path);
-    match rule_for(role) {
+    match role.spec().writes {
         WriteRule::Anything => true,
         WriteRule::Nothing => false,
         WriteRule::Only { folders, files } => {
