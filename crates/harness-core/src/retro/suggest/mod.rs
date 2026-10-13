@@ -326,6 +326,7 @@ mod tests {
     use crate::retro::TaskHistory;
     use crate::skills::SKILLS_DIR;
     use crate::task::agent::AgentOutcome;
+    use crate::task::scenario::Workflow;
     use std::future::Future;
 
     const TOML: &str = "[roles.developer]\nagent = \"claude\"\nskills = [\"style\"]\n\
@@ -342,7 +343,14 @@ mod tests {
         fs::write(harness.join(CONFIG_FILE), TOML).unwrap();
         fs::write(harness.join("skills/style.md"), STYLE).unwrap();
         repo.commit_all("settings").unwrap();
-        crate::task::orchestrator::create_task(&repo, "task-001", "Build a parser", 5).unwrap();
+        crate::task::orchestrator::create_task(
+            &repo,
+            "task-001",
+            "Build a parser",
+            Workflow::Task,
+            5,
+        )
+        .unwrap();
         let config = Config::load(&harness).unwrap();
         let tasks = TaskHistory::load_all(&repo.runs_dir()).unwrap();
         let stats = Stats::collect(crate::retro::Scope::All, &tasks, Some(&config));

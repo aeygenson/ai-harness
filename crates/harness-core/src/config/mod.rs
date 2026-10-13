@@ -1,6 +1,7 @@
 //! Project settings: `.harness/harness.toml`.
 //!
 //! ```toml
+//! scenario = "software"  # optional: the kind of project, see `crate::task::scenario`
 //! max_rounds = 5
 //! agent_timeout_minutes = 30
 //!
@@ -31,6 +32,7 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 
 use crate::task::handoff::Role;
+use crate::task::scenario::Scenario;
 use crate::task::DEFAULT_MAX_ROUNDS;
 
 /// The name of the settings file inside a project's `.harness` folder.
@@ -38,6 +40,10 @@ pub const CONFIG_FILE: &str = "harness.toml";
 
 /// What `harness init` writes into a new project.
 pub const DEFAULT_CONFIG: &str = r#"# Settings of the AI harness for this project.
+
+# The kind of project: it decides which roles work. Only "software" for now
+# (architect, developer, tester, security).
+scenario = "software"
 
 max_rounds = 5
 agent_timeout_minutes = 30
@@ -103,6 +109,9 @@ agent = "claude"
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
+    /// `scenario`: the kind of project; `software` when the line is missing.
+    #[serde(default)]
+    pub scenario: Scenario,
     /// `max_rounds`: how many rounds of sent-back work AI roles may do before Lisa decides.
     #[serde(default = "default_max_rounds")]
     pub max_rounds: u32,
@@ -281,8 +290,22 @@ fn default_timeout() -> u64 {
 
 impl Config {
     /// Reads settings from the text of a `harness.toml` file.
+    ///
+    /// A `[roles.<role>]` for a role that is not part of the scenario is an
+    /// error, the same as a typo in a role name.
     pub fn parse(text: &str) -> Result<Self, toml::de::Error> {
-        toml::from_str(text)
+        let config: Self = toml::from_str(text)?;
+        let roles = config.scenario.roles();
+        if let Some(role) = config.roles.keys().find(|role| !roles.contains(role)) {
+            let names: Vec<&str> = roles.iter().map(|r| r.as_str()).collect();
+            // `custom` is how serde lets us make a reader error of our own text.
+            return Err(serde::de::Error::custom(format!(
+                "[roles.{role}] is not a role of the {} scenario; its roles are {}",
+                config.scenario,
+                names.join(", ")
+            )));
+        }
+        Ok(config)
     }
 
     /// Reads `<harness_dir>/harness.toml`.
@@ -380,6 +403,32 @@ mod tests {
         Config::parse("max_round = 5").unwrap_err();
         Config::parse("[roles.tester]\nagnet = \"claude\"").unwrap_err();
         Config::parse("[roles.designer]\nagent = \"claude\"").unwrap_err();
+    }
+
+    #[test]
+    fn a_project_without_a_scenario_is_software() {
+        assert_eq!(Config::parse("").unwrap().scenario, Scenario::Software);
+        assert_eq!(
+            Config::parse(DEFAULT_CONFIG).unwrap().scenario,
+            Scenario::Software
+        );
+    }
+
+    #[test]
+    fn an_unknown_scenario_is_refused_with_the_names_to_use() {
+        let error = Config::parse("scenario = \"sales\"").unwrap_err();
+        assert!(error.to_string().contains("`software`"), "{error}");
+    }
+
+    #[test]
+    fn a_role_outside_the_scenario_is_refused() {
+        let error = Config::parse("[roles.human]\nagent = \"claude\"").unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("[roles.human] is not a role of the software scenario"),
+            "{error}"
+        );
     }
 
     #[test]

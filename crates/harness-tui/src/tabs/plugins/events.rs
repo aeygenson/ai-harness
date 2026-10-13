@@ -11,7 +11,7 @@ use crate::tabs::roles::RolesTab;
 impl PluginsTab {
     /// Can the role get the plugin now? `Err` is the key of the message why not.
     pub(super) fn can_give(&self, roles: &RolesTab, name: &str) -> Result<(), &'static str> {
-        if roles.settings(self.role()).is_none() {
+        if roles.settings(self.role(roles)).is_none() {
             return Err("plugins.no_role");
         }
         // A plugin the role has can always be taken away.
@@ -33,7 +33,7 @@ impl PluginsTab {
             return Ok(());
         };
         self.can_give(roles, &name)?;
-        roles.toggle_plugin(self.role(), &name);
+        roles.toggle_plugin(self.role(roles), &name);
         Ok(())
     }
 
@@ -41,8 +41,10 @@ impl PluginsTab {
         match key {
             KeyCode::Up | KeyCode::Char('k') => self.move_by(-1, roles),
             KeyCode::Down | KeyCode::Char('j') => self.move_by(1, roles),
-            KeyCode::Left | KeyCode::Char('h') => self.choose_role(self.role.saturating_sub(1)),
-            KeyCode::Right | KeyCode::Char('l') => self.choose_role(self.role + 1),
+            KeyCode::Left | KeyCode::Char('h') => {
+                self.choose_role(self.role.saturating_sub(1), roles);
+            }
+            KeyCode::Right | KeyCode::Char('l') => self.choose_role(self.role + 1, roles),
             KeyCode::Char('e') => return self.press(PluginButton::Open, roles),
             KeyCode::Char('f') => return Action::OpenCatalog,
             KeyCode::Char('U') => return self.press(PluginButton::Update, roles),
@@ -148,7 +150,7 @@ impl PluginsTab {
     pub fn press(&mut self, id: PluginButton, roles: &mut RolesTab) -> Action {
         match id {
             PluginButton::Role(index) => {
-                self.choose_role(index);
+                self.choose_role(index, roles);
                 return Action::None;
             }
             PluginButton::OpenCatalog => return Action::OpenCatalog,

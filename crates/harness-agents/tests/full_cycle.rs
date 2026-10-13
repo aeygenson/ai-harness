@@ -15,6 +15,7 @@ use harness_core::task::orchestrator::{
     self, create_task, record_human_decision, RunSetup, StopReason, ATTEMPTS_PER_ROLE,
     MAX_CHANGE_BYTES,
 };
+use harness_core::task::scenario::Workflow;
 use harness_core::task::store::TaskStore;
 use harness_core::task::tripwire::Watched;
 use harness_core::task::{Stage, TaskState, WaitReason, DEFAULT_MAX_ROUNDS};
@@ -35,7 +36,14 @@ fn new_project() -> (TempDir, Repo) {
 }
 
 fn new_task(repo: &Repo) -> (TaskStore, TaskState) {
-    create_task(repo, "task-001", "Build a parser", DEFAULT_MAX_ROUNDS).unwrap()
+    create_task(
+        repo,
+        "task-001",
+        "Build a parser",
+        Workflow::Task,
+        DEFAULT_MAX_ROUNDS,
+    )
+    .unwrap()
 }
 
 /// Commit messages, newest first.

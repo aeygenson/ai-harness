@@ -8,7 +8,6 @@ use harness_core::mcp::{self, SECRET_PREFIX};
 
 use super::tab::{is_oauth, McpTab};
 use crate::tabs::roles::RolesTab;
-use crate::tabs::skills::ROLES;
 use crate::ui::i18n::I18n;
 use crate::ui::theme;
 
@@ -91,7 +90,7 @@ impl McpTab {
 
         // Which agents can start it; the role's own agent in bold.
         lines.push(Line::default());
-        let agent = roles.settings(self.role()).map(|s| s.agent);
+        let agent = roles.settings(self.role(roles)).map(|s| s.agent);
         let mut spans = vec![Span::styled(format!("{} ", tr.t("mcp.agents")), bold)];
         for (index, each) in AgentKind::ALL.into_iter().enumerate() {
             if index > 0 {
@@ -117,7 +116,8 @@ impl McpTab {
         self.tools_details(name, server, tr, &mut lines);
 
         lines.push(Line::default());
-        let users: Vec<&str> = ROLES
+        let users: Vec<&str> = roles
+            .scenario_roles()
             .iter()
             .filter(|r| {
                 roles

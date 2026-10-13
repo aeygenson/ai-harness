@@ -4,16 +4,18 @@ use std::path::Path;
 
 use super::RunError;
 use crate::git::Repo;
+use crate::task::scenario::Workflow;
 use crate::task::store::{self, StoreError, TaskStore};
 use crate::task::{Stage, TaskState};
 
-/// Creates a new task in `<project>/.harness/runs/` and commits it. If an
+/// Creates a new task in `<project>/.harness/runs/` that follows `workflow`, and commits it. If an
 /// unfinished task already has the same text (a message sent twice), nothing
 /// is created and the error names that task.
 pub fn create_task(
     repo: &Repo,
     task_id: &str,
     description: &str,
+    workflow: Workflow,
     max_rounds: u32,
 ) -> Result<(TaskStore, TaskState), RunError> {
     if let Some((task, stage)) = same_task(&repo.runs_dir(), description)? {
@@ -22,7 +24,7 @@ pub fn create_task(
             stage: crate::retro::stage_text(stage),
         });
     }
-    create_task_anyway(repo, task_id, description, max_rounds)
+    create_task_anyway(repo, task_id, description, workflow, max_rounds)
 }
 
 /// Like [`create_task`], but also when an unfinished task has the same text.
@@ -30,6 +32,7 @@ pub fn create_task_anyway(
     repo: &Repo,
     task_id: &str,
     description: &str,
+    workflow: Workflow,
     max_rounds: u32,
 ) -> Result<(TaskStore, TaskState), RunError> {
     repo.ensure_harness_ignores()?;
@@ -38,7 +41,7 @@ pub fn create_task_anyway(
         path: runs.clone(),
         source,
     })?;
-    let (store, state) = TaskStore::create(&runs, task_id, description, max_rounds)?;
+    let (store, state) = TaskStore::create(&runs, task_id, description, workflow, max_rounds)?;
     repo.commit_paths(&[store.dir()], &format!("{task_id}: new task"))?;
     Ok((store, state))
 }

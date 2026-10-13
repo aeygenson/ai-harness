@@ -260,7 +260,13 @@ fn create_proposed_task(
         return Ok(());
     };
     let task_id = next_task_id(&repo.runs_dir())?;
-    orchestrator::create_task(repo, &task_id, text, config.max_rounds)?;
+    orchestrator::create_task(
+        repo,
+        &task_id,
+        text,
+        config.scenario.default_workflow(),
+        config.max_rounds,
+    )?;
     let path = Applied::add(dir, &[id])?;
     repo.commit_paths(
         &[&path],
@@ -275,6 +281,7 @@ mod tests {
     use crate::config::CONFIG_FILE;
     use crate::retro::proposals::{Proposal, RoleSkill, SkillList};
     use crate::task::handoff::Role;
+    use crate::task::scenario::Workflow;
 
     fn project() -> (tempfile::TempDir, Repo) {
         let dir = tempfile::tempdir().unwrap();
@@ -299,7 +306,14 @@ mod tests {
         ));
         assert_eq!(list(&repo), Vec::<RetroInfo>::new());
 
-        crate::task::orchestrator::create_task(&repo, "task-001", "Build a parser", 5).unwrap();
+        crate::task::orchestrator::create_task(
+            &repo,
+            "task-001",
+            "Build a parser",
+            Workflow::Task,
+            5,
+        )
+        .unwrap();
         assert!(matches!(
             save_stats(&repo, Some("task-404"), None),
             Err(OpsError::NoTask(..))
@@ -373,7 +387,14 @@ mod tests {
     #[test]
     fn a_task_proposal_creates_a_task_for_the_team() {
         let (_dir, repo) = project();
-        crate::task::orchestrator::create_task(&repo, "task-001", "Build a parser", 5).unwrap();
+        crate::task::orchestrator::create_task(
+            &repo,
+            "task-001",
+            "Build a parser",
+            Workflow::Task,
+            5,
+        )
+        .unwrap();
         let (retro, _) = save_stats(&repo, None, None).unwrap();
         let text = "Add a CI step that checks formatting.";
         fs::write(

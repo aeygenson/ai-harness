@@ -34,15 +34,7 @@ fn problem(text: impl Into<String>) -> BuildError {
     BuildError(text.into())
 }
 
-/// The four roles that run agents, in the order of the flow.
-pub const ROLES: [Role; 4] = [
-    Role::Architect,
-    Role::Developer,
-    Role::Tester,
-    Role::Security,
-];
-
-/// The team from harness.toml: each role gets the agent, model, MCP servers
+/// The team from harness.toml: each role of the project's scenario gets the agent, model, MCP servers
 /// and plugins set there. Asks each agent for its `--version` (for the steps'
 /// manifests), so the programs run once briefly.
 pub fn build_team(config: &Config, project_dir: &Path) -> Result<Team, BuildError> {
@@ -51,7 +43,7 @@ pub fn build_team(config: &Config, project_dir: &Path) -> Result<Team, BuildErro
         .map_err(|e| problem(e.to_string()))?;
     let plugins = Plugins::load(project_dir, config).map_err(|e| problem(e.to_string()))?;
     let mut team = Team::new();
-    for role in ROLES {
+    for &role in config.scenario.roles() {
         let settings = config.role(role).map_err(|e| problem(e.to_string()))?;
         let agent = build_agent(
             config,

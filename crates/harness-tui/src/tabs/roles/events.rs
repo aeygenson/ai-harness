@@ -4,7 +4,7 @@ use ratatui::crossterm::event::KeyCode;
 
 use harness_core::config::{AgentKind, RoleConfig};
 
-use super::tab::{toggle, Action, Focus, RolesTab, Row, WHO};
+use super::tab::{toggle, Action, Focus, RolesTab, Row};
 use crate::ui::i18n::I18n;
 
 impl RolesTab {
@@ -97,7 +97,7 @@ impl RolesTab {
     }
 
     pub fn select(&mut self, index: usize) {
-        let index = index.min(WHO.len() - 1);
+        let index = index.min(self.list().len() - 1);
         if index != self.selected {
             self.selected = index;
             self.row = 0;

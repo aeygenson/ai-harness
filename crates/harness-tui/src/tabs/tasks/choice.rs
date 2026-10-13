@@ -20,12 +20,7 @@ impl TasksTab {
         if let Some(Stage::Working(role)) = stage {
             items.push((Choice::Continue(role), true));
         }
-        for role in [
-            Role::Architect,
-            Role::Developer,
-            Role::Tester,
-            Role::Security,
-        ] {
+        for &role in self.scenario.roles() {
             items.push((Choice::Role(role), waiting));
         }
         items.push((Choice::Finish, waiting));
@@ -41,8 +36,9 @@ impl TasksTab {
             .collect()
     }
 
-    /// What the selected task needs next: the developer after the design, the
-    /// role that asked for help, a new task when it is done.
+    /// What the selected task needs next: the role its workflow gives the
+    /// approved work to (the developer after the design), the role that asked
+    /// for help, a new task when it is done.
     fn default_choice(&self) -> Choice {
         let Some(task) = self.current() else {
             return Choice::NewTask;
@@ -50,7 +46,9 @@ impl TasksTab {
         match task.state.stage {
             Stage::Done => Choice::NewTask,
             Stage::Working(role) => Choice::Continue(role),
-            Stage::WaitingForHuman(WaitReason::ApproveDesign) => Choice::Role(Role::Developer),
+            Stage::WaitingForHuman(WaitReason::ApproveDesign) => {
+                Choice::Role(task.state.workflow.after_approval())
+            }
             Stage::WaitingForHuman(WaitReason::RoleAskedForHelp(role)) => Choice::Role(role),
             Stage::WaitingForHuman(WaitReason::RoundLimitReached) => {
                 let suggested = task.steps.last().and_then(|s| match s.handoff.next_role {

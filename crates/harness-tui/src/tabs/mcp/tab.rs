@@ -32,12 +32,11 @@ use harness_core::task::handoff::Role;
 
 use super::catalog::Catalog;
 use crate::tabs::roles::RolesTab;
-use crate::tabs::skills::ROLES;
 
 /// A button of the MCP tab's server list, clicked or chosen with a key.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum McpButton {
-    /// A role of the selector, an index into `tabs::skills::ROLES`.
+    /// A role of the selector, an index into the scenario's roles.
     Role(usize),
     /// Gives the selected server to the role, or takes it away.
     Toggle,
@@ -96,7 +95,7 @@ pub enum Action {
 pub struct McpTab {
     /// `~/.harness`, where the secrets are kept.
     pub(super) home: Option<PathBuf>,
-    /// The role chosen at the top, an index into `ROLES`.
+    /// The role chosen at the top, an index into the scenario's roles.
     pub(crate) role: usize,
     /// The selected server of the list.
     pub(crate) row: usize,
@@ -137,15 +136,17 @@ impl McpTab {
             .unwrap_or_default();
     }
 
-    pub fn role(&self) -> Role {
-        ROLES[self.role.min(ROLES.len() - 1)]
+    /// The selected role of the selector, one of the scenario's roles.
+    pub fn role(&self, roles: &RolesTab) -> Role {
+        let list = roles.scenario_roles();
+        list[self.role.min(list.len() - 1)]
     }
 
     /// The servers in the list: those `harness.toml` describes, then those a
     /// role lists without a description.
     pub fn names(roles: &RolesTab) -> Vec<String> {
         let mut names: Vec<String> = roles.servers().keys().cloned().collect();
-        for role in ROLES {
+        for &role in roles.scenario_roles() {
             for name in roles.settings(role).map_or(&[][..], |s| s.mcp.as_slice()) {
                 if !names.contains(name) {
                     names.push(name.clone());
@@ -166,8 +167,8 @@ impl McpTab {
         Self::names(roles).get(self.at(roles)).cloned()
     }
 
-    pub fn choose_role(&mut self, index: usize) {
-        if index < ROLES.len() {
+    pub fn choose_role(&mut self, index: usize, roles: &RolesTab) {
+        if index < roles.scenario_roles().len() {
             self.role = index;
         }
     }
@@ -196,7 +197,7 @@ impl McpTab {
 
     pub(super) fn has(&self, roles: &RolesTab, name: &str) -> bool {
         roles
-            .settings(self.role())
+            .settings(self.role(roles))
             .is_some_and(|s| s.mcp.iter().any(|n| n == name))
     }
 

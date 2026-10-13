@@ -9,7 +9,7 @@ use ratatui::Frame;
 use harness_core::config::{independence, trifecta, AgentKind};
 use harness_core::task::handoff::Role;
 
-use super::tab::{Focus, RolesTab, Row, WHO};
+use super::tab::{Focus, RolesTab, Row};
 use crate::tabs::tasks::draw_list;
 use crate::ui::i18n::I18n;
 use crate::ui::theme;
@@ -45,7 +45,8 @@ impl RolesTab {
         let [left, right] =
             Layout::horizontal([Constraint::Length(24), Constraint::Min(0)]).areas(main);
 
-        let items: Vec<ListItem> = WHO
+        let items: Vec<ListItem> = self
+            .list()
             .iter()
             .map(|who| {
                 let (name, agent) = match who {

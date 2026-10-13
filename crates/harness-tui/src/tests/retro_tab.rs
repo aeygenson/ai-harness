@@ -152,7 +152,7 @@ fn a_retrospective_is_generated_edited_and_its_proposals_applied() {
         "{message}"
     );
 
-    orchestrator::create_task(&repo, "task-001", "Build a parser", 5).unwrap();
+    orchestrator::create_task(&repo, "task-001", "Build a parser", Workflow::Task, 5).unwrap();
     click(&mut app, " Generate ");
     key(&mut app, KeyCode::Enter);
     assert!(app.retro.as_ref().unwrap().is_generating());

@@ -13,6 +13,7 @@ use harness_core::git::Repo;
 use harness_core::models;
 use harness_core::task::handoff::{Handoff, Issue, NextStep, Role, Severity, Verdict};
 use harness_core::task::orchestrator;
+use harness_core::task::scenario::Workflow;
 use harness_core::task::store::TaskStore;
 use ratatui::backend::TestBackend;
 use ratatui::crossterm::event::{
@@ -52,7 +53,7 @@ fn project(root: &Path) {
     projects::init(root).unwrap();
     let repo = Repo::open(root).unwrap();
     let (store, mut state) =
-        orchestrator::create_task(&repo, "task-001", "Build a parser", 5).unwrap();
+        orchestrator::create_task(&repo, "task-001", "Build a parser", Workflow::Task, 5).unwrap();
     let steps = [
         handoff(
             Role::Architect,
@@ -90,7 +91,7 @@ fn project(root: &Path) {
     store
         .record(&mut state, &tester, "Tester notes here.")
         .unwrap();
-    orchestrator::create_task(&repo, "task-002", "Second task", 5).unwrap();
+    orchestrator::create_task(&repo, "task-002", "Second task", Workflow::Task, 5).unwrap();
 }
 
 /// A temporary `~/.harness` and a folder for projects.
