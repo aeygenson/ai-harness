@@ -298,6 +298,58 @@ mod tests {
         args[i + 1].clone()
     }
 
+    /// The exact tools and rules of every role, written down so that moving
+    /// the roles' rights to one place cannot change them unnoticed.
+    #[test]
+    fn every_role_keeps_exactly_its_tools_and_rules() {
+        let agent = ClaudeCode::new(Secret::new("t"), RoleSettings::default());
+        let inbox = "Edit(./.harness/runs/task-001/inbox/**)";
+        let tester_files = [
+            "tests/**", "*_test.*", "*.test.*", "*.spec.*", "*_spec.*", "test_*", "*Test.*",
+            "*Tests.*",
+        ]
+        .map(|pattern| format!("Edit(./{pattern}),Edit(./**/{pattern})"))
+        .join(",");
+        let expected = [
+            (
+                Role::Architect,
+                "Read,Glob,Grep,Edit,Write",
+                format!("Read(./**),Glob,Grep,Edit(./docs/**),Edit(./**/docs/**),{inbox}"),
+            ),
+            (
+                Role::Developer,
+                "Read,Glob,Grep,Edit,Write,Bash",
+                "Read(./**),Glob,Grep,Edit(./**),Bash".to_string(),
+            ),
+            (
+                Role::Tester,
+                "Read,Glob,Grep,Edit,Write,Bash",
+                format!("Read(./**),Glob,Grep,{tester_files},{inbox},Bash"),
+            ),
+            (
+                Role::Security,
+                "Read,Glob,Grep,Write,Bash",
+                format!(
+                    "Read(./**),Glob,Grep,{inbox},Bash(git diff:*),Bash(git log:*),\
+                     Bash(git show:*),Bash(cargo audit:*),Bash(cargo deny:*),Bash(npm audit:*),\
+                     Bash(pnpm audit:*),Bash(yarn audit:*),Bash(pip-audit:*),Bash(govulncheck:*),\
+                     Bash(bundle audit:*),Bash(dotnet list package:*),Bash(osv-scanner:*),\
+                     Bash(semgrep:*),Bash(gitleaks:*)"
+                ),
+            ),
+        ];
+        for (role, tools, allowed) in expected {
+            let command = agent.command(&job(role));
+            assert_eq!(arg_after(&command, "--tools"), tools, "{role}");
+            assert_eq!(arg_after(&command, "--allowedTools"), allowed, "{role}");
+            assert_eq!(
+                arg_after(&command, "--disallowedTools"),
+                "Bash(git commit:*),Bash(git push:*),Edit(./.git/**),Edit(./.claude/**)",
+                "{role}"
+            );
+        }
+    }
+
     #[test]
     fn the_architect_cannot_run_commands_and_writes_only_docs() {
         let agent = ClaudeCode::new(Secret::new("t"), RoleSettings::default());

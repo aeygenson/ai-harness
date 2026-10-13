@@ -269,6 +269,29 @@ mod tests {
         }
     }
 
+    /// The exact line about what each role may change, written down so that
+    /// moving the roles' rights to one place cannot change it unnoticed.
+    #[test]
+    fn every_role_is_told_exactly_what_it_may_change() {
+        assert_eq!(
+            write_rule_text(Role::Architect),
+            "You may change only files inside folders named docs.\n"
+        );
+        assert_eq!(
+            write_rule_text(Role::Developer),
+            "You may change any project file except .harness/ and agent settings.\n"
+        );
+        assert_eq!(
+            write_rule_text(Role::Tester),
+            "You may change only files inside folders named tests, and test files anywhere \
+             named like *_test.*, *.test.*, *.spec.*, *_spec.*, test_*, *Test.*, *Tests.*.\n"
+        );
+        assert_eq!(
+            write_rule_text(Role::Security),
+            "Do not change any project files; only read them.\n"
+        );
+    }
+
     #[test]
     fn the_prompt_does_not_point_to_files_the_project_may_not_have() {
         assert!(!prompt_for(Role::Architect).contains("handoff-format.md"));

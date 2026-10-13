@@ -276,6 +276,51 @@ mod tests {
         assert!(!settings(Role::Tester).contains("cargo build"));
     }
 
+    /// The exact deny list of every role, written down so that moving the
+    /// roles' rights to one place cannot change it unnoticed.
+    #[test]
+    fn every_role_keeps_exactly_its_deny_list() {
+        let deny = |role: Role| -> Vec<String> {
+            let settings: serde_json::Value = serde_json::from_str(&settings(role)).unwrap();
+            serde_json::from_value(settings["permissions"]["deny"].clone()).unwrap()
+        };
+        let for_all = ["git commit", "git push"];
+        let readers: Vec<&str> = for_all
+            .into_iter()
+            .chain([
+                "rm",
+                "mv",
+                "cp",
+                "git add",
+                "git checkout",
+                "git reset",
+                "git restore",
+                "git stash",
+                "cargo build",
+                "cargo install",
+                "cargo run",
+                "cargo publish",
+                "npm install",
+                "npm publish",
+                "pip install",
+                "go install",
+                "dotnet build",
+                "curl",
+                "wget",
+            ])
+            .collect();
+        let commands = |names: &[&str]| -> Vec<String> {
+            names
+                .iter()
+                .map(|name| format!("command({name})"))
+                .collect()
+        };
+        assert_eq!(deny(Role::Architect), commands(&readers));
+        assert_eq!(deny(Role::Developer), commands(&for_all));
+        assert_eq!(deny(Role::Tester), commands(&for_all));
+        assert_eq!(deny(Role::Security), commands(&readers));
+    }
+
     #[test]
     fn no_api_keys_in_the_environment() {
         let command = Antigravity::new("/creds", RoleSettings::default())

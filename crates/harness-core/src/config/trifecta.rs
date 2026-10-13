@@ -115,6 +115,15 @@ env = { LOG_LEVEL = "info" }
     }
 
     #[test]
+    fn the_roles_that_run_commands_are_developer_tester_and_security() {
+        assert!(!runs_commands(Role::Architect));
+        assert!(runs_commands(Role::Developer));
+        assert!(runs_commands(Role::Tester));
+        assert!(runs_commands(Role::Security));
+        assert!(!runs_commands(Role::Human));
+    }
+
+    #[test]
     fn a_server_missing_from_the_settings_is_skipped() {
         let mut config = Config::parse(CONFIG).unwrap();
         config.mcp.remove("web");

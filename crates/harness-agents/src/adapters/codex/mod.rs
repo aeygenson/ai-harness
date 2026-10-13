@@ -469,8 +469,13 @@ mod tests {
         let codex = Codex::new("/creds/codex", RoleSettings::default());
         let architect = args(&codex.command(&job(Role::Architect), Path::new("/secrets")));
         assert!(architect.contains(&"sandbox_workspace_write.network_access=false".to_string()));
-        let developer = args(&codex.command(&job(Role::Developer), Path::new("/secrets")));
-        assert!(developer.contains(&"sandbox_workspace_write.network_access=true".to_string()));
+        for role in [Role::Developer, Role::Tester, Role::Security] {
+            let args = args(&codex.command(&job(role), Path::new("/secrets")));
+            assert!(
+                args.contains(&"sandbox_workspace_write.network_access=true".to_string()),
+                "{role}"
+            );
+        }
     }
 
     #[test]
