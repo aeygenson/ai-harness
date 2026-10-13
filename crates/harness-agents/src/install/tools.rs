@@ -353,15 +353,16 @@ mod tests {
     fn npx_is_installed_with_node() {
         let none = |_: &str| false;
 
-        // On Linux the harness's own installer brings Node.js with npx.
+        // On Linux the harness's own installer brings Node.js with npx. The
+        // test runs on every system, and the installer command is this system's.
         assert_eq!(
             Tool::Npx.linux_command(&none),
             Tool::Node.linux_command(&none)
         );
-        assert!(Tool::Npx
-            .linux_command(&none)
-            .unwrap()
-            .contains("install.sh"));
+        assert_eq!(
+            Tool::Npx.linux_command(&none).as_deref(),
+            Some(harness_platform::program::installer_command())
+        );
         assert_eq!(
             Tool::Npx.mac_command().as_deref(),
             Some("brew install node")
