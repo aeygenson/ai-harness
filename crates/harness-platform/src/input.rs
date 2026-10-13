@@ -66,14 +66,18 @@ fn wait_on(input: &impl std::os::fd::AsFd, timeout: Duration) -> io::Result<Inpu
     let mut watched = [PollFd::new(input, PollFlags::IN)];
     match poll(&mut watched, Some(&timeout)) {
         Ok(_) => {}
-        // A signal came while waiting (the window was resized): try again later.
+        // A signal interrupted the wait: the loop simply comes back.
         Err(rustix::io::Errno::INTR) => return Ok(Input::Nothing),
         Err(error) => return Err(error.into()),
     }
     let found = watched[0].revents();
+    // NVAL: this system cannot watch this input (macOS cannot poll some
+    // terminals); crossterm then waits as it did before.
+    if found.contains(PollFlags::NVAL) {
+        Ok(Input::Unwatched)
     // HUP: the other end (the terminal window, the writer of a pipe) is gone.
-    // ERR and NVAL: the input is broken or no longer open.
-    if found.intersects(PollFlags::HUP | PollFlags::ERR | PollFlags::NVAL) {
+    // ERR: the input is broken.
+    } else if found.intersects(PollFlags::HUP | PollFlags::ERR) {
         Ok(Input::Closed)
     } else if found.contains(PollFlags::IN) {
         Ok(Input::Ready)
@@ -103,6 +107,36 @@ mod tests {
         let (reader, _writer) = io::pipe().unwrap();
 
         assert_eq!(wait_on(&reader, SHORT).unwrap(), Input::Nothing);
+    }
+
+    /// A pseudo-terminal, as a terminal window gives the TUI: the window's
+    /// end (`window`) and the program's end (`program`, its stdin).
+    fn pseudo_terminal() -> (std::os::fd::OwnedFd, std::fs::File) {
+        use rustix::pty::{grantpt, openpt, ptsname, unlockpt, OpenptFlags};
+
+        let window = openpt(OpenptFlags::RDWR | OpenptFlags::NOCTTY).unwrap();
+        grantpt(&window).unwrap();
+        unlockpt(&window).unwrap();
+        let name = ptsname(&window, Vec::new()).unwrap();
+        let program = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(name.to_str().unwrap())
+            .unwrap();
+        (window, program)
+    }
+
+    #[test]
+    fn a_key_typed_in_the_terminal_is_ready_and_a_closed_window_is_noticed() {
+        let (window, program) = pseudo_terminal();
+        assert_eq!(wait_on(&program, SHORT).unwrap(), Input::Nothing);
+
+        // A new terminal hands over whole lines, so the key comes with Enter.
+        rustix::io::write(&window, b"q\n").unwrap();
+        assert_eq!(wait_on(&program, SHORT).unwrap(), Input::Ready);
+
+        drop(window);
+        assert_eq!(wait_on(&program, SHORT).unwrap(), Input::Closed);
     }
 
     #[test]

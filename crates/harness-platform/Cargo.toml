@@ -22,5 +22,9 @@ harness-fake = { path = "../harness-fake" }
 tempfile = "3"
 tokio = { version = "1", features = ["signal", "macros", "rt", "time"] }
 
+# Tests make a pseudo-terminal, the real thing a closed window hangs up.
+[target.'cfg(unix)'.dev-dependencies]
+rustix = { version = "1.1", features = ["event", "pty"] }
+
 [lints]
 workspace = true

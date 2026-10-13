@@ -2,7 +2,7 @@
 //! handing the terminal to another program (an editor, `harness login`, a
 //! program's installer) and back.
 
-use std::io;
+use std::io::{self, Write};
 use std::path::Path;
 use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -145,8 +145,8 @@ fn handle(app: &mut App, event: Event) {
 /// Gives the terminal to the editor and takes it back when the editor is closed.
 fn edit_outside(terminal: &mut DefaultTerminal, file: &Path, tr: &I18n) -> Result<(), String> {
     let _ = execute!(io::stdout(), DisableMouseCapture, DisableBracketedPaste);
-    ratatui::restore();
-    println!("{}", tr.f("skills.editing", &[("path", &file.display())]));
+    let _ = ratatui::try_restore();
+    say(&tr.f("skills.editing", &[("path", &file.display())]));
     let result = editor::run(file);
     take_terminal_back(terminal);
     result
@@ -200,18 +200,25 @@ fn run_outside(
     tr: &I18n,
 ) -> Result<(), String> {
     let _ = execute!(io::stdout(), DisableMouseCapture, DisableBracketedPaste);
-    ratatui::restore();
-    println!("{heading}\n");
+    let _ = ratatui::try_restore();
+    say(&format!("{heading}\n"));
     let result = match command.status() {
         Ok(status) if status.success() => Ok(()),
         Ok(status) => Err(status.to_string()),
         Err(error) => Err(error.to_string()),
     };
-    println!("\n{}", tr.t("agents.sign_in_back"));
+    say(&format!("\n{}", tr.t("agents.sign_in_back")));
     let mut line = String::new();
     let _ = io::BufRead::read_line(&mut io::stdin().lock(), &mut line);
     take_terminal_back(terminal);
     result
+}
+
+/// Prints a line for Lisa in the plain terminal. Unlike `println!`, which
+/// panics when it cannot write, this ignores a closed window: the loop then
+/// notices the closed terminal and ends normally.
+fn say(text: &str) {
+    let _ = writeln!(io::stdout(), "{text}");
 }
 
 /// Full screen again after a program had the terminal.
