@@ -89,6 +89,93 @@ impl Tool {
             Tool::Git | Tool::Npx | Tool::Curl | Tool::Bubblewrap | Tool::Zed => None,
         }
     }
+
+    /// The maker's page that says how to install it.
+    pub fn site(self) -> &'static str {
+        match self {
+            Tool::Git => "https://git-scm.com/downloads",
+            // npx comes with Node.js (and npm).
+            Tool::Node | Tool::Npx => "https://nodejs.org/en/download",
+            Tool::Curl => "https://curl.se/download.html",
+            Tool::Bubblewrap => "https://github.com/containers/bubblewrap",
+            Tool::Zed => "https://zed.dev/download",
+        }
+    }
+
+    /// The command that installs it on this system; `None` when the harness
+    /// knows none (then [`Tool::site`] says how). On Linux it uses the
+    /// system's package manager with `sudo`, so it asks for the password.
+    pub fn install_command(self) -> Option<String> {
+        harness_platform::program::on_each_system(
+            self.linux_command(&|name| harness_platform::program::find(name).is_some()),
+            self.mac_command(),
+            self.windows_command(),
+        )
+    }
+
+    /// The command on Linux; `has` says whether a program is in `PATH`.
+    fn linux_command(self, has: &dyn Fn(&str) -> bool) -> Option<String> {
+        match self {
+            Tool::Git => linux_package("git", has),
+            Tool::Curl => linux_package("curl", has),
+            Tool::Bubblewrap => linux_package("bubblewrap", has),
+            // The harness's installer puts a new enough Node.js (with npm and
+            // npx) into ~/.local; distributions often have an older one.
+            Tool::Node | Tool::Npx => {
+                Some(harness_platform::program::installer_command().to_string())
+            }
+            Tool::Zed => Some("curl -fsSL https://zed.dev/install.sh | sh".to_string()),
+        }
+    }
+
+    /// The command on macOS, with Homebrew (as the harness's installer does).
+    fn mac_command(self) -> Option<String> {
+        let command = match self {
+            Tool::Git => "brew install git",
+            Tool::Node | Tool::Npx => "brew install node",
+            Tool::Curl => "brew install curl",
+            Tool::Zed => "brew install --cask zed",
+            Tool::Bubblewrap => return None,
+        };
+        Some(command.to_string())
+    }
+
+    /// The command on Windows, with winget (as the harness's installer does).
+    fn windows_command(self) -> Option<String> {
+        let id = match self {
+            Tool::Git => "Git.Git",
+            Tool::Node | Tool::Npx => "OpenJS.NodeJS.LTS",
+            Tool::Curl => "cURL.cURL",
+            Tool::Zed => "ZedIndustries.Zed",
+            Tool::Bubblewrap => return None,
+        };
+        Some(format!("{WINGET_INSTALL} {id}"))
+    }
+}
+
+/// winget's install command. Its questions about the terms of its sources
+/// and packages are answered here, so it does not stop to ask.
+const WINGET_INSTALL: &str =
+    "winget install --exact --accept-source-agreements --accept-package-agreements --id";
+
+/// The package managers of the common Linux distributions, with the start
+/// of their install command (the same ones the harness's installer knows).
+const LINUX_MANAGERS: [(&str, &str); 4] = [
+    (
+        "apt-get",
+        "sudo apt-get update -q && sudo apt-get install -y",
+    ),
+    ("dnf", "sudo dnf install -y"),
+    ("pacman", "sudo pacman -S --needed --noconfirm"),
+    ("zypper", "sudo zypper --non-interactive install"),
+];
+
+/// The command that installs `package` with the first package manager found.
+fn linux_package(package: &str, has: &dyn Fn(&str) -> bool) -> Option<String> {
+    LINUX_MANAGERS
+        .iter()
+        .find(|(manager, _)| has(manager))
+        .map(|(_, command)| format!("{command} {package}"))
 }
 
 /// What was found for one tool.
@@ -242,5 +329,56 @@ mod tests {
             harness_platform::program::sandbox_program().is_some()
         );
         assert_eq!(here.first(), Some(&Tool::Git));
+    }
+
+    #[test]
+    fn linux_uses_the_package_manager_it_finds() {
+        let apt = |name: &str| name == "apt-get";
+        let dnf = |name: &str| name == "dnf";
+        let none = |_: &str| false;
+
+        assert_eq!(
+            Tool::Git.linux_command(&apt).as_deref(),
+            Some("sudo apt-get update -q && sudo apt-get install -y git")
+        );
+        assert_eq!(
+            Tool::Bubblewrap.linux_command(&dnf).as_deref(),
+            Some("sudo dnf install -y bubblewrap")
+        );
+        // Without a known package manager only the site can help.
+        assert_eq!(Tool::Curl.linux_command(&none), None);
+    }
+
+    #[test]
+    fn npx_is_installed_with_node() {
+        let none = |_: &str| false;
+
+        // On Linux the harness's own installer brings Node.js with npx.
+        assert_eq!(
+            Tool::Npx.linux_command(&none),
+            Tool::Node.linux_command(&none)
+        );
+        assert!(Tool::Npx
+            .linux_command(&none)
+            .unwrap()
+            .contains("install.sh"));
+        assert_eq!(
+            Tool::Npx.mac_command().as_deref(),
+            Some("brew install node")
+        );
+        assert_eq!(Tool::Npx.windows_command(), Tool::Node.windows_command());
+        assert_eq!(Tool::Npx.site(), Tool::Node.site());
+    }
+
+    #[test]
+    fn windows_commands_do_not_stop_to_ask() {
+        let command = Tool::Git.windows_command().unwrap();
+
+        assert!(command.starts_with("winget install"), "{command}");
+        assert!(command.contains("--accept-package-agreements"), "{command}");
+        assert!(command.ends_with("--id Git.Git"), "{command}");
+        // Bubblewrap is only for Linux.
+        assert_eq!(Tool::Bubblewrap.windows_command(), None);
+        assert_eq!(Tool::Bubblewrap.mac_command(), None);
     }
 }

@@ -8,7 +8,7 @@ use ratatui::Frame;
 
 use harness_agents::install::catalog::{Action, Status};
 
-use super::computer::computer_height;
+use super::computer::{computer_height, tool_details};
 use super::tab::{AgentsTab, Job};
 use crate::tabs::tasks::draw_list;
 use crate::ui::i18n::I18n;
@@ -36,10 +36,10 @@ impl AgentsTab {
         } else {
             tr.t("agents.check")
         };
-        let step = self.next_step(false);
+        let step = self.next_step(false).is_some() || self.tool_step().is_some();
         let removable = self.next_step(true).is_some();
         let run = match self.current().and_then(Status::action) {
-            Some((Action::Update, _)) => tr.t("agents.run_update"),
+            Some((Action::Update, _)) if self.tool.is_none() => tr.t("agents.run_update"),
             _ => tr.t("agents.run_install"),
         };
         let running = self.job.as_ref().is_some_and(Job::running);
@@ -49,7 +49,7 @@ impl AgentsTab {
             hits,
             &[
                 (check, ButtonId::AgentsCheck, !self.checking && !running),
-                (run, ButtonId::AgentRun, step.is_some()),
+                (run, ButtonId::AgentRun, step),
                 (tr.t("agents.run_remove"), ButtonId::AgentRemove, removable),
                 (
                     tr.t("agents.run_sign_in"),
@@ -71,7 +71,7 @@ impl AgentsTab {
         let computer = computer_height(&self.computer_lines(tr), left.width).min(left.height / 2);
         let [left, computer_area] =
             Layout::vertical([Constraint::Min(0), Constraint::Length(computer)]).areas(left);
-        self.draw_computer(frame, computer_area, tr);
+        self.draw_computer(frame, computer_area, hits, tr);
 
         let items: Vec<ListItem> = self
             .statuses
@@ -99,7 +99,7 @@ impl AgentsTab {
             tr.t("agents.title"),
             items,
             self.selected,
-            true,
+            self.tool.is_none(),
         );
 
         let (right, log) = match &self.job {
@@ -111,13 +111,14 @@ impl AgentsTab {
             }
             None => (right, None),
         };
-        let text = match self.current() {
-            Some(status) => self.details(status, tr),
-            None => vec![],
+        let (title, text) = match (self.current_tool(), self.current()) {
+            (Some(tool), _) => (tr.t("agents.about_tool"), tool_details(tool, tr)),
+            (None, Some(status)) => (tr.t("agents.about"), self.details(status, tr)),
+            (None, None) => (tr.t("agents.about"), vec![]),
         };
         frame.render_widget(
             Paragraph::new(text)
-                .block(panel(tr.t("agents.about"), false))
+                .block(panel(title, false))
                 .wrap(Wrap { trim: false }),
             right,
         );

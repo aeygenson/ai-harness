@@ -227,6 +227,12 @@ impl App {
                 }
             }
             ListId::Agents => self.agents.select(index),
+            ListId::Tools => {
+                self.agents.select_tool(index);
+                if double {
+                    self.press(ButtonId::AgentRun);
+                }
+            }
             ListId::Skills => {
                 if let Some(skills) = &mut self.skills {
                     skills.select(index);

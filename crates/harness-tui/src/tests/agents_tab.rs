@@ -60,7 +60,7 @@ fn the_agents_tab_shows_the_catalog_with_what_is_installed() {
         "✓ Git 2.43.0",
         "! Node.js 20.11.1 · older than 22.19",
         "✗ npx not found",
-        "Install what is missing",
+        "Choose a program above",
         // The whole command fits in the panel (it wraps at its spaces).
         installer.split(' ').next().unwrap(),
         installer.split(' ').next_back().unwrap(),
@@ -128,6 +128,63 @@ fn wait_for_agents(app: &mut App) {
         std::thread::sleep(Duration::from_millis(10));
     }
     panic!("the agents were not checked");
+}
+
+#[test]
+fn a_missing_program_is_installed_in_the_terminal_after_confirming() {
+    use harness_agents::install::tools::Tool;
+    let env = Env::new();
+    let mut app = agents_app(&env);
+    let agents = app.agents.statuses.len();
+
+    // A click on npx in the «Computer» panel shows what it is and how to get it.
+    click(&mut app, "✗ npx");
+    assert_eq!(app.agents.tool, Some(2));
+    let command = Tool::Npx.install_command().unwrap();
+    let text = screen_of_width(&mut app, 200);
+    for part in [
+        "About the program",
+        "✗ Not found on this computer",
+        "Starts most MCP servers",
+        "runs this command in this window",
+        "https://nodejs.org/en/download",
+    ] {
+        assert!(text.contains(part), "missing {part:?} in:\n{text}");
+    }
+    // Remove and Sign in are about agents only.
+    assert!(app.agents.next_step(true).is_none());
+    assert!(app.agents.sign_in_target().is_none());
+
+    // «Install» asks first, then hands the command to the terminal.
+    key(&mut app, KeyCode::Char('i'));
+    let (_, form) = app.form.as_ref().unwrap();
+    assert!(form.text.contains(&command), "{}", form.text);
+    key(&mut app, KeyCode::Enter);
+    assert_eq!(app.tool_install.take(), Some(("npx", command)));
+    assert!(app.agents.job.is_none());
+
+    // Back from the terminal: the computer is checked again.
+    app.finish_tool_install("npx", Err("exit status: 1".into()));
+    assert_eq!(
+        app.message.as_ref().unwrap().text,
+        "npx: the command failed (exit status: 1)"
+    );
+    assert!(app.agents.checking);
+    wait_for_agents(&mut app);
+
+    // Git is there: nothing to install for it.
+    app.agents.select_tool(0);
+    assert!(app.agents.tool_step().is_none());
+    // The keys go from the last agent down into the programs, and back.
+    app.agents.select(agents - 1);
+    key(&mut app, KeyCode::Down);
+    assert_eq!(app.agents.tool, Some(0));
+    key(&mut app, KeyCode::Up);
+    assert_eq!((app.agents.tool, app.agents.selected), (None, agents - 1));
+    // A click on an agent chooses the agent again.
+    app.agents.select_tool(1);
+    click(&mut app, "Claude Code");
+    assert_eq!(app.agents.tool, None);
 }
 
 #[test]

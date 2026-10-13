@@ -150,6 +150,18 @@ pub fn on_this_system<T>(unix: T, windows: T) -> T {
     }
 }
 
+/// `linux`, `mac` or `windows`, whichever system this is: for things that
+/// differ between Linux and macOS too, such as how a program is installed.
+pub fn on_each_system<T>(linux: T, mac: T, windows: T) -> T {
+    if cfg!(windows) {
+        windows
+    } else if cfg!(target_os = "macos") {
+        mac
+    } else {
+        linux
+    }
+}
+
 /// Where `npm install -g` puts programs without asking for `sudo`: on Linux
 /// Node usually belongs to the system, so programs go into `~/.local`
 /// (`~/.local/bin`, which [`usual_places`] covers), as the harness's own
@@ -244,6 +256,18 @@ mod tests {
             "{}",
             installer_command()
         );
+    }
+
+    #[test]
+    fn each_system_gets_its_own_value() {
+        let expected = if cfg!(windows) {
+            "windows"
+        } else if cfg!(target_os = "macos") {
+            "mac"
+        } else {
+            "linux"
+        };
+        assert_eq!(on_each_system("linux", "mac", "windows"), expected);
     }
 
     #[test]

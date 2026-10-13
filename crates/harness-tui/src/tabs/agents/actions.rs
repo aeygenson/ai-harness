@@ -1,5 +1,6 @@
 //! The Agents tab's work: signing in, installing, updating and removing agents,
-//! asking them which models they offer, and updating the harness itself.
+//! installing the other programs the harness needs, asking the agents which
+//! models they offer, and updating the harness itself.
 
 use std::sync::mpsc;
 
@@ -73,6 +74,37 @@ impl App {
             },
             form,
         ));
+    }
+
+    /// «Install» for a program of the «Computer» panel: first the command is
+    /// shown to be confirmed. It runs in the terminal, not in the background,
+    /// because it may ask for a password (`sudo`).
+    pub(crate) fn ask_to_install_tool(&mut self) {
+        let Some((status, command)) = self.agents.tool_step() else {
+            return;
+        };
+        let name = status.tool.name();
+        let tr = &self.tr;
+        let text = tr.f("agents.confirm_tool_text", &[("command", &command)]);
+        let form = Form::new(
+            &tr.f("agents.confirm_install", &[("name", &name)]),
+            &text,
+            tr.t("agents.run_install"),
+        );
+        self.form = Some((Purpose::InstallTool { name, command }, form));
+    }
+
+    /// Back from installing a program: say how it went and check the
+    /// computer again, so the panel shows what is there now.
+    pub(crate) fn finish_tool_install(&mut self, name: &str, result: Result<(), String>) {
+        self.message = Some(match result {
+            Ok(()) => Message::info(self.tr.f("agents.tool_installed", &[("name", &name)])),
+            Err(error) => Message::error(self.tr.f(
+                "agents.tool_install_failed",
+                &[("name", &name), ("error", &error)],
+            )),
+        });
+        self.check_agents();
     }
 
     /// Asks in the background whether a newer harness is out.

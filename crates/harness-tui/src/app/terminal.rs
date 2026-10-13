@@ -1,8 +1,10 @@
 //! The terminal around the app: the loop that draws and reads events, and
-//! handing the terminal to another program (an editor, `harness login`) and back.
+//! handing the terminal to another program (an editor, `harness login`, a
+//! program's installer) and back.
 
 use std::io;
 use std::path::Path;
+use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -116,6 +118,10 @@ pub(crate) fn event_loop(
             let result = sign_in_outside(terminal, login, name, &app.tr);
             app.finish_sign_in(name, result);
         }
+        if let Some((name, command)) = app.tool_install.take() {
+            let result = install_outside(terminal, name, &command, &app.tr);
+            app.finish_tool_install(name, result);
+        }
         if loaded.elapsed() >= RELOAD_EVERY {
             if let Some(tasks) = &mut app.tasks {
                 tasks.reload();
@@ -154,24 +160,53 @@ fn sign_in_outside(
     name: &str,
     tr: &I18n,
 ) -> Result<(), String> {
+    let heading = tr.f("agents.signing_in", &[("name", &name)]);
+    let command = std::env::current_exe().map(|harness| {
+        let mut command = Command::new(harness);
+        command.args(["login", login]);
+        command
+    });
+    match command {
+        Ok(command) => run_outside(terminal, &heading, command, tr),
+        Err(error) => Err(error.to_string()),
+    }
+}
+
+/// Gives the terminal to the command that installs a program (it may ask
+/// for a password) and takes it back once Lisa presses Enter.
+fn install_outside(
+    terminal: &mut DefaultTerminal,
+    name: &str,
+    line: &str,
+    tr: &I18n,
+) -> Result<(), String> {
+    let heading = tr.f(
+        "agents.installing_tool",
+        &[("name", &name), ("command", &line)],
+    );
+    let (shell, flags) = harness_platform::program::shell();
+    let mut command = Command::new(shell);
+    command.args(flags).arg(line);
+    run_outside(terminal, &heading, command, tr)
+}
+
+/// Leaves the full screen, prints `heading`, runs `command` in the plain
+/// terminal (it reads the keyboard itself) and takes the terminal back once
+/// Lisa has read the output and pressed Enter.
+fn run_outside(
+    terminal: &mut DefaultTerminal,
+    heading: &str,
+    mut command: Command,
+    tr: &I18n,
+) -> Result<(), String> {
     let _ = execute!(io::stdout(), DisableMouseCapture, DisableBracketedPaste);
     ratatui::restore();
-    println!("{}\n", tr.f("agents.signing_in", &[("name", &name)]));
-    let result = std::env::current_exe()
-        .map_err(|e| e.to_string())
-        .and_then(|harness| {
-            std::process::Command::new(harness)
-                .args(["login", login])
-                .status()
-                .map_err(|e| e.to_string())
-        })
-        .and_then(|status| {
-            if status.success() {
-                Ok(())
-            } else {
-                Err(status.to_string())
-            }
-        });
+    println!("{heading}\n");
+    let result = match command.status() {
+        Ok(status) if status.success() => Ok(()),
+        Ok(status) => Err(status.to_string()),
+        Err(error) => Err(error.to_string()),
+    };
     println!("\n{}", tr.t("agents.sign_in_back"));
     let mut line = String::new();
     let _ = io::BufRead::read_line(&mut io::stdin().lock(), &mut line);

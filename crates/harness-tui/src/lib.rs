@@ -136,6 +136,8 @@ enum Purpose {
     },
     /// Install the newer harness in the place of this one.
     UpdateHarness,
+    /// Run this command in the terminal to install the program named.
+    InstallTool { name: &'static str, command: String },
 }
 
 /// What a download in the background brought.
@@ -277,6 +279,9 @@ struct App {
     /// An agent to sign in to after this event (the name `harness login` takes),
     /// with the name shown.
     sign_in: Option<(&'static str, &'static str)>,
+    /// A program to install in the terminal after this event: its name and
+    /// the command.
+    tool_install: Option<(&'static str, String)>,
     projects: ProjectsTab,
     agents: AgentsTab,
     /// Checks which agents are installed; tests give a fake one.

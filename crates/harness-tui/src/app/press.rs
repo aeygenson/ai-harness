@@ -16,6 +16,7 @@ impl App {
     pub(crate) fn press(&mut self, id: ButtonId) {
         match id {
             ButtonId::AgentsCheck => self.check_agents(),
+            ButtonId::AgentRun if self.agents.tool.is_some() => self.ask_to_install_tool(),
             ButtonId::AgentRun => self.ask_to_run_agent_command(false),
             ButtonId::AgentRemove => self.ask_to_run_agent_command(true),
             ButtonId::AgentSignIn => self.sign_in_agent(),
