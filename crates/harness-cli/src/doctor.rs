@@ -143,7 +143,7 @@ fn purpose(tool: Tool) -> &'static str {
     match tool {
         Tool::Git => "every role's work is committed with git",
         Tool::Node => "Codex CLI, DeepSeek Harness (22.19 or newer) and MCP servers need it",
-        Tool::Npx => "most MCP servers are started with npx",
+        Tool::Npx => "most MCP servers are started with npx, which comes with Node.js",
         Tool::Curl => "the MCP registry, model lists and web MCP servers use it",
         Tool::Bubblewrap => "without it the commands Claude Code runs can see its login",
         Tool::Zed => "files open in another editor instead",

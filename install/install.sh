@@ -125,7 +125,8 @@ before_of() { printf '%s' "$BEFORE" | grep "^$1|" | cut -d'|' -f2-; }
 # for git only Homebrew's counts).
 mac_installed() { # mac_installed <name> [--cask]
     case "$1" in
-        node) has node && return 0 ;;
+        # npx comes with Node.js; a Node.js without it is installed again.
+        node) has node && has npx && return 0 ;;
         zed) [ -d /Applications/Zed.app ] || [ -d "$HOME/Applications/Zed.app" ] && return 0 ;;
     esac
     brew list "$@" >/dev/null 2>&1
@@ -178,9 +179,10 @@ linux_packages() {
     fi
 }
 
-# Node.js 22.19 or newer (DeepSeek Harness needs it). Many distributions
-# ship an older one, so when the system's is missing or old, the current
-# Node 22 goes into ~/.local.
+# Node.js 22.19 or newer (DeepSeek Harness needs it) with npx (MCP servers
+# need it). Many distributions ship an older one, or Node.js without npm and
+# npx, so when the system's is missing, old or without npx, the current Node 22
+# (which brings npm and npx) goes into ~/.local.
 NODE_DIR="$HOME/.local/share/node"
 linux_node() {
     local major=0 minor=0 arch file
@@ -189,7 +191,7 @@ linux_node() {
         minor="$(node --version | sed 's/^v[0-9]*\.//; s/\..*//')"
     fi
     if { [ "$major" -gt 22 ] || { [ "$major" -eq 22 ] && [ "$minor" -ge 19 ]; }; } &&
-        [ ! -x "$NODE_DIR/bin/node" ]; then
+        has npx && [ ! -x "$NODE_DIR/bin/node" ]; then
         note "Node.js $(node --version) is new enough"
         return
     fi
