@@ -34,8 +34,8 @@ fn problem(text: impl Into<String>) -> BuildError {
     BuildError(text.into())
 }
 
-/// The team from harness.toml: each role of the project's scenario gets the agent, model, MCP servers
-/// and plugins set there. Asks each agent for its `--version` (for the steps'
+/// The team from harness.toml: each role of the project's scenario gets the
+/// agent, model, MCP servers and plugins set there. Asks each agent for its `--version` (for the steps'
 /// manifests), so the programs run once briefly.
 pub fn build_team(config: &Config, project_dir: &Path) -> Result<Team, BuildError> {
     let dir = credentials::default_dir().ok_or_else(|| problem("HOME is not set"))?;

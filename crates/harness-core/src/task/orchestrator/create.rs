@@ -8,7 +8,9 @@ use crate::task::scenario::Workflow;
 use crate::task::store::{self, StoreError, TaskStore};
 use crate::task::{Stage, TaskState};
 
-/// Creates a new task in `<project>/.harness/runs/` that follows `workflow`, and commits it. If an
+/// Creates a new task in `<project>/.harness/runs/` and commits it.
+///
+/// The task follows `workflow` (see `Scenario::default_workflow`). If an
 /// unfinished task already has the same text (a message sent twice), nothing
 /// is created and the error names that task.
 pub fn create_task(

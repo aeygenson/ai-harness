@@ -1,8 +1,8 @@
 //! The state of one task and the rules for moving it forward (the state machine).
 //!
 //! The folder holds the rest of running a task: `handoff` (what a role hands
-//! over), `scenario` (the kind of project and the task's workflow), `routes`, `prompt`, `permissions`, `agent` (the adapter interface),
-//! `orchestrator` (the run loop), `store` (saving tasks to disk), and `facts`
+//! over), `scenario` (the kind of project and the task's workflow), `routes`,
+//! `prompt`, `permissions`, `agent` (the adapter interface), `orchestrator` (the run loop), `store` (saving tasks to disk), and `facts`
 //! and `weakened` (what earlier steps really changed, read from git).
 
 pub mod agent;

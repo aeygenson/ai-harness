@@ -44,7 +44,7 @@ impl Scenario {
         }
     }
 
-    /// The workflows a task of this scenario can follow; the first is the default.
+    /// The workflows a task of this scenario can follow.
     pub fn workflows(self) -> &'static [Workflow] {
         match self {
             Scenario::Software => &[Workflow::Task],
@@ -53,9 +53,9 @@ impl Scenario {
 
     /// The workflow a new task gets when nobody chooses one.
     pub fn default_workflow(self) -> Workflow {
-        // Every scenario has at least one workflow (a test checks this), so
-        // indexing cannot panic.
-        self.workflows()[0]
+        match self {
+            Scenario::Software => Workflow::Task,
+        }
     }
 }
 
@@ -99,13 +99,23 @@ impl Workflow {
 mod tests {
     use super::*;
 
-    /// Every scenario, so the tests below cover a new one automatically.
-    const ALL: [Scenario; 1] = [Scenario::Software];
+    /// Every scenario. The `match` stops the build when a new one is added
+    /// and not listed here, so the tests below cannot miss it.
+    fn all() -> Vec<Scenario> {
+        let all = vec![Scenario::Software];
+        for scenario in &all {
+            match scenario {
+                Scenario::Software => {}
+            }
+        }
+        all
+    }
 
     #[test]
     fn every_scenario_has_a_workflow_that_starts_with_one_of_its_roles() {
-        for scenario in ALL {
-            assert!(!scenario.workflows().is_empty(), "{scenario}");
+        for scenario in all() {
+            assert!(!scenario.roles().is_empty(), "{scenario}");
+            assert!(scenario.workflows().contains(&scenario.default_workflow()));
             for workflow in scenario.workflows() {
                 assert!(scenario.roles().contains(&workflow.start()));
                 assert!(scenario.roles().contains(&workflow.after_approval()));
