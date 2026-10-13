@@ -1,12 +1,13 @@
 //! The Agents tab: the catalog of console agents, with the ones installed on
-//! this computer marked (see `harness_agents::install::catalog`). It does not need an
-//! open project: agents are installed on the computer, not in a project.
+//! this computer marked (see `harness_agents::install::catalog`), and the
+//! other programs the harness needs. It does not need an open project: agents
+//! are installed on the computer, not in a project.
 
 use ratatui::crossterm::event::KeyCode;
 
 use harness_agents::install::catalog::{self, Action, Status, CATALOG};
 use harness_agents::install::credentials;
-use harness_agents::install::tools::ToolStatus;
+use harness_agents::install::tools::{Health, ToolStatus};
 use harness_core::config::AgentKind;
 
 use super::release::HarnessRelease;
@@ -20,6 +21,9 @@ pub struct AgentsTab {
     /// A check runs in the background.
     pub checking: bool,
     pub selected: usize,
+    /// A program of the «Computer» panel is chosen instead of an agent: its
+    /// place in `tools`.
+    pub tool: Option<usize>,
     /// The install or update that runs or ran last, with what it printed.
     pub job: Option<Job>,
     /// The other programs the harness needs; empty until they were checked.
@@ -74,6 +78,7 @@ impl AgentsTab {
             known: false,
             checking: false,
             selected: 0,
+            tool: None,
             job: None,
             tools: Vec::new(),
             release: HarnessRelease::of_this_program(),
@@ -94,12 +99,44 @@ impl AgentsTab {
         self.statuses.get(self.selected)
     }
 
+    /// The answer of the check of the other programs.
+    pub fn tools_checked(&mut self, tools: Vec<ToolStatus>) {
+        self.tools = tools;
+        // The list can be shorter now; then the agent is chosen again.
+        if self.tool.is_some_and(|index| index >= self.tools.len()) {
+            self.tool = None;
+        }
+    }
+
+    /// The program chosen in the «Computer» panel, if one is.
+    pub fn current_tool(&self) -> Option<&ToolStatus> {
+        self.tools.get(self.tool?)
+    }
+
+    /// The chosen program and the command «Install» would run for it: only
+    /// when it is missing or too old, while nothing else runs, and when there
+    /// is a command for this system.
+    pub fn tool_step(&self) -> Option<(&ToolStatus, String)> {
+        if self.checking || self.job.as_ref().is_some_and(Job::running) {
+            return None;
+        }
+        let status = self.current_tool()?;
+        if status.health() == Health::Good {
+            return None;
+        }
+        Some((status, status.tool.install_command()?))
+    }
+
     /// What «Install»/«Update» (or, with `remove`, «Remove») would do for
     /// the selected agent, with the command: only once the computer was
     /// checked, while nothing else runs, and when there is a command for
     /// this system.
     pub fn next_step(&self, remove: bool) -> Option<(&Status, Action, String)> {
-        if !self.known || self.checking || self.job.as_ref().is_some_and(Job::running) {
+        if self.tool.is_some()
+            || !self.known
+            || self.checking
+            || self.job.as_ref().is_some_and(Job::running)
+        {
             return None;
         }
         let status = self.current()?;
@@ -121,7 +158,11 @@ impl AgentsTab {
     /// The agent «Sign in» would sign in to: one the harness runs and that
     /// is installed, once the computer was checked and while nothing runs.
     pub fn sign_in_target(&self) -> Option<&Status> {
-        if !self.known || self.checking || self.job.as_ref().is_some_and(Job::running) {
+        if self.tool.is_some()
+            || !self.known
+            || self.checking
+            || self.job.as_ref().is_some_and(Job::running)
+        {
             return None;
         }
         self.current()
@@ -151,12 +192,29 @@ impl AgentsTab {
     pub fn select(&mut self, index: usize) {
         if index < self.statuses.len() {
             self.selected = index;
+            self.tool = None;
         }
     }
 
+    /// Chooses the program at `index` of the «Computer» panel.
+    pub fn select_tool(&mut self, index: usize) {
+        if index < self.tools.len() {
+            self.tool = Some(index);
+        }
+    }
+
+    /// Moves the choice up or down. The agents and the programs below them
+    /// count as one list: going down past the last agent reaches the programs.
     pub fn move_by(&mut self, delta: isize) {
-        let last = self.statuses.len().saturating_sub(1);
-        self.selected = self.selected.saturating_add_signed(delta).min(last);
+        let agents = self.statuses.len();
+        let now = self.tool.map_or(self.selected, |index| agents + index);
+        let last = (agents + self.tools.len()).saturating_sub(1);
+        let next = now.saturating_add_signed(delta).min(last);
+        if next < agents {
+            self.select(next);
+        } else {
+            self.select_tool(next - agents);
+        }
     }
 
     pub fn on_key(&mut self, key: KeyCode) {

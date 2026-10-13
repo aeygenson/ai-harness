@@ -1,19 +1,21 @@
 //! The «Computer» panel under the agent list: the harness's own version, the
 //! other programs the harness needs (Git, Node.js, ...), the same check as
 //! `harness doctor`, and the installer command when something is missing.
+//! A program in it can be chosen like an agent: the details panel then says
+//! what it is for and how to install it.
 
 use ratatui::layout::Rect;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Paragraph, Wrap};
 use ratatui::Frame;
 
-use harness_agents::install::tools::{Health, ToolStatus};
+use harness_agents::install::tools::{Health, Need, Tool, ToolStatus};
 use harness_agents::install::update::VERSION;
 
 use super::release::{HarnessRelease, HARNESS_NAME};
 use super::tab::AgentsTab;
 use crate::ui::i18n::I18n;
-use crate::ui::{panel, theme};
+use crate::ui::{panel, theme, Hits, ListId, Target};
 
 impl AgentsTab {
     /// The panel's lines: the harness, one per program, then the fix if one is needed.
@@ -26,7 +28,17 @@ impl AgentsTab {
             ));
             return lines;
         }
-        lines.extend(self.tools.iter().map(|s| tool_line(s, tr)));
+        for (index, status) in self.tools.iter().enumerate() {
+            let line = tool_line(status, tr);
+            lines.push(if self.tool == Some(index) {
+                // Marked like the chosen row of a list.
+                let mut spans = vec![Span::raw("▶ ")];
+                spans.extend(line.spans);
+                Line::from(spans).patch_style(theme::selected())
+            } else {
+                line
+            });
+        }
         if self.tools.iter().any(|s| s.health() != Health::Good) {
             lines.push(Line::from(tr.t("agents.tools_install").to_string()));
             lines.push(Line::styled(
@@ -37,14 +49,108 @@ impl AgentsTab {
         lines
     }
 
-    /// Draws the panel into `area`.
-    pub fn draw_computer(&self, frame: &mut Frame, area: Rect, tr: &I18n) {
+    /// Draws the panel into `area`, with every program's rows clickable.
+    pub fn draw_computer(&self, frame: &mut Frame, area: Rect, hits: &mut Hits, tr: &I18n) {
+        let lines = self.computer_lines(tr);
+        let block = panel(tr.t("agents.computer"), self.tool.is_some());
+        let inner = block.inner(area);
+        let width = usize::from(inner.width).max(1);
+        // A program's line can wrap onto more rows: each of its rows is a hit
+        // of its own that points at the program (`first` is its place).
+        let mut y = inner.y;
+        for (index, line) in lines.iter().enumerate() {
+            let rows = u16::try_from(wrapped_rows(&line.to_string(), width)).unwrap_or(1);
+            // The first line is the harness; the programs follow it.
+            let tool = index.checked_sub(1).filter(|t| *t < self.tools.len());
+            if let Some(tool) = tool {
+                let target = Target::List {
+                    list: ListId::Tools,
+                    first: tool,
+                };
+                for row in y..y.saturating_add(rows).min(inner.bottom()) {
+                    hits.add(Rect::new(inner.x, row, inner.width, 1), target);
+                }
+            }
+            y = y.saturating_add(rows);
+        }
         frame.render_widget(
-            Paragraph::new(self.computer_lines(tr))
-                .block(panel(tr.t("agents.computer"), false))
+            Paragraph::new(lines)
+                .block(block)
                 .wrap(Wrap { trim: false }),
             area,
         );
+    }
+}
+
+/// The details of a chosen program: what it is for, whether it is there,
+/// and how to install it.
+pub fn tool_details(status: &ToolStatus, tr: &I18n) -> Vec<Line<'static>> {
+    let tool = status.tool;
+    let mut lines = vec![
+        Line::styled(tool.name().to_string(), theme::accent()),
+        Line::default(),
+    ];
+    let state = match &status.path {
+        None => {
+            // Red when the harness needs it, yellow when it is only recommended.
+            let style = match status.health() {
+                Health::Missing => theme::bad(),
+                Health::Good | Health::Warning => theme::warn(),
+            };
+            Line::styled(tr.t("agents.tool_not_found").to_string(), style)
+        }
+        Some(path) => {
+            let version = status.version.as_deref().unwrap_or("?");
+            let text = tr.f(
+                "agents.installed",
+                &[("path", &path.display()), ("version", &version)],
+            );
+            Line::styled(text, theme::ok())
+        }
+    };
+    lines.push(state);
+    if let (true, Some(min)) = (status.old(), tool.min_version()) {
+        lines.push(Line::styled(
+            tr.f("agents.old", &[("min", &min)]),
+            theme::warn(),
+        ));
+    }
+    let need = match tool.need() {
+        Need::Required => "agents.tool_required",
+        Need::Recommended => "agents.tool_recommended",
+    };
+    lines.push(Line::from(tr.t(need).to_string()));
+    lines.push(Line::default());
+    lines.extend(
+        tr.t(about_key(tool))
+            .lines()
+            .map(|l| Line::from(l.to_string())),
+    );
+    lines.push(Line::default());
+    if status.health() != Health::Good {
+        match tool.install_command() {
+            Some(command) => {
+                lines.push(Line::from(tr.t("agents.tool_install").to_string()));
+                lines.push(Line::styled(format!("  {command}"), theme::accent()));
+            }
+            None => lines.push(Line::from(
+                tr.f("agents.see_site", &[("site", &tool.site())]),
+            )),
+        }
+    }
+    lines.push(Line::from(tr.f("agents.site", &[("site", &tool.site())])));
+    lines
+}
+
+/// The translation key that says what `tool` is for.
+fn about_key(tool: Tool) -> &'static str {
+    match tool {
+        Tool::Git => "agents.tool_about_git",
+        Tool::Node => "agents.tool_about_node",
+        Tool::Npx => "agents.tool_about_npx",
+        Tool::Curl => "agents.tool_about_curl",
+        Tool::Bubblewrap => "agents.tool_about_bubblewrap",
+        Tool::Zed => "agents.tool_about_zed",
     }
 }
 

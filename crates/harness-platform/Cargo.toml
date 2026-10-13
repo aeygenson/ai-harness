@@ -1,12 +1,17 @@
 [package]
 name = "harness-platform"
-version = "0.5.1"
+version = "0.6.0"
 edition = "2021"
 
 # Only for catching the stop signals (see `stop`): the rest of the harness
 # already runs on tokio, so this adds no new crate.
 [dependencies]
 tokio = { version = "1", features = ["signal", "macros", "rt"] }
+
+# Only for noticing a closed terminal (see `input`) without `unsafe`: its safe
+# `poll`. crossterm already brings this crate in, so it adds nothing new.
+[target.'cfg(unix)'.dependencies]
+rustix = { version = "1.1", features = ["event"] }
 
 # Only for reading a secret on Windows, which has no `stty`.
 [target.'cfg(windows)'.dependencies]
@@ -16,6 +21,10 @@ crossterm = "0.29"
 harness-fake = { path = "../harness-fake" }
 tempfile = "3"
 tokio = { version = "1", features = ["signal", "macros", "rt", "time"] }
+
+# Tests make a pseudo-terminal, the real thing a closed window hangs up.
+[target.'cfg(unix)'.dev-dependencies]
+rustix = { version = "1.1", features = ["event", "pty"] }
 
 [lints]
 workspace = true

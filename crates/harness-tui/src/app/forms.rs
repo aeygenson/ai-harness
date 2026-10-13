@@ -86,6 +86,10 @@ impl App {
                 self.run_harness_update();
                 Ok(())
             }
+            Purpose::InstallTool { name, command } => {
+                self.tool_install = Some((name, command.clone()));
+                Ok(())
+            }
             Purpose::Remove(path) => self.remove_project(&path.clone()),
         };
         if let Err(error) = result {

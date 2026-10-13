@@ -75,7 +75,7 @@ impl App {
             return;
         };
         self.tool_check = None;
-        self.agents.tools = tools;
+        self.agents.tools_checked(tools);
     }
 
     /// Runs a confirmed install or update in the background; its lines come in `tick`.

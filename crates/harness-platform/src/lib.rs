@@ -11,7 +11,8 @@
 //! - [`path`]: paths written with `/`, as git writes them;
 //! - [`editor`]: opening a file in Zed, `$EDITOR` or the system's editor;
 //! - [`folder_dialog`]: the system's «choose a folder» window;
-//! - [`terminal`]: reading a secret without echo, the text-selection key.
+//! - [`terminal`]: reading a secret without echo, the text-selection key;
+//! - [`input`]: waiting for a key, and noticing that the terminal is closed.
 //!
 //! Each function has one small version per system (`#[cfg(...)]`); outside
 //! this crate there is no `#[cfg(unix)]` in the harness's own logic.
@@ -20,6 +21,7 @@ pub mod editor;
 pub mod env;
 pub mod folder_dialog;
 pub mod home;
+pub mod input;
 pub mod open;
 pub mod path;
 pub mod private;

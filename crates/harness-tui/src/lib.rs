@@ -136,6 +136,8 @@ enum Purpose {
     },
     /// Install the newer harness in the place of this one.
     UpdateHarness,
+    /// Run this command in the terminal to install the program named.
+    InstallTool { name: &'static str, command: String },
 }
 
 /// What a download in the background brought.
@@ -188,23 +190,39 @@ pub fn run(start: &Path) -> Result<()> {
     // First of all: from here on, closing the window no longer kills the TUI
     // while an agent runs; the app is closed normally instead.
     let stop = app::terminal::watch_stop_signals().context("cannot listen for stop signals")?;
+    // `ratatui::init` puts in a panic hook that prints when it cannot give the
+    // terminal back. In a closed window that print panics again, and a panic
+    // inside a panic ends the program at once, without stopping the agents.
+    // So the hook from before `init` is kept, and ratatui's is replaced below.
+    let hook = std::panic::take_hook();
+    // The terminal is made before the app on purpose: values are dropped in
+    // the opposite order, so after a panic the app (and its agents) stops
+    // first, before the terminal's own clean-up, which may panic too.
+    let mut terminal = ratatui::init();
+    std::panic::set_hook(Box::new(move |info| {
+        // Give the mouse back to the terminal even if the program panics.
+        let _ = execute!(io::stdout(), DisableMouseCapture, DisableBracketedPaste);
+        let _ = ratatui::try_restore();
+        hook(info);
+    }));
     let mut app = App::new(projects::harness_home(), start);
     app.native = true;
     app.splash.open = app.splash.at_start;
     // Which agents are installed: asked once at the start, in the background.
     app.check_agents();
-    let mut terminal = ratatui::init();
-    // Give the mouse back to the terminal even if the program panics.
-    let hook = std::panic::take_hook();
-    std::panic::set_hook(Box::new(move |info| {
-        let _ = execute!(io::stdout(), DisableMouseCapture, DisableBracketedPaste);
-        hook(info);
-    }));
     // A pasted text arrives as one event, so its line breaks do not send it.
     execute!(io::stdout(), EnableMouseCapture, EnableBracketedPaste)?;
     let result = app::terminal::event_loop(&mut terminal, &mut app, &stop);
+    // When Lisa quit, the shell comes back first and the agents stop after.
+    // Otherwise the window may be gone and giving the terminal back fails, so
+    // the agents are stopped first (dropping the app does that). Rust
+    // remembers whether `app` was moved here and drops it at the end if not.
+    if !app.quit {
+        drop(app);
+    }
     let _ = execute!(io::stdout(), DisableMouseCapture, DisableBracketedPaste);
-    ratatui::restore();
+    // `try_restore` returns the error instead of printing it like `restore`.
+    let _ = ratatui::try_restore();
     result
 }
 
@@ -271,6 +289,9 @@ struct App {
     /// An agent to sign in to after this event (the name `harness login` takes),
     /// with the name shown.
     sign_in: Option<(&'static str, &'static str)>,
+    /// A program to install in the terminal after this event: its name and
+    /// the command.
+    tool_install: Option<(&'static str, String)>,
     projects: ProjectsTab,
     agents: AgentsTab,
     /// Checks which agents are installed; tests give a fake one.

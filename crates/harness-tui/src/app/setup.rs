@@ -42,6 +42,7 @@ impl App {
             retro: None,
             edit: None,
             sign_in: None,
+            tool_install: None,
             agents: AgentsTab::new(),
             agent_checker: tabs::agents::check,
             agent_check: None,
