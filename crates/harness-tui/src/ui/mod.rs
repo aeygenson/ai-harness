@@ -70,6 +70,8 @@ pub enum ListId {
     RetroProposals,
     /// The catalog of the Agents tab.
     Agents,
+    /// The programs in the «Computer» panel of the Agents tab.
+    Tools,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

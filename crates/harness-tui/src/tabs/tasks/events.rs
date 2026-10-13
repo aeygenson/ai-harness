@@ -96,7 +96,8 @@ impl TasksTab {
             | ListId::PluginCatalogs
             | ListId::Retros
             | ListId::RetroProposals
-            | ListId::Agents => {}
+            | ListId::Agents
+            | ListId::Tools => {}
         }
     }
 
