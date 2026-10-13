@@ -231,9 +231,9 @@ fn toml_value(value: impl Into<serde_json::Value>) -> String {
 }
 
 /// Roles that run commands such as `cargo test` or `cargo audit` may need to
-/// download crates. The Architect only reads and writes documents.
+/// download packages; see [`Role::spec`].
 fn needs_network(role: Role) -> bool {
-    matches!(role, Role::Developer | Role::Tester | Role::Security)
+    role.spec().network
 }
 
 /// How the turn ended, from `--json` output: `{"type":"turn.completed",...}` or
@@ -469,8 +469,13 @@ mod tests {
         let codex = Codex::new("/creds/codex", RoleSettings::default());
         let architect = args(&codex.command(&job(Role::Architect), Path::new("/secrets")));
         assert!(architect.contains(&"sandbox_workspace_write.network_access=false".to_string()));
-        let developer = args(&codex.command(&job(Role::Developer), Path::new("/secrets")));
-        assert!(developer.contains(&"sandbox_workspace_write.network_access=true".to_string()));
+        for role in [Role::Developer, Role::Tester, Role::Security] {
+            let args = args(&codex.command(&job(role), Path::new("/secrets")));
+            assert!(
+                args.contains(&"sandbox_workspace_write.network_access=true".to_string()),
+                "{role}"
+            );
+        }
     }
 
     #[test]

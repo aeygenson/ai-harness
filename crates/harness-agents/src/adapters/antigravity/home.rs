@@ -6,6 +6,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use harness_core::task::handoff::Role;
+use harness_core::task::permissions::Commands;
 
 use super::NOT_COPIED;
 
@@ -39,11 +40,12 @@ pub(super) fn toolchain_env(real_home: &Path) -> Vec<(&'static str, PathBuf)> {
 /// Commands no role may run: the harness makes the commits.
 pub(super) const DENIED_FOR_ALL: &[&str] = &["git commit", "git push"];
 
-/// Commands the roles that only look (Architect, Security) may not run: they
-/// change files, the git state, install or publish packages, or reach the
-/// network. Reading, running tests and audit tools stay allowed. The list
-/// cannot be complete; the git check after the role still catches any
-/// changed file.
+/// Commands a role without [`Commands::Any`] (see [`Role::spec`]) may not
+/// run: they change files, the git state, install or publish packages, or
+/// reach the network (so here such a role loses `curl` even when its spec
+/// allows the network). Reading, running tests and audit tools stay allowed.
+/// The list cannot be complete; the git check after the role still catches
+/// any changed file.
 pub(super) const DENIED_FOR_READERS: &[&str] = &[
     "rm",
     "mv",
@@ -69,7 +71,7 @@ pub(super) const DENIED_FOR_READERS: &[&str] = &[
 /// The role's `settings.json`. `deny` beats everything else.
 pub(super) fn settings(role: Role) -> String {
     let mut deny: Vec<&str> = DENIED_FOR_ALL.to_vec();
-    if matches!(role, Role::Architect | Role::Security) {
+    if role.spec().commands != Commands::Any {
         deny.extend(DENIED_FOR_READERS);
     }
     let deny: Vec<String> = deny.iter().map(|c| format!("command({c})")).collect();
