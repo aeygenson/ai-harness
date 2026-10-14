@@ -1,7 +1,8 @@
-//! Sending a task's branch to GitHub: the only git commands of the harness
-//! that use the network. The address is always given in full (made from
-//! `[github]` in `harness.toml`), never a remote's name, and a push never
-//! forces: the harness only adds commits to a branch, it never rewrites one.
+//! Sending a task's branch to GitHub and bringing a merged pull request back:
+//! the only git commands of the harness that use the network. The address is
+//! always given in full (made from `[github]` in `harness.toml`), never a
+//! remote's name, and nothing is forced: the harness only adds commits to a
+//! branch, it never rewrites one.
 
 use super::{GitError, Repo};
 
@@ -11,6 +12,18 @@ impl Repo {
     pub fn push_branch(&self, url: &str, branch: &str) -> Result<(), GitError> {
         let refspec = format!("refs/heads/{branch}:refs/heads/{branch}");
         self.git_online(&["push", "--quiet", url, &refspec])?;
+        Ok(())
+    }
+
+    /// Brings the commits of the branch `branch` at `url` into the branch
+    /// checked out now, only when that needs no merge commit (a "fast
+    /// forward"). Git refuses when the two have gone different ways.
+    pub fn fast_forward_from(&self, url: &str, branch: &str) -> Result<(), GitError> {
+        // `fetch` + `merge` instead of `pull`: `pull` follows Lisa's
+        // `pull.rebase` setting and could rewrite her commits.
+        let reference = format!("refs/heads/{branch}");
+        self.git_online(&["fetch", "--quiet", url, &reference])?;
+        self.git(&["merge", "--quiet", "--ff-only", "FETCH_HEAD"])?;
         Ok(())
     }
 
@@ -156,6 +169,59 @@ mod tests {
         assert!(repo.has_in_history(&head.unwrap()));
         // Only the full name counts.
         assert_eq!(repo.remote_branch_head(&url, "harness/task").unwrap(), None);
+    }
+
+    #[test]
+    fn a_branch_at_the_remote_is_brought_in_only_as_a_fast_forward() {
+        let (dir, repo, url) = project_and_remote();
+        repo.push_branch(&url, "harness/task-001").unwrap();
+        // GitHub gets a newer commit, as when a pull request is merged there.
+        fs::create_dir(dir.path().join("other")).unwrap();
+        let other = Repo::init(&dir.path().join("other")).unwrap();
+        other
+            .git(&["fetch", "--quiet", &url, "harness/task-001"])
+            .unwrap();
+        other
+            .git(&["switch", "--quiet", "-c", "work", "FETCH_HEAD"])
+            .unwrap();
+        fs::write(dir.path().join("other/x.txt"), "x\n").unwrap();
+        other.commit_all("merged on GitHub").unwrap();
+        other
+            .git(&["push", "--quiet", &url, "work:harness/task-001"])
+            .unwrap();
+
+        repo.fast_forward_from(&url, "harness/task-001").unwrap();
+
+        assert_eq!(repo.head().unwrap(), other.head().unwrap());
+        assert_eq!(
+            fs::read_to_string(repo.root().join("x.txt")).unwrap(),
+            "x\n"
+        );
+        // A local commit the remote does not have: no merge commit is made.
+        fs::write(repo.root().join("y.txt"), "y\n").unwrap();
+        repo.commit_all("only here").unwrap();
+        fs::write(dir.path().join("other/z.txt"), "z\n").unwrap();
+        other.commit_all("newer on GitHub").unwrap();
+        other
+            .git(&["push", "--quiet", &url, "work:harness/task-001"])
+            .unwrap();
+        let mine = repo.head().unwrap();
+
+        repo.fast_forward_from(&url, "harness/task-001")
+            .unwrap_err();
+
+        assert_eq!(repo.head().unwrap(), mine);
+    }
+
+    #[test]
+    fn a_branch_head_is_known_only_for_a_real_branch() {
+        let (_dir, repo, _url) = project_and_remote();
+
+        assert_eq!(
+            repo.branch_head("harness/task-001").unwrap(),
+            repo.head().unwrap()
+        );
+        assert_eq!(repo.branch_head("harness/task-002").unwrap(), None);
     }
 
     #[test]

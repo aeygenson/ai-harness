@@ -8,7 +8,7 @@
 
 use std::path::PathBuf;
 
-use harness_core::config::Config;
+use harness_core::config::{Config, GitHubConfig};
 use harness_core::git::Repo;
 use harness_core::task::branch::task_branch;
 use harness_core::task::pull_request::{self, PullRequest};
@@ -35,6 +35,19 @@ pub struct GitHub {
     pub push_url: String,
 }
 
+impl GitHub {
+    /// The project's repository from `[github]`, with `gh` installed and
+    /// signed in; otherwise an error that says how to fix that and then `again`.
+    pub(crate) fn ready(settings: &GitHubConfig, again: &str) -> Result<Self, String> {
+        Ok(Self {
+            repo: settings.repo.clone(),
+            base: settings.base.clone(),
+            gh: super::ready_gh(again)?,
+            push_url: format!("{PUSH_URL_START}{}.git", settings.repo),
+        })
+    }
+}
+
 /// Sends the finished task to GitHub when the project is on GitHub
 /// (`[github]` in `config`); `Ok(None)` otherwise. Needs the GitHub CLI,
 /// signed in. Pushes, opens a pull request and commits `state.json`.
@@ -47,13 +60,7 @@ pub fn publish(
     let Some(settings) = &config.github else {
         return Ok(None);
     };
-    let gh = super::ready_gh("run the task again")?;
-    let github = GitHub {
-        repo: settings.repo.clone(),
-        base: settings.base.clone(),
-        gh,
-        push_url: format!("{PUSH_URL_START}{}.git", settings.repo),
-    };
+    let github = GitHub::ready(settings, "run the task again")?;
     let secrets = credentials::default_dir()
         .map(|dir| credentials::saved_secrets(&dir))
         .unwrap_or_default();
@@ -195,7 +202,7 @@ fn open(
 
 /// An empty repository that stands in for GitHub in tests.
 #[cfg(test)]
-fn bare_repo(dir: &std::path::Path) -> String {
+pub(super) fn bare_repo(dir: &std::path::Path) -> String {
     let status = std::process::Command::new("git")
         .args(["init", "--quiet", "--bare"])
         .arg(dir)

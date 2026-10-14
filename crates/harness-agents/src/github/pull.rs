@@ -1,4 +1,5 @@
-//! Pull requests through `gh`: the one a branch already has, and a new one.
+//! Pull requests through `gh`: the one a branch already has, a new one,
+//! what GitHub says about one, and merging it.
 
 use std::path::Path;
 use std::time::Duration;
@@ -91,6 +92,65 @@ pub(super) fn create(gh: &Path, new: &NewPullRequest) -> Result<PullRequest, Str
     checked(new.repo, number, url)
 }
 
+/// What `gh pr view --json state,headRefOid,mergeable,statusCheckRollup`
+/// prints: the pull request as GitHub sees it now.
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct View {
+    /// `OPEN`, `CLOSED` or `MERGED`.
+    pub state: String,
+    /// The commit the pull request's branch is at on GitHub.
+    pub head_ref_oid: String,
+    /// `MERGEABLE`, `CONFLICTING` or `UNKNOWN` (GitHub has not worked it out yet).
+    pub mergeable: String,
+    /// The checks (CI) of that commit; empty when the repository has none.
+    #[serde(default)]
+    pub status_check_rollup: Vec<Check>,
+}
+
+/// One check of a pull request: a GitHub Actions job (`name`, `status`,
+/// `conclusion`) or an older commit status (`context`, `state`). Every
+/// field is optional because the two kinds have different ones.
+#[derive(Debug, serde::Deserialize)]
+pub(super) struct Check {
+    pub name: Option<String>,
+    pub context: Option<String>,
+    pub status: Option<String>,
+    pub conclusion: Option<String>,
+    pub state: Option<String>,
+}
+
+/// Asks GitHub about pull request `number` of `repo`.
+pub(super) fn view(gh: &Path, repo: &str, number: u64) -> Result<View, String> {
+    let mut command = quiet_command(gh);
+    command.args([
+        "pr",
+        "view",
+        &number.to_string(),
+        &format!("--repo={repo}"),
+        "--json=state,headRefOid,mergeable,statusCheckRollup",
+    ]);
+    let out = crate::install::models::run_for(command, "", &[], GH_LIMIT)?;
+    serde_json::from_str(&out).map_err(|e| format!("gh pr view printed no pull request: {e}"))
+}
+
+/// Merges pull request `number` of `repo` with a merge commit, so every
+/// role's commit stays in the history. `head` is the commit Lisa decided
+/// on: GitHub refuses when the branch has moved on since.
+pub(super) fn merge(gh: &Path, repo: &str, number: u64, head: &str) -> Result<(), String> {
+    let mut command = quiet_command(gh);
+    command.args([
+        "pr",
+        "merge",
+        &number.to_string(),
+        &format!("--repo={repo}"),
+        "--merge",
+        &format!("--match-head-commit={head}"),
+    ]);
+    crate::install::models::run_for(command, "", &[], GH_LIMIT)?;
+    Ok(())
+}
+
 /// A pull request from `gh`'s answer, only when its address is the one
 /// GitHub gives `number` in `repo`: the address is shown and opened later.
 fn checked(repo: &str, number: u64, url: &str) -> Result<PullRequest, String> {
@@ -148,6 +208,41 @@ mod tests {
         let strange = harness_fake::install(other.path(), "gh", script);
         let error = find(&strange, "lisa/app", "harness/task-001").unwrap_err();
         assert!(error.contains("unexpected address"), "{error}");
+    }
+
+    #[test]
+    fn a_pull_request_is_viewed_and_merged_at_the_commit_given() {
+        let bin = tempfile::tempdir().unwrap();
+        let args = bin.path().join("args.txt");
+        let script = format!(
+            "append-args {}\nwhen-arg 2 view print {{\"state\":\"OPEN\",\"headRefOid\":\"abc\",\"mergeable\":\"MERGEABLE\",\"statusCheckRollup\":[{{\"name\":\"server\",\"status\":\"COMPLETED\",\"conclusion\":\"SUCCESS\"}}]}}\n",
+            args.display()
+        );
+        let gh = harness_fake::install(bin.path(), "gh", &script);
+
+        let seen = view(&gh, "lisa/app", 7).unwrap();
+        merge(&gh, "lisa/app", 7, "abc").unwrap();
+
+        assert_eq!(seen.state, "OPEN");
+        assert_eq!(seen.head_ref_oid, "abc");
+        assert_eq!(seen.status_check_rollup[0].name.as_deref(), Some("server"));
+        let saved = std::fs::read_to_string(&args).unwrap();
+        assert_eq!(
+            saved.lines().collect::<Vec<_>>(),
+            [
+                "pr",
+                "view",
+                "7",
+                "--repo=lisa/app",
+                "--json=state,headRefOid,mergeable,statusCheckRollup",
+                "pr",
+                "merge",
+                "7",
+                "--repo=lisa/app",
+                "--merge",
+                "--match-head-commit=abc"
+            ]
+        );
     }
 
     #[test]

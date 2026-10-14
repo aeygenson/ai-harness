@@ -10,6 +10,7 @@ use std::sync::mpsc::{channel, Receiver, Sender};
 use std::thread::{self, JoinHandle};
 
 use harness_agents::build::BuildError;
+use harness_agents::github::{Folder, Merged};
 use harness_agents::process;
 use harness_agents::Team;
 use harness_core::config::Config;
@@ -20,9 +21,11 @@ use harness_core::task::handoff::{NextStep, Role, Verdict};
 use harness_core::task::orchestrator::{self, Project, SameText, StopReason};
 use harness_core::task::pull_request::PullRequest;
 use harness_core::task::store::TaskStore;
-use harness_core::task::{Stage, TaskState};
+use harness_core::task::Stage;
 use harness_core::text;
 use tokio::sync::oneshot;
+
+use super::github::{send_to_github, without_roles};
 
 /// Builds the agents of the project: `build_team`, or mock agents in tests.
 pub type Builder = fn(&Config, &Path) -> Result<Team, BuildError>;
@@ -50,6 +53,8 @@ pub enum Request {
     Continue(String),
     /// Send the done task to GitHub again (the last try failed).
     Publish(String),
+    /// Merge the done task's pull request and bring the work into the folder.
+    Merge(String),
 }
 
 /// The model and level Lisa chose for one role for this launch only;
@@ -70,6 +75,8 @@ pub struct Outcome {
     /// How sending the done task to GitHub went; `None` when nothing was
     /// sent (not done, or the project is not on GitHub).
     pub published: Option<Result<PullRequest, String>>,
+    /// How merging the pull request went; `None` when it was not asked for.
+    pub merged: Option<Result<Merged, String>>,
 }
 
 #[derive(Debug)]
@@ -226,22 +233,19 @@ fn work(job: Job, events: &Sender<Event>, stop: oneshot::Receiver<()>) -> Result
     let repo = Repo::open(root).map_err(|e| text(&e))?;
     // An existing task's branch first: its settings are the ones to use, and
     // Lisa's decision and the roles' work are committed there.
-    if let Request::Decide { task, .. } | Request::Continue(task) | Request::Publish(task) =
-        &request
+    if let Request::Decide { task, .. }
+    | Request::Continue(task)
+    | Request::Publish(task)
+    | Request::Merge(task) = &request
     {
         if branch::enter(&repo, task).map_err(|e| text(&e))? {
             let _ = events.send(Event::SwitchedBranch);
         }
     }
     let harness_dir = root.join(HARNESS_DIR);
-    let mut config = Config::load(&harness_dir).map_err(|e| text(&e))?;
-    if let Some(choice) = choice {
-        if let Some(settings) = config.roles.get_mut(&choice.role) {
-            settings.model = choice.model;
-            settings.effort = choice.effort;
-        }
-    }
+    let config = load_config(&harness_dir, choice)?;
     let runs = repo.runs_dir();
+    let merging = matches!(request, Request::Merge(_));
     // Everything the agents need is checked before anything is saved: a
     // missing login leaves the task as it was.
     let needs_run = !matches!(
@@ -250,6 +254,7 @@ fn work(job: Job, events: &Sender<Event>, stop: oneshot::Receiver<()>) -> Result
             next: NextStep::Done,
             ..
         } | Request::Publish(_)
+            | Request::Merge(_)
     );
     let agents = if needs_run {
         let team = builder(&config, root).map_err(|e| text(&e))?;
@@ -283,19 +288,19 @@ fn work(job: Job, events: &Sender<Event>, stop: oneshot::Receiver<()>) -> Result
                 .map_err(|e| text(&e))?;
             (store, state)
         }
-        Request::Continue(task) | Request::Publish(task) => {
+        Request::Continue(task) | Request::Publish(task) | Request::Merge(task) => {
             TaskStore::open(&runs, &task).map_err(|e| text(&e))?
         }
     };
     let task = state.task_id.clone();
     let _ = events.send(Event::Started(task.clone()));
     let Some((team, skills)) = agents else {
-        let published = send_to_github(&repo, &config, &store, &mut state);
-        return Ok(Outcome {
-            task,
-            stop: None,
-            published,
-        });
+        let outcome = without_roles(merging, &repo, &config, &store, &mut state);
+        // A merge leaves the folder on the main branch: the tab reads it again.
+        if matches!(&outcome.merged, Some(Ok(m)) if m.folder == Folder::Updated) {
+            let _ = events.send(Event::SwitchedBranch);
+        }
+        return Ok(outcome);
     };
     let project = Project {
         config: &config,
@@ -316,21 +321,20 @@ fn work(job: Job, events: &Sender<Event>, stop: oneshot::Receiver<()>) -> Result
         task,
         stop: Some(stop),
         published,
+        merged: None,
     })
 }
 
-/// Sends a done task to GitHub when the project is there (see
-/// `harness_agents::github::publish`); `None` when nothing was sent.
-fn send_to_github(
-    repo: &Repo,
-    config: &Config,
-    store: &TaskStore,
-    state: &mut TaskState,
-) -> Option<Result<PullRequest, String>> {
-    if state.stage != Stage::Done {
-        return None;
+/// `harness.toml` with the model and level Lisa chose for this launch.
+fn load_config(harness_dir: &Path, choice: Option<RunChoice>) -> Result<Config, String> {
+    let mut config = Config::load(harness_dir).map_err(|e| e.to_string())?;
+    if let Some(choice) = choice {
+        if let Some(settings) = config.roles.get_mut(&choice.role) {
+            settings.model = choice.model;
+            settings.effort = choice.effort;
+        }
     }
-    harness_agents::github::publish(repo, config, store, state).transpose()
+    Ok(config)
 }
 
 /// A line of the agent's output as the live log shows it. The agents print

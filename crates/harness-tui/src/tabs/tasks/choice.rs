@@ -27,7 +27,19 @@ impl TasksTab {
         if self.needs_publishing() {
             items.push((Choice::Publish, true));
         }
+        if self.has_pull_request() {
+            items.push((Choice::Merge, true));
+        }
         items
+    }
+
+    /// Is the selected task done in a project on GitHub, with its pull
+    /// request? Then it can be merged (GitHub says whether it is ready).
+    fn has_pull_request(&self) -> bool {
+        self.on_github
+            && self
+                .current()
+                .is_some_and(|t| t.state.stage == Stage::Done && t.state.pull_request.is_some())
     }
 
     /// Is the selected task done in a project on GitHub, without its pull
@@ -133,7 +145,7 @@ impl TasksTab {
         match self.choice {
             Choice::NewTask => Some(Role::Architect),
             Choice::Role(role) | Choice::Continue(role) => Some(role),
-            Choice::Finish | Choice::Publish => None,
+            Choice::Finish | Choice::Publish | Choice::Merge => None,
         }
     }
 
@@ -261,6 +273,9 @@ pub enum Choice {
     Finish,
     /// Send the done task to GitHub: push its branch and open its pull request.
     Publish,
+    /// Merge the done task's pull request on GitHub and bring the merged
+    /// work into the project's main branch.
+    Merge,
 }
 
 /// The open list of the message box.

@@ -1,14 +1,17 @@
 //! GitHub CLI (`gh`): whether it is signed in to GitHub, the commands that
-//! sign it in, and (in `pull`) finding and opening pull requests; `publish`
-//! sends a finished task to GitHub. The harness talks to GitHub only through
+//! sign it in, and (in `pull`) finding, opening and merging pull requests;
+//! `publish` sends a finished task to GitHub, and `merge` merges its pull
+//! request and brings the work back into the project. The harness talks to GitHub only through
 //! `gh` and `git push`, under Lisa's own login: `gh` keeps the login in the
 //! system's key store, and the harness never sees or saves the token.
 
 mod connect;
+mod merge;
 mod publish;
 mod pull;
 
 pub use connect::{connect, connect_with, Connection};
+pub use merge::{merge, merge_with, Folder, Merged};
 pub use publish::{publish, publish_with, GitHub, PUSH_URL_START};
 
 use std::path::{Path, PathBuf};

@@ -647,7 +647,16 @@ fn a_done_task_on_github_shows_its_pull_request_or_offers_to_send_it() {
     key(&mut app, KeyCode::Char('o'));
     assert!(app.message.is_some());
 
-    // The other one has no pull request yet: sending it is what comes next.
+    // A task with a pull request can have it merged; no role runs for that.
+    key(&mut app, KeyCode::Up);
+    click(&mut app, " To: architect · new task ▾ ");
+    click(&mut app, "Merge pull request");
+    let text = screen(&mut app);
+    assert!(text.contains(" To: Merge pull request ▾ "), "{text}");
+    assert!(!text.contains("[ Model:"), "{text}");
+
+    // The other one has no pull request yet: sending it is what comes next,
+    // and there is nothing to merge.
     click(&mut app, "task-002");
     let text = screen(&mut app);
     assert!(text.contains("To: Send to GitHub ▾"), "{text}");
@@ -656,4 +665,6 @@ fn a_done_task_on_github_shows_its_pull_request_or_offers_to_send_it() {
         "{text}"
     );
     assert_eq!(app.tasks.as_ref().unwrap().pull_request_url(1), None);
+    click(&mut app, " To: Send to GitHub ▾ ");
+    assert!(!screen(&mut app).contains("Merge pull request"));
 }
