@@ -1,14 +1,17 @@
 //! The programs the harness needs besides the agents (Git, Node.js, curl,
-//! Zed, ...) and a check of which of them are on this computer: the first
-//! half of `harness doctor` and of the «Computer» panel on the Agents tab.
+//! Zed, GitHub CLI, ...) and a check of which of them are on this computer:
+//! the first half of `harness doctor` and of the «Computer» panel on the
+//! Agents tab.
 //!
 //! The agents themselves are checked by [`super::catalog`]. Everything
-//! missing here is installed by the harness's installer
-//! ([`harness_platform::program::installer_command`]).
+//! missing here except the GitHub CLI is installed by the harness's
+//! installer ([`harness_platform::program::installer_command`]).
 
 use std::path::{Path, PathBuf};
 
 use super::catalog::{older, parse_version, version_of};
+
+mod commands;
 
 /// A program the harness uses that is not an agent.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -25,6 +28,9 @@ pub enum Tool {
     Bubblewrap,
     /// The editor the harness opens files in.
     Zed,
+    /// GitHub CLI (`gh`): pushes a project's task branches and opens pull
+    /// requests (see [`crate::github`]).
+    GitHubCli,
 }
 
 /// How much the harness needs a tool.
@@ -47,6 +53,7 @@ impl Tool {
             tools.push(Tool::Bubblewrap);
         }
         tools.push(Tool::Zed);
+        tools.push(Tool::GitHubCli);
         tools
     }
 
@@ -59,6 +66,7 @@ impl Tool {
             Tool::Curl => "curl",
             Tool::Bubblewrap => "bubblewrap",
             Tool::Zed => "Zed",
+            Tool::GitHubCli => "GitHub CLI",
         }
     }
 
@@ -71,6 +79,7 @@ impl Tool {
             Tool::Curl => "curl",
             Tool::Bubblewrap => harness_platform::program::sandbox_program().unwrap_or("bwrap"),
             Tool::Zed => "zed",
+            Tool::GitHubCli => "gh",
         }
     }
 
@@ -78,7 +87,8 @@ impl Tool {
     pub fn need(self) -> Need {
         match self {
             Tool::Git | Tool::Node | Tool::Npx => Need::Required,
-            Tool::Curl | Tool::Bubblewrap | Tool::Zed => Need::Recommended,
+            // Only projects on GitHub need it.
+            Tool::Curl | Tool::Bubblewrap | Tool::Zed | Tool::GitHubCli => Need::Recommended,
         }
     }
 
@@ -86,7 +96,9 @@ impl Tool {
     pub fn min_version(self) -> Option<&'static str> {
         match self {
             Tool::Node => Some(NODE_MIN),
-            Tool::Git | Tool::Npx | Tool::Curl | Tool::Bubblewrap | Tool::Zed => None,
+            Tool::Git | Tool::Npx | Tool::Curl | Tool::Bubblewrap | Tool::Zed | Tool::GitHubCli => {
+                None
+            }
         }
     }
 
@@ -99,83 +111,18 @@ impl Tool {
             Tool::Curl => "https://curl.se/download.html",
             Tool::Bubblewrap => "https://github.com/containers/bubblewrap",
             Tool::Zed => "https://zed.dev/download",
+            Tool::GitHubCli => "https://cli.github.com",
         }
     }
 
-    /// The command that installs it on this system; `None` when the harness
-    /// knows none (then [`Tool::site`] says how). On Linux it uses the
-    /// system's package manager with `sudo`, so it asks for the password.
-    pub fn install_command(self) -> Option<String> {
-        harness_platform::program::on_each_system(
-            self.linux_command(&|name| harness_platform::program::find(name).is_some()),
-            self.mac_command(),
-            self.windows_command(),
-        )
-    }
-
-    /// The command on Linux; `has` says whether a program is in `PATH`.
-    fn linux_command(self, has: &dyn Fn(&str) -> bool) -> Option<String> {
+    /// Does the harness's installer bring it? Only the GitHub CLI it does
+    /// not: most projects do not need it.
+    pub fn from_installer(self) -> bool {
         match self {
-            Tool::Git => linux_package("git", has),
-            Tool::Curl => linux_package("curl", has),
-            Tool::Bubblewrap => linux_package("bubblewrap", has),
-            // The harness's installer puts a new enough Node.js (with npm and
-            // npx) into ~/.local; distributions often have an older one.
-            Tool::Node | Tool::Npx => {
-                Some(harness_platform::program::installer_command().to_string())
-            }
-            Tool::Zed => Some("curl -fsSL https://zed.dev/install.sh | sh".to_string()),
+            Tool::Git | Tool::Node | Tool::Npx | Tool::Curl | Tool::Bubblewrap | Tool::Zed => true,
+            Tool::GitHubCli => false,
         }
     }
-
-    /// The command on macOS, with Homebrew (as the harness's installer does).
-    fn mac_command(self) -> Option<String> {
-        let command = match self {
-            Tool::Git => "brew install git",
-            Tool::Node | Tool::Npx => "brew install node",
-            Tool::Curl => "brew install curl",
-            Tool::Zed => "brew install --cask zed",
-            Tool::Bubblewrap => return None,
-        };
-        Some(command.to_string())
-    }
-
-    /// The command on Windows, with winget (as the harness's installer does).
-    fn windows_command(self) -> Option<String> {
-        let id = match self {
-            Tool::Git => "Git.Git",
-            Tool::Node | Tool::Npx => "OpenJS.NodeJS.LTS",
-            Tool::Curl => "cURL.cURL",
-            Tool::Zed => "ZedIndustries.Zed",
-            Tool::Bubblewrap => return None,
-        };
-        Some(format!("{WINGET_INSTALL} {id}"))
-    }
-}
-
-/// winget's install command. Its questions about the terms of its sources
-/// and packages are answered here, so it does not stop to ask.
-const WINGET_INSTALL: &str =
-    "winget install --exact --accept-source-agreements --accept-package-agreements --id";
-
-/// The package managers of the common Linux distributions, with the start
-/// of their install command (the same ones the harness's installer knows).
-const LINUX_MANAGERS: [(&str, &str); 4] = [
-    (
-        "apt-get",
-        "sudo apt-get update -q && sudo apt-get install -y",
-    ),
-    ("dnf", "sudo dnf install -y"),
-    ("pacman", "sudo pacman -S --needed --noconfirm"),
-    ("zypper", "sudo zypper --non-interactive install"),
-];
-
-/// The command that installs `package` with the first package manager found.
-fn linux_package(package: &str, has: &dyn Fn(&str) -> bool) -> Option<String> {
-    LINUX_MANAGERS
-        .iter()
-        .find(|(manager, _)| has(manager))
-        .map(|(_, command)| format!("{command} {package}"))
 }
 
 /// What was found for one tool.
@@ -187,6 +134,9 @@ pub struct ToolStatus {
     pub path: Option<PathBuf>,
     /// What `--version` printed, reduced to the number.
     pub version: Option<String>,
+    /// For a program with a login (the GitHub CLI): is it signed in? `None`
+    /// for the others, and when the program is not found.
+    pub signed_in: Option<bool>,
 }
 
 /// How a checked tool looks: fine, worth a look, or missing.
@@ -194,7 +144,7 @@ pub struct ToolStatus {
 pub enum Health {
     /// Found and new enough.
     Good,
-    /// Too old, or a recommended tool is missing.
+    /// Too old, not signed in, or a recommended tool is missing.
     Warning,
     /// A required tool is missing.
     Missing,
@@ -209,12 +159,17 @@ impl ToolStatus {
         }
     }
 
+    /// Is it missing or too old, so that installing it would help?
+    pub fn needs_install(&self) -> bool {
+        self.path.is_none() || self.old()
+    }
+
     /// Fine, worth a look, or missing (see [`Health`]).
     pub fn health(&self) -> Health {
         match (&self.path, self.tool.need()) {
             (None, Need::Required) => Health::Missing,
             (None, Need::Recommended) => Health::Warning,
-            (Some(_), _) if self.old() => Health::Warning,
+            (Some(_), _) if self.old() || self.signed_in == Some(false) => Health::Warning,
             (Some(_), _) => Health::Good,
         }
     }
@@ -222,15 +177,16 @@ impl ToolStatus {
 
 /// Checks every tool this system needs, all at once.
 pub fn check() -> Vec<ToolStatus> {
-    check_with(&Tool::here(), &find, &version_of)
+    check_with(&Tool::here(), &find, &version_of, &signed_in)
 }
 
-/// [`check`] for `tools`, with how a program is found and asked for its
-/// version given (tests give fake ones).
+/// [`check`] for `tools`, with how a program is found, asked for its
+/// version and asked whether it is signed in given (tests give fake ones).
 pub fn check_with(
     tools: &[Tool],
     find: &(dyn Fn(Tool) -> Option<PathBuf> + Sync),
     version: &(dyn Fn(&Path) -> Result<String, String> + Sync),
+    signed_in: &(dyn Fn(Tool, &Path) -> Option<bool> + Sync),
 ) -> Vec<ToolStatus> {
     // `--version` can take a moment (Node starts slowly): ask all at once.
     std::thread::scope(|scope| {
@@ -243,10 +199,12 @@ pub fn check_with(
                         .as_deref()
                         .and_then(|p| version(p).ok())
                         .and_then(|text| parse_version(&text));
+                    let signed_in = path.as_deref().and_then(|p| signed_in(tool, p));
                     ToolStatus {
                         tool,
                         path,
                         version,
+                        signed_in,
                     }
                 })
             })
@@ -259,6 +217,7 @@ pub fn check_with(
                     tool,
                     path: None,
                     version: None,
+                    signed_in: None,
                 })
             })
             .collect()
@@ -269,9 +228,17 @@ pub fn check_with(
 fn find(tool: Tool) -> Option<PathBuf> {
     match tool {
         Tool::Zed => harness_platform::editor::zed(),
-        Tool::Git | Tool::Node | Tool::Npx | Tool::Curl | Tool::Bubblewrap => {
+        Tool::Git | Tool::Node | Tool::Npx | Tool::Curl | Tool::Bubblewrap | Tool::GitHubCli => {
             harness_platform::program::find(tool.program())
         }
+    }
+}
+
+/// Whether `tool` at `path` is signed in, for the tools that have a login.
+fn signed_in(tool: Tool, path: &Path) -> Option<bool> {
+    match tool {
+        Tool::GitHubCli => Some(crate::github::signed_in(path)),
+        Tool::Git | Tool::Node | Tool::Npx | Tool::Curl | Tool::Bubblewrap | Tool::Zed => None,
     }
 }
 
@@ -284,8 +251,14 @@ mod tests {
             Tool::Git => Some(PathBuf::from("/bin/git")),
             Tool::Node => Some(PathBuf::from("/bin/node")),
             Tool::Curl => Some(PathBuf::from("/bin/curl")),
+            Tool::GitHubCli => Some(PathBuf::from("/bin/gh")),
             Tool::Npx | Tool::Bubblewrap | Tool::Zed => None,
         }
+    }
+
+    /// `gh` is found but not signed in.
+    fn fake_signed_in(tool: Tool, _: &Path) -> Option<bool> {
+        (tool == Tool::GitHubCli).then_some(false)
     }
 
     fn fake_version(path: &Path) -> Result<String, String> {
@@ -300,9 +273,16 @@ mod tests {
 
     #[test]
     fn each_tool_is_good_old_or_missing_as_needed() {
-        let tools = [Tool::Git, Tool::Node, Tool::Npx, Tool::Curl, Tool::Zed];
+        let tools = [
+            Tool::Git,
+            Tool::Node,
+            Tool::Npx,
+            Tool::Curl,
+            Tool::Zed,
+            Tool::GitHubCli,
+        ];
 
-        let found = check_with(&tools, &fake_find, &fake_version);
+        let found = check_with(&tools, &fake_find, &fake_version, &fake_signed_in);
 
         let health: Vec<(Tool, Health)> = found.iter().map(|s| (s.tool, s.health())).collect();
         assert_eq!(
@@ -315,12 +295,27 @@ mod tests {
                 // Found, even when it gives no version.
                 (Tool::Curl, Health::Good),
                 (Tool::Zed, Health::Warning),
+                // Found, but not signed in.
+                (Tool::GitHubCli, Health::Warning),
             ]
         );
         assert_eq!(found[0].version.as_deref(), Some("2.43.0"));
         assert_eq!(found[3].version, None);
+        assert_eq!(found[0].signed_in, None);
+        assert_eq!(found[5].signed_in, Some(false));
+        // Signing in fixes it, installing does not.
+        assert!(!found[5].needs_install());
+        assert!(found[4].needs_install());
     }
 
+    #[test]
+    fn a_signed_in_github_cli_is_good() {
+        let found = check_with(&[Tool::GitHubCli], &fake_find, &fake_version, &|_, _| {
+            Some(true)
+        });
+
+        assert_eq!(found[0].health(), Health::Good);
+    }
     #[test]
     fn only_linux_lists_bubblewrap() {
         let here = Tool::here();
@@ -329,57 +324,5 @@ mod tests {
             harness_platform::program::sandbox_program().is_some()
         );
         assert_eq!(here.first(), Some(&Tool::Git));
-    }
-
-    #[test]
-    fn linux_uses_the_package_manager_it_finds() {
-        let apt = |name: &str| name == "apt-get";
-        let dnf = |name: &str| name == "dnf";
-        let none = |_: &str| false;
-
-        assert_eq!(
-            Tool::Git.linux_command(&apt).as_deref(),
-            Some("sudo apt-get update -q && sudo apt-get install -y git")
-        );
-        assert_eq!(
-            Tool::Bubblewrap.linux_command(&dnf).as_deref(),
-            Some("sudo dnf install -y bubblewrap")
-        );
-        // Without a known package manager only the site can help.
-        assert_eq!(Tool::Curl.linux_command(&none), None);
-    }
-
-    #[test]
-    fn npx_is_installed_with_node() {
-        let none = |_: &str| false;
-
-        // On Linux the harness's own installer brings Node.js with npx. The
-        // test runs on every system, and the installer command is this system's.
-        assert_eq!(
-            Tool::Npx.linux_command(&none),
-            Tool::Node.linux_command(&none)
-        );
-        assert_eq!(
-            Tool::Npx.linux_command(&none).as_deref(),
-            Some(harness_platform::program::installer_command())
-        );
-        assert_eq!(
-            Tool::Npx.mac_command().as_deref(),
-            Some("brew install node")
-        );
-        assert_eq!(Tool::Npx.windows_command(), Tool::Node.windows_command());
-        assert_eq!(Tool::Npx.site(), Tool::Node.site());
-    }
-
-    #[test]
-    fn windows_commands_do_not_stop_to_ask() {
-        let command = Tool::Git.windows_command().unwrap();
-
-        assert!(command.starts_with("winget install"), "{command}");
-        assert!(command.contains("--accept-package-agreements"), "{command}");
-        assert!(command.ends_with("--id Git.Git"), "{command}");
-        // Bubblewrap is only for Linux.
-        assert_eq!(Tool::Bubblewrap.windows_command(), None);
-        assert_eq!(Tool::Bubblewrap.mac_command(), None);
     }
 }

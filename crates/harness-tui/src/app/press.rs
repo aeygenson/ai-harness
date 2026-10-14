@@ -123,11 +123,14 @@ impl App {
         }
     }
 
-    /// Starts signing in to the agent selected on the Agents tab.
+    /// Starts signing in to the agent, or the program of the «Computer»
+    /// panel (the GitHub CLI), selected on the Agents tab.
     fn sign_in_agent(&mut self) {
         if let Some(status) = self.agents.sign_in_target() {
             let entry = status.entry;
             self.sign_in = Some((credentials::login_name(entry.id), entry.name));
+        } else if let Some((status, path)) = self.agents.tool_sign_in() {
+            self.tool_sign_in = Some((status.tool.name(), path.to_path_buf()));
         }
     }
 

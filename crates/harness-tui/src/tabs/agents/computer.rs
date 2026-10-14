@@ -39,7 +39,13 @@ impl AgentsTab {
                 line
             });
         }
-        if self.tools.iter().any(|s| s.health() != Health::Good) {
+        // Only for what the installer brings: it does not install the
+        // GitHub CLI or sign anything in.
+        if self
+            .tools
+            .iter()
+            .any(|s| s.tool.from_installer() && s.needs_install())
+        {
             lines.push(Line::from(tr.t("agents.tools_install").to_string()));
             lines.push(Line::styled(
                 harness_platform::program::installer_command().to_string(),
@@ -115,6 +121,17 @@ pub fn tool_details(status: &ToolStatus, tr: &I18n) -> Vec<Line<'static>> {
             theme::warn(),
         ));
     }
+    match status.signed_in {
+        Some(true) => lines.push(Line::styled(
+            tr.t("agents.tool_signed_in_state").to_string(),
+            theme::ok(),
+        )),
+        Some(false) => lines.push(Line::styled(
+            tr.t("agents.tool_signed_out_state").to_string(),
+            theme::warn(),
+        )),
+        None => {}
+    }
     let need = match tool.need() {
         Need::Required => "agents.tool_required",
         Need::Recommended => "agents.tool_recommended",
@@ -127,7 +144,7 @@ pub fn tool_details(status: &ToolStatus, tr: &I18n) -> Vec<Line<'static>> {
             .map(|l| Line::from(l.to_string())),
     );
     lines.push(Line::default());
-    if status.health() != Health::Good {
+    if status.needs_install() {
         match tool.install_command() {
             Some(command) => {
                 lines.push(Line::from(tr.t("agents.tool_install").to_string()));
@@ -151,6 +168,7 @@ fn about_key(tool: Tool) -> &'static str {
         Tool::Curl => "agents.tool_about_curl",
         Tool::Bubblewrap => "agents.tool_about_bubblewrap",
         Tool::Zed => "agents.tool_about_zed",
+        Tool::GitHubCli => "agents.tool_about_github_cli",
     }
 }
 
@@ -225,7 +243,8 @@ fn harness_line(release: &HarnessRelease, tr: &I18n) -> Line<'static> {
     ])
 }
 
-/// `✓ Git 2.43.0`, `! Node.js 20.1.0 · older than 22.19`, `✗ npx · not found`.
+/// `✓ Git 2.43.0`, `! Node.js 20.1.0 · older than 22.19`, `✗ npx · not found`,
+/// `! GitHub CLI 2.62.0 · not signed in`.
 fn tool_line(status: &ToolStatus, tr: &I18n) -> Line<'static> {
     let (mark, style) = match status.health() {
         Health::Good => ("✓", theme::ok()),
@@ -239,6 +258,16 @@ fn tool_line(status: &ToolStatus, tr: &I18n) -> Line<'static> {
         }
         (Some(_), Some(version), _) => version.clone(),
         (Some(_), None, _) => String::new(),
+    };
+    let about = if status.signed_in == Some(false) {
+        let signed_out = tr.t("agents.tool_signed_out");
+        if about.is_empty() {
+            signed_out.to_string()
+        } else {
+            format!("{about} · {signed_out}")
+        }
+    } else {
+        about
     };
     Line::from(vec![
         Span::styled(format!("{mark} "), style),

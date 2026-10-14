@@ -54,7 +54,7 @@ impl AgentsTab {
                 (
                     tr.t("agents.run_sign_in"),
                     ButtonId::AgentSignIn,
-                    self.sign_in_target().is_some(),
+                    self.sign_in_target().is_some() || self.tool_sign_in().is_some(),
                 ),
                 (
                     tr.t("agents.run_update_harness"),

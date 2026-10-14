@@ -7,7 +7,7 @@ use ratatui::crossterm::event::KeyCode;
 
 use harness_agents::install::catalog::{self, Action, Status, CATALOG};
 use harness_agents::install::credentials;
-use harness_agents::install::tools::{Health, ToolStatus};
+use harness_agents::install::tools::ToolStatus;
 use harness_core::config::AgentKind;
 
 use super::release::HarnessRelease;
@@ -114,14 +114,14 @@ impl AgentsTab {
     }
 
     /// The chosen program and the command «Install» would run for it: only
-    /// when it is missing or too old, while nothing else runs, and when there
+    /// when it is missing or too old (not when it is only signed out), while nothing else runs, and when there
     /// is a command for this system.
     pub fn tool_step(&self) -> Option<(&ToolStatus, String)> {
         if self.checking || self.job.as_ref().is_some_and(Job::running) {
             return None;
         }
         let status = self.current_tool()?;
-        if status.health() == Health::Good {
+        if !status.needs_install() {
             return None;
         }
         Some((status, status.tool.install_command()?))
@@ -167,6 +167,17 @@ impl AgentsTab {
         }
         self.current()
             .filter(|status| status.entry.runs() && status.installed())
+    }
+
+    /// The chosen program «Sign in» would sign in, with its path: one that
+    /// has a login (the GitHub CLI) and is installed, while nothing runs.
+    pub fn tool_sign_in(&self) -> Option<(&ToolStatus, &std::path::Path)> {
+        if self.checking || self.job.as_ref().is_some_and(Job::running) {
+            return None;
+        }
+        let status = self.current_tool()?;
+        status.signed_in?;
+        Some((status, status.path.as_deref()?))
     }
 
     /// Looks again which agents have a saved login (after «Sign in»).

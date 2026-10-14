@@ -107,6 +107,19 @@ impl App {
         self.check_agents();
     }
 
+    /// Back from signing in a program (the GitHub CLI): say how it went and
+    /// check the computer again, so the panel shows the login.
+    pub(crate) fn finish_tool_sign_in(&mut self, name: &str, result: Result<(), String>) {
+        self.message = Some(match result {
+            Ok(()) => Message::info(self.tr.f("agents.tool_signed_in", &[("name", &name)])),
+            Err(error) => Message::error(self.tr.f(
+                "agents.sign_in_failed",
+                &[("name", &name), ("error", &error)],
+            )),
+        });
+        self.check_agents();
+    }
+
     /// Asks in the background whether a newer harness is out.
     pub(crate) fn check_release(&mut self) {
         if self.release_check.is_some() {

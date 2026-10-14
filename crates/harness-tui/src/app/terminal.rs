@@ -122,6 +122,12 @@ pub(crate) fn event_loop(
             let result = install_outside(terminal, name, &command, &app.tr);
             app.finish_tool_install(name, result);
         }
+        if let Some((name, path)) = app.tool_sign_in.take() {
+            let heading = app.tr.f("agents.signing_in", &[("name", &name)]);
+            let commands = harness_agents::github::sign_in_commands(&path);
+            let result = run_outside(terminal, &heading, commands, &app.tr);
+            app.finish_tool_sign_in(name, result);
+        }
         if loaded.elapsed() >= RELOAD_EVERY {
             if let Some(tasks) = &mut app.tasks {
                 tasks.reload();
@@ -167,7 +173,7 @@ fn sign_in_outside(
         command
     });
     match command {
-        Ok(command) => run_outside(terminal, &heading, command, tr),
+        Ok(command) => run_outside(terminal, &heading, vec![command], tr),
         Err(error) => Err(error.to_string()),
     }
 }
@@ -187,26 +193,29 @@ fn install_outside(
     let (shell, flags) = harness_platform::program::shell();
     let mut command = Command::new(shell);
     command.args(flags).arg(line);
-    run_outside(terminal, &heading, command, tr)
+    run_outside(terminal, &heading, vec![command], tr)
 }
 
-/// Leaves the full screen, prints `heading`, runs `command` in the plain
-/// terminal (it reads the keyboard itself) and takes the terminal back once
-/// Lisa has read the output and pressed Enter.
+/// Leaves the full screen, prints `heading`, runs `commands` one after
+/// another in the plain terminal (they read the keyboard themselves) and
+/// takes the terminal back once Lisa has read the output and pressed Enter.
+/// A command that fails stops the ones after it.
 fn run_outside(
     terminal: &mut DefaultTerminal,
     heading: &str,
-    mut command: Command,
+    commands: Vec<Command>,
     tr: &I18n,
 ) -> Result<(), String> {
     let _ = execute!(io::stdout(), DisableMouseCapture, DisableBracketedPaste);
     let _ = ratatui::try_restore();
     say(&format!("{heading}\n"));
-    let result = match command.status() {
-        Ok(status) if status.success() => Ok(()),
-        Ok(status) => Err(status.to_string()),
-        Err(error) => Err(error.to_string()),
-    };
+    let result = commands
+        .into_iter()
+        .try_for_each(|mut command| match command.status() {
+            Ok(status) if status.success() => Ok(()),
+            Ok(status) => Err(status.to_string()),
+            Err(error) => Err(error.to_string()),
+        });
     say(&format!("\n{}", tr.t("agents.sign_in_back")));
     let mut line = String::new();
     let _ = io::BufRead::read_line(&mut io::stdin().lock(), &mut line);
