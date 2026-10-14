@@ -80,6 +80,8 @@ pub enum ButtonId {
     OpenFolder,
     RemoveProject,
     UseProject,
+    /// «Connect GitHub» on the Projects tab.
+    ConnectGitHub,
     Ok,
     Cancel,
     Language,

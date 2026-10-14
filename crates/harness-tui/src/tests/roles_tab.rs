@@ -55,10 +55,17 @@ fn roles_get_agents_models_and_skills_and_are_saved() {
     click(&mut app, "retro      claude");
     click(&mut app, "( ) antigravity");
 
+    // Meanwhile the project was put on GitHub in the background.
+    let path = root.join(".harness/harness.toml");
+    let mut file = fs::read_to_string(&path).unwrap();
+    file.push_str("\n[github]\nrepo = \"lisa/test\"\n");
+    fs::write(&path, file).unwrap();
+
     click(&mut app, " Save ");
     let text = screen(&mut app);
     assert!(text.contains("Settings saved and committed"), "{text}");
     let saved = config(&root);
+    assert_eq!(saved.github.unwrap().repo, "lisa/test", "kept");
     let developer = &saved.roles[&Role::Developer];
     assert_eq!(developer.agent, AgentKind::Codex);
     assert_eq!(developer.model.as_deref(), Some("gpt-5.5"));

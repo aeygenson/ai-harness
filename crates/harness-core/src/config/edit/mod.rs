@@ -5,8 +5,10 @@
 //! keeps everything else as it was. After every change the result is checked
 //! with the normal `Config::parse`.
 
+mod github;
 mod mcp;
 
+pub use github::set_github;
 pub use mcp::{remove_mcp, set_mcp};
 
 use toml_edit::{value, Array, DocumentMut, Item, Table};

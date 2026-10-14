@@ -197,7 +197,17 @@ impl Repo {
 
     /// Commits only the given paths (files or folders), whatever else changed.
     pub fn commit_paths(&self, paths: &[&Path], message: &str) -> Result<bool, GitError> {
-        let paths: Vec<&str> = paths.iter().filter_map(|p| p.to_str()).collect();
+        // A path that is dropped here would leave `git add -A --` without
+        // paths, and that takes every file of the project.
+        let paths: Vec<&str> = paths
+            .iter()
+            .map(|path| {
+                path.to_str().ok_or_else(|| GitError::Io {
+                    path: path.to_path_buf(),
+                    source: io::Error::new(io::ErrorKind::InvalidData, "the path is not UTF-8"),
+                })
+            })
+            .collect::<Result<_, _>>()?;
         let mut add = vec!["add", "-A", "--"];
         add.extend(&paths);
         self.git(&add)?;

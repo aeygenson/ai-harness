@@ -28,7 +28,7 @@ pub mod save;
 pub mod trifecta;
 
 pub use agent_kind::{AgentKind, UnknownAgent};
-pub use github::GitHubConfig;
+pub use github::{is_repo, GitHubConfig};
 
 use std::collections::BTreeMap;
 use std::fs;

@@ -124,6 +124,7 @@ Everything can be done from the TUI. The same steps from the command line:
 ```bash
 cd ~/code/my-project                 # any git repository
 harness init                         # create .harness/harness.toml
+harness github vgs-prototype         # put the project on GitHub (private repository)
 harness task new task-001 "Add a CSV export to the report page"
 harness run task-001                 # Architect writes the design, then waits for you
 harness approve task-001             # Developer, Tester and Security take over

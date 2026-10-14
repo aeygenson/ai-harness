@@ -26,6 +26,16 @@ pub(crate) struct Cli {
 pub(crate) enum Command {
     /// Create .harness/ with a default harness.toml and commit it.
     Init,
+    /// Put the project on GitHub: make the repository NAME (or `owner/name`)
+    /// if it is not there, write [github] into harness.toml and push the
+    /// main branch. Needs the GitHub CLI, signed in.
+    Github {
+        /// The repository, for example `vgs-prototype` or `lisa/vgs-prototype`.
+        name: String,
+        /// Make a new repository public (everyone can see it); private by default.
+        #[arg(long)]
+        public: bool,
+    },
     /// Save an agent's login (outside the project, never in git). Hidden:
     /// agents are signed in on the TUI's Agents tab, which runs this in its
     /// terminal.

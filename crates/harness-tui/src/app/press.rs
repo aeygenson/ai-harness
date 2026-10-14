@@ -98,6 +98,7 @@ impl App {
             ButtonId::Theme => self.next_theme(),
             ButtonId::Language => self.next_language(),
             ButtonId::RemoveProject => self.ask_to_remove_project(),
+            ButtonId::ConnectGitHub => self.ask_to_connect_github(),
             ButtonId::Save => self.save_roles(),
             ButtonId::Undo => {
                 if let Some(roles) = &mut self.roles {
@@ -114,6 +115,9 @@ impl App {
     fn send_message(&mut self) {
         if self.generating() {
             self.message = Some(Message::error(self.tr.t("retro.busy")));
+            return;
+        }
+        if self.connecting() {
             return;
         }
         if let Some(tasks) = &mut self.tasks {
@@ -194,6 +198,9 @@ impl App {
 
     /// Saves the Roles tab and reloads the tabs that show its agents and skills.
     fn save_roles(&mut self) {
+        if self.connecting() {
+            return;
+        }
         if let Some(roles) = &mut self.roles {
             self.message = Some(match roles.save() {
                 Ok(()) => Message::info(self.tr.t("roles.saved")),

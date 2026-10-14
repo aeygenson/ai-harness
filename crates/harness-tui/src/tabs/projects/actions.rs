@@ -2,6 +2,7 @@
 
 use std::path::{Path, PathBuf};
 
+use harness_core::config;
 use harness_core::config::projects::{self, name_of};
 use harness_platform::folder_dialog::{self, Native};
 
@@ -51,7 +52,9 @@ impl App {
                 self.form = Some((
                     Purpose::NewProject(path.clone()),
                     Form::new(tr.t("form.new_title"), &text, tr.t("form.create"))
-                        .field(tr.t("form.new_name"), &name_of(&path)),
+                        .field(tr.t("form.new_name"), &name_of(&path))
+                        .check(tr.t("form.new_github"), false)
+                        .check(tr.t("form.github_private"), true),
                 ));
             }
             Pick::Open if has_config(&path) => self.open(&path),
@@ -64,6 +67,12 @@ impl App {
         let path = path.to_path_buf();
         if has_config(&path) {
             return Err(self.tr.t("form.exists").to_string());
+        }
+        // The repository gets the folder's name: the project's name may have
+        // spaces. Checked first, so a project is not made half way.
+        let folder = name_of(&path);
+        if form.is_checked(1) && !config::is_repo(&format!("owner/{folder}")) {
+            return Err(self.tr.f("form.github_bad_name", &[("name", &folder)]));
         }
         let done = projects::init(&path).map_err(|e| e.to_string())?;
         let path = path.canonicalize().unwrap_or(path);
@@ -81,6 +90,9 @@ impl App {
             .tr
             .f("projects.created", &[("name", &name), ("git", &git)]);
         self.message = Some(Message::info(text));
+        if form.is_checked(1) {
+            self.connect_github(path.clone(), &folder, form.is_checked(2));
+        }
         Ok(())
     }
 
