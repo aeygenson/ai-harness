@@ -9,6 +9,7 @@ mod connect;
 mod merge;
 mod publish;
 mod pull;
+mod ready;
 
 pub use connect::{connect, connect_with, Connection};
 pub use merge::{merge, merge_with, Folder, Merged};
