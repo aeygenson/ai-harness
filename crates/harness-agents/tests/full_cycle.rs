@@ -711,7 +711,7 @@ async fn claude_codes_empty_stub_files_do_not_stop_the_task() {
         fs::read_to_string(&exclude).unwrap_or_default(),
         old_exclude
     );
-    assert!(repo.changed_files().unwrap().is_empty());
+    assert_eq!(repo.changed_files().unwrap(), Vec::<String>::new());
 }
 
 #[tokio::test]
@@ -739,7 +739,7 @@ async fn a_file_hidden_by_an_old_stub_block_stops_the_run_before_any_role() {
         StopReason::DirtyWorkingTree(vec![".npmrc".to_string()])
     );
     assert!(!dir.path().join("package.json").exists());
-    assert!(agent.calls().is_empty());
+    assert_eq!(agent.calls(), Vec::<Role>::new());
 }
 
 #[tokio::test]
