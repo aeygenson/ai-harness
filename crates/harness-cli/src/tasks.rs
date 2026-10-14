@@ -270,7 +270,7 @@ mod tests {
         );
         let (_, state) = open_task(&repo, "task-001").unwrap();
         assert_eq!(state.stage, Stage::Working(Role::Developer));
-        assert!(repo.changed_files().unwrap().is_empty());
+        assert_eq!(repo.changed_files().unwrap(), Vec::<String>::new());
         repo.switch_branch(&base).unwrap();
         assert_eq!(repo.head().unwrap(), base_commit);
     }

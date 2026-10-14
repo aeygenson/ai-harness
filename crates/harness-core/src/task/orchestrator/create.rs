@@ -194,6 +194,9 @@ mod tests {
         create_project_task(&repo, &config, "task-002", "Add a parser", SameText::Allow).unwrap();
 
         assert!(repo.runs_dir().join("task-002").exists());
-        assert!(repo.branches_starting_with("harness/").unwrap().is_empty());
+        assert_eq!(
+            repo.branches_starting_with("harness/").unwrap(),
+            Vec::<String>::new()
+        );
     }
 }
