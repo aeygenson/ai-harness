@@ -22,7 +22,7 @@ use std::path::{Path, PathBuf};
 use crate::git::{GitError, Repo};
 
 /// The files Claude Code creates empty at the top of the project.
-pub const STUB_FILES: &[&str] = &[
+pub(crate) const STUB_FILES: &[&str] = &[
     "bunfig.toml",
     "package.json",
     ".npmrc",
@@ -59,7 +59,7 @@ fn is_stub_line(line: &[u8]) -> bool {
 }
 
 /// Does the text of `info/exclude` hold Claude Code's header line?
-pub fn has_stub_block(exclude: &[u8]) -> bool {
+pub(crate) fn has_stub_block(exclude: &[u8]) -> bool {
     lines(exclude).any(|line| line == EXCLUDE_HEADER)
 }
 
@@ -70,7 +70,7 @@ pub fn has_stub_block(exclude: &[u8]) -> bool {
 /// otherwise only empty lines and `/<stub>` lines for names in
 /// [`STUB_FILES`]. A line like `/src` or `*` would hide real work from
 /// `git status`, so it does not pass.
-pub fn only_stub_lines(before: &[u8], after: &[u8]) -> bool {
+pub(crate) fn only_stub_lines(before: &[u8], after: &[u8]) -> bool {
     let Some(added) = after.strip_prefix(before) else {
         return false;
     };
@@ -187,13 +187,13 @@ fn is_empty_file(path: &Path) -> bool {
 
 /// The stub files that were missing in the project before a role.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct MissingStubs {
+pub(crate) struct MissingStubs {
     paths: Vec<PathBuf>,
 }
 
 impl MissingStubs {
     /// Notes which of [`STUB_FILES`] are missing in `root` now.
-    pub fn note(root: &Path) -> Self {
+    pub(crate) fn note(root: &Path) -> Self {
         let paths = STUB_FILES
             .iter()
             .map(|name| root.join(name))
@@ -212,7 +212,7 @@ impl MissingStubs {
     ///
     /// # Errors
     /// Git failed, or a file could not be removed.
-    pub fn remove_new_empty(&self, repo: &Repo) -> Result<(), GitError> {
+    pub(crate) fn remove_new_empty(&self, repo: &Repo) -> Result<(), GitError> {
         remove_visible_empty(repo, &self.paths)
     }
 }
@@ -309,6 +309,26 @@ mod tests {
             "Lisa's .gitignore hides it"
         );
         assert_eq!(repo.changed_files().unwrap(), [".npmrc"]);
+    }
+
+    #[test]
+    fn a_tracked_stub_that_was_emptied_is_left() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = Repo::init(dir.path()).unwrap();
+        let root = dir.path();
+        fs::write(root.join("package.json"), "{}\n").unwrap();
+        repo.commit_all("the project's package.json").unwrap();
+        let missing = MissingStubs::note(root);
+        fs::remove_file(root.join("package.json")).unwrap();
+        let after_note = MissingStubs::note(root);
+        // The agent empties the file: git shows it as changed, not new.
+        fs::write(root.join("package.json"), "").unwrap();
+
+        missing.remove_new_empty(&repo).unwrap();
+        after_note.remove_new_empty(&repo).unwrap();
+
+        assert!(root.join("package.json").exists());
+        assert_eq!(repo.changed_files().unwrap(), ["package.json"]);
     }
 
     #[test]
