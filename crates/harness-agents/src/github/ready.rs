@@ -5,9 +5,10 @@ use harness_core::git::Repo;
 use harness_core::text;
 
 use super::pull::{Check, View};
+use super::GitHub;
 
 /// How many characters of a name or commit from GitHub go into a message.
-const SHOWN_CHARS: usize = 80;
+pub(super) const SHOWN_CHARS: usize = 80;
 
 /// What the checks of a pull request say together.
 #[derive(Debug, PartialEq, Eq)]
@@ -55,8 +56,8 @@ pub(super) fn check_identity(
 /// not be in the merge.
 pub(super) fn check_ready(
     repo: &Repo,
+    github: &GitHub,
     branch: &str,
-    base: &str,
     number: u64,
     seen: &View,
 ) -> Result<(), String> {
@@ -79,10 +80,14 @@ pub(super) fn check_ready(
         .ok_or_else(|| format!("the branch {branch} is not in this project; nothing was merged"))?;
     let remote = &seen.head_ref_oid;
     if *remote != local {
+        // Commits the harness made after sending (state.json, a retro):
+        // they are sent now, and their checks have to run before merging.
         if repo.is_ancestor(remote, &local) {
+            repo.push_branch(&github.push_url, branch)
+                .map_err(|e| format!("cannot send the last commits of {branch} to GitHub: {e}"))?;
             return Err(format!(
-                "the last commits of {branch} are not on GitHub yet; nothing was merged. \
-                 Choose «Send to GitHub», then merge"
+                "sent the last commits of {branch} to GitHub; nothing was merged yet. Merge \
+                 again when its checks have passed"
             ));
         }
         return Err(format!(
@@ -110,9 +115,10 @@ pub(super) fn check_ready(
     match checks(rollup) {
         // Right after sending, GitHub may not have started the CI yet: no
         // checks at all is "passed" only in a project without workflows.
-        Checks::Passed if rollup.is_empty() && base_has_workflows(repo, base) => Err(format!(
+        Checks::Passed if rollup.is_empty() && base_has_workflows(repo, github)? => Err(format!(
             "GitHub shows no checks for pull request #{number} yet, but the project has \
-             workflows; merge again when they have run"
+             workflows; merge again when they have run. If they do not run on pull requests, \
+             merge it on GitHub; then «Merge pull request» only updates the folder"
         )),
         Checks::Passed => Ok(()),
         Checks::Running(names) => Err(format!(
@@ -128,10 +134,13 @@ pub(super) fn check_ready(
     }
 }
 
-/// Does the local `base` have GitHub Actions workflows? The base branch,
-/// not the folder: an agent could have removed them on the task's branch.
-fn base_has_workflows(repo: &Repo, base: &str) -> bool {
-    matches!(repo.branch_head(base), Ok(Some(commit)) if repo.has_path_at(&commit, ".github/workflows"))
+/// Does `base` on GitHub have GitHub Actions workflows? GitHub's copy, not
+/// a local branch or the folder: an agent could have changed those.
+fn base_has_workflows(repo: &Repo, github: &GitHub) -> Result<bool, String> {
+    let commit = repo
+        .fetch_branch(&github.push_url, &github.base)
+        .map_err(|e| format!("cannot look at {} on GitHub: {e}", github.base))?;
+    Ok(repo.has_path_at(&commit, ".github/workflows"))
 }
 
 /// Is `commit` a full commit hash? It comes from GitHub and is given to git.

@@ -24,9 +24,7 @@ impl TasksTab {
             items.push((Choice::Role(role), waiting));
         }
         items.push((Choice::Finish, waiting));
-        // Sending again also works with a pull request: it pushes commits
-        // that did not get there the last time.
-        if self.done_on_github() {
+        if self.needs_publishing() {
             items.push((Choice::Publish, true));
         }
         if self.has_pull_request() {

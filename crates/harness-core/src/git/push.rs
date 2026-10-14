@@ -1,8 +1,9 @@
 //! Sending a task's branch to GitHub and bringing a merged pull request back:
 //! the only git commands of the harness that use the network. The address is
 //! always given in full (made from `[github]` in `harness.toml`), never a
-//! remote's name, and nothing is forced: the harness only adds commits to a
-//! branch, it never rewrites one.
+//! remote's name, and no branch is forced: the harness only adds commits to a
+//! branch, it never rewrites one. (Only its own reference of what it last
+//! downloaded, `refs/harness/fetched/...`, is simply replaced.)
 
 use super::{GitError, Repo};
 

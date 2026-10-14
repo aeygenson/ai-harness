@@ -295,10 +295,11 @@ fn work(job: Job, events: &Sender<Event>, stop: oneshot::Receiver<()>) -> Result
     let task = state.task_id.clone();
     let _ = events.send(Event::Started(task.clone()));
     let Some((team, skills)) = agents else {
-        let before = repo.current_branch().ok();
+        let before = (repo.current_branch().ok(), repo.head().ok());
         let outcome = without_roles(merging, &repo, &config, &store, &mut state);
-        // A merge moves the folder to the main branch: the tab reads it again.
-        if repo.current_branch().ok() != before {
+        // A merge moves the folder to the main branch, or that branch
+        // forward: the tab reads settings and tasks again.
+        if (repo.current_branch().ok(), repo.head().ok()) != before {
             let _ = events.send(Event::SwitchedBranch);
         }
         return Ok(outcome);

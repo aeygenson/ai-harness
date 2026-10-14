@@ -4,6 +4,7 @@
 use harness_agents::github::Folder;
 use harness_core::config::Config;
 use harness_core::git::Repo;
+use harness_core::task::branch::task_branch;
 use harness_core::task::pull_request::PullRequest;
 use harness_core::task::store::TaskStore;
 use harness_core::task::{Stage, TaskState};
@@ -84,6 +85,15 @@ pub(super) fn github_text(outcome: &Outcome, tr: &I18n) -> Option<Message> {
     let number = merged.number.to_string();
     let base = &merged.base;
     Some(match &merged.folder {
+        Folder::Updated if merged.left_behind => Message::info(tr.f(
+            "tasks.merged_left_behind",
+            &[
+                ("task", task),
+                ("number", &number),
+                ("base", base),
+                ("branch", &task_branch(task)),
+            ],
+        )),
         Folder::Updated => Message::info(tr.f(
             "tasks.merged",
             &[("task", task), ("number", &number), ("base", base)],
@@ -124,6 +134,7 @@ mod tests {
                 number: 7,
                 base: "main".into(),
                 folder,
+                left_behind: false,
             })),
         }
     }
@@ -137,6 +148,17 @@ mod tests {
             done.text.contains("#7 merged; the project is on main"),
             "{}",
             done.text
+        );
+
+        let mut later = merged(Folder::Updated);
+        if let Some(Ok(m)) = later.merged.as_mut() {
+            m.left_behind = true;
+        }
+        let later = github_text(&later, &tr).unwrap();
+        assert!(
+            later.text.contains("stay on harness/task-001"),
+            "{}",
+            later.text
         );
 
         let files = format!("evil\u{1b}[2J{}", "x".repeat(400));
