@@ -13,8 +13,9 @@ use crate::git::{GitError, Repo, HARNESS_DIR};
 use crate::retro::proposals::ProposalsFile;
 use crate::retro::suggest::{self, Applied, ApplyError, PROPOSALS_JSON, RETRO_MD};
 use crate::retro::{RetroError, Scope, Stats, TaskHistory, RETROS_DIR};
-use crate::task::orchestrator::{self, RunError};
-use crate::task::store::{next_task_id, StoreError};
+use crate::task::branch;
+use crate::task::orchestrator::{self, RunError, SameText};
+use crate::task::store::StoreError;
 
 const STATS_MD: &str = "stats.md";
 const STATS_JSON: &str = "stats.json";
@@ -177,7 +178,10 @@ pub fn check_clean(repo: &Repo) -> Result<(), OpsError> {
 /// Applies the proposals `ids` of the retrospective in `dir`. Skill proposals
 /// change skill files and the roles' skills in harness.toml, all in one commit.
 /// Each task proposal then creates a new task (its own commit, see
-/// [`orchestrator::create_task`]). `applied.json` records every applied id.
+/// [`orchestrator::create_project_task`]). `applied.json` records every applied id.
+/// In a project on GitHub each new task starts its own branch from the one
+/// checked out, so the tasks follow one another and the record of what was
+/// applied lands on the last task's branch, in its pull request.
 /// Proposals applied before are skipped; returns the ids applied now.
 pub fn apply(repo: &Repo, dir: &Path, ids: &[u32]) -> Result<Vec<u32>, OpsError> {
     let harness_dir = repo.root().join(HARNESS_DIR);
@@ -259,14 +263,8 @@ fn create_proposed_task(
     let Some(text) = &proposal.task else {
         return Ok(());
     };
-    let task_id = next_task_id(&repo.runs_dir())?;
-    orchestrator::create_task(
-        repo,
-        &task_id,
-        text,
-        config.scenario.default_workflow(),
-        config.max_rounds,
-    )?;
+    let task_id = branch::next_task_id(repo).map_err(RunError::from)?;
+    orchestrator::create_project_task(repo, &config, &task_id, text, SameText::Refuse)?;
     let path = Applied::add(dir, &[id])?;
     repo.commit_paths(
         &[&path],

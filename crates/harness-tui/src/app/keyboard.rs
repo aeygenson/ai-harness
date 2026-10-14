@@ -145,7 +145,7 @@ impl App {
     }
 
     /// Reads every open tab again from disk (r or F5).
-    fn reload_all(&mut self) {
+    pub(super) fn reload_all(&mut self) {
         if let Some(tasks) = &mut self.tasks {
             tasks.reload();
         }

@@ -53,8 +53,11 @@ pub enum SuggestError {
     /// The project had uncommitted changes before the agent started.
     #[error("the project has uncommitted changes; commit or remove them first: {}", .0.join(", "))]
     Dirty(Vec<String>),
-    /// The agent made a git commit.
-    #[error("the retro agent made a git commit itself, which agents must never do")]
+    /// The agent made a git commit or changed git branches.
+    #[error(
+        "the retro agent made a git commit or changed git branches itself, which agents must \
+         never do; check git log and git branch"
+    )]
     AgentCommitted,
     /// The agent changed project files it may not touch.
     #[error("the retro agent changed files it may not touch (left as they are): {}", .0.join(", "))]
@@ -183,9 +186,15 @@ pub async fn suggest<A: AgentRunner>(
         output_dir: inbox.clone(),
     };
     let head = repo.head()?;
+    let branch = repo.current_branch()?;
+    let branch_heads = repo.branch_heads()?;
     let outcome = agent.run(&job).await;
 
-    let committed = repo.head()? != head;
+    // A changed branch counts like a commit: the harness later checks out
+    // task branches and reads their settings (see `crate::task::branch`).
+    let committed = repo.head()? != head
+        || repo.current_branch()? != branch
+        || repo.branch_heads()? != branch_heads;
     let changed = repo.changed_files()?;
     let log = retro_dir.join(AGENT_LOG);
     write(&log, &outcome.log)?;

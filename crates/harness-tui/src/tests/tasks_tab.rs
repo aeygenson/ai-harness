@@ -534,3 +534,73 @@ fn the_task_and_each_step_show_what_the_agents_spent() {
     assert!(developer.contains("Spent: 5k tokens"), "{developer}");
     assert!(!human.contains("Spent:"), "{human}");
 }
+
+#[test]
+fn a_decision_on_an_old_copy_of_a_task_on_another_branch_is_refused() {
+    use harness_core::git::Repo;
+    use harness_core::task::orchestrator::{self, SameText};
+    use harness_core::task::{Stage, WaitReason};
+    let env = Env::new();
+    let (root, mut app) = empty_project(&env);
+    let repo = Repo::open(&root).unwrap();
+    let settings = root.join(".harness/harness.toml");
+    let text = fs::read_to_string(&settings).unwrap();
+    fs::write(
+        &settings,
+        format!("{text}\n[github]\nrepo = \"lisa/app\"\n"),
+    )
+    .unwrap();
+    repo.commit_all("on GitHub").unwrap();
+    click(&mut app, "Write here");
+    type_text(&mut app, "First task");
+    send(&mut app);
+    wait(&mut app);
+    assert_eq!(
+        repo.current_branch().unwrap().as_deref(),
+        Some("harness/task-001")
+    );
+    // task-002 starts from task-001's branch, with a copy of task-001 that
+    // waits for the design; then task-001 moves on in its own branch.
+    orchestrator::create_project_task(
+        &repo,
+        &config(&root),
+        "task-002",
+        "Second",
+        SameText::Refuse,
+    )
+    .unwrap();
+    repo.switch_branch("harness/task-001").unwrap();
+    let (store, mut state) = TaskStore::open(&repo.runs_dir(), "task-001").unwrap();
+    orchestrator::record_human_decision(
+        &repo,
+        &store,
+        &mut state,
+        Verdict::Approved,
+        NextStep::To(Role::Developer),
+        "go",
+    )
+    .unwrap();
+    repo.switch_branch("harness/task-002").unwrap();
+    key(&mut app, KeyCode::F(5));
+    click(&mut app, "task-001");
+    assert_eq!(
+        stage(&app),
+        Stage::WaitingForHuman(WaitReason::ApproveDesign)
+    );
+
+    key(&mut app, KeyCode::Enter);
+    type_text(&mut app, "approve again");
+    send(&mut app);
+    wait(&mut app);
+
+    let (message, problem) = shown(&app);
+    assert!(problem, "{message}");
+    assert!(message.contains("has moved on"), "{message}");
+    assert_eq!(
+        repo.current_branch().unwrap().as_deref(),
+        Some("harness/task-001")
+    );
+    // Nothing was decided twice: the last step is still Lisa's first answer.
+    let steps = store.steps().unwrap();
+    assert_eq!(steps.last().unwrap().handoff.summary, "go");
+}
