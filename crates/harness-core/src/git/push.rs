@@ -18,20 +18,52 @@ impl Repo {
     /// Downloads the branch `branch` at `url` and returns its commit. Only
     /// the repository's store changes: no branch and no file.
     pub fn fetch_branch(&self, url: &str, branch: &str) -> Result<String, GitError> {
-        let reference = format!("refs/heads/{branch}");
-        self.git_online(&["fetch", "--quiet", url, &reference])?;
-        // Read at once: another program (an editor's automatic fetch) may
-        // write `FETCH_HEAD` again a moment later.
-        let commit = self.git(&["rev-parse", "--verify", "-q", "FETCH_HEAD^{commit}"])?;
+        // Into a reference of the harness's own, not `FETCH_HEAD`: another
+        // program (an editor's automatic fetch) may write that at any time.
+        let fetched = format!("refs/harness/fetched/{branch}");
+        let refspec = format!("+refs/heads/{branch}:{fetched}");
+        self.git_online(&["fetch", "--quiet", "--no-tags", url, &refspec])?;
+        let commit = self.git(&[
+            "rev-parse",
+            "--verify",
+            "-q",
+            &format!("{fetched}^{{commit}}"),
+        ])?;
         let commit = commit.trim().to_string();
         if is_hash(&commit) {
             Ok(commit)
         } else {
             Err(GitError::Failed {
-                command: "rev-parse FETCH_HEAD".into(),
+                command: format!("rev-parse {fetched}"),
                 stderr: "no commit was fetched".into(),
             })
         }
+    }
+
+    /// Points the local branch `name` (not checked out) at `commit`, only
+    /// if it is still at `old` (`None`: only if there is no such branch yet).
+    /// No file changes.
+    pub fn move_branch(&self, name: &str, commit: &str, old: Option<&str>) -> Result<(), GitError> {
+        // Forty zeros tell git that the branch must not exist yet.
+        let zeros = "0".repeat(40);
+        let old = old.unwrap_or(&zeros);
+        if !is_hash(commit) || !is_hash(old) {
+            return Err(GitError::Failed {
+                command: format!("update-ref refs/heads/{name}"),
+                stderr: "not a commit".into(),
+            });
+        }
+        let reference = format!("refs/heads/{name}");
+        self.git(&["update-ref", &reference, commit, old])?;
+        Ok(())
+    }
+
+    /// Does `commit` have the folder or file `path`?
+    pub fn has_path_at(&self, commit: &str, path: &str) -> bool {
+        is_hash(commit)
+            && self
+                .git(&["cat-file", "-e", &format!("{commit}:{path}")])
+                .is_ok()
     }
 
     /// Moves the branch checked out now forward to `commit`, only when that
@@ -250,6 +282,26 @@ mod tests {
 
         assert_eq!(repo.head().unwrap(), mine);
         assert!(!repo.is_ancestor("-h", &fetched));
+    }
+
+    #[test]
+    fn a_branch_not_checked_out_moves_only_from_where_it_was() {
+        let (_dir, repo, _url) = project_and_remote();
+        let first = repo.head().unwrap().unwrap();
+        fs::write(repo.root().join("y.txt"), "y\n").unwrap();
+        repo.commit_all("second").unwrap();
+        let second = repo.head().unwrap().unwrap();
+
+        repo.move_branch("other", &first, None).unwrap();
+        repo.move_branch("other", &second, None).unwrap_err();
+        repo.move_branch("other", &second, Some(&second))
+            .unwrap_err();
+        repo.move_branch("other", &second, Some(&first)).unwrap();
+
+        assert_eq!(repo.branch_head("other").unwrap(), Some(second.clone()));
+        assert!(repo.has_path_at(&second, "y.txt"));
+        assert!(!repo.has_path_at(&first, "y.txt"));
+        assert!(!repo.has_path_at("--help", "y.txt"));
     }
 
     #[test]

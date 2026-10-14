@@ -10,7 +10,7 @@ use std::sync::mpsc::{channel, Receiver, Sender};
 use std::thread::{self, JoinHandle};
 
 use harness_agents::build::BuildError;
-use harness_agents::github::{Folder, Merged};
+use harness_agents::github::Merged;
 use harness_agents::process;
 use harness_agents::Team;
 use harness_core::config::Config;
@@ -232,11 +232,11 @@ fn work(job: Job, events: &Sender<Event>, stop: oneshot::Receiver<()>) -> Result
     let text = |e: &dyn std::fmt::Display| e.to_string();
     let repo = Repo::open(root).map_err(|e| text(&e))?;
     // An existing task's branch first: its settings are the ones to use, and
-    // Lisa's decision and the roles' work are committed there.
-    if let Request::Decide { task, .. }
-    | Request::Continue(task)
-    | Request::Publish(task)
-    | Request::Merge(task) = &request
+    // Lisa's decision and the roles' work are committed there. A merge stays
+    // where Lisa is: it changes the folder only once everything is checked,
+    // and then it moves to the main branch.
+    if let Request::Decide { task, .. } | Request::Continue(task) | Request::Publish(task) =
+        &request
     {
         if branch::enter(&repo, task).map_err(|e| text(&e))? {
             let _ = events.send(Event::SwitchedBranch);
@@ -295,9 +295,10 @@ fn work(job: Job, events: &Sender<Event>, stop: oneshot::Receiver<()>) -> Result
     let task = state.task_id.clone();
     let _ = events.send(Event::Started(task.clone()));
     let Some((team, skills)) = agents else {
+        let before = repo.current_branch().ok();
         let outcome = without_roles(merging, &repo, &config, &store, &mut state);
-        // A merge leaves the folder on the main branch: the tab reads it again.
-        if matches!(&outcome.merged, Some(Ok(m)) if m.folder == Folder::Updated) {
+        // A merge moves the folder to the main branch: the tab reads it again.
+        if repo.current_branch().ok() != before {
             let _ = events.send(Event::SwitchedBranch);
         }
         return Ok(outcome);

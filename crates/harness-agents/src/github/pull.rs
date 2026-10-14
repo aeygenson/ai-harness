@@ -92,22 +92,42 @@ pub(super) fn create(gh: &Path, new: &NewPullRequest) -> Result<PullRequest, Str
     checked(new.repo, number, url)
 }
 
-/// What `gh pr view --json state,baseRefName,headRefOid,mergeable,statusCheckRollup`
-/// prints: the pull request as GitHub sees it now.
+/// The fields `gh pr view` is asked for.
+const VIEW_FIELDS: &str = "state,isDraft,baseRefName,headRefName,headRefOid,\
+                           isCrossRepository,mergeable,mergeCommit,statusCheckRollup";
+
+/// What `gh pr view --json VIEW_FIELDS` prints: the pull request as GitHub
+/// sees it now.
 #[derive(Debug, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(super) struct View {
     /// `OPEN`, `CLOSED` or `MERGED`.
     pub state: String,
+    /// A draft cannot be merged until it is marked ready.
+    #[serde(default)]
+    pub is_draft: bool,
     /// The branch it goes into, for example `main`.
     pub base_ref_name: String,
+    /// The branch it comes from, for example `harness/task-001`.
+    pub head_ref_name: String,
     /// The commit the pull request's branch is at on GitHub.
     pub head_ref_oid: String,
+    /// The branch is in another repository (a fork).
+    #[serde(default)]
+    pub is_cross_repository: bool,
     /// `MERGEABLE`, `CONFLICTING` or `UNKNOWN` (GitHub has not worked it out yet).
     pub mergeable: String,
-    /// The checks (CI) of that commit; empty when the repository has none.
-    #[serde(default)]
-    pub status_check_rollup: Vec<Check>,
+    /// The commit the merge made in the base branch; only once merged.
+    pub merge_commit: Option<Commit>,
+    /// The checks (CI) of the last commit; missing or `null` when there are none.
+    pub status_check_rollup: Option<Vec<Check>>,
+}
+
+/// A commit as `gh` prints it.
+#[derive(Debug, serde::Deserialize)]
+pub(super) struct Commit {
+    /// Its hash.
+    pub oid: String,
 }
 
 /// One check of a pull request: a GitHub Actions job (`name`, `status`,
@@ -135,7 +155,7 @@ pub(super) fn view(gh: &Path, repo: &str, number: u64) -> Result<View, String> {
         "view",
         &number.to_string(),
         &format!("--repo={repo}"),
-        "--json=state,baseRefName,headRefOid,mergeable,statusCheckRollup",
+        &format!("--json={VIEW_FIELDS}"),
     ]);
     let out = crate::install::models::run_for(command, "", &[], GH_LIMIT)?;
     serde_json::from_str(&out).map_err(|e| format!("gh pr view printed no pull request: {e}"))
@@ -222,7 +242,7 @@ mod tests {
         let bin = tempfile::tempdir().unwrap();
         let args = bin.path().join("args.txt");
         let script = format!(
-            "append-args {}\nwhen-arg 2 view print {{\"state\":\"OPEN\",\"baseRefName\":\"main\",\"headRefOid\":\"abc\",\"mergeable\":\"MERGEABLE\",\"statusCheckRollup\":[{{\"name\":\"server\",\"status\":\"COMPLETED\",\"conclusion\":\"SUCCESS\"}}]}}\n",
+            "append-args {}\nwhen-arg 2 view print {{\"state\":\"OPEN\",\"baseRefName\":\"main\",\"headRefName\":\"harness/task-001\",\"headRefOid\":\"abc\",\"mergeable\":\"MERGEABLE\",\"statusCheckRollup\":[{{\"name\":\"server\",\"status\":\"COMPLETED\",\"conclusion\":\"SUCCESS\"}}]}}\n",
             args.display()
         );
         let gh = harness_fake::install(bin.path(), "gh", &script);
@@ -232,8 +252,10 @@ mod tests {
 
         assert_eq!(seen.state, "OPEN");
         assert_eq!(seen.head_ref_oid, "abc");
-        assert_eq!(seen.status_check_rollup[0].name.as_deref(), Some("server"));
+        let checks = seen.status_check_rollup.unwrap();
+        assert_eq!(checks[0].name.as_deref(), Some("server"));
         let saved = std::fs::read_to_string(&args).unwrap();
+        let fields = format!("--json={VIEW_FIELDS}");
         assert_eq!(
             saved.lines().collect::<Vec<_>>(),
             [
@@ -241,7 +263,7 @@ mod tests {
                 "view",
                 "7",
                 "--repo=lisa/app",
-                "--json=state,baseRefName,headRefOid,mergeable,statusCheckRollup",
+                fields.as_str(),
                 "pr",
                 "merge",
                 "7",
