@@ -172,11 +172,18 @@ impl App {
     /// A key that no hot key took: the open tab handles it.
     fn tab_key(&mut self, code: KeyCode) {
         match self.tab {
-            Tab::Tasks => {
-                if let Some(tasks) = &mut self.tasks {
-                    tasks.on_key(code);
+            Tab::Tasks => match code {
+                KeyCode::Char('o') => {
+                    if let Some(index) = self.tasks.as_ref().map(|t| t.task) {
+                        self.press(ButtonId::TaskPullRequest(index));
+                    }
                 }
-            }
+                code => {
+                    if let Some(tasks) = &mut self.tasks {
+                        tasks.on_key(code);
+                    }
+                }
+            },
             Tab::Roles => match code {
                 KeyCode::Char('s') => self.press(ButtonId::Save),
                 KeyCode::Char('u') => self.press(ButtonId::Undo),

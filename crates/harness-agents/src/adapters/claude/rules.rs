@@ -55,6 +55,9 @@ impl RoleRules {
             denied: [
                 "Bash(git commit:*)",
                 "Bash(git push:*)",
+                // The GitHub CLI pushes and opens pull requests with Lisa's
+                // login; only the harness does that, after all checks.
+                "Bash(gh:*)",
                 "Edit(./.git/**)",
                 "Edit(./.claude/**)",
             ]

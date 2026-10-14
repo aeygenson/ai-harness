@@ -147,6 +147,13 @@ impl TasksTab {
         self.zoom.filter(|z| *z != Zoom::Log || log)
     }
 
+    /// The page of the pull request of the task at `index`, if it has one
+    /// that is really on GitHub (see `PullRequest::page`).
+    pub fn pull_request_url(&self, index: usize) -> Option<String> {
+        let pull_request = self.tasks.get(index)?.state.pull_request.as_ref()?;
+        pull_request.page().map(str::to_string)
+    }
+
     /// A click on link `index` of the selected step's «Files»: the app opens it.
     pub fn open_file(&mut self, index: usize) {
         let step = self.current().and_then(|t| t.steps.get(self.step)).cloned();

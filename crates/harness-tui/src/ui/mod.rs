@@ -101,6 +101,9 @@ pub enum ButtonId {
     Skill(crate::tabs::skills::SkillButton),
     /// A link in «Files» of the step on the Tasks tab.
     TaskFile(usize),
+    /// The pull request of a task on the Tasks tab (its place in the list):
+    /// opens it in the browser.
+    TaskPullRequest(usize),
     /// The title of a window of the Tasks tab: over the whole tab, or back.
     TaskZoom(crate::tabs::tasks::Zoom),
     /// A button of the MCP tab's server list.

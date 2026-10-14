@@ -24,7 +24,19 @@ impl TasksTab {
             items.push((Choice::Role(role), waiting));
         }
         items.push((Choice::Finish, waiting));
+        if self.needs_publishing() {
+            items.push((Choice::Publish, true));
+        }
         items
+    }
+
+    /// Is the selected task done in a project on GitHub, without its pull
+    /// request yet (sending it failed, or it was finished elsewhere)?
+    fn needs_publishing(&self) -> bool {
+        self.on_github
+            && self
+                .current()
+                .is_some_and(|t| t.state.stage == Stage::Done && t.state.pull_request.is_none())
     }
 
     /// What can be chosen in «To» now.
@@ -44,6 +56,7 @@ impl TasksTab {
             return Choice::NewTask;
         };
         match task.state.stage {
+            Stage::Done if self.needs_publishing() => Choice::Publish,
             Stage::Done => Choice::NewTask,
             Stage::Working(role) => Choice::Continue(role),
             Stage::WaitingForHuman(WaitReason::ApproveDesign) => {
@@ -120,7 +133,7 @@ impl TasksTab {
         match self.choice {
             Choice::NewTask => Some(Role::Architect),
             Choice::Role(role) | Choice::Continue(role) => Some(role),
-            Choice::Finish => None,
+            Choice::Finish | Choice::Publish => None,
         }
     }
 
@@ -246,6 +259,8 @@ pub enum Choice {
     Continue(Role),
     /// Approve and finish the task.
     Finish,
+    /// Send the done task to GitHub: push its branch and open its pull request.
+    Publish,
 }
 
 /// The open list of the message box.

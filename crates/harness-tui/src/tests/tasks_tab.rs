@@ -604,3 +604,56 @@ fn a_decision_on_an_old_copy_of_a_task_on_another_branch_is_refused() {
     let steps = store.steps().unwrap();
     assert_eq!(steps.last().unwrap().handoff.summary, "go");
 }
+
+#[test]
+fn a_done_task_on_github_shows_its_pull_request_or_offers_to_send_it() {
+    use harness_core::task::pull_request::PullRequest;
+    use harness_core::task::store::TaskStore;
+    use harness_core::task::Stage;
+    let env = Env::new();
+    let root = env.path("test");
+    project(&root);
+    let config = root.join(".harness/harness.toml");
+    let text = std::fs::read_to_string(&config).unwrap();
+    std::fs::write(&config, format!("{text}\n[github]\nrepo = \"lisa/app\"\n")).unwrap();
+    let runs = root.join(".harness/runs");
+    for (task, pull_request) in [
+        (
+            "task-001",
+            Some(PullRequest {
+                number: 7,
+                url: "https://github.com/lisa/app/pull/7".into(),
+            }),
+        ),
+        ("task-002", None),
+    ] {
+        let (store, mut state) = TaskStore::open(&runs, task).unwrap();
+        state.stage = Stage::Done;
+        state.pull_request = pull_request;
+        let json = serde_json::to_string(&state).unwrap();
+        std::fs::write(store.dir().join("state.json"), json).unwrap();
+    }
+    let mut app = env.app(&root);
+
+    // The pull request is on the task's row; a click opens it.
+    click(&mut app, "PR #7");
+    let message = &app.message.as_ref().unwrap().text;
+    assert_eq!(
+        message,
+        "Cannot open https://github.com/lisa/app/pull/7: no browser in tests"
+    );
+    // The key o does the same for the selected task.
+    app.message = None;
+    key(&mut app, KeyCode::Char('o'));
+    assert!(app.message.is_some());
+
+    // The other one has no pull request yet: sending it is what comes next.
+    click(&mut app, "task-002");
+    let text = screen(&mut app);
+    assert!(text.contains("To: Send to GitHub ▾"), "{text}");
+    assert!(
+        text.contains("│▶ task-002  ✓ done                │"),
+        "{text}"
+    );
+    assert_eq!(app.tasks.as_ref().unwrap().pull_request_url(1), None);
+}

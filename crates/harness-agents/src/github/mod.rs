@@ -1,7 +1,13 @@
-//! GitHub CLI (`gh`): whether it is signed in to GitHub, and the commands
-//! that sign it in. The harness talks to GitHub only through `gh`, under
-//! Lisa's own login: `gh` keeps the login in the system's key store, and the
-//! harness never sees or saves the token.
+//! GitHub CLI (`gh`): whether it is signed in to GitHub, the commands that
+//! sign it in, and (in `pull`) finding and opening pull requests; `publish`
+//! sends a finished task to GitHub. The harness talks to GitHub only through
+//! `gh` and `git push`, under Lisa's own login: `gh` keeps the login in the
+//! system's key store, and the harness never sees or saves the token.
+
+mod publish;
+mod pull;
+
+pub use publish::{publish, publish_with, GitHub, PUSH_URL_START};
 
 use std::path::Path;
 use std::process::Command;
@@ -51,7 +57,7 @@ pub fn sign_in_commands(gh: &Path) -> Vec<Command> {
 /// `gh` started for a check: Lisa's own environment (`gh` finds its login
 /// through it, for example `GH_CONFIG_DIR` or `GH_TOKEN`), but without
 /// questions or the note about a newer version.
-fn quiet_command(gh: &Path) -> Command {
+pub(crate) fn quiet_command(gh: &Path) -> Command {
     let mut command = Command::new(gh);
     command
         .current_dir(std::env::temp_dir())

@@ -121,6 +121,8 @@ impl Env {
         app.tool_checker = fake_tools;
         // The real ones ask GitHub and replace the harness's own file.
         app.release_checker = || Ok(None);
+        // The real one opens Lisa's browser.
+        app.url_opener = |_| Err("no browser in tests".into());
         app.updater = |tx| {
             let _ = tx.send(JobEvent::Done(Err("no updates in tests".into())));
         };

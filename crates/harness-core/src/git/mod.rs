@@ -6,6 +6,7 @@
 
 mod branch;
 mod history;
+mod push;
 mod remote;
 mod restore;
 
@@ -256,15 +257,35 @@ impl Repo {
     }
 
     pub(super) fn git(&self, args: &[&str]) -> Result<String, GitError> {
-        self.run(args, false)
+        self.run(args, &[])
     }
 
     /// Like `git`, but paths are taken literally: a file named `*.rs` means only that file.
     pub(super) fn git_literal(&self, args: &[&str]) -> Result<String, GitError> {
-        self.run(args, true)
+        self.run(args, &[("GIT_LITERAL_PATHSPECS", "1")])
     }
 
-    fn run(&self, args: &[&str], literal_paths: bool) -> Result<String, GitError> {
+    /// Like `git`, for commands that talk to GitHub: they never stop to ask
+    /// for a password in the terminal (the harness may run in the
+    /// background), they fail instead. The login comes from `gh`.
+    pub(super) fn git_online(&self, args: &[&str]) -> Result<String, GitError> {
+        // A connection that stalls (under 1 KB/s for a minute) is given up,
+        // so the harness does not wait for it forever.
+        let mut all = vec![
+            "-c",
+            "http.lowSpeedLimit=1000",
+            "-c",
+            "http.lowSpeedTime=60",
+        ];
+        all.extend(args);
+        self.run(
+            &all,
+            &[("GIT_TERMINAL_PROMPT", "0"), ("GCM_INTERACTIVE", "never")],
+        )
+    }
+
+    /// Runs git with the harness's fixed settings and the extra variables `env`.
+    fn run(&self, args: &[&str], env: &[(&str, &str)]) -> Result<String, GitError> {
         let mut command = Command::new("git");
         command
             .current_dir(&self.root)
@@ -280,10 +301,8 @@ impl Repo {
             .args(["-c", "core.hooksPath=/dev/null"])
             // The same for the file-watcher command `git status` would start.
             .args(["-c", "core.fsmonitor=false"])
-            .args(args);
-        if literal_paths {
-            command.env("GIT_LITERAL_PATHSPECS", "1");
-        }
+            .args(args)
+            .envs(env.iter().copied());
         let output = command.output().map_err(GitError::CannotRun)?;
         if output.status.success() {
             Ok(String::from_utf8_lossy(&output.stdout).into_owned())

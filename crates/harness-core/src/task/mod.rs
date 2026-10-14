@@ -4,8 +4,9 @@
 //! branch in a project on GitHub), `handoff` (what a role hands over),
 //! `scenario` (the kind of project and the task's workflow), `routes`,
 //! `prompt`, `permissions`, `agent` (the adapter interface), `orchestrator`
-//! (the run loop), `store` (saving tasks to disk), and `facts` and `weakened`
-//! (what earlier steps really changed, read from git).
+//! (the run loop), `store` (saving tasks to disk), `facts` and `weakened`
+//! (what earlier steps really changed, read from git), and `pull_request`
+//! (the pull request a finished task becomes on GitHub).
 
 pub mod agent;
 pub mod branch;
@@ -15,6 +16,7 @@ pub mod manifest;
 pub mod orchestrator;
 pub mod permissions;
 pub mod prompt;
+pub mod pull_request;
 pub mod routes;
 pub mod scenario;
 pub mod store;
@@ -26,6 +28,7 @@ use std::fmt;
 use serde::{Deserialize, Serialize};
 
 use crate::task::handoff::{Handoff, NextStep, Role, Verdict, SCHEMA_VERSION};
+use crate::task::pull_request::PullRequest;
 use crate::task::scenario::Workflow;
 
 /// Default limit on how many rounds a task may take before Lisa must step in.
@@ -70,6 +73,10 @@ pub struct TaskState {
     pub max_rounds: u32,
     /// Who works now, or why the task waits, or that it is done.
     pub stage: Stage,
+    /// The pull request the finished task became on GitHub; missing in
+    /// `state.json` until there is one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pull_request: Option<PullRequest>,
 }
 
 /// Why a handoff was refused. The task state is left unchanged.
@@ -173,6 +180,7 @@ impl TaskState {
             round: 1,
             max_rounds,
             stage: Stage::Working(workflow.start()),
+            pull_request: None,
         }
     }
 

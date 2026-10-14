@@ -7,6 +7,7 @@ use anyhow::Result;
 use harness_core::task::handoff::{NextStep, Role, Verdict};
 use harness_core::task::orchestrator::{self, StopReason};
 use harness_core::task::{Stage, WaitReason};
+use harness_core::text;
 
 use super::choice::Choice;
 use super::steps::sized_list;
@@ -66,6 +67,7 @@ impl TasksTab {
                 notes,
             },
             (Choice::Continue(_), Some((task, _))) => Request::Continue(task),
+            (Choice::Publish, Some((task, _))) => Request::Publish(task),
         };
         self.log.clear();
         if let (Some(role), Some((agent, model, effort))) = (self.target(), self.run_choice()) {
@@ -137,6 +139,21 @@ impl TasksTab {
 fn outcome_text(outcome: &Outcome, tr: &I18n) -> Message {
     let task = &outcome.task;
     let role = |role: &Role| role.as_str();
+    match &outcome.published {
+        Some(Ok(pull_request)) => {
+            return Message::info(tr.f(
+                "tasks.published",
+                &[("task", task), ("url", &pull_request.url)],
+            ))
+        }
+        Some(Err(error)) => {
+            return Message::error(tr.f(
+                "tasks.publish_failed",
+                &[("task", task), ("error", &text::safe_line(error, 300))],
+            ))
+        }
+        None => {}
+    }
     let Some(stop) = &outcome.stop else {
         return Message::info(tr.f("tasks.stop_finished", &[("task", task)]));
     };

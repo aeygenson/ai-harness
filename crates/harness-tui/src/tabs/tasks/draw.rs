@@ -16,6 +16,12 @@ use crate::ui::i18n::I18n;
 use crate::ui::theme;
 use crate::ui::{panel, selected, ButtonId, Hits, ListId, Target};
 
+/// The selection mark every list puts before its rows (see [`draw_list`]).
+const LIST_MARK: &str = "▶ ";
+
+/// Its width on the screen: every row of a list starts this far to the right.
+const LIST_MARK_WIDTH: usize = 2;
+
 impl TasksTab {
     pub fn draw(&self, frame: &mut Frame, area: Rect, hits: &mut Hits, tr: &I18n) {
         let [area, input_area] =
@@ -106,9 +112,10 @@ impl TasksTab {
         self.draw_input(frame, input_area, hits, tr);
     }
 
-    /// The list of tasks, each with a mark for where it stands.
+    /// The list of tasks, each with a mark for where it stands and its pull
+    /// request, which a click (or o) opens in the browser.
     fn draw_tasks(&self, frame: &mut Frame, area: Rect, hits: &mut Hits, tr: &I18n) {
-        let items: Vec<ListItem> = self
+        let lines: Vec<Line> = self
             .tasks
             .iter()
             .map(|t| {
@@ -117,17 +124,26 @@ impl TasksTab {
                     Stage::Working(_) => ("●", theme::running()),
                     Stage::WaitingForHuman(_) => ("◆", theme::warn()),
                 };
-                ListItem::new(Line::from(vec![
+                let mut spans = vec![
                     Span::raw(format!("{}  ", t.id)),
                     Span::styled(format!("{mark} {}", short_stage(t.state.stage, tr)), style),
-                ]))
+                ];
+                if let Some(pull_request) = &t.state.pull_request {
+                    spans.push(Span::raw("  "));
+                    spans.push(Span::styled(
+                        format!("PR #{}", pull_request.number),
+                        theme::accent(),
+                    ));
+                }
+                Line::from(spans)
             })
             .collect();
+        let items: Vec<ListItem> = lines.iter().cloned().map(ListItem::new).collect();
         let title = match self.filter {
             Some(role) => tr.f("tasks.title_filtered", &[("role", &role)]),
             None => tr.t("tasks.title").to_string(),
         };
-        draw_list(
+        let first = draw_list(
             frame,
             hits,
             area,
@@ -137,6 +153,36 @@ impl TasksTab {
             self.task,
             self.focus == Focus::Tasks,
         );
+        self.pull_request_hits(&lines, first, area, hits);
+    }
+
+    /// Makes the «PR #7» at the end of the visible task rows clickable.
+    fn pull_request_hits(&self, lines: &[Line], first: usize, area: Rect, hits: &mut Hits) {
+        let inner = panel("", false).inner(area);
+        let visible = lines
+            .iter()
+            .enumerate()
+            .skip(first)
+            .take(usize::from(inner.height));
+        for (row, (index, line)) in visible.enumerate() {
+            if self.tasks[index].state.pull_request.is_none() {
+                continue;
+            }
+            // The list puts the selection mark («▶ ») before every row.
+            let width = u16::try_from(line.width() + LIST_MARK_WIDTH).unwrap_or(u16::MAX);
+            let link = u16::try_from(line.spans.last().map_or(0, Span::width)).unwrap_or(0);
+            let x = inner.x.saturating_add(width.saturating_sub(link));
+            let y = inner
+                .y
+                .saturating_add(u16::try_from(row).unwrap_or(u16::MAX));
+            let link = link.min(inner.right().saturating_sub(x));
+            if link > 0 {
+                hits.add(
+                    Rect::new(x, y, link, 1),
+                    Target::Button(ButtonId::TaskPullRequest(index)),
+                );
+            }
+        }
     }
 
     /// The selected step (or the task description), with its file links clickable.
@@ -289,7 +335,7 @@ pub fn draw_list(
     items: Vec<ListItem>,
     selected_row: usize,
     focused: bool,
-) {
+) -> usize {
     let block = panel(title, focused);
     let inner = block.inner(area);
     let mut state = ListState::default().with_selected(Some(selected_row));
@@ -297,7 +343,7 @@ pub fn draw_list(
         List::new(items)
             .block(block)
             .highlight_style(selected())
-            .highlight_symbol("▶ "),
+            .highlight_symbol(LIST_MARK),
         area,
         &mut state,
     );
@@ -308,4 +354,5 @@ pub fn draw_list(
             first: state.offset(),
         },
     );
+    state.offset()
 }
