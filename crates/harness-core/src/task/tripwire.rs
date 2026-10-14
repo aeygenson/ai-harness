@@ -14,6 +14,7 @@ use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
 use crate::git::{GitError, Repo};
+use crate::task::agent_stubs;
 
 /// Files inside the home folder that are watched, with `/`. A file that
 /// does not exist is watched too: creating it is a change. Both the Unix
@@ -69,6 +70,9 @@ pub struct Watched {
     pub reported_files: Vec<PathBuf>,
     /// Files inside the restored folders that are not watched (see [`GIT_OWN_FILES`]).
     pub ignored_files: Vec<PathBuf>,
+    /// Git's `info/exclude`: Claude Code's block of stub lines there is put
+    /// back without stopping the task (see [`agent_stubs`]).
+    pub exclude_file: PathBuf,
 }
 
 impl Watched {
@@ -88,6 +92,7 @@ impl Watched {
             restored_folders,
             reported_files,
             ignored_files,
+            exclude_file: common.join("info").join("exclude"),
         })
     }
 
@@ -111,6 +116,28 @@ impl Watched {
     /// Is `path` inside one of the folders that are put back?
     fn is_restored(&self, path: &Path) -> bool {
         self.restored_folders.iter().any(|f| path.starts_with(f))
+    }
+
+    /// Is this change only Claude Code's stub lines added to `info/exclude`?
+    fn is_stub_exclude(
+        &self,
+        path: &Path,
+        before: Option<&Content>,
+        after: Option<&Content>,
+    ) -> bool {
+        if path != self.exclude_file {
+            return false;
+        }
+        // A missing file counts as empty: Claude Code creates it when it is not there.
+        let before = match before {
+            None => &[][..],
+            Some(Content::Bytes(bytes)) => bytes.as_slice(),
+            Some(Content::Summary { .. } | Content::Unreadable(_)) => return false,
+        };
+        let Some(Content::Bytes(after)) = after else {
+            return false;
+        };
+        agent_stubs::only_stub_lines(before, after)
     }
 }
 
@@ -143,10 +170,14 @@ pub struct Changes {
     pub put_back: Vec<PathBuf>,
     /// Changed single files, left as they are for Lisa to check.
     pub reported: Vec<PathBuf>,
+    /// `info/exclude` changed and held Claude Code's block of stub lines
+    /// (now put back): its new empty stub files must be removed. When the
+    /// block was the only change, it is not a reason to stop.
+    pub claude_stubs: bool,
 }
 
 impl Changes {
-    /// True when nothing watched changed.
+    /// True when nothing watched changed, apart from Claude Code's stub lines.
     pub fn is_empty(&self) -> bool {
         self.put_back.is_empty() && self.reported.is_empty()
     }
@@ -170,7 +201,14 @@ impl Snapshot {
             }
             if watched.is_restored(path) {
                 put_back(path, before.as_ref())?;
-                changes.put_back.push(path.clone());
+                if *path == watched.exclude_file {
+                    // Claude Code ran, also when it is not the only change.
+                    changes.claude_stubs = matches!(&after, Some(Content::Bytes(bytes))
+                        if agent_stubs::has_stub_block(bytes));
+                }
+                if !watched.is_stub_exclude(path, before.as_ref(), after.as_ref()) {
+                    changes.put_back.push(path.clone());
+                }
             } else {
                 changes.reported.push(path.clone());
             }
@@ -255,6 +293,7 @@ mod tests {
             restored_folders: vec![dir.join("hooks"), dir.join("info")],
             reported_files: vec![dir.join("home/.bashrc"), dir.join("home/.gitconfig")],
             ignored_files: vec![dir.join("info/refs")],
+            exclude_file: dir.join("info/exclude"),
         }
     }
 
@@ -271,6 +310,92 @@ mod tests {
             before.check_and_restore(&watched).unwrap(),
             Changes::default()
         );
+    }
+
+    #[test]
+    fn claude_codes_stub_lines_in_exclude_are_put_back_quietly() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::create_dir_all(dir.path().join("info")).unwrap();
+        let exclude = dir.path().join("info/exclude");
+        fs::write(&exclude, "# excludes\n").unwrap();
+        let watched = watched(dir.path());
+        let before = watched.snapshot().unwrap();
+        // What Claude Code appends when it starts its sandbox.
+        fs::write(
+            &exclude,
+            "# excludes\n\n\n# claude-code scrub-mode stubs\n/package.json\n/.env",
+        )
+        .unwrap();
+
+        let changes = before.check_and_restore(&watched).unwrap();
+
+        assert!(changes.is_empty() && changes.claude_stubs, "{changes:?}");
+        assert_eq!(fs::read_to_string(&exclude).unwrap(), "# excludes\n");
+    }
+
+    #[test]
+    fn other_exclude_lines_still_stop_the_task() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::create_dir_all(dir.path().join("info")).unwrap();
+        let exclude = dir.path().join("info/exclude");
+        fs::write(&exclude, "# excludes\n").unwrap();
+        let watched = watched(dir.path());
+        let before = watched.snapshot().unwrap();
+        fs::write(
+            &exclude,
+            "# excludes\n\n# claude-code scrub-mode stubs\n/package.json\n/src\n",
+        )
+        .unwrap();
+
+        let changes = before.check_and_restore(&watched).unwrap();
+
+        assert_eq!(changes.put_back, std::slice::from_ref(&exclude));
+        assert_eq!(fs::read_to_string(&exclude).unwrap(), "# excludes\n");
+    }
+
+    #[test]
+    fn a_stub_block_anywhere_else_still_stops_the_task() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::create_dir_all(dir.path().join("hooks")).unwrap();
+        let watched = watched(dir.path());
+        let before = watched.snapshot().unwrap();
+        let block = "\n\n# claude-code scrub-mode stubs\n/package.json";
+        fs::write(dir.path().join("hooks/pre-commit"), block).unwrap();
+
+        let changes = before.check_and_restore(&watched).unwrap();
+
+        assert_eq!(changes.put_back, [dir.path().join("hooks/pre-commit")]);
+        assert!(!changes.claude_stubs);
+    }
+
+    #[test]
+    fn a_stub_block_in_a_new_exclude_file_is_claude_codes() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::create_dir_all(dir.path().join("info")).unwrap();
+        let watched = watched(dir.path());
+        let before = watched.snapshot().unwrap();
+        // Claude Code creates `exclude` when git did not.
+        let exclude = dir.path().join("info/exclude");
+        fs::write(&exclude, "\n\n# claude-code scrub-mode stubs\n/.env").unwrap();
+
+        let changes = before.check_and_restore(&watched).unwrap();
+
+        assert!(changes.is_empty() && changes.claude_stubs, "{changes:?}");
+        assert!(!exclude.exists());
+    }
+
+    #[test]
+    fn a_missing_home_file_that_appears_empty_is_still_reported() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::create_dir_all(dir.path().join("home")).unwrap();
+        let watched = watched(dir.path());
+        let before = watched.snapshot().unwrap();
+        // What Claude Code does with a missing start-up file.
+        fs::write(dir.path().join("home/.bashrc"), "").unwrap();
+
+        let changes = before.check_and_restore(&watched).unwrap();
+
+        assert_eq!(changes.reported, [dir.path().join("home/.bashrc")]);
     }
 
     #[test]
@@ -380,6 +505,7 @@ mod tests {
             restored_folders: Vec::new(),
             reported_files: vec![program.clone()],
             ignored_files: Vec::new(),
+            exclude_file: dir.path().join("exclude"),
         };
         let before = watched.snapshot().unwrap();
 

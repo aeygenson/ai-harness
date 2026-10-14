@@ -3,9 +3,12 @@
 //! Around every role the harness uses git:
 //!
 //! 1. Before: the project must have no uncommitted changes, so everything that
-//!    changes afterwards was done by this role.
+//!    changes afterwards was done by this role. Stub lines an unwatched run of
+//!    Claude Code left in `.git/info/exclude` are removed first, so they hide
+//!    nothing (see [`crate::task::agent_stubs`]).
 //! 2. After: git's hooks and a few files outside the project are compared
-//!    with before (see [`crate::task::tripwire`]); files no role may change
+//!    with before (see [`crate::task::tripwire`]), and the empty stub files
+//!    Claude Code made are removed; files no role may change
 //!    (agent instructions and settings, the harness's own files) are put back
 //!    at once; then the changed files are
 //!    checked against the role's permissions and against [`MAX_CHANGE_BYTES`],
@@ -35,6 +38,7 @@ use crate::config::{AgentKind, Config};
 use crate::git::{GitError, Repo};
 use crate::skills::Skills;
 use crate::task::agent::{AgentRunner, RunEnd};
+use crate::task::agent_stubs;
 use crate::task::handoff::{Handoff, Role, Verdict};
 use crate::task::manifest::AgentFacts;
 use crate::task::permissions;
@@ -139,6 +143,9 @@ pub async fn run_watching<A: AgentRunner>(
             Stage::Working(role) => role,
         };
 
+        // Before looking at git status: a block an unwatched run of Claude
+        // Code left in `info/exclude` would hide files from it.
+        agent_stubs::clear_leftovers(repo)?;
         let dirty = repo.changed_files()?;
         if !dirty.is_empty() {
             return Ok(StopReason::DirtyWorkingTree(dirty));

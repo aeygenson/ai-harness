@@ -5,10 +5,13 @@
 //! `scenario` (the kind of project and the task's workflow), `routes`,
 //! `prompt`, `permissions`, `agent` (the adapter interface), `orchestrator`
 //! (the run loop), `store` (saving tasks to disk), `facts` and `weakened`
-//! (what earlier steps really changed, read from git), and `pull_request`
-//! (the pull request a finished task becomes on GitHub).
+//! (what earlier steps really changed, read from git), `pull_request`
+//! (the pull request a finished task becomes on GitHub), `tripwire` (what
+//! `git status` does not show) and `agent_stubs` (the empty files Claude Code
+//! makes when it starts, which are not a reason to stop).
 
 pub mod agent;
+pub mod agent_stubs;
 pub mod branch;
 pub mod facts;
 pub mod handoff;

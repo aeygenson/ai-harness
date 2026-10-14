@@ -3,6 +3,7 @@
 
 use super::{RunError, StopReason};
 use crate::git::Repo;
+use crate::task::agent_stubs::MissingStubs;
 use crate::task::handoff::Role;
 use crate::task::tripwire::{Snapshot, Watched};
 
@@ -13,11 +14,12 @@ pub(super) struct Before {
     branch_heads: String,
     config: Vec<u8>,
     hidden: Snapshot,
+    stubs: MissingStubs,
 }
 
 impl Before {
-    /// Notes the last commit, the branches, `.git/config` and the files the
-    /// tripwire watches.
+    /// Notes the last commit, the branches, `.git/config`, the files the
+    /// tripwire watches and which of Claude Code's stub files are missing.
     pub(super) fn take(repo: &Repo, watched: &Watched) -> Result<Self, RunError> {
         Ok(Self {
             head: repo.head()?,
@@ -25,12 +27,14 @@ impl Before {
             branch_heads: repo.branch_heads()?,
             config: repo.local_config()?,
             hidden: watched.snapshot()?,
+            stubs: MissingStubs::note(repo.root()),
         })
     }
 
     /// Compares with now: git's settings, the tripwire, the commit and the
     /// branches. Puts back what can be put back and returns why the task
-    /// must stop, or `None` when all is as before.
+    /// must stop. When all is as before, removes the empty stub files Claude
+    /// Code made (see [`crate::task::agent_stubs`]) and returns `None`.
     pub(super) fn check(
         &self,
         repo: &Repo,
@@ -64,6 +68,14 @@ impl Before {
                 put_back: changes.put_back,
                 reported: changes.reported,
             }));
+        }
+        // Only now, with nothing left that could make git run the agent's
+        // command (`git status` reads `~/.gitconfig` and its filters).
+        // Claude Code's empty stub files would otherwise end up in the role's
+        // commit once `info/exclude` no longer hides them. Only when its block
+        // was there: another agent's empty file is its own work.
+        if changes.claude_stubs {
+            self.stubs.remove_new_empty(repo)?;
         }
         Ok(None)
     }
