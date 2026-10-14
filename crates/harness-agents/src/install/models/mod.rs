@@ -2,7 +2,8 @@
 //!
 //! Every agent is asked the way it runs a role: with a copy of the saved
 //! login in a private temporary folder that is deleted afterwards, and with
-//! only the whitelisted environment. Nothing is sent to a model:
+//! only the whitelisted environment. A login Codex refreshed while answering
+//! is saved back, as after a role. Nothing is sent to a model:
 //!
 //! - Claude Code: the `initialize` request of its stream-json mode;
 //! - Codex: `codex debug models`;
@@ -22,6 +23,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use harness_core::config::AgentKind;
 use harness_core::models::ModelList;
 
+use crate::adapters::codex::{keep_refreshed_login, AUTH_FILE};
 use crate::adapters::dsh::KEY_ENV as DEEPSEEK_KEY_ENV;
 use crate::install::credentials::{self, Secret};
 use crate::process::base_command;
@@ -110,13 +112,24 @@ pub fn ask(
         AgentKind::Codex => {
             let home = tmp.join("codex");
             fs::create_dir_all(&home).map_err(|e| e.to_string())?;
-            let auth = fs::read_to_string(credentials_dir.join("codex/auth.json"))
-                .map_err(|_missing| "no Codex login saved".to_string())?;
-            credentials::write_private(&home.join("auth.json"), &auth)
+            let saved = credentials_dir.join("codex").join(AUTH_FILE);
+            let auth = fs::read(&saved).map_err(|_missing| "no Codex login saved".to_string())?;
+            harness_platform::private::write(&home.join(AUTH_FILE), &auth)
                 .map_err(|e| e.to_string())?;
             let mut command = base_command(&programs.codex, tmp);
             command.env("CODEX_HOME", &home).args(["debug", "models"]);
-            parse_codex(&run(command, "", &[])?)?
+            let answer = run(command, "", &[]);
+            // Asking may have refreshed the login, even when it failed.
+            let kept = keep_refreshed_login(&home.join(AUTH_FILE), &auth, &saved).map_err(|e| {
+                format!("Codex refreshed its login, but it could not be saved ({e}); sign in to Codex again")
+            });
+            let answer = answer.map_err(|e| match &kept {
+                Err(lost) => format!("{e}; {lost}"),
+                Ok(()) => e,
+            });
+            let list = parse_codex(&answer?)?;
+            kept?;
+            list
         }
         AgentKind::Dsh => {
             let key = match std::env::var(DEEPSEEK_KEY_ENV) {
@@ -309,18 +322,48 @@ mod tests {
     }
 
     #[test]
+    fn a_login_codex_refreshed_is_kept_even_when_asking_failed() {
+        let creds = tempfile::tempdir().unwrap();
+        let bin = tempfile::tempdir().unwrap();
+        fs::create_dir_all(creds.path().join("codex")).unwrap();
+        fs::write(
+            creds.path().join("codex/auth.json"),
+            "{\"tokens\":{\"refresh_token\":\"one\"}}",
+        )
+        .unwrap();
+        let programs = Programs {
+            codex: harness_fake::install(
+                bin.path(),
+                "codex",
+                "save-text ${CODEX_HOME}/auth.json {\"tokens\":{\"refresh_token\":\"two\"}}\nexit 1",
+            ),
+            ..Programs::default()
+        };
+
+        ask(AgentKind::Codex, creds.path(), &programs).unwrap_err();
+
+        let saved = fs::read_to_string(creds.path().join("codex/auth.json")).unwrap();
+        assert_eq!(saved, "{\"tokens\":{\"refresh_token\":\"two\"}}");
+    }
+
+    #[test]
     fn an_agent_is_asked_with_a_copy_of_its_login_and_a_failure_hides_the_key() {
         let creds = tempfile::tempdir().unwrap();
         let bin = tempfile::tempdir().unwrap();
         fs::create_dir_all(creds.path().join("codex")).unwrap();
-        fs::write(creds.path().join("codex/auth.json"), "{\"login\":1}").unwrap();
+        fs::write(
+            creds.path().join("codex/auth.json"),
+            "{\"tokens\":{\"refresh_token\":\"one\"}}",
+        )
+        .unwrap();
         credentials::save_token(creds.path(), "deepseek", &Secret::new("sk-secret")).unwrap();
         let script = |name: &str, script: &str| harness_fake::install(bin.path(), name, script);
         let programs = Programs {
             codex: script(
                 "codex",
                 r#"need-args debug models else 3
-need-text ${CODEX_HOME}/auth.json login else 4
+need-text ${CODEX_HOME}/auth.json one else 4
+save-text ${CODEX_HOME}/auth.json {"tokens":{"refresh_token":"two"}}
 print {"models":[{"slug":"gpt-x","visibility":"list","supported_reasoning_levels":[{"effort":"low"}]}]}"#,
             ),
             curl: script("curl", "eprint-file ${5#@}\nexit 22"),
@@ -329,6 +372,9 @@ print {"models":[{"slug":"gpt-x","visibility":"list","supported_reasoning_levels
         let list = ask(AgentKind::Codex, creds.path(), &programs).unwrap();
         assert_eq!(list.agent, AgentKind::Codex);
         assert_eq!(list.models[0].id, "gpt-x");
+        // Codex refreshed its login while answering: the new one is kept.
+        let saved = fs::read_to_string(creds.path().join("codex/auth.json")).unwrap();
+        assert_eq!(saved, "{\"tokens\":{\"refresh_token\":\"two\"}}");
         let error = ask(AgentKind::Dsh, creds.path(), &programs).unwrap_err();
         assert!(!error.contains("sk-secret"), "{error}");
         assert!(error.contains("***"), "{error}");

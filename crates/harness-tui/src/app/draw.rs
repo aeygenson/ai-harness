@@ -1,16 +1,14 @@
 //! Drawing the whole screen: the tab bar, the open tab, the form on top and the
-//! footer with messages and hot keys.
+//! footer with messages and hot keys (`footer.rs`).
 
 use harness_agents::install::update::VERSION;
 use harness_core::config::projects::name_of;
 use ratatui::layout::{Constraint, Layout, Rect};
-use ratatui::style::{Modifier, Style};
-use ratatui::text::{Line, Span};
+use ratatui::style::Style;
+use ratatui::text::Span;
 use ratatui::widgets::{Paragraph, Wrap};
 use ratatui::Frame;
 
-use crate::tabs::tasks::TasksTab;
-use crate::ui::message::MessageKind;
 use crate::ui::{self, theme};
 use crate::ui::{buttons, panel, ButtonId, Target};
 use crate::{App, Tab, TABS};
@@ -26,7 +24,7 @@ impl App {
         let [top, main, footer] = Layout::vertical([
             Constraint::Length(1),
             Constraint::Min(0),
-            Constraint::Length(1),
+            Constraint::Length(self.footer_height(frame.area().width, frame.area().height)),
         ])
         .areas(frame.area());
         self.draw_tabs(frame, top);
@@ -117,47 +115,6 @@ impl App {
                 );
             }
         }
-    }
-
-    /// The bottom line: the latest message or problem, then the hot keys.
-    fn draw_footer(&self, frame: &mut Frame, footer: Rect) {
-        // The latest result or problem first, so a narrow window still shows it.
-        let mut spans = Vec::new();
-        let problem = self
-            .tasks
-            .as_ref()
-            .and_then(|t| t.problem.clone())
-            .or_else(|| self.skills.as_ref().and_then(|s| s.problem.clone()))
-            .or_else(|| self.projects.problem.clone())
-            .or_else(|| self.tr.problems.first().cloned());
-        if let Some(message) = &self.message {
-            let (mark, style) = match message.kind {
-                MessageKind::Error => ("✗", theme::bad()),
-                MessageKind::Info => ("✓", theme::ok()),
-            };
-            spans.push(Span::styled(
-                format!(" {mark} {}  ", message.text),
-                style.add_modifier(Modifier::BOLD),
-            ));
-        } else if let Some(problem) = problem {
-            spans.push(Span::styled(
-                format!(" ✗ {problem}  "),
-                theme::bad().add_modifier(Modifier::BOLD),
-            ));
-        }
-        let typing = self.tab == Tab::Tasks && self.tasks.as_ref().is_some_and(TasksTab::typing);
-        let hint = if typing {
-            "tasks.typing_hint"
-        } else {
-            "footer.hint"
-        };
-        // The key that lets the terminal select text while the TUI has the mouse.
-        let copy = harness_platform::terminal::select_text_key();
-        spans.push(Span::styled(
-            format!(" {}", self.tr.f(hint, &[("copy", &copy)])),
-            theme::dim(),
-        ));
-        frame.render_widget(Line::from(spans), footer);
     }
 
     /// The top line: project name, the tabs and the buttons on the right.

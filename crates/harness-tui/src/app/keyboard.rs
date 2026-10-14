@@ -2,6 +2,7 @@
 
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
+use crate::app::footer::StatusView;
 use crate::tabs::mcp::{McpButton, McpTab};
 use crate::tabs::plugins::{PluginButton, PluginsTab};
 use crate::tabs::projects::picker::FolderButton;
@@ -66,6 +67,9 @@ impl App {
             .as_ref()
             .is_some_and(|t| !t.input.trim().is_empty());
         match code {
+            KeyCode::Esc if self.status_view == StatusView::Open => {
+                self.status_view = StatusView::OneLine;
+            }
             KeyCode::Esc if self.tasks.as_ref().is_some_and(|t| t.menu.is_some()) => {
                 if let Some(tasks) = &mut self.tasks {
                     tasks.menu = None;
@@ -124,6 +128,7 @@ impl App {
             KeyCode::Char('L') | KeyCode::F(2) => self.press(ButtonId::Language),
             KeyCode::Char('T') | KeyCode::F(3) => self.press(ButtonId::Theme),
             KeyCode::Char('H' | '?') | KeyCode::F(1) => self.splash.open = true,
+            KeyCode::Char('M') | KeyCode::F(4) => self.toggle_status(),
             KeyCode::Char(c @ '1'..='8') => {
                 let index = usize::from(c as u8 - b'1');
                 self.show(TABS[index].0);

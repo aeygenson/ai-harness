@@ -332,6 +332,8 @@ struct App {
     start_dir: PathBuf,
     /// The last result or problem, shown at the bottom.
     message: Option<Message>,
+    /// The message at the bottom on one line, or opened over several (⤢).
+    status_view: app::footer::StatusView,
     hits: Hits,
     last_click: Option<(Instant, Target, u16)>,
     /// Builds the agents that run the roles.
