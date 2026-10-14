@@ -61,6 +61,7 @@ impl App {
             native: false,
             start_dir: default_start_dir(),
             message: None,
+            status_view: super::footer::StatusView::OneLine,
             hits: Hits::default(),
             last_click: None,
             builder: harness_agents::build::build_team,

@@ -23,6 +23,7 @@ use ratatui::Terminal;
 use std::time::Duration;
 
 mod agents_tab;
+mod footer;
 mod language;
 mod mcp_tab;
 mod plugins_tab;

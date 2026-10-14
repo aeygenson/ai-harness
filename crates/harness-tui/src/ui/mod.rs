@@ -108,6 +108,8 @@ pub enum ButtonId {
     TaskPullRequest(usize),
     /// The title of a window of the Tasks tab: over the whole tab, or back.
     TaskZoom(crate::tabs::tasks::Zoom),
+    /// The ⤢ or ⤡ mark of the message at the bottom: opens it over several lines, or back.
+    Status,
     /// A button of the MCP tab's server list.
     Mcp(crate::tabs::mcp::McpButton),
     /// A button of the MCP registry's catalog.

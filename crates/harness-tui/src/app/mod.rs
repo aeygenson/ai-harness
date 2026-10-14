@@ -5,6 +5,7 @@
 pub(crate) mod background;
 mod draw;
 mod edits;
+pub(crate) mod footer;
 mod forms;
 mod keyboard;
 mod mouse;
