@@ -26,6 +26,18 @@ impl Repo {
         Ok(out.lines().any(|line| line == reference))
     }
 
+    /// The commit the local branch `name` is at; `None` when there is no such branch.
+    pub fn branch_head(&self, name: &str) -> Result<Option<String>, GitError> {
+        let reference = format!("refs/heads/{name}");
+        // `--verify -q` prints nothing and ends with an error when the
+        // branch is missing, instead of guessing what `name` could mean.
+        match self.git(&["rev-parse", "--verify", "-q", &reference]) {
+            Ok(out) => Ok(Some(out.trim().to_string())),
+            Err(GitError::Failed { stderr, .. }) if stderr.is_empty() => Ok(None),
+            Err(e) => Err(e),
+        }
+    }
+
     /// The local branches whose names start with `prefix`, sorted.
     pub fn branches_starting_with(&self, prefix: &str) -> Result<Vec<String>, GitError> {
         let pattern = format!("refs/heads/{prefix}*");
@@ -151,5 +163,14 @@ mod tests {
         repo.git(&["switch", "-q", "--detach", &commit]).unwrap();
 
         assert_eq!(repo.current_branch().unwrap(), None);
+    }
+
+    #[test]
+    fn a_branch_head_is_known_only_for_a_real_branch() {
+        let (_dir, repo) = repo_with_a_commit();
+        let branch = repo.current_branch().unwrap().unwrap();
+
+        assert_eq!(repo.branch_head(&branch).unwrap(), repo.head().unwrap());
+        assert_eq!(repo.branch_head("harness/task-002").unwrap(), None);
     }
 }

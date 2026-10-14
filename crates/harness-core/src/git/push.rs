@@ -1,7 +1,9 @@
-//! Sending a task's branch to GitHub: the only git commands of the harness
-//! that use the network. The address is always given in full (made from
-//! `[github]` in `harness.toml`), never a remote's name, and a push never
-//! forces: the harness only adds commits to a branch, it never rewrites one.
+//! Sending a task's branch to GitHub and bringing a merged pull request back:
+//! the only git commands of the harness that use the network. The address is
+//! always given in full (made from `[github]` in `harness.toml`), never a
+//! remote's name, and no branch is forced: the harness only adds commits to a
+//! branch, it never rewrites one. (Only its own reference of what it last
+//! downloaded, `refs/harness/fetched/...`, is simply replaced.)
 
 use super::{GitError, Repo};
 
@@ -12,6 +14,85 @@ impl Repo {
         let refspec = format!("refs/heads/{branch}:refs/heads/{branch}");
         self.git_online(&["push", "--quiet", url, &refspec])?;
         Ok(())
+    }
+
+    /// Downloads the branch `branch` at `url` and returns its commit. Only
+    /// the repository's store changes: no branch and no file.
+    pub fn fetch_branch(&self, url: &str, branch: &str) -> Result<String, GitError> {
+        // Into a reference of the harness's own, not `FETCH_HEAD`: another
+        // program (an editor's automatic fetch) may write that at any time.
+        let fetched = format!("refs/harness/fetched/{branch}");
+        let refspec = format!("+refs/heads/{branch}:{fetched}");
+        self.git_online(&["fetch", "--quiet", "--no-tags", url, &refspec])?;
+        let commit = self.git(&[
+            "rev-parse",
+            "--verify",
+            "-q",
+            &format!("{fetched}^{{commit}}"),
+        ])?;
+        let commit = commit.trim().to_string();
+        if is_hash(&commit) {
+            Ok(commit)
+        } else {
+            Err(GitError::Failed {
+                command: format!("rev-parse {fetched}"),
+                stderr: "no commit was fetched".into(),
+            })
+        }
+    }
+
+    /// Points the local branch `name` (not checked out) at `commit`, only
+    /// if it is still at `old` (`None`: only if there is no such branch yet).
+    /// No file changes.
+    pub fn move_branch(&self, name: &str, commit: &str, old: Option<&str>) -> Result<(), GitError> {
+        // Forty zeros tell git that the branch must not exist yet.
+        let zeros = "0".repeat(40);
+        let old = old.unwrap_or(&zeros);
+        if !is_hash(commit) || !is_hash(old) {
+            return Err(GitError::Failed {
+                command: format!("update-ref refs/heads/{name}"),
+                stderr: "not a commit".into(),
+            });
+        }
+        let reference = format!("refs/heads/{name}");
+        self.git(&["update-ref", &reference, commit, old])?;
+        Ok(())
+    }
+
+    /// Does `commit` have the folder or file `path`?
+    pub fn has_path_at(&self, commit: &str, path: &str) -> bool {
+        is_hash(commit)
+            && self
+                .git(&["cat-file", "-e", &format!("{commit}:{path}")])
+                .is_ok()
+    }
+
+    /// Moves the branch checked out now forward to `commit`, only when that
+    /// needs no merge commit (a "fast forward"); git refuses otherwise.
+    pub fn fast_forward_to(&self, commit: &str) -> Result<(), GitError> {
+        // `merge` instead of `pull`: `pull` follows Lisa's `pull.rebase`
+        // setting and could rewrite her commits. `--no-overwrite-ignore`
+        // keeps an ignored file of hers (such as `.env`) that the new
+        // commits would replace: git stops instead.
+        self.git(&[
+            "merge",
+            "--quiet",
+            "--ff-only",
+            "--no-overwrite-ignore",
+            commit,
+        ])?;
+        Ok(())
+    }
+
+    /// Is `older` part of the history of `newer`? `false` also when git
+    /// does not know one of them.
+    pub fn is_ancestor(&self, older: &str, newer: &str) -> bool {
+        // Only hashes: a value starting with `-` would be read as an option.
+        is_hash(older)
+            && is_hash(newer)
+            && self
+                .git(&["merge-base", "--is-ancestor", older, newer])
+                .is_ok()
     }
 
     /// The commit the branch `branch` is at in the repository at `url`;
@@ -156,6 +237,104 @@ mod tests {
         assert!(repo.has_in_history(&head.unwrap()));
         // Only the full name counts.
         assert_eq!(repo.remote_branch_head(&url, "harness/task").unwrap(), None);
+    }
+
+    #[test]
+    fn a_branch_at_the_remote_is_brought_in_only_as_a_fast_forward() {
+        let (dir, repo, url) = project_and_remote();
+        repo.push_branch(&url, "harness/task-001").unwrap();
+        // GitHub gets a newer commit, as when a pull request is merged there.
+        fs::create_dir(dir.path().join("other")).unwrap();
+        let other = Repo::init(&dir.path().join("other")).unwrap();
+        other
+            .git(&["fetch", "--quiet", &url, "harness/task-001"])
+            .unwrap();
+        other
+            .git(&["switch", "--quiet", "-c", "work", "FETCH_HEAD"])
+            .unwrap();
+        fs::write(dir.path().join("other/x.txt"), "x\n").unwrap();
+        other.commit_all("merged on GitHub").unwrap();
+        other
+            .git(&["push", "--quiet", &url, "work:harness/task-001"])
+            .unwrap();
+
+        let fetched = repo.fetch_branch(&url, "harness/task-001").unwrap();
+        assert!(repo.is_ancestor(&repo.head().unwrap().unwrap(), &fetched));
+        repo.fast_forward_to(&fetched).unwrap();
+
+        assert_eq!(repo.head().unwrap(), Some(fetched));
+        assert_eq!(
+            fs::read_to_string(repo.root().join("x.txt")).unwrap(),
+            "x\n"
+        );
+        // A local commit the remote does not have: no merge commit is made.
+        fs::write(repo.root().join("y.txt"), "y\n").unwrap();
+        repo.commit_all("only here").unwrap();
+        fs::write(dir.path().join("other/z.txt"), "z\n").unwrap();
+        other.commit_all("newer on GitHub").unwrap();
+        other
+            .git(&["push", "--quiet", &url, "work:harness/task-001"])
+            .unwrap();
+        let mine = repo.head().unwrap();
+
+        let fetched = repo.fetch_branch(&url, "harness/task-001").unwrap();
+        assert!(!repo.is_ancestor(mine.as_deref().unwrap(), &fetched));
+        repo.fast_forward_to(&fetched).unwrap_err();
+
+        assert_eq!(repo.head().unwrap(), mine);
+        assert!(!repo.is_ancestor("-h", &fetched));
+    }
+
+    #[test]
+    fn a_branch_not_checked_out_moves_only_from_where_it_was() {
+        let (_dir, repo, _url) = project_and_remote();
+        let first = repo.head().unwrap().unwrap();
+        fs::write(repo.root().join("y.txt"), "y\n").unwrap();
+        repo.commit_all("second").unwrap();
+        let second = repo.head().unwrap().unwrap();
+
+        repo.move_branch("other", &first, None).unwrap();
+        repo.move_branch("other", &second, None).unwrap_err();
+        repo.move_branch("other", &second, Some(&second))
+            .unwrap_err();
+        repo.move_branch("other", &second, Some(&first)).unwrap();
+
+        assert_eq!(repo.branch_head("other").unwrap(), Some(second.clone()));
+        assert!(repo.has_path_at(&second, "y.txt"));
+        assert!(!repo.has_path_at(&first, "y.txt"));
+        assert!(!repo.has_path_at("--help", "y.txt"));
+    }
+
+    #[test]
+    fn a_fast_forward_keeps_an_ignored_file_of_lisa() {
+        let (dir, repo, url) = project_and_remote();
+        fs::write(repo.root().join(".gitignore"), "secret.env\n").unwrap();
+        repo.commit_all("ignore").unwrap();
+        repo.push_branch(&url, "harness/task-001").unwrap();
+        // GitHub gets a commit that adds a file with the ignored name.
+        fs::create_dir(dir.path().join("other")).unwrap();
+        let other = Repo::init(&dir.path().join("other")).unwrap();
+        other
+            .git(&["fetch", "--quiet", &url, "harness/task-001"])
+            .unwrap();
+        other
+            .git(&["switch", "--quiet", "-c", "work", "FETCH_HEAD"])
+            .unwrap();
+        fs::write(dir.path().join("other/secret.env"), "theirs\n").unwrap();
+        other.git(&["add", "-f", "secret.env"]).unwrap();
+        other.commit_all("add secret.env").unwrap();
+        other
+            .git(&["push", "--quiet", &url, "work:harness/task-001"])
+            .unwrap();
+        fs::write(repo.root().join("secret.env"), "mine\n").unwrap();
+
+        let fetched = repo.fetch_branch(&url, "harness/task-001").unwrap();
+        repo.fast_forward_to(&fetched).unwrap_err();
+
+        assert_eq!(
+            fs::read_to_string(repo.root().join("secret.env")).unwrap(),
+            "mine\n"
+        );
     }
 
     #[test]

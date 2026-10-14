@@ -1,4 +1,5 @@
-//! Pull requests through `gh`: the one a branch already has, and a new one.
+//! Pull requests through `gh`: the one a branch already has, a new one,
+//! what GitHub says about one, and merging it.
 
 use std::path::Path;
 use std::time::Duration;
@@ -91,6 +92,92 @@ pub(super) fn create(gh: &Path, new: &NewPullRequest) -> Result<PullRequest, Str
     checked(new.repo, number, url)
 }
 
+/// The fields `gh pr view` is asked for.
+const VIEW_FIELDS: &str = "state,isDraft,baseRefName,headRefName,headRefOid,\
+                           isCrossRepository,mergeable,mergeCommit,statusCheckRollup";
+
+/// What `gh pr view --json VIEW_FIELDS` prints: the pull request as GitHub
+/// sees it now.
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct View {
+    /// `OPEN`, `CLOSED` or `MERGED`.
+    pub state: String,
+    /// A draft cannot be merged until it is marked ready.
+    #[serde(default)]
+    pub is_draft: bool,
+    /// The branch it goes into, for example `main`.
+    pub base_ref_name: String,
+    /// The branch it comes from, for example `harness/task-001`.
+    pub head_ref_name: String,
+    /// The commit the pull request's branch is at on GitHub.
+    pub head_ref_oid: String,
+    /// The branch is in another repository (a fork).
+    #[serde(default)]
+    pub is_cross_repository: bool,
+    /// `MERGEABLE`, `CONFLICTING` or `UNKNOWN` (GitHub has not worked it out yet).
+    pub mergeable: String,
+    /// The commit the merge made in the base branch; only once merged.
+    pub merge_commit: Option<Commit>,
+    /// The checks (CI) of the last commit; missing or `null` when there are none.
+    pub status_check_rollup: Option<Vec<Check>>,
+}
+
+/// A commit as `gh` prints it.
+#[derive(Debug, serde::Deserialize)]
+pub(super) struct Commit {
+    /// Its hash.
+    pub oid: String,
+}
+
+/// One check of a pull request: a GitHub Actions job (`name`, `status`,
+/// `conclusion`) or an older commit status (`context`, `state`). Every
+/// field is optional because the two kinds have different ones.
+#[derive(Debug, serde::Deserialize)]
+pub(super) struct Check {
+    /// A job's name.
+    pub name: Option<String>,
+    /// A commit status's name.
+    pub context: Option<String>,
+    /// A job's progress: `QUEUED`, `IN_PROGRESS`, `COMPLETED`, ...
+    pub status: Option<String>,
+    /// How a finished job ended: `SUCCESS`, `FAILURE`, `SKIPPED`, ...
+    pub conclusion: Option<String>,
+    /// A commit status: `SUCCESS`, `PENDING`, `FAILURE`, ...
+    pub state: Option<String>,
+}
+
+/// Asks GitHub about pull request `number` of `repo`.
+pub(super) fn view(gh: &Path, repo: &str, number: u64) -> Result<View, String> {
+    let mut command = quiet_command(gh);
+    command.args([
+        "pr",
+        "view",
+        &number.to_string(),
+        &format!("--repo={repo}"),
+        &format!("--json={VIEW_FIELDS}"),
+    ]);
+    let out = crate::install::models::run_for(command, "", &[], GH_LIMIT)?;
+    serde_json::from_str(&out).map_err(|e| format!("gh pr view printed no pull request: {e}"))
+}
+
+/// Merges pull request `number` of `repo` with a merge commit, so every
+/// role's commit stays in the history. `head` is the commit Lisa decided
+/// on: GitHub refuses when the branch has moved on since.
+pub(super) fn merge(gh: &Path, repo: &str, number: u64, head: &str) -> Result<(), String> {
+    let mut command = quiet_command(gh);
+    command.args([
+        "pr",
+        "merge",
+        &number.to_string(),
+        &format!("--repo={repo}"),
+        "--merge",
+        &format!("--match-head-commit={head}"),
+    ]);
+    crate::install::models::run_for(command, "", &[], GH_LIMIT)?;
+    Ok(())
+}
+
 /// A pull request from `gh`'s answer, only when its address is the one
 /// GitHub gives `number` in `repo`: the address is shown and opened later.
 fn checked(repo: &str, number: u64, url: &str) -> Result<PullRequest, String> {
@@ -148,6 +235,43 @@ mod tests {
         let strange = harness_fake::install(other.path(), "gh", script);
         let error = find(&strange, "lisa/app", "harness/task-001").unwrap_err();
         assert!(error.contains("unexpected address"), "{error}");
+    }
+
+    #[test]
+    fn a_pull_request_is_viewed_and_merged_at_the_commit_given() {
+        let bin = tempfile::tempdir().unwrap();
+        let args = bin.path().join("args.txt");
+        let script = format!(
+            "append-args {}\nwhen-arg 2 view print {{\"state\":\"OPEN\",\"baseRefName\":\"main\",\"headRefName\":\"harness/task-001\",\"headRefOid\":\"abc\",\"mergeable\":\"MERGEABLE\",\"statusCheckRollup\":[{{\"name\":\"server\",\"status\":\"COMPLETED\",\"conclusion\":\"SUCCESS\"}}]}}\n",
+            args.display()
+        );
+        let gh = harness_fake::install(bin.path(), "gh", &script);
+
+        let seen = view(&gh, "lisa/app", 7).unwrap();
+        merge(&gh, "lisa/app", 7, "abc").unwrap();
+
+        assert_eq!(seen.state, "OPEN");
+        assert_eq!(seen.head_ref_oid, "abc");
+        let checks = seen.status_check_rollup.unwrap();
+        assert_eq!(checks[0].name.as_deref(), Some("server"));
+        let saved = std::fs::read_to_string(&args).unwrap();
+        let fields = format!("--json={VIEW_FIELDS}");
+        assert_eq!(
+            saved.lines().collect::<Vec<_>>(),
+            [
+                "pr",
+                "view",
+                "7",
+                "--repo=lisa/app",
+                fields.as_str(),
+                "pr",
+                "merge",
+                "7",
+                "--repo=lisa/app",
+                "--merge",
+                "--match-head-commit=abc"
+            ]
+        );
     }
 
     #[test]
