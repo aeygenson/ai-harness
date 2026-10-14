@@ -650,10 +650,39 @@ async fn hooks_and_files_outside_the_project_are_noticed() {
     assert_eq!(repo.changed_files().unwrap(), ["src/parser.rs"]);
 }
 
+/// The usual watched files, but a home folder of the test's own.
+fn watched_with_home(repo: &Repo, home: &std::path::Path) -> Watched {
+    let mut watched = Watched::for_repo(repo).unwrap();
+    watched.reported_files = vec![home.join(".bashrc")];
+    watched
+}
+
+async fn run_with(
+    repo: &Repo,
+    store: &TaskStore,
+    state: &mut TaskState,
+    agent: &MockAgent,
+    watched: &Watched,
+) -> StopReason {
+    let setup = RunSetup {
+        skills: &Skills::none(),
+        watched,
+        agents: AgentFacts {
+            config: None,
+            versions: &BTreeMap::new(),
+        },
+    };
+    orchestrator::run_watching(repo, store, state, agent, setup)
+        .await
+        .unwrap()
+}
+
 #[tokio::test]
 async fn claude_codes_empty_stub_files_do_not_stop_the_task() {
     let (dir, repo) = new_project();
     let (store, mut state) = new_task(&repo);
+    let home = tempfile::tempdir().unwrap();
+    let watched = watched_with_home(&repo, home.path());
     let exclude = dir.path().join(".git/info/exclude");
     let old_exclude = fs::read_to_string(&exclude).unwrap_or_default();
     // What Claude Code does when it starts its sandbox, plus the role's work.
@@ -673,9 +702,7 @@ async fn claude_codes_empty_stub_files_do_not_stop_the_task() {
         ),
     );
 
-    let stop = orchestrator::run(&repo, &store, &mut state, &agent)
-        .await
-        .unwrap();
+    let stop = run_with(&repo, &store, &mut state, &agent, &watched).await;
 
     assert_eq!(stop, StopReason::WaitingForHuman(WaitReason::ApproveDesign));
     assert!(!dir.path().join("package.json").exists());
@@ -685,4 +712,32 @@ async fn claude_codes_empty_stub_files_do_not_stop_the_task() {
         old_exclude
     );
     assert!(repo.changed_files().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn a_file_hidden_by_an_old_stub_block_stops_the_run_before_any_role() {
+    let (dir, repo) = new_project();
+    let (store, mut state) = new_task(&repo);
+    let home = tempfile::tempdir().unwrap();
+    let watched = watched_with_home(&repo, home.path());
+    // Left by a run of Claude Code the harness did not watch.
+    let exclude = dir.path().join(".git/info/exclude");
+    let old_exclude = fs::read_to_string(&exclude).unwrap_or_default();
+    fs::write(
+        &exclude,
+        format!("{old_exclude}\n\n# claude-code scrub-mode stubs\n/package.json\n/.npmrc"),
+    )
+    .unwrap();
+    fs::write(dir.path().join("package.json"), "").unwrap();
+    fs::write(dir.path().join(".npmrc"), "registry=https://example.com/\n").unwrap();
+    let agent = MockAgent::new();
+
+    let stop = run_with(&repo, &store, &mut state, &agent, &watched).await;
+
+    assert_eq!(
+        stop,
+        StopReason::DirtyWorkingTree(vec![".npmrc".to_string()])
+    );
+    assert!(!dir.path().join("package.json").exists());
+    assert!(agent.calls().is_empty());
 }

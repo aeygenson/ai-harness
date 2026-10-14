@@ -46,9 +46,6 @@ impl Before {
             repo.restore_local_config(&self.config)?;
         }
         let changes = self.hidden.check_and_restore(watched)?;
-        // Claude Code's empty stub files would otherwise end up in the role's
-        // commit once `info/exclude` no longer hides them.
-        self.stubs.remove_new_empty()?;
         // A new branch at the same commit would make the harness commit the
         // role's work on that branch, so a switch counts like a commit. So
         // does a made, moved or deleted branch: the harness later checks out
@@ -60,6 +57,12 @@ impl Before {
             || repo.branch_heads()? != self.branch_heads;
         if git_changed {
             return Ok(Some(StopReason::AgentCommitted(role)));
+        }
+        // Claude Code's empty stub files would otherwise end up in the role's
+        // commit once `info/exclude` no longer hides them. Only when its block
+        // was there: another agent's empty file is its own work.
+        if changes.claude_stubs {
+            self.stubs.remove_new_empty()?;
         }
         if config_changed {
             return Ok(Some(StopReason::GitConfigChanged(role)));

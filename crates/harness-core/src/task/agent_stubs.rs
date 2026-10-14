@@ -8,14 +8,18 @@
 //! them read-only, and adds them to `.git/info/exclude` so `git status`
 //! does not show them. Checked against Claude Code 2.1.283 and 2.1.299.
 //!
-//! An empty file holds no command and no setting, so the harness removes the
-//! new empty ones after the role, and does not stop the task for the exclude
-//! lines that hide exactly these files. Any other change to `info/exclude`
-//! still stops it.
+//! The tripwire puts `info/exclude` back after every role. When the only
+//! change was this block, it does not stop the task, and the harness removes
+//! the new empty stub files so they do not end up in the role's commit. Any
+//! other change to `info/exclude` still stops the task. A block left from a
+//! run the harness did not watch (Lisa's own Claude Code, the retrospective)
+//! is removed before the next role, so it cannot hide that role's files.
 
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
+
+use crate::git::Repo;
 
 /// The files Claude Code creates empty at the top of the project.
 pub const STUB_FILES: &[&str] = &[
@@ -70,6 +74,74 @@ pub fn only_stub_lines(before: &[u8], after: &[u8]) -> bool {
     has_stub
 }
 
+/// Removes Claude Code's blocks from the text of `info/exclude` and returns
+/// the new text with the stub names the blocks listed, or `None` when there
+/// is no block. The blank lines just above a block go with it.
+fn strip_stub_blocks(text: &str) -> Option<(String, Vec<String>)> {
+    if !text.lines().any(|line| line == EXCLUDE_HEADER) {
+        return None;
+    }
+    let mut kept: Vec<&str> = Vec::new();
+    let mut names = Vec::new();
+    let mut in_block = false;
+    for line in text.lines() {
+        if line == EXCLUDE_HEADER {
+            in_block = true;
+            while kept.last().is_some_and(|last| last.is_empty()) {
+                kept.pop();
+            }
+            continue;
+        }
+        if in_block {
+            let stub = line
+                .strip_prefix('/')
+                .filter(|name| STUB_FILES.contains(name));
+            if let Some(name) = stub {
+                names.push(name.to_string());
+                continue;
+            }
+            in_block = false;
+        }
+        kept.push(line);
+    }
+    let mut new_text = kept.join("\n");
+    if !new_text.is_empty() {
+        new_text.push('\n');
+    }
+    Some((new_text, names))
+}
+
+/// Removes what an earlier unwatched run of Claude Code left: its block in
+/// `exclude` and the empty, untracked stub files that block hid. Without
+/// this, a role could put a real `package.json` or `.npmrc` there and git
+/// would not show it, so it would skip every check and review.
+///
+/// # Errors
+/// Reading or writing `exclude`, or removing a stub file, failed.
+pub fn clear_leftovers(repo: &Repo, exclude: &Path) -> io::Result<()> {
+    let text = match fs::read_to_string(exclude) {
+        Ok(text) => text,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(e) => return Err(e),
+    };
+    let Some((new_text, names)) = strip_stub_blocks(&text) else {
+        return Ok(());
+    };
+    fs::write(exclude, new_text)?;
+    for name in names {
+        let path = repo.root().join(&name);
+        if is_empty_file(&path) && !repo.is_tracked(Path::new(&name)) {
+            fs::remove_file(&path)?;
+        }
+    }
+    Ok(())
+}
+
+/// Is `path` a plain file (not a link) with nothing in it?
+fn is_empty_file(path: &Path) -> bool {
+    fs::symlink_metadata(path).is_ok_and(|meta| meta.is_file() && meta.len() == 0)
+}
+
 /// The stub files that were missing in the project before a role.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct MissingStubs {
@@ -82,8 +154,11 @@ impl MissingStubs {
         let paths = STUB_FILES
             .iter()
             .map(|name| root.join(name))
-            // `symlink_metadata` also sees a link that points nowhere.
-            .filter(|path| fs::symlink_metadata(path).is_err())
+            // `symlink_metadata` also sees a link that points nowhere. Only
+            // "not found" counts: a file we cannot look at is not missing.
+            .filter(|path| {
+                fs::symlink_metadata(path).is_err_and(|e| e.kind() == io::ErrorKind::NotFound)
+            })
             .collect();
         Self { paths }
     }
@@ -94,10 +169,7 @@ impl MissingStubs {
     pub fn remove_new_empty(&self) -> io::Result<Vec<PathBuf>> {
         let mut removed = Vec::new();
         for path in &self.paths {
-            let Ok(meta) = fs::symlink_metadata(path) else {
-                continue;
-            };
-            if meta.is_file() && meta.len() == 0 {
+            if is_empty_file(path) {
                 fs::remove_file(path)?;
                 removed.push(path.clone());
             }
@@ -166,6 +238,48 @@ mod tests {
         assert!(root.join(".env").exists(), "it was there before the role");
         assert!(root.join("pnpm-lock.yaml").exists(), "it has content");
         assert!(root.join("notes.txt").exists(), "not a stub name");
+    }
+
+    #[test]
+    fn leftovers_of_an_unwatched_run_are_cleared() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = Repo::init(dir.path()).unwrap();
+        let root = dir.path();
+        fs::write(root.join(".gitmodules"), "").unwrap();
+        repo.commit_all("an empty .gitmodules of the project")
+            .unwrap();
+        let exclude = repo.git_common_dir().unwrap().join("info/exclude");
+        let old = fs::read_to_string(&exclude).unwrap_or_default();
+        fs::write(
+            &exclude,
+            format!("{old}\n\n{EXCLUDE_HEADER}\n/package.json\n/.npmrc\n/.gitmodules"),
+        )
+        .unwrap();
+        fs::write(root.join("package.json"), "").unwrap();
+        fs::write(root.join(".npmrc"), "registry=https://example.com/\n").unwrap();
+
+        clear_leftovers(&repo, &exclude).unwrap();
+
+        let new = fs::read_to_string(&exclude).unwrap();
+        assert!(!new.contains(EXCLUDE_HEADER), "{new}");
+        assert!(!new.contains("/package.json"), "{new}");
+        assert!(!root.join("package.json").exists());
+        assert!(
+            root.join(".npmrc").exists(),
+            "it has content: git shows it now"
+        );
+        assert!(root.join(".gitmodules").exists(), "it is tracked");
+    }
+
+    #[test]
+    fn stripping_keeps_lisas_own_lines() {
+        let text = format!("# excludes\n/build\n\n\n{EXCLUDE_HEADER}\n/.env\n/yarn.lock\n/notes\n");
+
+        let (new_text, names) = strip_stub_blocks(&text).unwrap();
+
+        assert_eq!(new_text, "# excludes\n/build\n/notes\n");
+        assert_eq!(names, [".env", "yarn.lock"]);
+        assert!(strip_stub_blocks("# excludes\n/build\n").is_none());
     }
 
     #[cfg(unix)]
