@@ -37,8 +37,9 @@ pub(super) fn toolchain_env(real_home: &Path) -> Vec<(&'static str, PathBuf)> {
         .collect()
 }
 
-/// Commands no role may run: the harness makes the commits.
-pub(super) const DENIED_FOR_ALL: &[&str] = &["git commit", "git push"];
+/// Commands no role may run: the harness makes the commits, and only it
+/// sends work to GitHub (`gh` uses Lisa's GitHub login).
+pub(super) const DENIED_FOR_ALL: &[&str] = &["git commit", "git push", "gh"];
 
 /// Commands a role without [`Commands::Any`] (see [`Role::spec`]) may not
 /// run: they change files, the git state, install or publish packages, or

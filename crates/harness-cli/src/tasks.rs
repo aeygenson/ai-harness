@@ -85,6 +85,20 @@ pub(crate) async fn run(project: &Path, task_id: &str) -> Result<()> {
     };
     let stop = orchestrator::run_project(&repo, &store, &mut state, &agent, project).await?;
     println!("{}", explain(&stop, task_id));
+    if stop == StopReason::Done {
+        // Running a done task again sends it again: the way to retry after a
+        // failed push.
+        match harness_agents::github::publish(&repo, &config, &store, &mut state) {
+            Ok(Some(pull_request)) => println!("Pull request: {}", pull_request.url),
+            Ok(None) => {}
+            // The error can hold what GitHub's server printed: no terminal codes.
+            Err(error) => bail!(
+                "{task_id} is done, but it was not sent to GitHub: {}\n\
+                 Once that is fixed, send it with: harness run {task_id}",
+                harness_core::text::safe(&error)
+            ),
+        }
+    }
     Ok(())
 }
 
@@ -223,6 +237,9 @@ pub(crate) fn status(project: &Path, task_id: &str) -> Result<()> {
         "{task_id}: round {} of {}, {:?}",
         state.round, state.max_rounds, state.stage
     );
+    if let Some(page) = state.pull_request.as_ref().and_then(|p| p.page()) {
+        println!("  pull request: {page}");
+    }
     for handoff in store.history()? {
         println!(
             "  round {} {:?} {:?} -> {:?}: {}",

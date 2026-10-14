@@ -85,6 +85,8 @@ pub struct TasksTab {
     home: Option<PathBuf>,
     /// The project's scenario: «To» lists its roles.
     pub(super) scenario: Scenario,
+    /// The project is on GitHub (`[github]`): a done task becomes a pull request.
+    pub(super) on_github: bool,
     /// What `harness.toml` says about each role.
     pub(super) settings: BTreeMap<Role, RoleConfig>,
     /// The models each agent said it has.
@@ -138,6 +140,7 @@ impl TasksTab {
             root: root.to_path_buf(),
             home: home.map(Path::to_path_buf),
             scenario: Scenario::default(),
+            on_github: false,
             settings: BTreeMap::new(),
             models: BTreeMap::new(),
             tasks: Vec::new(),
@@ -198,6 +201,7 @@ impl TasksTab {
         match Config::load(&harness_dir) {
             Ok(config) => {
                 self.scenario = config.scenario;
+                self.on_github = config.github.is_some();
                 self.settings = config.roles.clone();
                 for (role, settings) in &config.roles {
                     self.roles.push((

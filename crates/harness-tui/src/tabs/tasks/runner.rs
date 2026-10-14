@@ -18,8 +18,9 @@ use harness_core::skills::Skills;
 use harness_core::task::branch;
 use harness_core::task::handoff::{NextStep, Role, Verdict};
 use harness_core::task::orchestrator::{self, Project, SameText, StopReason};
+use harness_core::task::pull_request::PullRequest;
 use harness_core::task::store::TaskStore;
-use harness_core::task::Stage;
+use harness_core::task::{Stage, TaskState};
 use harness_core::text;
 use tokio::sync::oneshot;
 
@@ -47,6 +48,8 @@ pub enum Request {
     },
     /// A role stopped part-way (a limit, a failure): run the task again.
     Continue(String),
+    /// Send the done task to GitHub again (the last try failed).
+    Publish(String),
 }
 
 /// The model and level Lisa chose for one role for this launch only;
@@ -64,6 +67,9 @@ pub struct Outcome {
     pub task: String,
     /// Why the roles stopped; `None` when nothing had to run.
     pub stop: Option<StopReason>,
+    /// How sending the done task to GitHub went; `None` when nothing was
+    /// sent (not done, or the project is not on GitHub).
+    pub published: Option<Result<PullRequest, String>>,
 }
 
 #[derive(Debug)]
@@ -220,7 +226,9 @@ fn work(job: Job, events: &Sender<Event>, stop: oneshot::Receiver<()>) -> Result
     let repo = Repo::open(root).map_err(|e| text(&e))?;
     // An existing task's branch first: its settings are the ones to use, and
     // Lisa's decision and the roles' work are committed there.
-    if let Request::Decide { task, .. } | Request::Continue(task) = &request {
+    if let Request::Decide { task, .. } | Request::Continue(task) | Request::Publish(task) =
+        &request
+    {
         if branch::enter(&repo, task).map_err(|e| text(&e))? {
             let _ = events.send(Event::SwitchedBranch);
         }
@@ -241,7 +249,7 @@ fn work(job: Job, events: &Sender<Event>, stop: oneshot::Receiver<()>) -> Result
         Request::Decide {
             next: NextStep::Done,
             ..
-        }
+        } | Request::Publish(_)
     );
     let agents = if needs_run {
         let team = builder(&config, root).map_err(|e| text(&e))?;
@@ -275,12 +283,19 @@ fn work(job: Job, events: &Sender<Event>, stop: oneshot::Receiver<()>) -> Result
                 .map_err(|e| text(&e))?;
             (store, state)
         }
-        Request::Continue(task) => TaskStore::open(&runs, &task).map_err(|e| text(&e))?,
+        Request::Continue(task) | Request::Publish(task) => {
+            TaskStore::open(&runs, &task).map_err(|e| text(&e))?
+        }
     };
     let task = state.task_id.clone();
     let _ = events.send(Event::Started(task.clone()));
     let Some((team, skills)) = agents else {
-        return Ok(Outcome { task, stop: None });
+        let published = send_to_github(&repo, &config, &store, &mut state);
+        return Ok(Outcome {
+            task,
+            stop: None,
+            published,
+        });
     };
     let project = Project {
         config: &config,
@@ -292,10 +307,30 @@ fn work(job: Job, events: &Sender<Event>, stop: oneshot::Receiver<()>) -> Result
         stop,
     )?
     .map_err(|e| text(&e))?;
+    let published = if stop == StopReason::Done {
+        send_to_github(&repo, &config, &store, &mut state)
+    } else {
+        None
+    };
     Ok(Outcome {
         task,
         stop: Some(stop),
+        published,
     })
+}
+
+/// Sends a done task to GitHub when the project is there (see
+/// `harness_agents::github::publish`); `None` when nothing was sent.
+fn send_to_github(
+    repo: &Repo,
+    config: &Config,
+    store: &TaskStore,
+    state: &mut TaskState,
+) -> Option<Result<PullRequest, String>> {
+    if state.stage != Stage::Done {
+        return None;
+    }
+    harness_agents::github::publish(repo, config, store, state).transpose()
 }
 
 /// A line of the agent's output as the live log shows it. The agents print

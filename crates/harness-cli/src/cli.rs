@@ -59,7 +59,8 @@ pub(crate) enum Command {
         #[command(subcommand)]
         command: TaskCommand,
     },
-    /// Run roles until the task is done or needs Lisa.
+    /// Run roles until the task is done or needs Lisa. A done task of a
+    /// project on GitHub is pushed and becomes a pull request.
     Run { task_id: String },
     /// Accept the work and send it on.
     Approve {

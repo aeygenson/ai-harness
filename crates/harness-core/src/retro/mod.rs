@@ -387,6 +387,7 @@ mod tests {
                 round: 2,
                 max_rounds: 5,
                 stage,
+                pull_request: None,
             },
             handoffs,
             failures: vec![],

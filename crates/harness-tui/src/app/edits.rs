@@ -11,6 +11,21 @@ use crate::ui::message::Message;
 use crate::{App, EditJob, EditKind};
 
 impl App {
+    /// Opens the pull request of the task at `index` of the Tasks tab's list
+    /// in the browser, if it has one.
+    pub(crate) fn open_pull_request(&mut self, index: usize) {
+        let Some(url) = self.tasks.as_ref().and_then(|t| t.pull_request_url(index)) else {
+            return;
+        };
+        self.message = Some(match (self.url_opener)(&url) {
+            Ok(()) => Message::info(self.tr.f("tasks.pull_request_opened", &[("url", &url)])),
+            Err(error) => Message::error(self.tr.f(
+                "tasks.pull_request_not_opened",
+                &[("url", &url), ("error", &error)],
+            )),
+        });
+    }
+
     /// A file chosen in «Files» of the Tasks tab: Zed opens it and the TUI
     /// goes on; without Zed the editor gets the terminal.
     pub(crate) fn open_task_file(&mut self) {

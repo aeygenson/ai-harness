@@ -62,6 +62,7 @@ impl App {
             hits: Hits::default(),
             last_click: None,
             builder: harness_agents::build::build_team,
+            url_opener: harness_agents::mcp::oauth::open_in_browser,
             retro_builder: harness_agents::build::retro_agent,
             asker: ask_agents,
             viewer: editor::viewer,

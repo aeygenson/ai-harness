@@ -85,7 +85,7 @@
 runs/
   task-001/
     task.md
-    state.json
+    state.json       # где задача; у готовой задачи на GitHub ещё pull_request
     round-01/
       01-architect/  notes.md  handoff.json
       02-human/      notes.md  handoff.json

@@ -70,6 +70,7 @@ impl App {
                     tasks.open_file(index);
                 }
             }
+            ButtonId::TaskPullRequest(index) => self.open_pull_request(index),
             ButtonId::Input => {
                 if let Some(tasks) = &mut self.tasks {
                     tasks.focus_input();

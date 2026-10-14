@@ -30,6 +30,7 @@ use std::path::{Path, PathBuf};
 
 use crate::task::handoff::{Handoff, Role};
 use crate::task::manifest::{Manifest, MANIFEST_FILE};
+use crate::task::pull_request::PullRequest;
 use crate::task::scenario::Workflow;
 use crate::task::{TaskState, TransitionError};
 use files::{
@@ -254,6 +255,19 @@ impl TaskStore {
             }
         }
         Ok(steps)
+    }
+
+    /// Remembers the pull request the finished task became, in `state.json`.
+    pub fn save_pull_request(
+        &self,
+        state: &mut TaskState,
+        pull_request: PullRequest,
+    ) -> Result<(), StoreError> {
+        let mut next = state.clone();
+        next.pull_request = Some(pull_request);
+        self.save_state(&next)?;
+        *state = next;
+        Ok(())
     }
 
     /// The task's folder, for example `runs/task-001`.

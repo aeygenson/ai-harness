@@ -329,6 +329,8 @@ struct App {
     last_click: Option<(Instant, Target, u16)>,
     /// Builds the agents that run the roles.
     builder: Builder,
+    /// Opens a web page in the browser; tests give a fake one.
+    url_opener: fn(&str) -> Result<(), String>,
     /// Builds the agent of the retrospective.
     retro_builder: RetroBuilder,
     asker: ModelAsker,

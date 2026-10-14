@@ -284,7 +284,7 @@ mod tests {
             let settings: serde_json::Value = serde_json::from_str(&settings(role)).unwrap();
             serde_json::from_value(settings["permissions"]["deny"].clone()).unwrap()
         };
-        let for_all = ["git commit", "git push"];
+        let for_all = ["git commit", "git push", "gh"];
         let readers: Vec<&str> = for_all
             .into_iter()
             .chain([

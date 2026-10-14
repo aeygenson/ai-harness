@@ -21,6 +21,7 @@ impl TasksTab {
             Choice::Role(role) => role.as_str().to_string(),
             Choice::Continue(role) => tr.f("tasks.choice_continue", &[("role", &role)]),
             Choice::Finish => tr.t("tasks.choice_finish").to_string(),
+            Choice::Publish => tr.t("tasks.choice_publish").to_string(),
         }
     }
 

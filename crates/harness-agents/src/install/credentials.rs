@@ -92,6 +92,19 @@ pub fn secret_names(dir: &Path) -> io::Result<Vec<String>> {
     Ok(names)
 }
 
+/// The saved tokens (Claude Code, `DeepSeek`) and MCP secrets, to hide
+/// them in text that leaves the computer. What cannot be read is skipped.
+pub fn saved_secrets(dir: &Path) -> Vec<Secret> {
+    let tokens = ["claude", "deepseek"]
+        .into_iter()
+        .filter_map(|agent| load_token(dir, agent).ok());
+    let secrets = secret_names(dir)
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|name| load_secret(dir, &name).ok());
+    tokens.chain(secrets).collect()
+}
+
 /// A token never contains spaces, but a copy from the terminal may add a line
 /// break in the middle of a long token. Remove every kind of whitespace.
 fn clean(token: &str) -> String {

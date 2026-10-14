@@ -344,7 +344,7 @@ mod tests {
             assert_eq!(arg_after(&command, "--allowedTools"), allowed, "{role}");
             assert_eq!(
                 arg_after(&command, "--disallowedTools"),
-                "Bash(git commit:*),Bash(git push:*),Edit(./.git/**),Edit(./.claude/**)",
+                "Bash(git commit:*),Bash(git push:*),Bash(gh:*),Edit(./.git/**),Edit(./.claude/**)",
                 "{role}"
             );
         }
