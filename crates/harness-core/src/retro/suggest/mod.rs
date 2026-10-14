@@ -26,6 +26,7 @@ use crate::retro::proposals::{ProposalError, ProposalsFile};
 use crate::retro::Stats;
 use crate::skills::SkillError;
 use crate::task::agent::{AgentRunner, RoleJob, RunEnd};
+use crate::task::agent_stubs;
 use crate::task::handoff::Role;
 use crate::text;
 pub use apply::apply;
@@ -150,6 +151,8 @@ pub async fn suggest<A: AgentRunner>(
     language: &str,
 ) -> Result<Suggestions, SuggestError> {
     repo.ensure_harness_ignores()?;
+    // Stub lines Claude Code left in `info/exclude` would hide files from git.
+    agent_stubs::clear_leftovers(repo)?;
     let dirty = repo.changed_files()?;
     if !dirty.is_empty() {
         return Err(SuggestError::Dirty(dirty));
@@ -195,6 +198,9 @@ pub async fn suggest<A: AgentRunner>(
     let committed = repo.head()? != head
         || repo.current_branch()? != branch
         || repo.branch_heads()? != branch_heads;
+    // The Retrospective's own Claude Code run leaves its stub block and
+    // empty stub files; without them git shows all the agent changed.
+    agent_stubs::clear_leftovers(repo)?;
     let changed = repo.changed_files()?;
     let log = retro_dir.join(AGENT_LOG);
     write(&log, &outcome.log)?;
@@ -591,6 +597,37 @@ mod tests {
         // The next run refuses to start until Lisa looks at the changes.
         let agent = FakeAgent::writing("x", "{\"proposals\": []}");
         assert!(matches!(run(agent), Err(SuggestError::Dirty(_))));
+    }
+
+    /// Does what Claude Code does when it starts, and writes an `.npmrc`
+    /// that its stub lines would hide from git.
+    struct StubbyAgent(FakeAgent);
+
+    impl AgentRunner for StubbyAgent {
+        fn run(&self, job: &RoleJob) -> impl Future<Output = AgentOutcome> + Send {
+            let root = &job.project_dir;
+            let exclude = root.join(".git/info/exclude");
+            let old = fs::read_to_string(&exclude).unwrap_or_default();
+            let block = "\n\n# claude-code scrub-mode stubs\n/package.json\n/.npmrc";
+            fs::write(&exclude, format!("{old}{block}")).unwrap();
+            fs::write(root.join("package.json"), "").unwrap();
+            fs::write(root.join(".npmrc"), "registry=https://example.com/\n").unwrap();
+            self.0.run(job)
+        }
+    }
+
+    #[test]
+    fn a_file_hidden_by_claude_codes_stub_lines_is_still_seen() {
+        let (_dir, repo, retro_dir, stats, config) = project();
+        let agent = StubbyAgent(FakeAgent::writing("x", "{\"proposals\": []}"));
+
+        let result = block_on(suggest(&repo, &retro_dir, &stats, &config, &agent, ENGLISH));
+
+        match result {
+            Err(SuggestError::ForbiddenChanges(files)) => assert_eq!(files, [".npmrc"]),
+            other => panic!("{other:?}"),
+        }
+        assert!(!repo.root().join("package.json").exists());
     }
 
     const ORIGIN: &str = "retro 001, approved by Lisa";

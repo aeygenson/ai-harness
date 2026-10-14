@@ -145,7 +145,7 @@ pub async fn run_watching<A: AgentRunner>(
 
         // Before looking at git status: a block an unwatched run of Claude
         // Code left in `info/exclude` would hide files from it.
-        agent_stubs::clear_leftovers(repo, &setup.watched.exclude_file)?;
+        agent_stubs::clear_leftovers(repo)?;
         let dirty = repo.changed_files()?;
         if !dirty.is_empty() {
             return Ok(StopReason::DirtyWorkingTree(dirty));

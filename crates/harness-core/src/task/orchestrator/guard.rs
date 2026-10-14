@@ -32,8 +32,9 @@ impl Before {
     }
 
     /// Compares with now: git's settings, the tripwire, the commit and the
-    /// branches. Puts back what can be put back and returns why the task
-    /// must stop, or `None` when all is as before.
+    /// branches. Puts back what can be put back, removes the empty stub
+    /// files Claude Code made (see [`crate::task::agent_stubs`]) and returns
+    /// why the task must stop, or `None` when all is as before.
     pub(super) fn check(
         &self,
         repo: &Repo,
@@ -46,6 +47,13 @@ impl Before {
             repo.restore_local_config(&self.config)?;
         }
         let changes = self.hidden.check_and_restore(watched)?;
+        // Claude Code's empty stub files would otherwise end up in the role's
+        // commit, or block the next run, once `info/exclude` no longer hides
+        // them. Only when its block was there: another agent's empty file is
+        // its own work. Only untracked files go, so a commit is not touched.
+        if changes.claude_stubs {
+            self.stubs.remove_new_empty(repo)?;
+        }
         // A new branch at the same commit would make the harness commit the
         // role's work on that branch, so a switch counts like a commit. So
         // does a made, moved or deleted branch: the harness later checks out
@@ -58,12 +66,7 @@ impl Before {
         if git_changed {
             return Ok(Some(StopReason::AgentCommitted(role)));
         }
-        // Claude Code's empty stub files would otherwise end up in the role's
-        // commit once `info/exclude` no longer hides them. Only when its block
-        // was there: another agent's empty file is its own work.
-        if changes.claude_stubs {
-            self.stubs.remove_new_empty()?;
-        }
+
         if config_changed {
             return Ok(Some(StopReason::GitConfigChanged(role)));
         }

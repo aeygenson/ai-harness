@@ -741,3 +741,32 @@ async fn a_file_hidden_by_an_old_stub_block_stops_the_run_before_any_role() {
     assert!(!dir.path().join("package.json").exists());
     assert!(agent.calls().is_empty());
 }
+
+#[tokio::test]
+async fn an_empty_stub_named_file_without_claude_codes_block_is_the_agents_work() {
+    let (dir, repo) = new_project();
+    let (store, mut state) = new_task(&repo);
+    state.stage = Stage::Working(Role::Developer);
+    let home = tempfile::tempdir().unwrap();
+    let watched = watched_with_home(&repo, home.path());
+    let agent = MockAgent::new()
+        .then(
+            Role::Developer,
+            MockStep::finish_writing(
+                Verdict::Approved,
+                NextStep::To(Role::Tester),
+                &[(".env", ""), ("src/parser.rs", "fn parse() {}")],
+            ),
+        )
+        .then(Role::Tester, approve(Role::Security))
+        .then(
+            Role::Security,
+            MockStep::finish(Verdict::Approved, NextStep::Done),
+        );
+
+    let stop = run_with(&repo, &store, &mut state, &agent, &watched).await;
+
+    assert_eq!(stop, StopReason::Done);
+    assert!(dir.path().join(".env").exists());
+    assert!(repo.is_tracked(std::path::Path::new(".env")));
+}

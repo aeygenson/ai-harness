@@ -170,8 +170,9 @@ pub struct Changes {
     pub put_back: Vec<PathBuf>,
     /// Changed single files, left as they are for Lisa to check.
     pub reported: Vec<PathBuf>,
-    /// Claude Code added its block of stub lines to `info/exclude` (now put
-    /// back); it is not a reason to stop, but its stub files must be removed.
+    /// `info/exclude` changed and held Claude Code's block of stub lines
+    /// (now put back): its new empty stub files must be removed. When the
+    /// block was the only change, it is not a reason to stop.
     pub claude_stubs: bool,
 }
 
@@ -200,9 +201,12 @@ impl Snapshot {
             }
             if watched.is_restored(path) {
                 put_back(path, before.as_ref())?;
-                if watched.is_stub_exclude(path, before.as_ref(), after.as_ref()) {
-                    changes.claude_stubs = true;
-                } else {
+                if *path == watched.exclude_file {
+                    // Claude Code ran, also when it is not the only change.
+                    changes.claude_stubs = matches!(&after, Some(Content::Bytes(bytes))
+                        if agent_stubs::has_stub_block(bytes));
+                }
+                if !watched.is_stub_exclude(path, before.as_ref(), after.as_ref()) {
                     changes.put_back.push(path.clone());
                 }
             } else {
@@ -386,7 +390,7 @@ mod tests {
         fs::create_dir_all(dir.path().join("home")).unwrap();
         let watched = watched(dir.path());
         let before = watched.snapshot().unwrap();
-        // An empty `.bash_profile` would make bash skip `.profile`.
+        // What Claude Code does with a missing start-up file.
         fs::write(dir.path().join("home/.bashrc"), "").unwrap();
 
         let changes = before.check_and_restore(&watched).unwrap();
