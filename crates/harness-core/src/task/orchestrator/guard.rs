@@ -3,6 +3,7 @@
 
 use super::{RunError, StopReason};
 use crate::git::Repo;
+use crate::task::agent_stubs::MissingStubs;
 use crate::task::handoff::Role;
 use crate::task::tripwire::{Snapshot, Watched};
 
@@ -13,11 +14,12 @@ pub(super) struct Before {
     branch_heads: String,
     config: Vec<u8>,
     hidden: Snapshot,
+    stubs: MissingStubs,
 }
 
 impl Before {
-    /// Notes the last commit, the branches, `.git/config` and the files the
-    /// tripwire watches.
+    /// Notes the last commit, the branches, `.git/config`, the files the
+    /// tripwire watches and which of Claude Code's stub files are missing.
     pub(super) fn take(repo: &Repo, watched: &Watched) -> Result<Self, RunError> {
         Ok(Self {
             head: repo.head()?,
@@ -25,6 +27,7 @@ impl Before {
             branch_heads: repo.branch_heads()?,
             config: repo.local_config()?,
             hidden: watched.snapshot()?,
+            stubs: MissingStubs::note(repo.root()),
         })
     }
 
@@ -43,6 +46,9 @@ impl Before {
             repo.restore_local_config(&self.config)?;
         }
         let changes = self.hidden.check_and_restore(watched)?;
+        // Claude Code's empty stub files would otherwise end up in the role's
+        // commit once `info/exclude` no longer hides them.
+        self.stubs.remove_new_empty()?;
         // A new branch at the same commit would make the harness commit the
         // role's work on that branch, so a switch counts like a commit. So
         // does a made, moved or deleted branch: the harness later checks out

