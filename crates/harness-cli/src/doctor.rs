@@ -92,13 +92,28 @@ fn report(tools: &[ToolStatus], agents: &[Status]) -> (String, usize) {
         }
         text.push_str(&tool_line(status, health));
     }
-    if tools.iter().any(|s| s.health() != Health::Good) {
+    if tools
+        .iter()
+        .any(|s| s.tool.from_installer() && s.needs_install())
+    {
         text.push_str(
             "  Install what is missing with the harness's installer (safe to run again):\n",
         );
         text.push_str("    ");
         text.push_str(harness_platform::program::installer_command());
         text.push('\n');
+    }
+    // The installer does not bring these (the GitHub CLI): each says its own way.
+    for status in tools
+        .iter()
+        .filter(|s| !s.tool.from_installer() && s.needs_install())
+    {
+        let name = status.tool.name();
+        let how = status
+            .tool
+            .install_command()
+            .unwrap_or_else(|| format!("see {}", status.tool.site()));
+        let _ = writeln!(text, "  Install {name}: {how}");
     }
 
     text.push_str("\nAgents:\n");
@@ -135,6 +150,12 @@ fn tool_line(status: &ToolStatus, health: Health) -> String {
         (Some(_), Some(version), _) => version.clone(),
         (Some(path), None, _) => path.display().to_string(),
     };
+    if status.signed_in == Some(false) {
+        return format!(
+            "{mark} {name:<NAME_WIDTH$} {about}, not signed in (or GitHub cannot be reached): \
+             press «Sign in» on the Agents tab (harness tui, key 8)\n"
+        );
+    }
     format!("{mark} {name:<NAME_WIDTH$} {about}\n")
 }
 
@@ -147,6 +168,9 @@ fn purpose(tool: Tool) -> &'static str {
         Tool::Curl => "the MCP registry, model lists and web MCP servers use it",
         Tool::Bubblewrap => "without it the commands Claude Code runs can see its login",
         Tool::Zed => "files open in another editor instead",
+        Tool::GitHubCli => {
+            "only projects on GitHub need it, to push task branches and open pull requests"
+        }
     }
 }
 
@@ -182,6 +206,7 @@ mod tests {
             tool,
             path: version.map(|_| PathBuf::from("/bin/x")),
             version: version.map(str::to_string),
+            signed_in: None,
         }
     }
 
@@ -233,6 +258,38 @@ mod tests {
         assert!(
             text.contains("Everything the harness needs is here."),
             "{text}"
+        );
+    }
+
+    #[test]
+    fn the_github_cli_says_how_to_install_it_and_to_sign_in() {
+        let missing = [tool(Tool::Git, Some("2.43.0")), tool(Tool::GitHubCli, None)];
+        let signed_out = ToolStatus {
+            signed_in: Some(false),
+            ..tool(Tool::GitHubCli, Some("2.62.0"))
+        };
+
+        let (text, problems) = report(&missing, &agents(true));
+        let (signed_out_text, _) = report(&[signed_out], &agents(true));
+
+        // Only recommended: no problem, and not the harness's installer.
+        assert_eq!(problems, 0, "{text}");
+        assert!(text.contains("! GitHub CLI         not found"), "{text}");
+        assert!(!text.contains("harness's installer"), "{text}");
+        let how = Tool::GitHubCli
+            .install_command()
+            .unwrap_or_else(|| "see https://cli.github.com".to_string());
+        assert!(
+            text.contains(&format!("  Install GitHub CLI: {how}")),
+            "{text}"
+        );
+        assert!(
+            signed_out_text.contains("! GitHub CLI         2.62.0, not signed in"),
+            "{signed_out_text}"
+        );
+        assert!(
+            !signed_out_text.contains("Install GitHub CLI"),
+            "{signed_out_text}"
         );
     }
 

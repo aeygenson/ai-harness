@@ -3,11 +3,13 @@
 //!
 //! Layout: `adapters/` holds one file per agent, `mcp/` the MCP tools that run outside a
 //! role (check, OAuth sign-in, the web bridge, the registry), and `install/` the agent
-//! catalog, saved logins and model lists. The single files are shared by all of them.
+//! catalog, saved logins and model lists. The single files are shared by all of them;
+//! `github` runs the GitHub CLI.
 
 pub mod adapters;
 pub mod agent_home;
 pub mod build;
+pub mod github;
 pub mod install;
 pub mod launcher;
 pub mod mcp;

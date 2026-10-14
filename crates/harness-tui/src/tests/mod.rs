@@ -138,7 +138,7 @@ fn fake_tools() -> Vec<harness_agents::install::tools::ToolStatus> {
     let find = |tool: Tool| match tool {
         Tool::Git => Some(PathBuf::from("/bin/git")),
         Tool::Node => Some(PathBuf::from("/bin/node")),
-        Tool::Npx | Tool::Curl | Tool::Bubblewrap | Tool::Zed => None,
+        Tool::Npx | Tool::Curl | Tool::Bubblewrap | Tool::Zed | Tool::GitHubCli => None,
     };
     let version = |path: &Path| {
         Ok(if path.ends_with("git") {
@@ -147,7 +147,12 @@ fn fake_tools() -> Vec<harness_agents::install::tools::ToolStatus> {
             "v20.11.1".to_string()
         })
     };
-    tools::check_with(&[Tool::Git, Tool::Node, Tool::Npx], &find, &version)
+    tools::check_with(
+        &[Tool::Git, Tool::Node, Tool::Npx],
+        &find,
+        &version,
+        &|_, _| None,
+    )
 }
 
 /// The bottom-line message as its text and whether it reports a problem.

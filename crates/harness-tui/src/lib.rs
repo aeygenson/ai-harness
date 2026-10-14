@@ -292,6 +292,9 @@ struct App {
     /// A program to install in the terminal after this event: its name and
     /// the command.
     tool_install: Option<(&'static str, String)>,
+    /// A program to sign in after this event (the GitHub CLI): its name and
+    /// its full path.
+    tool_sign_in: Option<(&'static str, PathBuf)>,
     projects: ProjectsTab,
     agents: AgentsTab,
     /// Checks which agents are installed; tests give a fake one.

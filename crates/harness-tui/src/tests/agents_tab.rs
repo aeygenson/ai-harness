@@ -188,6 +188,52 @@ fn a_missing_program_is_installed_in_the_terminal_after_confirming() {
 }
 
 #[test]
+fn a_github_cli_without_a_login_is_signed_in_in_the_terminal() {
+    use harness_agents::install::tools::{Tool, ToolStatus};
+    let env = Env::new();
+    let mut app = agents_app(&env);
+    let mut tools = app.agents.tools.clone();
+    tools.push(ToolStatus {
+        tool: Tool::GitHubCli,
+        path: Some(PathBuf::from("/bin/gh")),
+        version: Some("2.62.0".to_string()),
+        signed_in: Some(false),
+    });
+    app.agents.tools_checked(tools);
+
+    click(&mut app, "! GitHub CLI 2.62.0 · not signed in");
+    let text = screen_of_width(&mut app, 200);
+    for part in [
+        "! Not signed in to GitHub",
+        "the harness never sees the token",
+        "https://cli.github.com",
+    ] {
+        assert!(text.contains(part), "missing {part:?} in:\n{text}");
+    }
+    // It is installed: «Install» does nothing, «Sign in» takes the terminal.
+    key(&mut app, KeyCode::Char('i'));
+    assert!(app.form.is_none());
+    key(&mut app, KeyCode::Char('l'));
+    assert_eq!(
+        app.tool_sign_in.take(),
+        Some(("GitHub CLI", PathBuf::from("/bin/gh")))
+    );
+    assert_eq!(app.sign_in, None);
+
+    // Back from the terminal: the computer is checked again for the login.
+    app.finish_tool_sign_in("GitHub CLI", Ok(()));
+    assert_eq!(
+        app.message.as_ref().unwrap().text,
+        "GitHub CLI: signed in, the computer is checked again"
+    );
+    assert!(app.agents.checking);
+    wait_for_agents(&mut app);
+    // A program without a login has no «Sign in».
+    app.agents.select_tool(0);
+    assert!(app.agents.tool_sign_in().is_none());
+}
+
+#[test]
 fn an_agent_is_updated_after_its_command_is_confirmed() {
     let env = Env::new();
     let mut app = agents_app(&env);

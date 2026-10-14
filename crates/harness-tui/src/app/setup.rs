@@ -43,6 +43,7 @@ impl App {
             edit: None,
             sign_in: None,
             tool_install: None,
+            tool_sign_in: None,
             agents: AgentsTab::new(),
             agent_checker: tabs::agents::check,
             agent_check: None,
