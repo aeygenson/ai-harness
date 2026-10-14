@@ -58,6 +58,7 @@ pub(super) fn without_roles(
 /// The message about sending or merging, when the work did one of them.
 pub(super) fn github_text(outcome: &Outcome, tr: &I18n) -> Option<Message> {
     let task = &outcome.task;
+    // Errors and file names may hold what an agent or GitHub wrote.
     let error = |e: &str| text::safe_line(e, ERROR_CHARS);
     if let Some(published) = &outcome.published {
         return Some(match published {
@@ -92,7 +93,8 @@ pub(super) fn github_text(outcome: &Outcome, tr: &I18n) -> Option<Message> {
             &[
                 ("task", task),
                 ("number", &number),
-                ("files", &files.join(", ")),
+                // File names can be anything an agent created.
+                ("files", &error(&files.join(", "))),
             ],
         )),
         Folder::Failed(e) => Message::error(tr.f(
@@ -105,4 +107,66 @@ pub(super) fn github_text(outcome: &Outcome, tr: &I18n) -> Option<Message> {
             ],
         )),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use harness_agents::github::Merged;
+
+    use super::*;
+
+    fn merged(folder: Folder) -> Outcome {
+        Outcome {
+            task: "task-001".into(),
+            stop: None,
+            published: None,
+            merged: Some(Ok(Merged {
+                number: 7,
+                base: "main".into(),
+                folder,
+            })),
+        }
+    }
+
+    #[test]
+    fn every_way_a_merge_ends_has_its_message() {
+        let tr = I18n::load(None);
+
+        let done = github_text(&merged(Folder::Updated), &tr).unwrap();
+        assert!(
+            done.text.contains("#7 merged; the project is on main"),
+            "{}",
+            done.text
+        );
+
+        let files = format!("evil\u{1b}[2J{}", "x".repeat(400));
+        let kept = github_text(&merged(Folder::Uncommitted(vec![files])), &tr).unwrap();
+        assert!(
+            kept.text.contains("uncommitted changes in evilxxx"),
+            "{}",
+            kept.text
+        );
+        assert!(kept.text.chars().count() < 500, "{}", kept.text);
+
+        let failed = github_text(&merged(Folder::Failed("offline".into())), &tr).unwrap();
+        assert!(
+            failed.text.contains("main here was not updated: offline"),
+            "{}",
+            failed.text
+        );
+
+        let mut refused = merged(Folder::Updated);
+        refused.merged = Some(Err("checks failed".into()));
+        let refused = github_text(&refused, &tr).unwrap();
+        assert!(
+            refused.text.contains("merging stopped: checks failed"),
+            "{}",
+            refused.text
+        );
+
+        // Work that neither sent nor merged has no GitHub message.
+        let mut nothing = merged(Folder::Updated);
+        nothing.merged = None;
+        assert!(github_text(&nothing, &tr).is_none());
+    }
 }

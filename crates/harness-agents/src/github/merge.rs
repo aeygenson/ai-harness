@@ -7,6 +7,8 @@
 //! the harness sent (no commits someone else pushed), without conflicts and
 //! with its checks (CI) passed.
 
+use std::path::Path;
+
 use harness_core::config::Config;
 use harness_core::git::Repo;
 use harness_core::task::branch::task_branch;
@@ -38,7 +40,8 @@ pub enum Folder {
     /// Nothing was changed: these files have uncommitted changes, and
     /// switching branches could lose them.
     Uncommitted(Vec<String>),
-    /// Switching to `base` or bringing in the merged work failed: git's message.
+    /// Nothing was changed, because bringing in the merged work could not
+    /// be done safely: why.
     Failed(String),
 }
 
@@ -77,55 +80,109 @@ pub fn merge_with(repo: &Repo, state: &TaskState, github: &GitHub) -> Result<Mer
         .pull_request
         .as_ref()
         .ok_or_else(|| format!("{task} has no pull request yet; send it to GitHub first"))?;
-    pull_request.page().ok_or_else(|| {
-        format!("state.json of {task} has a pull request address that is not on GitHub")
-    })?;
     let number = pull_request.number;
+    // The number is used with `github.repo`, so the address must name that
+    // repository too (state.json may have come from anywhere).
+    if pull_request.page() != Some(&format!("https://github.com/{}/pull/{number}", github.repo)) {
+        return Err(format!(
+            "state.json of {task} has a pull request address that is not in {}",
+            github.repo
+        ));
+    }
     let seen = pr::view(&github.gh, &github.repo, number)?;
+    if !is_commit(&seen.head_ref_oid) {
+        return Err(format!(
+            "GitHub gave no commit for pull request #{number}; nothing was merged"
+        ));
+    }
+    if seen.base_ref_name != github.base {
+        return Err(format!(
+            "pull request #{number} goes into {}, not into {} as harness.toml says; nothing \
+             was merged. Look at it on GitHub",
+            text::safe_line(&seen.base_ref_name, SHOWN_CHARS),
+            github.base
+        ));
+    }
     match seen.state.as_str() {
         // Merged earlier (on GitHub, or by a try that stopped before the
         // folder was updated): only the folder is left to do.
         "MERGED" => {}
         "OPEN" => {
             check_ready(repo, &task_branch(task), number, &seen)?;
-            pr::merge(&github.gh, &github.repo, number, &seen.head_ref_oid)?;
+            pr::merge(&github.gh, &github.repo, number, &seen.head_ref_oid).map_err(|e| {
+                format!(
+                    "GitHub did not confirm the merge of pull request #{number} ({e}); choose \
+                     «Merge pull request» again to see where it stands"
+                )
+            })?;
         }
-        _ => {
+        "CLOSED" => {
             return Err(format!(
                 "pull request #{number} was closed on GitHub without merging; open it again \
                  there if it should be merged"
+            ))
+        }
+        other => {
+            return Err(format!(
+                "GitHub says pull request #{number} is {}; nothing was merged",
+                text::safe_line(other, SHOWN_CHARS)
             ))
         }
     }
     Ok(Merged {
         number,
         base: github.base.clone(),
-        folder: update_base(repo, github),
+        folder: update_base(repo, github, &seen.head_ref_oid),
     })
 }
 
 /// Refuses to merge an open pull request that is not at the commit of the
-/// task's branch here, has conflicts or has checks that did not pass.
+/// task's branch here, may have conflicts or has checks that did not pass.
 fn check_ready(repo: &Repo, branch: &str, number: u64, seen: &View) -> Result<(), String> {
     let local = repo
         .branch_head(branch)
         .map_err(|e| e.to_string())?
         .ok_or_else(|| format!("the branch {branch} is not in this project; nothing was merged"))?;
-    if seen.head_ref_oid != local {
+    let remote = &seen.head_ref_oid;
+    if *remote != local {
+        if repo.is_ancestor(remote, &local) {
+            return Err(format!(
+                "the last commits of {branch} are not on GitHub yet; nothing was merged. \
+                 Choose «Send to GitHub», then merge"
+            ));
+        }
         return Err(format!(
-            "pull request #{number} is at commit {}, but {branch} here is at {local}: either \
-             someone else (maybe an agent) pushed to it, or the last commits were not sent. \
-             Nothing was merged; look at the pull request on GitHub",
-            text::safe_line(&seen.head_ref_oid, SHOWN_CHARS)
+            "pull request #{number} is at commit {remote}, which the harness did not make (an \
+             agent or someone else may have pushed it); nothing was merged. Look at it on GitHub"
         ));
     }
-    if seen.mergeable == "CONFLICTING" {
+    match seen.mergeable.as_str() {
+        "MERGEABLE" => {}
+        "CONFLICTING" => {
+            return Err(format!(
+                "pull request #{number} has conflicts with the main branch; nothing was \
+                 merged. Resolve them on GitHub, then merge again"
+            ))
+        }
+        // `UNKNOWN`: GitHub has not worked it out yet, which takes a moment.
+        _ => {
+            return Err(format!(
+                "GitHub is still checking pull request #{number} for conflicts; merge again \
+                 in a moment"
+            ))
+        }
+    }
+    let checks = checks(&seen.status_check_rollup);
+    // Right after sending, GitHub may not have started the CI yet: no
+    // checks at all is "passed" only in a project without workflows.
+    if checks == Checks::Passed && seen.status_check_rollup.is_empty() && has_workflows(repo.root())
+    {
         return Err(format!(
-            "pull request #{number} has conflicts with the main branch; nothing was merged. \
-             Resolve them on GitHub, then merge again"
+            "GitHub shows no checks for pull request #{number} yet, but the project has \
+             workflows; merge again when they have run"
         ));
     }
-    match checks(&seen.status_check_rollup) {
+    match checks {
         Checks::Passed => Ok(()),
         Checks::Running(names) => Err(format!(
             "the checks of pull request #{number} are still running ({}); merge again when \
@@ -138,6 +195,17 @@ fn check_ready(repo: &Repo, branch: &str, number: u64, seen: &View) -> Result<()
             names.join(", ")
         )),
     }
+}
+
+/// Does the project have GitHub Actions workflows (`.github/workflows/`)?
+fn has_workflows(root: &Path) -> bool {
+    std::fs::read_dir(root.join(".github").join("workflows"))
+        .is_ok_and(|mut entries| entries.next().is_some())
+}
+
+/// Is `commit` a full commit hash? It comes from GitHub and is given to git.
+fn is_commit(commit: &str) -> bool {
+    commit.len() == 40 && commit.chars().all(|c| c.is_ascii_hexdigit())
 }
 
 /// Sorts the checks into passed, still running and failed. A check that
@@ -177,33 +245,61 @@ fn checks(all: &[Check]) -> Checks {
     }
 }
 
-/// Checks out `base` and brings the merged work in from GitHub, only when
-/// no uncommitted change could be lost.
-fn update_base(repo: &Repo, github: &GitHub) -> Folder {
-    let text = |e: &dyn std::fmt::Display| e.to_string();
-    let files = match repo.changed_files() {
-        Ok(files) => files,
-        Err(e) => return Folder::Failed(text(&e)),
-    };
-    if !files.is_empty() {
-        return Folder::Uncommitted(files);
+/// Checks out `base` and brings the merged work (up to `merged`, the pull
+/// request's last commit) in from GitHub. Everything is checked before the
+/// folder changes: no uncommitted change, GitHub's `base` holds the work, and
+/// the local `base` has nothing GitHub lacks. A step that fails after the
+/// switch switches back, so a failure leaves the folder as it was.
+fn update_base(repo: &Repo, github: &GitHub, merged: &str) -> Folder {
+    let message = |e: &dyn std::fmt::Display| e.to_string();
+    let base = &github.base;
+    match repo.changed_files() {
+        Ok(files) if files.is_empty() => {}
+        Ok(files) => return Folder::Uncommitted(files),
+        Err(e) => return Folder::Failed(message(&e)),
     }
-    let on_base = matches!(repo.current_branch(), Ok(Some(name)) if name == github.base);
-    if !on_base {
-        if let Err(e) = repo.switch_branch(&github.base) {
-            return Folder::Failed(text(&e));
+    let fetched = match repo.fetch_branch(&github.push_url, base) {
+        Ok(commit) => commit,
+        Err(e) => return Folder::Failed(message(&e)),
+    };
+    if !repo.is_ancestor(merged, &fetched) {
+        return Folder::Failed(format!(
+            "{base} on GitHub does not hold the merged commit {merged} yet"
+        ));
+    }
+    let local = match repo.branch_head(base) {
+        Ok(Some(commit)) => commit,
+        Ok(None) => return Folder::Failed(format!("there is no branch {base} in this project")),
+        Err(e) => return Folder::Failed(message(&e)),
+    };
+    if !repo.is_ancestor(&local, &fetched) {
+        return Folder::Failed(format!(
+            "{base} here has commits that are not on GitHub; bring the two together yourself"
+        ));
+    }
+    let before = match repo.current_branch() {
+        Ok(branch) => branch,
+        Err(e) => return Folder::Failed(message(&e)),
+    };
+    if before.as_deref() != Some(base.as_str()) {
+        if let Err(e) = repo.switch_branch(base) {
+            return Folder::Failed(message(&e));
         }
     }
-    match repo.fast_forward_from(&github.push_url, &github.base) {
-        Ok(()) => Folder::Updated,
-        Err(e) => Folder::Failed(text(&e)),
+    if let Err(e) = repo.fast_forward_to(&fetched) {
+        if let Some(branch) = before.filter(|b| b != base) {
+            // Back to where Lisa was; if even that fails, git's first error
+            // is the one that explains what happened.
+            let _ = repo.switch_branch(&branch);
+        }
+        return Folder::Failed(message(&e));
     }
+    Folder::Updated
 }
 
 #[cfg(test)]
 mod tests {
     use std::fs;
-    use std::path::Path;
     use std::process::Command;
 
     use harness_core::task::handoff::Role;
@@ -278,6 +374,7 @@ mod tests {
     /// A fake `gh` whose `pr view` prints `view` and whose calls are saved
     /// in `args.txt`; returns that file.
     fn fake_gh(s: &mut Setup, view: &str) -> std::path::PathBuf {
+        let view = view.replace("BASE", &s.base).replace("HEAD", &s.head);
         let bin = s.dir.path().join("bin");
         let args = bin.join("args.txt");
         let script = format!(
@@ -288,9 +385,11 @@ mod tests {
         args
     }
 
+    /// What `gh pr view` prints for an open pull request into `BASE` (the
+    /// tests put the real name in).
     fn open_view(head: &str, mergeable: &str, checks: &str) -> String {
         format!(
-            r#"{{"state":"OPEN","headRefOid":"{head}","mergeable":"{mergeable}","statusCheckRollup":[{checks}]}}"#
+            r#"{{"state":"OPEN","baseRefName":"BASE","headRefOid":"{head}","mergeable":"{mergeable}","statusCheckRollup":[{checks}]}}"#
         )
     }
 
@@ -325,11 +424,9 @@ mod tests {
     #[test]
     fn an_already_merged_pull_request_only_updates_the_folder() {
         let mut s = setup();
-        let view = format!(
-            r#"{{"state":"MERGED","headRefOid":"{}","mergeable":"UNKNOWN"}}"#,
-            s.head
-        );
-        let args = fake_gh(&mut s, &view);
+        let view =
+            r#"{"state":"MERGED","baseRefName":"BASE","headRefOid":"HEAD","mergeable":"UNKNOWN"}"#;
+        let args = fake_gh(&mut s, view);
 
         let merged = merge_with(&s.repo, &s.state, &s.github).unwrap();
 
@@ -364,13 +461,18 @@ mod tests {
                 "still running (web, lint)",
             ),
             (
-                r#"{"state":"CLOSED","headRefOid":"HEAD","mergeable":"UNKNOWN"}"#.to_string(),
+                r#"{"state":"CLOSED","baseRefName":"BASE","headRefOid":"HEAD","mergeable":"UNKNOWN"}"#.to_string(),
                 "closed on GitHub without merging",
             ),
+            (open_view("HEAD", "UNKNOWN", GREEN), "still checking"),
+            (
+                open_view("HEAD", "MERGEABLE", GREEN).replace("BASE", "release"),
+                "goes into release",
+            ),
+            (open_view("not-a-commit", "MERGEABLE", GREEN), "gave no commit"),
         ];
         for (view, expected) in cases {
             let mut s = setup();
-            let view = view.replace("HEAD", &s.head);
             let args = fake_gh(&mut s, &view);
 
             let error = merge_with(&s.repo, &s.state, &s.github).unwrap_err();
@@ -386,10 +488,71 @@ mod tests {
     }
 
     #[test]
+    fn unsent_commits_or_missing_checks_stop_the_merge() {
+        let mut s = setup();
+        // A commit here that GitHub does not have yet.
+        let sent = s.head.clone();
+        fs::write(s.repo.root().join("late.txt"), "late\n").unwrap();
+        s.repo.commit_all("late").unwrap();
+        fake_gh(&mut s, &open_view(&sent, "MERGEABLE", GREEN));
+        let error = merge_with(&s.repo, &s.state, &s.github).unwrap_err();
+        assert!(error.contains("Choose «Send to GitHub»"), "{error}");
+
+        // A project with workflows whose checks have not shown up yet.
+        let mut s = setup();
+        fs::create_dir_all(s.repo.root().join(".github/workflows")).unwrap();
+        fs::write(s.repo.root().join(".github/workflows/ci.yml"), "on: push\n").unwrap();
+        fake_gh(&mut s, &open_view("HEAD", "MERGEABLE", ""));
+        let error = merge_with(&s.repo, &s.state, &s.github).unwrap_err();
+        assert!(error.contains("no checks"), "{error}");
+    }
+
+    #[test]
+    fn a_base_that_cannot_move_forward_safely_is_left_alone() {
+        // The local base has a commit GitHub does not have.
+        let mut s = setup();
+        fake_gh(&mut s, &open_view("HEAD", "MERGEABLE", GREEN));
+        s.repo.switch_branch(&s.base).unwrap();
+        fs::write(s.repo.root().join("mine.txt"), "mine\n").unwrap();
+        s.repo.commit_all("only here").unwrap();
+        let mine = s.repo.head().unwrap();
+        s.repo.switch_branch("harness/task-001").unwrap();
+
+        let merged = merge_with(&s.repo, &s.state, &s.github).unwrap();
+
+        assert!(
+            matches!(&merged.folder, Folder::Failed(why) if why.contains("not on GitHub")),
+            "{merged:?}"
+        );
+        assert_eq!(
+            s.repo.current_branch().unwrap().as_deref(),
+            Some("harness/task-001")
+        );
+        assert_eq!(s.repo.branch_head(&s.base).unwrap(), mine);
+
+        // GitHub's base does not hold the merged commit.
+        let mut s = setup();
+        let first = s.repo.branch_head(&s.base).unwrap().unwrap();
+        let back = format!("+{first}:refs/heads/{}", s.base);
+        git(s.repo.root(), &["push", "-q", &s.github.push_url, &back]);
+        fake_gh(&mut s, &open_view("HEAD", "MERGEABLE", GREEN));
+
+        let merged = merge_with(&s.repo, &s.state, &s.github).unwrap();
+
+        assert!(
+            matches!(&merged.folder, Folder::Failed(why) if why.contains("does not hold")),
+            "{merged:?}"
+        );
+        assert_eq!(
+            s.repo.current_branch().unwrap().as_deref(),
+            Some("harness/task-001")
+        );
+    }
+
+    #[test]
     fn uncommitted_changes_keep_the_folder_as_it_is() {
         let mut s = setup();
-        let view = open_view(&s.head, "MERGEABLE", "");
-        fake_gh(&mut s, &view);
+        fake_gh(&mut s, &open_view("HEAD", "MERGEABLE", ""));
         fs::write(s.repo.root().join("notes.txt"), "mine\n").unwrap();
 
         let merged = merge_with(&s.repo, &s.state, &s.github).unwrap();
@@ -413,12 +576,14 @@ mod tests {
         let error = merge_with(&s.repo, &s.state, &s.github).unwrap_err();
         assert!(error.contains("no pull request yet"), "{error}");
 
-        s.state.pull_request = Some(PullRequest {
-            number: 7,
-            url: "file:///tmp/x".into(),
-        });
-        let error = merge_with(&s.repo, &s.state, &s.github).unwrap_err();
-        assert!(error.contains("not on GitHub"), "{error}");
+        for url in ["file:///tmp/x", "https://github.com/mallory/app/pull/7"] {
+            s.state.pull_request = Some(PullRequest {
+                number: 7,
+                url: url.into(),
+            });
+            let error = merge_with(&s.repo, &s.state, &s.github).unwrap_err();
+            assert!(error.contains("not in lisa/app"), "{error}");
+        }
     }
 
     #[test]

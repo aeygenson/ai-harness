@@ -92,13 +92,15 @@ pub(super) fn create(gh: &Path, new: &NewPullRequest) -> Result<PullRequest, Str
     checked(new.repo, number, url)
 }
 
-/// What `gh pr view --json state,headRefOid,mergeable,statusCheckRollup`
+/// What `gh pr view --json state,baseRefName,headRefOid,mergeable,statusCheckRollup`
 /// prints: the pull request as GitHub sees it now.
 #[derive(Debug, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(super) struct View {
     /// `OPEN`, `CLOSED` or `MERGED`.
     pub state: String,
+    /// The branch it goes into, for example `main`.
+    pub base_ref_name: String,
     /// The commit the pull request's branch is at on GitHub.
     pub head_ref_oid: String,
     /// `MERGEABLE`, `CONFLICTING` or `UNKNOWN` (GitHub has not worked it out yet).
@@ -113,10 +115,15 @@ pub(super) struct View {
 /// field is optional because the two kinds have different ones.
 #[derive(Debug, serde::Deserialize)]
 pub(super) struct Check {
+    /// A job's name.
     pub name: Option<String>,
+    /// A commit status's name.
     pub context: Option<String>,
+    /// A job's progress: `QUEUED`, `IN_PROGRESS`, `COMPLETED`, ...
     pub status: Option<String>,
+    /// How a finished job ended: `SUCCESS`, `FAILURE`, `SKIPPED`, ...
     pub conclusion: Option<String>,
+    /// A commit status: `SUCCESS`, `PENDING`, `FAILURE`, ...
     pub state: Option<String>,
 }
 
@@ -128,7 +135,7 @@ pub(super) fn view(gh: &Path, repo: &str, number: u64) -> Result<View, String> {
         "view",
         &number.to_string(),
         &format!("--repo={repo}"),
-        "--json=state,headRefOid,mergeable,statusCheckRollup",
+        "--json=state,baseRefName,headRefOid,mergeable,statusCheckRollup",
     ]);
     let out = crate::install::models::run_for(command, "", &[], GH_LIMIT)?;
     serde_json::from_str(&out).map_err(|e| format!("gh pr view printed no pull request: {e}"))
@@ -215,7 +222,7 @@ mod tests {
         let bin = tempfile::tempdir().unwrap();
         let args = bin.path().join("args.txt");
         let script = format!(
-            "append-args {}\nwhen-arg 2 view print {{\"state\":\"OPEN\",\"headRefOid\":\"abc\",\"mergeable\":\"MERGEABLE\",\"statusCheckRollup\":[{{\"name\":\"server\",\"status\":\"COMPLETED\",\"conclusion\":\"SUCCESS\"}}]}}\n",
+            "append-args {}\nwhen-arg 2 view print {{\"state\":\"OPEN\",\"baseRefName\":\"main\",\"headRefOid\":\"abc\",\"mergeable\":\"MERGEABLE\",\"statusCheckRollup\":[{{\"name\":\"server\",\"status\":\"COMPLETED\",\"conclusion\":\"SUCCESS\"}}]}}\n",
             args.display()
         );
         let gh = harness_fake::install(bin.path(), "gh", &script);
@@ -234,7 +241,7 @@ mod tests {
                 "view",
                 "7",
                 "--repo=lisa/app",
-                "--json=state,headRefOid,mergeable,statusCheckRollup",
+                "--json=state,baseRefName,headRefOid,mergeable,statusCheckRollup",
                 "pr",
                 "merge",
                 "7",

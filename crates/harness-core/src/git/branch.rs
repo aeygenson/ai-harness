@@ -164,4 +164,13 @@ mod tests {
 
         assert_eq!(repo.current_branch().unwrap(), None);
     }
+
+    #[test]
+    fn a_branch_head_is_known_only_for_a_real_branch() {
+        let (_dir, repo) = repo_with_a_commit();
+        let branch = repo.current_branch().unwrap().unwrap();
+
+        assert_eq!(repo.branch_head(&branch).unwrap(), repo.head().unwrap());
+        assert_eq!(repo.branch_head("harness/task-002").unwrap(), None);
+    }
 }

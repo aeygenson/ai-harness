@@ -24,7 +24,9 @@ impl TasksTab {
             items.push((Choice::Role(role), waiting));
         }
         items.push((Choice::Finish, waiting));
-        if self.needs_publishing() {
+        // Sending again also works with a pull request: it pushes commits
+        // that did not get there the last time.
+        if self.done_on_github() {
             items.push((Choice::Publish, true));
         }
         if self.has_pull_request() {
@@ -36,19 +38,24 @@ impl TasksTab {
     /// Is the selected task done in a project on GitHub, with its pull
     /// request? Then it can be merged (GitHub says whether it is ready).
     fn has_pull_request(&self) -> bool {
-        self.on_github
+        self.done_on_github()
             && self
                 .current()
-                .is_some_and(|t| t.state.stage == Stage::Done && t.state.pull_request.is_some())
+                .is_some_and(|t| t.state.pull_request.is_some())
     }
 
     /// Is the selected task done in a project on GitHub, without its pull
     /// request yet (sending it failed, or it was finished elsewhere)?
     fn needs_publishing(&self) -> bool {
-        self.on_github
+        self.done_on_github()
             && self
                 .current()
-                .is_some_and(|t| t.state.stage == Stage::Done && t.state.pull_request.is_none())
+                .is_some_and(|t| t.state.pull_request.is_none())
+    }
+
+    /// Is the selected task done in a project on GitHub?
+    fn done_on_github(&self) -> bool {
+        self.on_github && self.current().is_some_and(|t| t.state.stage == Stage::Done)
     }
 
     /// What can be chosen in «To» now.
