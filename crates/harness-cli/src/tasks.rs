@@ -6,10 +6,11 @@ use std::path::{Path, PathBuf};
 use anyhow::{bail, Context, Result};
 use harness_agents::build::build_team;
 use harness_core::config::Config;
-use harness_core::git::HARNESS_DIR;
+use harness_core::git::{Repo, HARNESS_DIR};
 use harness_core::skills::Skills;
+use harness_core::task::branch;
 use harness_core::task::handoff::{NextStep, Role, Verdict};
-use harness_core::task::orchestrator::{self, Project, StopReason};
+use harness_core::task::orchestrator::{self, Project, SameText, StopReason};
 use harness_core::task::{Stage, WaitReason};
 use harness_platform::stop::StopSignals;
 
@@ -25,22 +26,23 @@ pub(crate) fn new_task(
 ) -> Result<()> {
     let repo = open_repo(project)?;
     let config = Config::load(&repo.root().join(HARNESS_DIR))?;
-    let create = if allow_duplicate {
-        orchestrator::create_task_anyway
+    let same_text = if allow_duplicate {
+        SameText::Allow
     } else {
-        orchestrator::create_task
+        SameText::Refuse
     };
-    let (store, _) = create(
-        &repo,
-        task_id,
-        description,
-        config.scenario.default_workflow(),
-        config.max_rounds,
-    )?;
+    let (store, _) =
+        orchestrator::create_project_task(&repo, &config, task_id, description, same_text)?;
     println!(
         "Created {}. Next: harness run {task_id}",
         store.dir().display()
     );
+    if config.github.is_some() {
+        println!(
+            "It works on its own branch: {}",
+            branch::task_branch(task_id)
+        );
+    }
     Ok(())
 }
 
@@ -68,6 +70,8 @@ pub(crate) async fn until_stopped(
 /// or waits for Lisa, then says what to do next.
 pub(crate) async fn run(project: &Path, task_id: &str) -> Result<()> {
     let repo = open_repo(project)?;
+    // First the task's branch: its settings and skills are the ones to use.
+    enter_branch(&repo, task_id)?;
     let harness_dir = repo.root().join(HARNESS_DIR);
     let config = Config::load(&harness_dir)?;
     let skills = Skills::load(&harness_dir, &config)?;
@@ -81,6 +85,17 @@ pub(crate) async fn run(project: &Path, task_id: &str) -> Result<()> {
     };
     let stop = orchestrator::run_project(&repo, &store, &mut state, &agent, project).await?;
     println!("{}", explain(&stop, task_id));
+    Ok(())
+}
+
+/// Checks out the task's branch if it has one, and says so when it switched.
+fn enter_branch(repo: &Repo, task_id: &str) -> Result<()> {
+    if branch::enter(repo, task_id)? {
+        println!(
+            "Switched to the task's branch {}.",
+            branch::task_branch(task_id)
+        );
+    }
     Ok(())
 }
 
@@ -125,7 +140,8 @@ fn explain(stop: &StopReason, task_id: &str) -> String {
                 .join("\n  ")
         ),
         StopReason::AgentCommitted(role) => format!(
-            "The {role:?} made a git commit itself. Check `git log` before running again."
+            "The {role:?} made a git commit or changed git branches itself. Check `git log`, \
+             `git branch` and `git status` before running again."
         ),
         StopReason::ProtectedFilesChanged { role, files, log } => format!(
             "The {role:?} changed files no role may change (agent instructions and settings, \
@@ -181,6 +197,8 @@ pub(crate) fn decide(
     notes: &str,
 ) -> Result<()> {
     let repo = open_repo(project)?;
+    // Lisa's decision is a commit too: it goes on the task's branch.
+    enter_branch(&repo, task_id)?;
     let (store, mut state) = open_task(&repo, task_id)?;
     let next = match to {
         Some(next) => next,
@@ -216,7 +234,46 @@ pub(crate) fn status(project: &Path, task_id: &str) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
+
+    use harness_core::config::projects;
+    use harness_core::config::CONFIG_FILE;
+
     use super::*;
+
+    #[test]
+    fn a_decision_lands_on_the_task_branch_after_lisa_switched_away() {
+        let dir = tempfile::tempdir().unwrap();
+        let project = dir.path();
+        projects::init(project).unwrap();
+        let config = project.join(HARNESS_DIR).join(CONFIG_FILE);
+        let text = fs::read_to_string(&config).unwrap();
+        fs::write(&config, format!("{text}\n[github]\nrepo = \"lisa/app\"\n")).unwrap();
+        let repo = open_repo(project).unwrap();
+        repo.commit_all("on GitHub").unwrap();
+        let base = repo.current_branch().unwrap().unwrap();
+        new_task(project, "task-001", "Add a parser", false).unwrap();
+        // The architect is done and the design waits for Lisa.
+        let (store, mut state) = open_task(&repo, "task-001").unwrap();
+        state.stage = Stage::WaitingForHuman(WaitReason::ApproveDesign);
+        let json = serde_json::to_string(&state).unwrap();
+        fs::write(store.dir().join("state.json"), json).unwrap();
+        repo.commit_all("design ready").unwrap();
+        repo.switch_branch(&base).unwrap();
+        let base_commit = repo.head().unwrap();
+
+        decide(project, "task-001", Verdict::Approved, None, "ok").unwrap();
+
+        assert_eq!(
+            repo.current_branch().unwrap(),
+            Some(branch::task_branch("task-001"))
+        );
+        let (_, state) = open_task(&repo, "task-001").unwrap();
+        assert_eq!(state.stage, Stage::Working(Role::Developer));
+        assert!(repo.changed_files().unwrap().is_empty());
+        repo.switch_branch(&base).unwrap();
+        assert_eq!(repo.head().unwrap(), base_commit);
+    }
 
     #[test]
     fn hidden_changes_say_what_was_put_back_and_what_lisa_must_check() {

@@ -117,6 +117,9 @@ pub struct TasksTab {
     pub(crate) running: Option<Running>,
     /// What the agent printed in the last run.
     pub(crate) log: VecDeque<String>,
+    /// The background work checked out a task's branch: the other tabs
+    /// show settings read from the old one and must read them again.
+    pub(crate) branch_changed: bool,
     /// A file to open in Zed, taken by the app.
     pub(crate) open: Option<PathBuf>,
     /// The window shown over the whole tab, if any.
@@ -153,6 +156,7 @@ impl TasksTab {
             run: None,
             running: None,
             log: VecDeque::new(),
+            branch_changed: false,
             open: None,
             zoom: None,
             commits: RefCell::default(),

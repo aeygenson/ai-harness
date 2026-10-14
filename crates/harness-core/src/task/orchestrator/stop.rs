@@ -3,6 +3,7 @@
 use std::path::PathBuf;
 
 use crate::git::GitError;
+use crate::task::branch::BranchError;
 use crate::task::handoff::Role;
 use crate::task::store::StoreError;
 use crate::task::WaitReason;
@@ -47,7 +48,8 @@ pub enum StopReason {
         /// Each too big file or folder with its size in bytes.
         files: Vec<(String, u64)>,
     },
-    /// The agent made a git commit itself, which agents must never do.
+    /// The agent made a git commit, switched the branch, or made, moved or
+    /// deleted a branch itself, which agents must never do.
     AgentCommitted(Role),
     /// The agent changed files no role may change: agent instructions and
     /// settings (`CLAUDE.md`, `.claude/`, ...) or the harness's own files
@@ -89,6 +91,9 @@ pub enum RunError {
     /// A git command failed.
     #[error(transparent)]
     Git(#[from] GitError),
+    /// The task could not be put on its own branch.
+    #[error(transparent)]
+    Branch(#[from] BranchError),
     /// Reading or putting back git's hooks or `info/` failed.
     #[error("cannot check git's hooks: {0}")]
     Tripwire(#[from] std::io::Error),

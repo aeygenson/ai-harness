@@ -21,7 +21,9 @@ mod protect;
 mod size;
 mod stop;
 
-pub use create::{create_task, create_task_anyway, same_task, words};
+pub use create::{
+    create_project_task, create_task, create_task_anyway, same_task, words, SameText,
+};
 pub use human::record_human_decision;
 pub use size::oversized_changes;
 pub use stop::{RunError, StopReason};

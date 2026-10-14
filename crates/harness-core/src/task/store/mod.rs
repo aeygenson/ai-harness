@@ -22,7 +22,7 @@
 mod files;
 mod ids;
 
-pub use ids::{next_task_id, task_ids};
+pub use ids::{following_task_id, next_task_id, task_ids};
 
 use std::fs;
 use std::io;
@@ -112,11 +112,8 @@ impl TaskStore {
         workflow: Workflow,
         max_rounds: u32,
     ) -> Result<(Self, TaskState), StoreError> {
-        check_task_id(task_id)?;
+        Self::check_new(runs_dir, task_id)?;
         let dir = runs_dir.join(task_id);
-        if dir.exists() {
-            return Err(StoreError::TaskExists(task_id.to_string()));
-        }
         create_dir(&dir)?;
 
         let store = Self { dir };
@@ -124,6 +121,15 @@ impl TaskStore {
         write_new(&store.dir.join(TASK_FILE), description)?;
         store.save_state(&state)?;
         Ok((store, state))
+    }
+
+    /// Can a new task get this id: is it safe as a folder name and still free?
+    pub fn check_new(runs_dir: &Path, task_id: &str) -> Result<(), StoreError> {
+        check_task_id(task_id)?;
+        if runs_dir.join(task_id).exists() {
+            return Err(StoreError::TaskExists(task_id.to_string()));
+        }
+        Ok(())
     }
 
     /// Opens an existing task and reads where it stopped.

@@ -48,6 +48,7 @@ impl TasksTab {
                     && stage == Stage::WaitingForHuman(WaitReason::ApproveDesign);
                 Request::Decide {
                     task,
+                    seen: stage,
                     verdict: if rejected {
                         Verdict::Rejected
                     } else {
@@ -57,8 +58,9 @@ impl TasksTab {
                     notes,
                 }
             }
-            (Choice::Finish, Some((task, _))) => Request::Decide {
+            (Choice::Finish, Some((task, stage))) => Request::Decide {
                 task,
+                seen: stage,
                 verdict: Verdict::Approved,
                 next: NextStep::Done,
                 notes,
@@ -94,6 +96,10 @@ impl TasksTab {
         let running = self.running.as_mut()?;
         let known = running.task.clone();
         let result = running.poll(&mut self.log);
+        if running.switched_branch {
+            running.switched_branch = false;
+            self.branch_changed = true;
+        }
         let started = running.task.clone();
         if started != known {
             if let Some(task) = &started {

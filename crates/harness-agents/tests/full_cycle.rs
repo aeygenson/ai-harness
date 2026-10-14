@@ -548,6 +548,39 @@ async fn an_agent_that_commits_by_itself_is_stopped() {
 }
 
 #[tokio::test]
+async fn an_agent_that_switches_the_branch_is_stopped() {
+    let (_dir, repo) = new_project();
+    let (store, mut state) = new_task(&repo);
+    let branch = repo.current_branch().unwrap();
+    let agent = MockAgent::new().then(Role::Architect, MockStep::SwitchBranch);
+
+    let stop = orchestrator::run(&repo, &store, &mut state, &agent)
+        .await
+        .unwrap();
+
+    // Without the check the harness would commit the role's work on the
+    // agent's branch instead of the task's.
+    assert_eq!(stop, StopReason::AgentCommitted(Role::Architect));
+    assert!(repo.has_branch("agent-branch").unwrap());
+    assert_ne!(repo.current_branch().unwrap(), branch);
+}
+
+#[tokio::test]
+async fn an_agent_that_makes_a_branch_is_stopped() {
+    let (_dir, repo) = new_project();
+    let (store, mut state) = new_task(&repo);
+    let agent = MockAgent::new().then(Role::Architect, MockStep::MakeBranch);
+
+    let stop = orchestrator::run(&repo, &store, &mut state, &agent)
+        .await
+        .unwrap();
+
+    // The harness checks out `harness/<task>` branches and reads their
+    // settings, so a role must not plant one.
+    assert_eq!(stop, StopReason::AgentCommitted(Role::Architect));
+}
+
+#[tokio::test]
 async fn an_agent_that_changes_the_git_settings_is_stopped_and_they_are_put_back() {
     let (_dir, repo) = new_project();
     let (store, mut state) = new_task(&repo);

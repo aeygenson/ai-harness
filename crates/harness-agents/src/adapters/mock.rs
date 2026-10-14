@@ -31,6 +31,12 @@ pub enum MockStep {
     WriteFilesOnly(Vec<(String, String)>),
     /// Make a git commit itself, which agents must never do.
     GitCommit,
+    /// Check out a new branch at the same commit, then finish with an
+    /// approval for Lisa, as if the work were done.
+    SwitchBranch,
+    /// Make a branch without checking it out, then finish with an approval
+    /// for Lisa: a branch the harness might check out later.
+    MakeBranch,
     /// Add a setting to `.git/config`, which agents must never change.
     ChangeGitConfig,
     /// Write a `handoff.json` that is not valid.
@@ -167,6 +173,31 @@ impl MockAgent {
                     .status();
                 AgentOutcome {
                     end: done_if(committed.is_ok_and(|status| status.success())),
+                    log,
+                }
+            }
+            // `step @` names the matched value so the arm can look at it.
+            step @ (MockStep::SwitchBranch | MockStep::MakeBranch) => {
+                let args: &[&str] = if matches!(step, MockStep::SwitchBranch) {
+                    &["switch", "-q", "-c", "agent-branch"]
+                } else {
+                    &["branch", "harness/task-009"]
+                };
+                let switched = Command::new("git")
+                    .current_dir(&job.project_dir)
+                    .args(args)
+                    .status()
+                    .is_ok_and(|status| status.success());
+                let written = switched
+                    && write_result(
+                        job,
+                        Verdict::Approved,
+                        NextStep::To(Role::Human),
+                        "switched",
+                    )
+                    .is_ok();
+                AgentOutcome {
+                    end: done_if(written),
                     log,
                 }
             }

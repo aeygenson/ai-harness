@@ -4,6 +4,7 @@
 //! in the terminal and in `RustRover`, so the harness sees exactly what she sees,
 //! and there is no extra dependency to learn.
 
+mod branch;
 mod history;
 mod remote;
 mod restore;

@@ -10,6 +10,9 @@
 //! model = "opus"        # optional: otherwise the agent's default model
 //! effort = "high"       # optional: how hard the model thinks (see `crate::models`)
 //! skills = ["write-docs"]  # optional: see `crate::skills`
+//!
+//! [github]              # optional: the project is on GitHub, see `github`
+//! repo = "owner/name"
 //! ```
 //!
 //! The folder also holds `edit` (changing `harness.toml` without losing
@@ -18,12 +21,14 @@
 
 mod agent_kind;
 pub mod edit;
+mod github;
 pub mod independence;
 pub mod projects;
 pub mod save;
 pub mod trifecta;
 
 pub use agent_kind::{AgentKind, UnknownAgent};
+pub use github::GitHubConfig;
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -88,6 +93,12 @@ agent_timeout_minutes = 30
 #
 # `harness retro <task> --suggest` asks the [retro] agent to read the history
 # and propose skill changes; nothing changes until `harness retro apply`.
+#
+# A project on GitHub: every new task then works on its own branch,
+# harness/<task>, made from the branch checked out when the task is created.
+#   [github]
+#   repo = "owner/name"
+#   base = "main"   # the branch pull requests go into
 
 [retro]
 agent = "claude"
@@ -130,6 +141,10 @@ pub struct Config {
     /// The agent that writes `harness retro --suggest`.
     #[serde(default)]
     pub retro: Option<RetroConfig>,
+    /// The project's repository on GitHub; `None` keeps every task on the
+    /// branch Lisa has checked out.
+    #[serde(default)]
+    pub github: Option<GitHubConfig>,
 }
 
 /// `[retro]`: which agent reads the history and proposes skill changes.

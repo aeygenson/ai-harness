@@ -172,10 +172,16 @@ impl App {
         self.take_mcp_check();
         self.take_registry_search();
         self.take_mcp_sign_in();
+        let mut branch_changed = false;
         if let Some(tasks) = &mut self.tasks {
             if let Some(message) = tasks.tick(&self.tr) {
                 self.message = Some(message);
             }
+            branch_changed = std::mem::take(&mut tasks.branch_changed);
+        }
+        if branch_changed {
+            // The task's branch may have other settings, skills and retros.
+            self.reload_all();
         }
         if let Some(retro) = &mut self.retro {
             if let Some(message) = retro.tick(&self.tr) {

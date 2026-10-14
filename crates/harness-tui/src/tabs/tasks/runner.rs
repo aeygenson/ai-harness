@@ -15,9 +15,11 @@ use harness_agents::Team;
 use harness_core::config::Config;
 use harness_core::git::{Repo, HARNESS_DIR};
 use harness_core::skills::Skills;
+use harness_core::task::branch;
 use harness_core::task::handoff::{NextStep, Role, Verdict};
-use harness_core::task::orchestrator::{self, Project, StopReason};
-use harness_core::task::store::{next_task_id, TaskStore};
+use harness_core::task::orchestrator::{self, Project, SameText, StopReason};
+use harness_core::task::store::TaskStore;
+use harness_core::task::Stage;
 use harness_core::text;
 use tokio::sync::oneshot;
 
@@ -35,6 +37,10 @@ pub enum Request {
     /// Lisa's decision on a waiting task; then the roles run, unless it is done.
     Decide {
         task: String,
+        /// Where the task stood when Lisa decided. The list is read from the
+        /// branch checked out, which may hold an old copy of a task that has
+        /// moved on in its own branch; then the decision is refused.
+        seen: Stage,
         verdict: Verdict,
         next: NextStep,
         notes: String,
@@ -64,6 +70,8 @@ pub struct Outcome {
 enum Event {
     /// The task being worked on; a new task gets its id here.
     Started(String),
+    /// The task's branch was checked out.
+    SwitchedBranch,
     Finished(Result<Outcome, String>),
 }
 
@@ -136,6 +144,8 @@ pub struct Running {
     log: Receiver<String>,
     /// The task, once known.
     pub task: Option<String>,
+    /// The work checked out the task's branch; reset by whoever reacts.
+    pub switched_branch: bool,
     /// Kept to stop the agents when this is dropped.
     _background: Background,
 }
@@ -166,6 +176,7 @@ impl Running {
             events: events_rx,
             log: log_rx,
             task: None,
+            switched_branch: false,
             _background: background,
         }
     }
@@ -181,6 +192,7 @@ impl Running {
         for event in self.events.try_iter() {
             match event {
                 Event::Started(task) => self.task = Some(task),
+                Event::SwitchedBranch => self.switched_branch = true,
                 Event::Finished(result) => return Some(result),
             }
         }
@@ -206,6 +218,13 @@ fn work(job: Job, events: &Sender<Event>, stop: oneshot::Receiver<()>) -> Result
     let root = root.as_path();
     let text = |e: &dyn std::fmt::Display| e.to_string();
     let repo = Repo::open(root).map_err(|e| text(&e))?;
+    // An existing task's branch first: its settings are the ones to use, and
+    // Lisa's decision and the roles' work are committed there.
+    if let Request::Decide { task, .. } | Request::Continue(task) = &request {
+        if branch::enter(&repo, task).map_err(|e| text(&e))? {
+            let _ = events.send(Event::SwitchedBranch);
+        }
+    }
     let harness_dir = root.join(HARNESS_DIR);
     let mut config = Config::load(&harness_dir).map_err(|e| text(&e))?;
     if let Some(choice) = choice {
@@ -234,23 +253,24 @@ fn work(job: Job, events: &Sender<Event>, stop: oneshot::Receiver<()>) -> Result
 
     let (store, mut state) = match request {
         Request::New(description) => {
-            let id = next_task_id(&runs).map_err(|e| text(&e))?;
-            orchestrator::create_task(
-                &repo,
-                &id,
-                &description,
-                config.scenario.default_workflow(),
-                config.max_rounds,
-            )
-            .map_err(|e| text(&e))?
+            let id = branch::next_task_id(&repo).map_err(|e| text(&e))?;
+            orchestrator::create_project_task(&repo, &config, &id, &description, SameText::Refuse)
+                .map_err(|e| text(&e))?
         }
         Request::Decide {
             task,
+            seen,
             verdict,
             next,
             notes,
         } => {
             let (store, mut state) = TaskStore::open(&runs, &task).map_err(|e| text(&e))?;
+            if state.stage != seen {
+                return Err(format!(
+                    "{task} has moved on in its branch {}; look at it again and decide",
+                    branch::task_branch(&task)
+                ));
+            }
             orchestrator::record_human_decision(&repo, &store, &mut state, verdict, next, &notes)
                 .map_err(|e| text(&e))?;
             (store, state)

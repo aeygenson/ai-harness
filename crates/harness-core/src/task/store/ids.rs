@@ -23,12 +23,20 @@ pub fn task_ids(runs_dir: &Path) -> Result<Vec<String>, StoreError> {
 /// The id for the next new task: `task-001`, or one more than the highest
 /// `task-NNN` in `runs_dir`.
 pub fn next_task_id(runs_dir: &Path) -> Result<String, StoreError> {
-    let highest = task_ids(runs_dir)?
-        .iter()
+    let ids = task_ids(runs_dir)?;
+    Ok(following_task_id(ids.iter().map(String::as_str)))
+}
+
+/// `task-001`, or one more than the highest `task-NNN` among `ids`; other
+/// ids are skipped.
+pub fn following_task_id<'a>(ids: impl IntoIterator<Item = &'a str>) -> String {
+    let highest = ids
+        .into_iter()
         .filter_map(|id| id.strip_prefix("task-")?.parse::<u32>().ok())
         .max()
         .unwrap_or(0);
-    Ok(format!("task-{:03}", highest + 1))
+    // `u64`, so even the highest `u32` (a branch name anyone could pick) has a next one.
+    format!("task-{:03}", u64::from(highest) + 1)
 }
 
 /// `round-02-tester-1.log` -> (2, Tester).
