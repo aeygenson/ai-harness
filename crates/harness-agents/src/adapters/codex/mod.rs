@@ -29,6 +29,9 @@
 
 mod home;
 
+pub(crate) use home::keep_refreshed_login;
+
+use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -43,7 +46,8 @@ use crate::role_settings::RoleSettings;
 
 /// Where the agent's own settings live inside the project (ignored by git).
 pub const CONFIG_DIR: &str = ".harness/agents/codex";
-const AUTH_FILE: &str = "auth.json";
+/// Codex's login file, in its saved folder and in `CODEX_HOME`.
+pub(crate) const AUTH_FILE: &str = "auth.json";
 /// Codex's plugin folder inside `CODEX_HOME`.
 const PLUGINS_DIR: &str = "plugins";
 /// The marketplace name the harness's plugins are filed under.
@@ -187,15 +191,18 @@ impl AgentRunner for Codex {
         let mut log = self.settings.header(AgentKind::Codex, job);
         let prepared = agent_home::fresh(&job.project_dir, CONFIG_DIR)
             .and_then(|_| self.put_auth(job))
-            .and_then(|()| self.put_plugins(job));
-        if let Err(e) = prepared {
-            self.clean_up(job);
-            return failed(log, format!("cannot prepare {CONFIG_DIR}: {e}"));
-        }
+            .and_then(|given| self.put_plugins(job).map(|()| given));
+        let given = match prepared {
+            Ok(given) => given,
+            Err(e) => {
+                let _ = self.clean_up(job, None);
+                return failed(log, format!("cannot prepare {CONFIG_DIR}: {e}"));
+            }
+        };
         let secrets = match self.write_secrets(job.role) {
             Ok(dir) => dir,
             Err(e) => {
-                self.clean_up(job);
+                let _ = self.clean_up(job, None);
                 return failed(log, format!("cannot write the role's secrets: {e}"));
             }
         };
@@ -203,7 +210,14 @@ impl AgentRunner for Codex {
         let hidden = self.settings.server_secrets(job.role);
         let result = process::run(command, &job.prompt, self.settings.timeout(), &hidden).await;
         drop(secrets);
-        self.clean_up(job);
+        if let Err(e) = self.clean_up(job, Some(&given)) {
+            // `write!` into a String cannot fail.
+            let _ = writeln!(
+                log,
+                "Codex refreshed its login, but it could not be saved ({e}); \
+                 if the next Codex run fails to sign in, sign in again on the Agents tab."
+            );
+        }
         let result = process::hide_secrets(result, hidden);
         let finished = match result {
             Ok(finished) => finished,
@@ -447,7 +461,7 @@ mod tests {
         assert!(!plugins.join("cache/harness/old").exists());
         assert!(!project.path().join(CONFIG_DIR).join("skills").exists());
 
-        codex.clean_up(&job);
+        codex.clean_up(&job, None).unwrap();
         assert!(!project.path().join(CONFIG_DIR).exists());
         assert!(source.join("skills/audit/SKILL.md").exists());
     }

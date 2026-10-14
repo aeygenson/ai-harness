@@ -35,7 +35,11 @@ fn setup() -> Setup {
     let scratch = tempfile::tempdir().unwrap();
     let auth_dir = scratch.path().join("creds/codex");
     fs::create_dir_all(&auth_dir).unwrap();
-    fs::write(auth_dir.join("auth.json"), r#"{"tokens":"old"}"#).unwrap();
+    fs::write(
+        auth_dir.join("auth.json"),
+        r#"{"tokens":{"refresh_token":"old"}}"#,
+    )
+    .unwrap();
     Setup {
         _project: project,
         scratch,
@@ -72,7 +76,7 @@ async fn a_well_behaved_codex_finishes_the_role_and_keeps_a_refreshed_login() {
             "save-env {seen}.env\n\
              save-stdin {seen}.prompt\n\
              copy ${{CODEX_HOME}}/auth.json {seen}.auth\n\
-             save-text ${{CODEX_HOME}}/auth.json {{\"tokens\":\"new\"}}\n\
+             save-text ${{CODEX_HOME}}/auth.json {{\"tokens\":{{\"refresh_token\":\"new\"}}}}\n\
              write .harness/runs/task-001/inbox/handoff.json\n{HANDOFF}\nend\n\
              print {{\"type\":\"thread.started\"}}\n\
              print {{\"type\":\"turn.completed\",\"usage\":{{}}}}\n",
@@ -97,7 +101,7 @@ async fn a_well_behaved_codex_finishes_the_role_and_keeps_a_refreshed_login() {
     // The login was there during the run...
     assert_eq!(
         fs::read_to_string(seen.with_extension("auth")).unwrap(),
-        r#"{"tokens":"old"}"#
+        r#"{"tokens":{"refresh_token":"old"}}"#
     );
     // ...is gone from the project afterwards, and the refreshed one was kept.
     assert!(!s
