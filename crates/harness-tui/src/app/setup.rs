@@ -54,6 +54,8 @@ impl App {
             release_checker: tabs::agents::check_release,
             release_check: None,
             updater: tabs::agents::update_harness,
+            github_connector: harness_agents::github::connect,
+            github_job: None,
             form: None,
             browser: None,
             native: false,
@@ -140,6 +142,8 @@ impl App {
         } else if self.generating() {
             self.message = Some(Message::error(self.tr.t("retro.busy")));
             return true;
+        } else if self.connecting() {
+            return true;
         }
         running
     }
@@ -163,13 +167,16 @@ impl App {
         &mut self,
         change: impl FnOnce(&str) -> Result<String, String>,
     ) -> Result<(), String> {
+        if self.connecting() {
+            return Err(self.tr.t("projects.github_wait").to_string());
+        }
         let (Some(root), Some(roles)) = (self.project.clone(), &mut self.roles) else {
             return Err(self.tr.t("tabs.no_open_project").to_string());
         };
         if roles.changed() {
             return Err(self.tr.t("mcp.save_first").to_string());
         }
-        let text = change(roles.text())?;
+        let text = change(&roles.current_text())?;
         let repo = Repo::open(&root).map_err(|e| e.to_string())?;
         config::save::save(&repo, &text).map_err(|e| e.to_string())?;
         roles.reload();

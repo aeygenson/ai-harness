@@ -4,6 +4,12 @@
 use super::Repo;
 
 impl Repo {
+    /// The text of `file` (relative to the project, with `/`) in the commit
+    /// checked out; `None` when it is not there.
+    pub fn file_at_head(&self, file: &str) -> Option<String> {
+        self.git(&["show", &format!("HEAD:{file}")]).ok()
+    }
+
     /// The text of `file` in the last commit that changed `changed` (both
     /// relative to the project, with `/`). `None` if there is no such commit
     /// or the file did not exist in it.

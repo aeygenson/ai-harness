@@ -37,11 +37,20 @@ fn is_safe_part(part: &str) -> bool {
     !part.is_empty() && !part.starts_with(['-', '.']) && part.chars().all(is_name_char)
 }
 
-/// `owner/name`, each part made only of the letters GitHub allows.
+/// Is `value` a repository the harness accepts: `owner/name`, each part made
+/// only of the letters GitHub allows and not starting with `-` or `.`? A name
+/// ending in `.git` is refused: the push address adds `.git` itself.
+pub fn is_repo(value: &str) -> bool {
+    let parts: Vec<&str> = value.split('/').collect();
+    parts.len() == 2
+        && parts.iter().all(|part| is_safe_part(part))
+        && !value.to_ascii_lowercase().ends_with(".git")
+}
+
+/// `owner/name`, as [`is_repo`] checks it.
 fn repo_name<'de, D: serde::Deserializer<'de>>(d: D) -> Result<String, D::Error> {
     let value = String::deserialize(d)?;
-    let parts: Vec<&str> = value.split('/').collect();
-    if parts.len() == 2 && parts.iter().all(|part| is_safe_part(part)) {
+    if is_repo(&value) {
         Ok(value)
     } else {
         Err(serde::de::Error::custom(format!(
@@ -119,6 +128,13 @@ mod tests {
             );
         }
         Config::parse("[github]\nrepo = \"lisa/app\"\nbase = \"release/1.0\"\n").unwrap();
+    }
+
+    #[test]
+    fn a_repository_ending_in_git_is_refused() {
+        assert!(super::is_repo("lisa/app"));
+        assert!(!super::is_repo("lisa/app.git"));
+        assert!(!super::is_repo("lisa/App.GIT"));
     }
 
     #[test]

@@ -16,6 +16,14 @@ impl App {
         };
         let result = match &purpose {
             Purpose::NewProject(path) => self.create_project(&path.clone(), &form),
+            Purpose::ConnectGitHub(path) => {
+                let name = match form.value(0) {
+                    "" => projects::name_of(path),
+                    name => name.to_string(),
+                };
+                self.connect_github(path.clone(), &name, form.is_checked(1));
+                Ok(())
+            }
             Purpose::InitFolder(path) => projects::init(path)
                 .map(|_| self.open(path))
                 .map_err(|e| e.to_string()),

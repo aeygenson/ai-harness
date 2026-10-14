@@ -47,7 +47,7 @@ use tabs::agents::{
 use tabs::mcp::McpTab;
 use tabs::plugins::PluginsTab;
 use tabs::projects::picker::Browser;
-use tabs::projects::ProjectsTab;
+use tabs::projects::{GitHubConnector, GitHubJob, ProjectsTab};
 use tabs::retro::{RetroBuilder, RetroTab};
 use tabs::roles::RolesTab;
 use tabs::skills::SkillsTab;
@@ -92,6 +92,9 @@ enum Purpose {
     InitFolder(PathBuf),
     /// Take the project off the list (the folder stays).
     Remove(PathBuf),
+    /// Put the project in this folder on GitHub: the form asks for the
+    /// repository's name and whether it is private.
+    ConnectGitHub(PathBuf),
     /// The model of the role selected on the Roles tab.
     Model,
     /// A new skill: its name and description.
@@ -316,6 +319,10 @@ struct App {
     release_check: Option<mpsc::Receiver<Result<Option<String>, String>>>,
     /// Installs the newer harness; tests give a fake one.
     updater: Updater,
+    /// Puts a project on GitHub; tests give a fake one.
+    github_connector: GitHubConnector,
+    /// The answer of that, while it runs.
+    github_job: Option<GitHubJob>,
     form: Option<(Purpose, Form)>,
     /// The folder browser, when the system has no folder dialog.
     browser: Option<(Pick, Browser)>,

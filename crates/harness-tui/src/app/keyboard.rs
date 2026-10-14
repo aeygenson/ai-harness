@@ -57,7 +57,9 @@ impl App {
         // Hot keys work with a Russian keyboard layout too: «й» is q.
         let code = keys::latin(key.code);
         let unsaved = self.roles.as_ref().is_some_and(RolesTab::changed);
-        let running = self.tasks.as_ref().is_some_and(TasksTab::is_running) || self.generating();
+        let running = self.tasks.as_ref().is_some_and(TasksTab::is_running)
+            || self.generating()
+            || self.github_job.is_some();
         // A message written but not sent is not thrown away by one key.
         let unsent = self
             .tasks
@@ -80,6 +82,8 @@ impl App {
             KeyCode::Char('q') | KeyCode::Esc if running => {
                 let key = if self.generating() {
                     "retro.quit_running"
+                } else if self.github_job.is_some() {
+                    "projects.github_wait"
                 } else {
                     "tasks.quit_running"
                 };
@@ -145,7 +149,7 @@ impl App {
     }
 
     /// Reads every open tab again from disk (r or F5).
-    pub(super) fn reload_all(&mut self) {
+    pub(crate) fn reload_all(&mut self) {
         if let Some(tasks) = &mut self.tasks {
             tasks.reload();
         }
@@ -262,6 +266,7 @@ impl App {
                 KeyCode::Char('n') => self.press(ButtonId::NewProject),
                 KeyCode::Char('o') => self.press(ButtonId::OpenFolder),
                 KeyCode::Delete => self.press(ButtonId::RemoveProject),
+                KeyCode::Char('g') => self.press(ButtonId::ConnectGitHub),
                 code => self.projects.on_key(code),
             },
         }

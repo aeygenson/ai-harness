@@ -168,6 +168,7 @@ impl App {
         self.take_agent_check();
         self.take_tool_check();
         self.take_release_check();
+        self.take_github_job();
         self.take_models();
         self.take_mcp_check();
         self.take_registry_search();

@@ -4,12 +4,14 @@
 //! `gh` and `git push`, under Lisa's own login: `gh` keeps the login in the
 //! system's key store, and the harness never sees or saves the token.
 
+mod connect;
 mod publish;
 mod pull;
 
+pub use connect::{connect, connect_with, Connection};
 pub use publish::{publish, publish_with, GitHub, PUSH_URL_START};
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Duration;
 
@@ -31,6 +33,24 @@ pub fn signed_in(gh: &Path) -> bool {
     let mut command = quiet_command(gh);
     command.args(["auth", "status", "--hostname", HOST]);
     crate::install::models::run_for(command, "", &[], STATUS_LIMIT).is_ok()
+}
+
+/// The `gh` program, installed and signed in; otherwise an error that says
+/// how to fix that and then `again` (for example "run the task again").
+pub(crate) fn ready_gh(again: &str) -> Result<PathBuf, String> {
+    let gh = harness_platform::program::find("gh").ok_or_else(|| {
+        format!(
+            "the GitHub CLI (gh) is not installed: install it on the Agents tab (Computer \
+             panel, GitHub CLI), sign in, then {again}"
+        )
+    })?;
+    if !signed_in(&gh) {
+        return Err(format!(
+            "the GitHub CLI is not signed in, or GitHub cannot be reached: sign in on the \
+             Agents tab (Computer panel, GitHub CLI), then {again}"
+        ));
+    }
+    Ok(gh)
 }
 
 /// The commands that sign `gh` in, to run one after another in the terminal
@@ -61,6 +81,9 @@ pub(crate) fn quiet_command(gh: &Path) -> Command {
     let mut command = Command::new(gh);
     command
         .current_dir(std::env::temp_dir())
+        // `gh` works with github.com, where git pushes, even when Lisa's
+        // environment names another host (GitHub Enterprise).
+        .env("GH_HOST", HOST)
         .env("GH_PROMPT_DISABLED", "1")
         .env("GH_NO_UPDATE_NOTIFIER", "1");
     command

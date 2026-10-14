@@ -123,6 +123,14 @@ impl Env {
         app.release_checker = || Ok(None);
         // The real one opens Lisa's browser.
         app.url_opener = |_| Err("no browser in tests".into());
+        // The real one makes a repository on GitHub and pushes to it.
+        app.github_connector = |_, name, private| {
+            if private {
+                Ok(format!("lisa/{name}"))
+            } else {
+                Err("GitHub said no".into())
+            }
+        };
         app.updater = |tx| {
             let _ = tx.send(JobEvent::Done(Err("no updates in tests".into())));
         };

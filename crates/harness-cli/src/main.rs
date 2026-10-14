@@ -3,6 +3,7 @@
 //!
 //! ```text
 //! harness init                         prepare .harness/ in the project
+//! harness github vgs-prototype         put the project on GitHub (private)
 //! harness secret set context7          save a secret an MCP server needs
 //! harness secret list                  show the names of the saved secrets
 //! harness marketplace add anthropics/claude-plugins-official
@@ -63,6 +64,7 @@ async fn main() -> Result<()> {
     let project = &cli.project;
     match cli.command {
         Command::Init => init(project),
+        Command::Github { name, public } => github(project, &name, public),
         Command::Login { agent } => login(&agent),
         Command::Secret { command } => secret(command),
         Command::Mcp { command } => mcp(project, command),
@@ -210,6 +212,17 @@ pub(crate) fn init(project: &Path) -> Result<()> {
     } else {
         println!("{} already exists, left as it is.", config.display());
     }
+    Ok(())
+}
+
+/// `harness github`: puts the project on GitHub, see
+/// `harness_agents::github::connect`.
+fn github(project: &Path, name: &str, public: bool) -> Result<()> {
+    let root = open_repo(project)?.root().to_path_buf();
+    let repo = harness_agents::github::connect(&root, name, !public)
+        .map_err(|error| anyhow::anyhow!(harness_core::text::safe(&error)))?;
+    println!("The project is on GitHub: https://github.com/{repo}");
+    println!("Every finished task now becomes a pull request there.");
     Ok(())
 }
 

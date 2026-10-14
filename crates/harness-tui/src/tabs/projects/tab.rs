@@ -102,6 +102,11 @@ impl ProjectsTab {
                 (tr.t("projects.new"), ButtonId::NewProject, true),
                 (tr.t("projects.open_folder"), ButtonId::OpenFolder, true),
                 (
+                    tr.t("projects.connect_github"),
+                    ButtonId::ConnectGitHub,
+                    has_selection,
+                ),
+                (
                     tr.t("projects.remove"),
                     ButtonId::RemoveProject,
                     has_selection,

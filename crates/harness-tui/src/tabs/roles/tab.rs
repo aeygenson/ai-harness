@@ -199,9 +199,12 @@ impl RolesTab {
         }
     }
 
-    /// `harness.toml` as it is on disk.
-    pub fn text(&self) -> &str {
-        &self.text
+    /// `harness.toml` as it is on disk now, not as it was read: something
+    /// else (putting the project on GitHub, in the background) may have
+    /// changed it since. Changes are made to this text, so they keep that.
+    pub fn current_text(&self) -> String {
+        let path = self.root.join(HARNESS_DIR).join(CONFIG_FILE);
+        fs::read_to_string(path).unwrap_or_else(|_| self.text.clone())
     }
 
     /// The MCP servers `harness.toml` describes.
@@ -259,7 +262,7 @@ impl RolesTab {
 
     /// Checks, writes and commits the changes. The error is shown as it is.
     pub fn save(&mut self) -> Result<(), String> {
-        let mut text = self.text.clone();
+        let mut text = self.current_text();
         for (role, settings) in &self.roles {
             if self.saved.roles.get(role) != Some(settings) {
                 text = config::edit::set_role(&text, *role, settings).map_err(|e| e.to_string())?;

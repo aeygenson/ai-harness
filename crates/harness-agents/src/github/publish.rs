@@ -47,17 +47,7 @@ pub fn publish(
     let Some(settings) = &config.github else {
         return Ok(None);
     };
-    let gh = harness_platform::program::find("gh").ok_or(
-        "the project is on GitHub, but the GitHub CLI (gh) is not installed: install it on \
-         the Agents tab (Computer panel, GitHub CLI), sign in, then run the task again",
-    )?;
-    if !super::signed_in(&gh) {
-        return Err(
-            "the GitHub CLI is not signed in, or GitHub cannot be reached: sign in on \
-                    the Agents tab (Computer panel, GitHub CLI), then run the task again"
-                .to_string(),
-        );
-    }
+    let gh = super::ready_gh("run the task again")?;
     let github = GitHub {
         repo: settings.repo.clone(),
         base: settings.base.clone(),

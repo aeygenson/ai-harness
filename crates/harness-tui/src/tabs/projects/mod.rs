@@ -4,7 +4,9 @@
 //! files add the work behind it to `App`.
 
 mod actions;
+mod github;
 pub(crate) mod picker;
 mod tab;
 
+pub(crate) use github::{GitHubConnector, GitHubJob};
 pub(crate) use tab::{has_config, ProjectsTab};

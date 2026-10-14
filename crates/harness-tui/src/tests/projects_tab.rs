@@ -193,3 +193,99 @@ fn projects_are_chosen_with_the_mouse_and_removed_from_the_list() {
     });
     assert!(app.form.is_none());
 }
+
+/// Lets the connection to GitHub finish, as the event loop does.
+fn wait_for_github(app: &mut App) {
+    let start = Instant::now();
+    while app.github_job.is_some() {
+        assert!(start.elapsed() < Duration::from_secs(10), "not finished");
+        std::thread::sleep(Duration::from_millis(10));
+        app.tick();
+    }
+}
+
+#[test]
+fn a_project_on_the_list_is_put_on_github() {
+    let env = Env::new();
+    let root = env.path("test");
+    project(&root);
+    let mut app = env.app(&root);
+    key(&mut app, KeyCode::Char('7'));
+
+    click(&mut app, " Connect GitHub ");
+    let text = screen(&mut app);
+    assert!(text.contains("Put the project on GitHub?"), "{text}");
+    let (purpose, form) = app.form.as_ref().unwrap();
+    assert_eq!(purpose, &Purpose::ConnectGitHub(root.clone()));
+    assert_eq!(form.value(0), "test");
+    assert!(form.is_checked(1));
+    click(&mut app, " Put on GitHub ");
+    assert!(shown(&app).0.contains("Putting «test» on GitHub"));
+    // Meanwhile the app does not quit (or save, or start a task).
+    key(&mut app, KeyCode::Char('q'));
+    assert!(!app.quit);
+    assert!(
+        shown(&app).0.contains("being put on GitHub"),
+        "{}",
+        shown(&app).0
+    );
+    wait_for_github(&mut app);
+
+    let (text, error) = shown(&app);
+    assert!(
+        !error && text.contains("https://github.com/lisa/test"),
+        "{text}"
+    );
+
+    // A failure is shown; the key g opens the same form.
+    key(&mut app, KeyCode::Char('g'));
+    app.form.as_mut().unwrap().1.switch(1);
+    key(&mut app, KeyCode::Enter);
+    wait_for_github(&mut app);
+    let (text, error) = shown(&app);
+    assert!(
+        error && text.contains("Not put on GitHub: GitHub said no"),
+        "{text}"
+    );
+}
+
+#[test]
+fn a_new_project_can_go_on_github_at_once() {
+    let env = Env::new();
+    let root = env.path("fresh");
+    fs::create_dir(&root).unwrap();
+    let mut app = env.app(env.code.path());
+    app.picked(Pick::NewProject, root.clone());
+    let text = screen(&mut app);
+    assert!(text.contains("Put it on GitHub too"), "{text}");
+    let (_, form) = app.form.as_mut().unwrap();
+    assert!(!form.is_checked(1));
+    form.switch(1);
+
+    click(&mut app, " Create ");
+    wait_for_github(&mut app);
+
+    assert!(has_config(&root));
+    let (text, error) = shown(&app);
+    assert!(
+        !error && text.contains("https://github.com/lisa/fresh"),
+        "{text}"
+    );
+}
+
+#[test]
+fn a_folder_name_github_does_not_take_is_refused_before_the_project_is_made() {
+    let env = Env::new();
+    let root = env.path("my app");
+    fs::create_dir(&root).unwrap();
+    let mut app = env.app(env.code.path());
+    app.picked(Pick::NewProject, root.clone());
+    app.form.as_mut().unwrap().1.switch(1);
+
+    click(&mut app, " Create ");
+
+    let text = screen(&mut app);
+    assert!(text.contains("GitHub does not take «my app»"), "{text}");
+    assert!(!has_config(&root));
+    assert!(app.github_job.is_none());
+}
