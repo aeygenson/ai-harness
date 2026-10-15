@@ -22,7 +22,7 @@ use crate::install::credentials::Secret;
 use crate::process::{self, failed};
 use crate::role_settings::RoleSettings;
 use harness_core::config::AgentKind;
-use harness_core::task::agent::{AgentOutcome, AgentRunner, RoleJob, RunEnd};
+use harness_core::task::agent::{AgentOutcome, AgentRunner, RoleJob};
 use harness_core::task::handoff::Role;
 use rules::RoleRules;
 
@@ -208,26 +208,17 @@ impl ClaudeCode {
         let (stdout, stderr, status) = (&finished.stdout, &finished.stderr, finished.status);
 
         let result = FinalResult::find(stdout);
-        let usage_limit_reached = process::looks_like_usage_limit(&format!(
-            "{}\n{stderr}",
-            result.as_ref().map_or("", |r| &r.text)
-        ));
-        let success = status.success()
-            && !usage_limit_reached
-            && result.as_ref().is_some_and(|r| !r.is_error);
+        let success = status.success() && result.as_ref().is_some_and(|r| !r.is_error);
         let message = match &result {
             _ if success => String::new(),
             Some(result) => result.text.clone(),
             None => format!("claude exited ({status}) without a result"),
         };
-        // The usage limit wins: Claude Code may report it inside a "result".
-        let end = if usage_limit_reached {
-            RunEnd::UsageLimit
-        } else if success {
-            RunEnd::Succeeded
-        } else {
-            RunEnd::Failed(message)
-        };
+        // Like the other agents, only a failed run can be a used-up
+        // subscription: a role that finished may well write "rate limits" in
+        // its summary. Claude Code reports the limit as an error "result",
+        // so its text is in `message`.
+        let end = process::run_end(success, message, stderr);
         AgentOutcome { end, log }
     }
 }

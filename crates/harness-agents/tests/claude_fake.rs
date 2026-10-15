@@ -159,6 +159,26 @@ async fn a_used_up_subscription_pauses_the_task() {
 }
 
 #[tokio::test]
+async fn a_finished_role_that_mentions_rate_limits_is_not_a_used_up_subscription() {
+    let s = setup();
+    // The architect does its job and its summary talks about rate limits.
+    let work = architect_work().replace(
+        "\"result\":\"Done.\"",
+        "\"result\":\"Done. Sign-in and rate limits come in task 11.\"",
+    );
+    let script = fake_claude(s.scratch.path(), &format!("read-stdin\n{work}"));
+    let agent = ClaudeCode::new(Secret::new("t"), RoleSettings::default()).with_program(script);
+    let (store, mut state) = new_task(&s.repo);
+
+    let stop = orchestrator::run(&s.repo, &store, &mut state, &agent)
+        .await
+        .unwrap();
+
+    assert_eq!(stop, StopReason::WaitingForHuman(WaitReason::ApproveDesign));
+    assert!(s.repo.root().join("docs/design.md").exists());
+}
+
+#[tokio::test]
 async fn a_hanging_agent_is_stopped_by_the_time_out() {
     let s = setup();
     let script = fake_claude(s.scratch.path(), "sleep 10\n");
