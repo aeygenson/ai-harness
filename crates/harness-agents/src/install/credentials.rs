@@ -100,12 +100,15 @@ pub fn secret_names(dir: &Path) -> io::Result<Vec<String>> {
     Ok(names)
 }
 
-/// The saved tokens (Claude Code, `DeepSeek`, NVIDIA) and MCP secrets, to hide
-/// them in text that leaves the computer. What cannot be read is skipped.
+/// The tokens and API keys the agents use (Claude Code, `DeepSeek`, NVIDIA;
+/// a key from Lisa's shell too) and MCP secrets, to hide them in text that
+/// leaves the computer. What cannot be read is skipped.
 pub fn saved_secrets(dir: &Path) -> Vec<Secret> {
-    let tokens = ["claude", "deepseek", "nvidia"]
+    let claude = load_token(dir, "claude").ok();
+    let keys = [Provider::DeepSeek, Provider::Nvidia]
         .into_iter()
-        .filter_map(|agent| load_token(dir, agent).ok());
+        .filter_map(|provider| load_api_key(dir, provider).ok());
+    let tokens = claude.into_iter().chain(keys);
     let secrets = secret_names(dir)
         .unwrap_or_default()
         .into_iter()
@@ -143,14 +146,11 @@ mod tests {
         save_token(dir, "deepseek", &Secret::new("k")).unwrap();
         assert!(has_login(dir, AgentKind::Dsh));
         assert_eq!(login_name("dsh"), "deepseek");
-        assert!(!has_login(dir, AgentKind::DshNvidia));
         save_token(dir, "nvidia", &Secret::new("nvapi-k")).unwrap();
         assert!(has_login(dir, AgentKind::DshNvidia));
         assert_eq!(login_name("dsh+nvidia"), "nvidia");
-        assert_eq!(
-            load_api_key(dir, Provider::Nvidia).unwrap().expose(),
-            "nvapi-k"
-        );
+        // A key in Lisa's shell would win; the saved one is found by name.
+        assert_eq!(load_token(dir, "nvidia").unwrap().expose(), "nvapi-k");
     }
 
     #[test]

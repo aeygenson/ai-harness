@@ -12,7 +12,7 @@ use harness_core::plugins::{Plugin, Plugins};
 use harness_core::retro::suggest;
 use harness_core::task::handoff::Role;
 
-use crate::adapters::dsh::{self, Provider};
+use crate::adapters::dsh::Provider;
 use crate::install::catalog;
 use crate::install::credentials::{self, Secret};
 use crate::role_settings::RoleSettings;
@@ -127,18 +127,8 @@ pub fn build_agent(
             antigravity_login(&dir)?,
             settings,
         ))),
-        AgentKind::Dsh => {
-            check_dsh_effort(choice)?;
-            let key = api_key(&dir, Provider::DeepSeek)?;
-            Ok(AnyAgent::Dsh(Dsh::new(key, settings)))
-        }
-        // NVIDIA's models each know their own effort levels; dsh checks them.
-        AgentKind::DshNvidia => {
-            let key = api_key(&dir, Provider::Nvidia)?;
-            Ok(AnyAgent::Dsh(
-                Dsh::new(key, settings).with_provider(Provider::Nvidia),
-            ))
-        }
+        AgentKind::Dsh => dsh_agent(&dir, choice, Provider::DeepSeek, settings),
+        AgentKind::DshNvidia => dsh_agent(&dir, choice, Provider::Nvidia, settings),
     }
 }
 
@@ -196,13 +186,28 @@ fn antigravity_login(dir: &Path) -> Result<PathBuf, BuildError> {
     }
 }
 
-/// dsh knows only a few effort words; anything else is refused before it runs.
-fn check_dsh_effort(choice: &AgentChoice) -> Result<(), BuildError> {
+/// dsh on `provider`'s API with its saved key, after checking the effort.
+fn dsh_agent(
+    dir: &Path,
+    choice: &AgentChoice,
+    provider: Provider,
+    settings: RoleSettings,
+) -> Result<AnyAgent, BuildError> {
+    check_dsh_effort(choice, provider)?;
+    let key = api_key(dir, provider)?;
+    Ok(AnyAgent::Dsh(Dsh::new(provider, key, settings)))
+}
+
+/// dsh knows only a few effort words for each provider; anything else is
+/// refused before it runs.
+fn check_dsh_effort(choice: &AgentChoice, provider: Provider) -> Result<(), BuildError> {
+    let efforts = provider.efforts();
     match choice.effort {
-        Some(effort) if !dsh::EFFORTS.contains(&effort) => Err(problem(format!(
-            "{} uses dsh with effort {effort:?}; use one of {}",
+        Some(effort) if !efforts.contains(&effort) => Err(problem(format!(
+            "{} uses {} with effort {effort:?}; use one of {}",
             choice.who,
-            dsh::EFFORTS.join(", ")
+            provider.agent(),
+            efforts.join(", ")
         ))),
         _ => Ok(()),
     }
@@ -213,8 +218,35 @@ fn check_dsh_effort(choice: &AgentChoice) -> Result<(), BuildError> {
 fn api_key(dir: &Path, provider: Provider) -> Result<Secret, BuildError> {
     credentials::load_api_key(dir, provider).map_err(|_missing| {
         problem(format!(
-            "no {} API key saved; sign in on the Agents tab first",
-            provider.name()
+            "no {provider} API key saved; sign in on the Agents tab first"
         ))
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn choice(agent: AgentKind, effort: &str) -> AgentChoice<'_> {
+        AgentChoice {
+            who: "Tester",
+            agent,
+            model: None,
+            effort: Some(effort),
+            role: Role::Tester,
+        }
+    }
+
+    #[test]
+    fn each_dsh_provider_takes_only_its_own_levels() {
+        check_dsh_effort(&choice(AgentKind::Dsh, "max"), Provider::DeepSeek).unwrap();
+        let error =
+            check_dsh_effort(&choice(AgentKind::DshNvidia, "max"), Provider::Nvidia).unwrap_err();
+        assert!(error.0.contains("Tester uses dsh+nvidia"), "{error}");
+        assert!(
+            error.0.contains("off, minimal, low, medium, high"),
+            "{error}"
+        );
+        check_dsh_effort(&choice(AgentKind::DshNvidia, "medium"), Provider::Nvidia).unwrap();
+    }
 }

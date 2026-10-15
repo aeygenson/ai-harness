@@ -6,6 +6,7 @@ use std::path::Path;
 
 use anyhow::{bail, Context, Result};
 use harness_agents::install::credentials;
+use harness_core::config::AgentKind;
 
 use crate::secrets::read_hidden;
 
@@ -65,7 +66,7 @@ struct KeyShape {
 /// `DeepSeek`: `sk-` and letters or digits.
 const DEEPSEEK: KeyShape = KeyShape {
     vendor: "DeepSeek",
-    login: "deepseek",
+    login: AgentKind::Dsh.login_name(),
     site: "platform.deepseek.com",
     prefix: "sk-",
     extra: &[],
@@ -74,7 +75,7 @@ const DEEPSEEK: KeyShape = KeyShape {
 /// NVIDIA (build.nvidia.com): `nvapi-` and letters, digits, `-` or `_`.
 const NVIDIA: KeyShape = KeyShape {
     vendor: "NVIDIA",
-    login: "nvidia",
+    login: AgentKind::DshNvidia.login_name(),
     site: "build.nvidia.com, «Get API Key»",
     prefix: "nvapi-",
     extra: &['-', '_'],

@@ -1,5 +1,5 @@
 ---
-description: Working notes for DeepSeek Harness (DeepSeek models).
+description: Working notes for DeepSeek Harness (DeepSeek or NVIDIA models).
 ---
 # Working in DeepSeek Harness
 

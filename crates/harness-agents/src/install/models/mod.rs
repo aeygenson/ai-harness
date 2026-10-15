@@ -177,7 +177,7 @@ fn ask_api(
     tmp: &Path,
 ) -> Result<Vec<Model>, String> {
     let key = credentials::load_api_key(credentials_dir, provider)
-        .map_err(|_missing| format!("no {} API key saved", provider.name()))?;
+        .map_err(|_missing| format!("no {provider} API key saved"))?;
     let header = tmp.join("header");
     credentials::write_private(
         &header,
@@ -335,11 +335,12 @@ mod tests {
         credentials::save_token(creds.path(), "nvidia", &Secret::new("nvapi-secret")).unwrap();
         let programs = Programs {
             // `-sS -m 60 -H @<file> <url>`: the key must be in the file, the
-            // URL must be NVIDIA's.
+            // URL must be NVIDIA's. (`NVIDIA_API_KEY` in the shell running
+            // the tests would win over the saved key, so only its place is checked.)
             curl: harness_fake::install(
                 bin.path(),
                 "curl",
-                r#"need-text ${5#@} nvapi-secret else 4
+                r#"need-text ${5#@} nvapi- else 4
 need-args -sS -m 60 -H ${5} https://integrate.api.nvidia.com/v1/models else 5
 print {"data":[{"id":"moonshotai/kimi-k2.6"}]}"#,
             ),

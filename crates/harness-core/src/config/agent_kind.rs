@@ -37,7 +37,7 @@ impl AgentKind {
     ];
 
     /// The name as written in `harness.toml`, e.g. `"codex"`.
-    pub fn as_str(self) -> &'static str {
+    pub const fn as_str(self) -> &'static str {
         match self {
             AgentKind::Claude => "claude",
             AgentKind::Codex => "codex",
@@ -49,7 +49,7 @@ impl AgentKind {
 
     /// Whose login the agent needs, the folder name in `~/.harness/credentials/`:
     /// `DeepSeek` Harness uses the `DeepSeek` key, or the NVIDIA key with NVIDIA's models.
-    pub fn login_name(self) -> &'static str {
+    pub const fn login_name(self) -> &'static str {
         match self {
             AgentKind::Dsh => "deepseek",
             AgentKind::DshNvidia => "nvidia",

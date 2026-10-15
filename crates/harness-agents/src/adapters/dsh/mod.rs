@@ -34,7 +34,8 @@ use serde_json::{json, Value};
 use crate::install::credentials::Secret;
 use crate::process::{self, failed};
 use crate::role_settings::RoleSettings;
-pub use provider::{Provider, NVIDIA_DEFAULT_MODEL, NVIDIA_KEY_ENV};
+
+pub use provider::{Provider, NVIDIA_DEFAULT_MODEL, NVIDIA_EFFORTS};
 
 /// The variable in Lisa's shell that may hold the `DeepSeek` API key; it wins
 /// over the saved one. dsh's own name for the key too.
@@ -63,20 +64,16 @@ pub struct Dsh {
 }
 
 impl Dsh {
-    /// dsh with the `DeepSeek` `key`, running each role with its `settings`.
-    pub fn new(key: Secret, settings: RoleSettings) -> Self {
+    /// dsh with `provider`'s API `key`, running each role with its `settings`.
+    /// The provider and its key come together, so a key never reaches the
+    /// other company's API.
+    pub fn new(provider: Provider, key: Secret, settings: RoleSettings) -> Self {
         Self {
             program: PathBuf::from("dsh"),
-            provider: Provider::DeepSeek,
+            provider,
             key,
             settings,
         }
-    }
-
-    /// Runs the model on `provider`'s API; `key` given to [`Dsh::new`] must be its key.
-    pub fn with_provider(mut self, provider: Provider) -> Self {
-        self.provider = provider;
-        self
     }
 
     /// Uses `program` instead of `dsh`; tests pass a small script that stands in for it.
@@ -140,7 +137,7 @@ impl Dsh {
             choice["reasoningEffort"] = effort.into();
         }
         let mut patch = vec![json!({ "id": "agent-default-model", "config": choice })];
-        patch.extend(self.provider.route_patch(model));
+        patch.extend(self.provider.patch_entries(model));
         patch.extend([
             // On by default: every session log goes to DeepSeek with the requests.
             json!({ "id": "session-log-deepseek", "disabled": true }),
@@ -287,7 +284,11 @@ mod tests {
 
     #[test]
     fn dsh_runs_headless_with_its_own_home_and_the_prompt_on_stdin() {
-        let dsh = Dsh::new(Secret::new("sk-secret"), RoleSettings::default());
+        let dsh = Dsh::new(
+            Provider::DeepSeek,
+            Secret::new("sk-secret"),
+            RoleSettings::default(),
+        );
         let command = dsh.command(&job(Role::Developer), Path::new("/tmp/home"));
         let args = args(&command);
         assert_eq!(&args[..3], ["--profile", "headless", "--patch"]);
@@ -304,8 +305,12 @@ mod tests {
 
     #[test]
     fn the_key_is_never_in_the_environment() {
-        let command = Dsh::new(Secret::new("sk-secret"), RoleSettings::default())
-            .command(&job(Role::Tester), Path::new("/h"));
+        let command = Dsh::new(
+            Provider::DeepSeek,
+            Secret::new("sk-secret"),
+            RoleSettings::default(),
+        )
+        .command(&job(Role::Tester), Path::new("/h"));
         for (name, value) in command.get_envs() {
             let name = name.to_string_lossy();
             assert!(
@@ -321,7 +326,11 @@ mod tests {
 
     #[test]
     fn the_home_holds_the_key_privately_and_is_deleted() {
-        let dsh = Dsh::new(Secret::new("sk-secret"), RoleSettings::default());
+        let dsh = Dsh::new(
+            Provider::DeepSeek,
+            Secret::new("sk-secret"),
+            RoleSettings::default(),
+        );
         let home = dsh.prepare_home(Role::Architect).unwrap();
         let credentials = home.path().join(CREDENTIALS_FILE);
         let parsed: Value =
@@ -338,6 +347,7 @@ mod tests {
     #[test]
     fn the_patch_sets_model_and_effort_and_stops_uploads() {
         let dsh = Dsh::new(
+            Provider::DeepSeek,
             Secret::new("k"),
             RoleSettings::default()
                 .with_model(Role::Developer, "deepseek-v4-pro")
@@ -382,10 +392,10 @@ mod tests {
     #[test]
     fn with_nvidia_the_home_holds_the_nvidia_key_and_the_patch_turns_its_route_on() {
         let dsh = Dsh::new(
+            Provider::Nvidia,
             Secret::new("nvapi-secret"),
             RoleSettings::default().with_model(Role::Developer, "z-ai/glm-5.3"),
-        )
-        .with_provider(Provider::Nvidia);
+        );
         let home = dsh.prepare_home(Role::Developer).unwrap();
         let credentials: Value =
             serde_json::from_str(&fs::read_to_string(home.path().join(CREDENTIALS_FILE)).unwrap())
@@ -420,10 +430,10 @@ mod tests {
     #[test]
     fn with_nvidia_a_level_from_harness_toml_is_passed_on() {
         let dsh = Dsh::new(
+            Provider::Nvidia,
             Secret::new("k"),
             RoleSettings::default().with_effort(Role::Tester, "off"),
-        )
-        .with_provider(Provider::Nvidia);
+        );
         let patch: Value = serde_json::from_str(&dsh.patch(Role::Tester, Path::new("/h"))).unwrap();
         assert_eq!(patch[0]["config"]["reasoningEffort"], "off");
     }
@@ -439,6 +449,7 @@ mod tests {
             env: BTreeMap::from([("CONTEXT7_API_KEY".into(), Secret::new("ctx-secret"))]),
         };
         let dsh = Dsh::new(
+            Provider::DeepSeek,
             Secret::new("k"),
             RoleSettings::default().with_mcp_servers(Role::Security, vec![server]),
         );
@@ -500,7 +511,12 @@ mod tests {
         );
         let mut job = job(Role::Tester);
         job.project_dir = dir.path().to_path_buf();
-        let dsh = Dsh::new(Secret::new("k"), RoleSettings::default()).with_program(&program);
+        let dsh = Dsh::new(
+            Provider::DeepSeek,
+            Secret::new("k"),
+            RoleSettings::default(),
+        )
+        .with_program(&program);
         let outcome = dsh.run(&job).await;
         assert_eq!(outcome.end, RunEnd::Succeeded);
         assert!(outcome.log.contains("done: do it"), "{}", outcome.log);

@@ -110,7 +110,7 @@ pub fn parse_codex(output: &str) -> Result<Vec<Model>, String> {
 /// The `GET /models` answer of a dsh `provider`'s API (`DeepSeek`, NVIDIA),
 /// in `OpenAI`'s format; without effort levels (see [`with_dsh_efforts`]).
 pub fn parse_api_models(output: &str, provider: Provider) -> Result<Vec<Model>, String> {
-    let vendor = provider.name();
+    let vendor = provider;
     let json: Value = serde_json::from_str(output)
         .map_err(|error| format!("{vendor} gave no model list: {error}"))?;
     if let Some(message) = json["error"]["message"].as_str() {
