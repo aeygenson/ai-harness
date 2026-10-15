@@ -17,9 +17,6 @@ const NVIDIA_KEY_ENV: &str = "NVIDIA_API_KEY";
 /// The model NVIDIA roles use when harness.toml names none: a strong coding
 /// model from dsh's NVIDIA catalog.
 pub const NVIDIA_DEFAULT_MODEL: &str = "moonshotai/kimi-k2.6";
-/// The levels dsh knows for NVIDIA's thinking models, weakest first. A model
-/// that does not think takes only `off`; dsh refuses a level the model lacks.
-pub const NVIDIA_EFFORTS: [&str; 5] = ["off", "minimal", "low", "medium", "high"];
 
 /// Whose API a dsh role's model runs on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -57,11 +54,13 @@ impl Provider {
         }
     }
 
-    /// The effort levels dsh accepts with this provider, weakest first.
+    /// The effort levels that work with this provider, weakest first. None
+    /// with NVIDIA: dsh (its `pi-ai` layer) never sends a level to NVIDIA's
+    /// API, so a level would be accepted and silently do nothing.
     pub fn efforts(self) -> &'static [&'static str] {
         match self {
             Provider::DeepSeek => &super::EFFORTS,
-            Provider::Nvidia => &NVIDIA_EFFORTS,
+            Provider::Nvidia => &[],
         }
     }
 
@@ -78,16 +77,6 @@ impl Provider {
         match self {
             Provider::DeepSeek => "deepseek-official",
             Provider::Nvidia => "nvidia",
-        }
-    }
-
-    /// The effort when harness.toml names none. A model that does not think
-    /// refuses every level but `off`, so with NVIDIA the model's own default
-    /// is kept.
-    pub(super) fn default_effort(self) -> Option<&'static str> {
-        match self {
-            Provider::DeepSeek => Some(super::DEFAULT_EFFORT),
-            Provider::Nvidia => None,
         }
     }
 
@@ -149,10 +138,8 @@ mod tests {
     }
 
     #[test]
-    fn nvidia_keeps_the_models_own_effort() {
-        assert_eq!(Provider::DeepSeek.default_effort(), Some("high"));
-        assert_eq!(Provider::Nvidia.default_effort(), None);
-        // `max` is a DeepSeek level, not one of NVIDIA's models.
-        assert!(!Provider::Nvidia.efforts().contains(&"max"));
+    fn only_deepseek_takes_levels() {
+        assert_eq!(Provider::DeepSeek.efforts(), ["off", "low", "high", "max"]);
+        assert!(Provider::Nvidia.efforts().is_empty());
     }
 }

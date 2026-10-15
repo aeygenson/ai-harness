@@ -198,11 +198,17 @@ fn dsh_agent(
     Ok(AnyAgent::Dsh(Dsh::new(provider, key, settings)))
 }
 
-/// dsh knows only a few effort words for each provider; anything else is
-/// refused before it runs.
+/// dsh knows only a few effort words for each provider, and none with NVIDIA;
+/// anything else is refused before it runs.
 fn check_dsh_effort(choice: &AgentChoice, provider: Provider) -> Result<(), BuildError> {
     let efforts = provider.efforts();
     match choice.effort {
+        Some(effort) if efforts.is_empty() => Err(problem(format!(
+            "{} uses {} with effort {effort:?}, but NVIDIA's models in dsh take no \
+             effort level; remove `effort`",
+            choice.who,
+            provider.agent()
+        ))),
         Some(effort) if !efforts.contains(&effort) => Err(problem(format!(
             "{} uses {} with effort {effort:?}; use one of {}",
             choice.who,
@@ -241,12 +247,17 @@ mod tests {
     fn each_dsh_provider_takes_only_its_own_levels() {
         check_dsh_effort(&choice(AgentKind::Dsh, "max"), Provider::DeepSeek).unwrap();
         let error =
-            check_dsh_effort(&choice(AgentKind::DshNvidia, "max"), Provider::Nvidia).unwrap_err();
+            check_dsh_effort(&choice(AgentKind::Dsh, "medium"), Provider::DeepSeek).unwrap_err();
+        assert!(error.0.contains("off, low, high, max"), "{error}");
+        // NVIDIA's API in dsh ignores levels, so none is accepted.
+        let error =
+            check_dsh_effort(&choice(AgentKind::DshNvidia, "off"), Provider::Nvidia).unwrap_err();
         assert!(error.0.contains("Tester uses dsh+nvidia"), "{error}");
-        assert!(
-            error.0.contains("off, minimal, low, medium, high"),
-            "{error}"
-        );
-        check_dsh_effort(&choice(AgentKind::DshNvidia, "medium"), Provider::Nvidia).unwrap();
+        assert!(error.0.contains("take no effort level"), "{error}");
+        let no_level = AgentChoice {
+            effort: None,
+            ..choice(AgentKind::DshNvidia, "")
+        };
+        check_dsh_effort(&no_level, Provider::Nvidia).unwrap();
     }
 }

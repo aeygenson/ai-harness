@@ -35,7 +35,7 @@ use crate::install::credentials::Secret;
 use crate::process::{self, failed};
 use crate::role_settings::RoleSettings;
 
-pub use provider::{Provider, NVIDIA_DEFAULT_MODEL, NVIDIA_EFFORTS};
+pub use provider::{Provider, NVIDIA_DEFAULT_MODEL};
 
 /// The variable in Lisa's shell that may hold the `DeepSeek` API key; it wins
 /// over the saved one. dsh's own name for the key too.
@@ -129,11 +129,9 @@ impl Dsh {
             .model(role)
             .unwrap_or(self.provider.default_model());
         let mut choice = json!({ "provider": self.provider.route(), "model": model });
-        if let Some(effort) = self
-            .settings
-            .effort(role)
-            .or(self.provider.default_effort())
-        {
+        // A provider without levels (NVIDIA) gets none: `build` refuses one.
+        if !self.provider.efforts().is_empty() {
+            let effort = self.settings.effort(role).unwrap_or(DEFAULT_EFFORT);
             choice["reasoningEffort"] = effort.into();
         }
         let mut patch = vec![json!({ "id": "agent-default-model", "config": choice })];
@@ -409,7 +407,7 @@ mod tests {
         let model = &entries[0]["config"];
         assert_eq!(model["provider"], "nvidia");
         assert_eq!(model["model"], "z-ai/glm-5.3");
-        // No level unless harness.toml names one: NVIDIA's models differ.
+        // NVIDIA's API in dsh takes no level.
         assert!(model.get("reasoningEffort").is_none(), "{model}");
         let route = entries.iter().find(|e| e["id"] == "llm-pi-ai").unwrap();
         let nvidia = &route["config"]["providers"]["nvidia"];
@@ -425,17 +423,6 @@ mod tests {
         let tester: Value =
             serde_json::from_str(&dsh.patch(Role::Tester, Path::new("/h"))).unwrap();
         assert_eq!(tester[0]["config"]["model"], NVIDIA_DEFAULT_MODEL);
-    }
-
-    #[test]
-    fn with_nvidia_a_level_from_harness_toml_is_passed_on() {
-        let dsh = Dsh::new(
-            Provider::Nvidia,
-            Secret::new("k"),
-            RoleSettings::default().with_effort(Role::Tester, "off"),
-        );
-        let patch: Value = serde_json::from_str(&dsh.patch(Role::Tester, Path::new("/h"))).unwrap();
-        assert_eq!(patch[0]["config"]["reasoningEffort"], "off");
     }
 
     #[test]

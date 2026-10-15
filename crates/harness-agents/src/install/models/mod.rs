@@ -326,6 +326,12 @@ mod tests {
         assert!(models.iter().all(|m| m.efforts.is_empty()));
         let error = parse_api_models("<html>", Provider::Nvidia).unwrap_err();
         assert!(error.starts_with("NVIDIA gave no model list"), "{error}");
+        let error = parse_api_models(r#"{"status":401,"title":"Unauthorized"}"#, Provider::Nvidia)
+            .unwrap_err();
+        assert!(error.contains("no `data`"), "{error}");
+        // Without the default model in the list, nothing else is marked default.
+        let models = parse_api_models(r#"{"data":[{"id":"nv-embed"}]}"#, Provider::Nvidia).unwrap();
+        assert!(!models[0].default);
     }
 
     #[test]
@@ -446,6 +452,10 @@ print {"models":[{"slug":"gpt-x","visibility":"list","supported_reasoning_levels
             .into_iter()
             .map(|(agent, _)| agent)
             .collect();
-        assert_eq!(asked, [AgentKind::Codex, AgentKind::Dsh]);
+        // (An NVIDIA key in the shell running the tests would add dsh+nvidia.)
+        assert!(
+            asked.starts_with(&[AgentKind::Codex, AgentKind::Dsh]),
+            "{asked:?}"
+        );
     }
 }

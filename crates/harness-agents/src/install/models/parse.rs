@@ -116,18 +116,19 @@ pub fn parse_api_models(output: &str, provider: Provider) -> Result<Vec<Model>, 
     if let Some(message) = json["error"]["message"].as_str() {
         return Err(format!("{vendor}: {message}"));
     }
-    let ids: Vec<String> = json["data"]
-        .as_array()
-        .into_iter()
-        .flatten()
+    // An error in another shape (NVIDIA's gateway has its own) has no list.
+    let Some(list) = json["data"].as_array() else {
+        return Err(format!(
+            "{vendor} gave no model list (no `data` in its answer)"
+        ));
+    };
+    let ids: Vec<String> = list
+        .iter()
         .filter_map(|m| m["id"].as_str().map(str::to_string))
         .collect();
-    let wanted = provider.default_model();
-    let default = if ids.iter().any(|id| id == wanted) {
-        wanted.to_string()
-    } else {
-        ids.first().cloned().unwrap_or_default()
-    };
+    // The default is the model dsh runs when harness.toml names none; when
+    // the API does not list it, no other model is marked in its place.
+    let default = provider.default_model();
     Ok(ids
         .into_iter()
         .map(|id| Model {
