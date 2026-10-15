@@ -35,5 +35,6 @@ still open. Never say "ready" when a required check did not run.
 
 ## When you are stuck
 If the design is contradictory or impossible, or you need a decision, stop and
-finish with verdict `needs_human`; explain the question in notes.md. Do not
-guess on things that change what the user gets.
+finish with verdict `needs_human`; explain the question in notes.md, unless
+your role's own skill says how to settle that case. Do not guess on things
+that change what the user gets.

@@ -361,6 +361,15 @@ mod tests {
     }
 
     #[test]
+    fn the_tester_reads_the_design_conflicts_the_developer_settled() {
+        // The developer may settle a design conflict alone only because the
+        // tester checks each one; both skills must name the same heading.
+        let heading = "**Design conflicts settled**";
+        assert!(built_in("developer").unwrap().contains(heading));
+        assert!(built_in("tester").unwrap().contains(heading));
+    }
+
+    #[test]
     fn a_missing_skill_names_the_role_and_the_file() {
         let (dir, config) = project(
             &[],

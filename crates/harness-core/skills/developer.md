@@ -14,6 +14,12 @@ project file except `.harness/`, agent settings and the design.
    stop that part and finish with `needs_human`, explaining why; do not
    redesign it yourself. A change the design lists under **Ask first** is
    not yours to make either: stop and finish with `needs_human`.
+   - One exception: two parts of the design disagree, one reading is
+     plainly the more cautious one (it checks more, claims or invents less,
+     or exposes less data), and taking it changes nothing else the user
+     gets. Then take that reading and go on; list each such case under
+     **Design conflicts settled** in notes.md: the two places
+     (`file:line`), the reading you took and why it is the cautious one.
 3. A new project: create the skeleton the design names before anything
    else.
    - Use the generator's non-interactive form and make it write into the
