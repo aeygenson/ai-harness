@@ -1,9 +1,13 @@
 //! Reading each agent's list of models from what it printed.
 
 use harness_core::models::Model;
+use harness_core::text;
 use serde_json::Value;
 
 use crate::adapters::dsh::Provider;
+
+/// The longest error reason from an API shown to Lisa: one line is enough.
+const MAX_REASON_CHARS: usize = 300;
 
 /// Claude Code's answer to `initialize`: `response.models`. The entry
 /// `default` only names another model; that one becomes the default.
@@ -118,17 +122,28 @@ pub fn parse_api_models(output: &str, provider: Provider) -> Result<Vec<Model>, 
     }
     // An error in another shape (NVIDIA's gateway has its own) has no list.
     let Some(list) = json["data"].as_array() else {
+        // The gateway's own words, if any: untrusted, so one short clean line.
+        let reason = json["detail"]
+            .as_str()
+            .or(json["title"].as_str())
+            .map_or_else(String::new, |text| {
+                format!(": {}", text::safe_line(text, MAX_REASON_CHARS))
+            });
         return Err(format!(
-            "{vendor} gave no model list (no `data` in its answer)"
+            "{vendor} gave no model list{reason}; check the API key \
+             (sign in again on the Agents tab)"
         ));
     };
     let ids: Vec<String> = list
         .iter()
         .filter_map(|m| m["id"].as_str().map(str::to_string))
         .collect();
-    // The default is the model dsh runs when harness.toml names none; when
-    // the API does not list it, no other model is marked in its place.
-    let default = provider.default_model();
+    let wanted = provider.default_model();
+    let default = if ids.iter().any(|id| id == wanted) {
+        wanted.to_string()
+    } else {
+        ids.first().cloned().unwrap_or_default()
+    };
     Ok(ids
         .into_iter()
         .map(|id| Model {

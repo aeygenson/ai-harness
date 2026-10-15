@@ -55,8 +55,8 @@ impl Provider {
     }
 
     /// The effort levels that work with this provider, weakest first. None
-    /// with NVIDIA: dsh (its `pi-ai` layer) never sends a level to NVIDIA's
-    /// API, so a level would be accepted and silently do nothing.
+    /// with NVIDIA: with the settings of dsh's catalog, its `pi-ai` layer
+    /// sends no level to NVIDIA's API, so a level would silently do nothing.
     pub fn efforts(self) -> &'static [&'static str] {
         match self {
             Provider::DeepSeek => &super::EFFORTS,

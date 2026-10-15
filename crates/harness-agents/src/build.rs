@@ -204,8 +204,8 @@ fn check_dsh_effort(choice: &AgentChoice, provider: Provider) -> Result<(), Buil
     let efforts = provider.efforts();
     match choice.effort {
         Some(effort) if efforts.is_empty() => Err(problem(format!(
-            "{} uses {} with effort {effort:?}, but NVIDIA's models in dsh take no \
-             effort level; remove `effort`",
+            "{} uses {} with effort {effort:?}, but its models take no effort level; \
+             remove `effort`",
             choice.who,
             provider.agent()
         ))),

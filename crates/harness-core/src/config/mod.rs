@@ -59,7 +59,7 @@ agent_timeout_minutes = 30
 # same agent with NVIDIA's free models from build.nvidia.com, with an NVIDIA key).
 # Add `model = "..."` to pick a model, for example "opus" for claude,
 # "deepseek-v4-pro" for dsh (default "deepseek-flash") or "z-ai/glm-5.3" for
-# dsh+nvidia (default "moonshotai/kimi-k2.6"), and
+# dsh+nvidia (default "moonshotai/kimi-k2.6"), and (except with dsh+nvidia)
 # `effort = "..."` for how hard it thinks, for example "high". `harness models`
 # lists what each agent offers.
 #

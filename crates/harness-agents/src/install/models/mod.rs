@@ -326,12 +326,14 @@ mod tests {
         assert!(models.iter().all(|m| m.efforts.is_empty()));
         let error = parse_api_models("<html>", Provider::Nvidia).unwrap_err();
         assert!(error.starts_with("NVIDIA gave no model list"), "{error}");
-        let error = parse_api_models(r#"{"status":401,"title":"Unauthorized"}"#, Provider::Nvidia)
-            .unwrap_err();
-        assert!(error.contains("no `data`"), "{error}");
-        // Without the default model in the list, nothing else is marked default.
-        let models = parse_api_models(r#"{"data":[{"id":"nv-embed"}]}"#, Provider::Nvidia).unwrap();
-        assert!(!models[0].default);
+        let error = parse_api_models(
+            r#"{"status":401,"title":"Unauthorized","detail":"Bad key\u001b[31m"}"#,
+            Provider::Nvidia,
+        )
+        .unwrap_err();
+        assert!(error.contains(": Bad key"), "{error}");
+        assert!(error.contains("sign in again"), "{error}");
+        assert!(!error.contains('\u{1b}'), "{error}");
     }
 
     #[test]
@@ -346,7 +348,7 @@ mod tests {
             curl: harness_fake::install(
                 bin.path(),
                 "curl",
-                r#"need-text ${5#@} nvapi- else 4
+                r#"need-text ${5#@} Authorization: else 4
 need-args -sS -m 60 -H ${5} https://integrate.api.nvidia.com/v1/models else 5
 print {"data":[{"id":"moonshotai/kimi-k2.6"}]}"#,
             ),
@@ -452,10 +454,11 @@ print {"models":[{"slug":"gpt-x","visibility":"list","supported_reasoning_levels
             .into_iter()
             .map(|(agent, _)| agent)
             .collect();
-        // (An NVIDIA key in the shell running the tests would add dsh+nvidia.)
-        assert!(
-            asked.starts_with(&[AgentKind::Codex, AgentKind::Dsh]),
-            "{asked:?}"
-        );
+        // A key in the shell running the tests counts as a login too.
+        let mut expected = vec![AgentKind::Codex, AgentKind::Dsh];
+        if credentials::has_login(creds.path(), AgentKind::DshNvidia) {
+            expected.push(AgentKind::DshNvidia);
+        }
+        assert_eq!(asked, expected);
     }
 }
