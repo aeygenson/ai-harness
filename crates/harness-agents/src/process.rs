@@ -135,8 +135,8 @@ struct ProcessTree {
     pid: u32,
     /// The mark in the environment of every process the agent started.
     mark: String,
-    /// Already stopped: a second stop would be slow, and the group's id may
-    /// by then belong to another program.
+    /// The group was already stopped: by a second time its id may belong to
+    /// another program.
     stopped: AtomicBool,
 }
 
@@ -145,10 +145,11 @@ impl ProcessTree {
         // An atomic flag can be changed through a shared `&self` (the tree
         // is borrowed by the waiting code and dropped at the end) and still
         // lets the future move between threads.
-        if self.stopped.swap(true, Ordering::Relaxed) {
-            return;
+        if !self.stopped.swap(true, Ordering::Relaxed) {
+            harness_platform::process::kill_tree_of(self.pid);
         }
-        harness_platform::process::kill_tree_of(self.pid);
+        // The mark is looked for every time: a second look catches what the
+        // first missed, and it never hits a process without the mark.
         harness_platform::run_mark::kill_marked(&self.mark);
     }
 }

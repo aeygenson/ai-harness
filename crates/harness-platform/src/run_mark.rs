@@ -9,7 +9,8 @@
 //!
 //! - Linux: the mark is read from `/proc/<pid>/environ`, and each process is
 //!   held by a pidfd from the check to the kill, so a process id that was
-//!   reused meanwhile is never hit. A kernel without pidfd (before 5.3) gets
+//!   reused meanwhile is never hit. When a pidfd cannot be opened (a kernel
+//!   before 5.3, a strict container, too many open files) the process gets
 //!   a plain kill right after the check, with the macOS risk below.
 //! - macOS: the mark is read from `ps -E`. Between that look and `kill` a
 //!   process can end and its id be reused; the window is short, but it exists.
@@ -61,8 +62,12 @@ pub fn mark<'a>(command: &'a mut Command, mark: &str) -> &'a mut Command {
     command.env(VARIABLE, mark)
 }
 
-/// Stops every process of this user that carries the mark `mark`. A process
-/// that has already ended, or that cannot be read, is skipped.
+/// Stops every process this program can read that carries the mark `mark`.
+/// A process that has already ended, or that cannot be read, is skipped.
+///
+/// It looks at most five times (a process can start a child between a look
+/// and the kill) and reports nothing. On macOS it runs `ps` and `kill`; on
+/// Windows it does nothing yet. It blocks while it reads the processes.
 pub fn kill_marked(mark: &str) {
     let entry = format!("{VARIABLE}={mark}");
     for _ in 0..PASSES {
@@ -202,6 +207,30 @@ mod tests {
 
         kill_marked(&other);
         assert!(still_running(&pid), "another mark must not stop it");
+        kill_marked(&ours);
+
+        assert!(!still_running(&pid));
+    }
+
+    // macOS may hide the environment of its own system programs; Codex runs
+    // exactly those (`/bin/sh`, `/bin/sleep`), so check one of them there.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn a_system_program_that_left_the_group_is_stopped_by_its_mark() {
+        let dir = tempfile::tempdir().unwrap();
+        let pid_file = dir.path().join("pid");
+        let script = format!(
+            "perl -e 'setpgrp(0, 0); exec @ARGV' /bin/sleep 30 & echo $! > '{}'",
+            pid_file.display()
+        );
+        let ours = new_mark();
+        let mut command = Command::new("/bin/sh");
+        command.args(["-c", &script]);
+        mark(&mut command, &ours);
+        command.status().unwrap();
+        let pid = std::fs::read_to_string(&pid_file).unwrap();
+        let pid = pid.trim().to_string();
+
         kill_marked(&ours);
 
         assert!(!still_running(&pid));
