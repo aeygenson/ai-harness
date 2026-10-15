@@ -1,5 +1,6 @@
 //! `harness update`: replaces this harness with the newest release from
-//! GitHub; `harness update --check` only says whether there is one. The TUI's
+//! GitHub (a build from the source: pulls and builds its git folder);
+//! `harness update --check` only says whether there is one. The TUI's
 //! «Update Harness» button does the same (see `harness_agents::install::update`).
 
 use anyhow::{bail, Context, Result};
@@ -14,7 +15,7 @@ pub(crate) fn update(check_only: bool) -> Result<()> {
         println!("{}", check_text(&releases.current, newer.as_deref()));
         return Ok(());
     }
-    if releases.from_source() {
+    if !releases.can_update() {
         bail!("{}", update::FROM_SOURCE);
     }
     let program = std::env::current_exe().context("cannot find the harness's own file")?;

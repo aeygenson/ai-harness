@@ -2,6 +2,7 @@
 //! which installs it the way `harness update` does. Shown in the «Computer»
 //! panel and, when there is a newer version, as a button in the top bar.
 
+use std::path::PathBuf;
 use std::sync::mpsc::Sender;
 
 use harness_agents::install::update::{self, Releases};
@@ -14,8 +15,10 @@ pub const HARNESS_NAME: &str = "AI Harness";
 /// What is known about the harness's own releases.
 #[derive(Debug, Default)]
 pub struct HarnessRelease {
-    /// Built from the source: this harness does not replace itself.
+    /// Built from source code whose folder is gone: this harness does not replace itself.
     pub from_source: bool,
+    /// Built from the source in this git folder: «Update Harness» pulls and builds it.
+    pub source_folder: Option<PathBuf>,
     /// The last check: the newer version (`None`: this is the newest), or why
     /// it failed. `None` until a check has answered.
     pub newer: Option<Result<Option<String>, String>>,
@@ -26,8 +29,10 @@ pub struct HarnessRelease {
 impl HarnessRelease {
     /// What `Releases::default()` says about this program.
     pub fn of_this_program() -> Self {
+        let releases = Releases::default();
         Self {
-            from_source: Releases::default().from_source(),
+            from_source: !releases.can_update(),
+            source_folder: releases.checkout,
             ..Self::default()
         }
     }
@@ -48,7 +53,7 @@ impl HarnessRelease {
 /// Asks whether a newer release is out; tests give a fake one.
 pub type ReleaseChecker = fn() -> Result<Option<String>, String>;
 
-/// The real check: asks GitHub.
+/// The real check: asks GitHub (a build from the source: its git folder).
 pub fn check_release() -> Result<Option<String>, String> {
     update::newer_version(&Releases::default())
 }

@@ -135,7 +135,9 @@ harness retro task-001               # what went well and what to improve
 ```
 
 Building from source needs Rust: `cargo build --release -p harness-cli`, or run the
-installer with `bash -s -- --dev`.
+installer with `bash -s -- --dev`. A harness built from source updates itself from its git
+folder: «Update Harness» (or `harness update`) runs `git pull --ff-only` and builds it again
+whenever the branch on GitHub has new commits.
 
 ## Architecture
 

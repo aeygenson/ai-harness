@@ -587,6 +587,7 @@ harness_source = "собран из исходного кода: обновля�
 harness_updated = "AI Harness {version} установлен: закройте harness (q) и откройте снова"
 confirm_update_harness = "Обновить AI Harness до {version}?"
 confirm_update_harness_text = "Harness скачает версию {version} со страницы Releases на GitHub, сверит её с SHA256SUMS.txt и поставит на место этой программы:\n\n  {path}\n\nРабота продолжится как есть; новая версия запустится при следующем открытии harness. Меняется только программа: проекты, настройки и входы остаются."
+confirm_update_harness_source_text = "Harness заберёт новый код своей папки\n\n  {folder}\n\n(git pull --ff-only), соберёт {version} через cargo install (несколько минут) и поставит на место этой программы:\n\n  {path}\n\nРабота продолжится как есть; новая версия запустится при следующем открытии harness. Меняется только программа: проекты, настройки и входы остаются."
 
 [errors]
 no_home = "Не задана переменная HOME, поэтому harness не находит ~/.harness"
