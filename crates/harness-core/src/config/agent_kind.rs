@@ -21,15 +21,19 @@ pub enum AgentKind {
     Antigravity,
     /// `DeepSeek` Harness (`dsh`).
     Dsh,
+    /// `DeepSeek` Harness with NVIDIA's free models (build.nvidia.com) instead
+    /// of `DeepSeek`'s own API: the same program, another key.
+    DshNvidia,
 }
 
 impl AgentKind {
     /// Every agent, in the order the screens list them.
-    pub const ALL: [AgentKind; 4] = [
+    pub const ALL: [AgentKind; 5] = [
         AgentKind::Claude,
         AgentKind::Codex,
         AgentKind::Antigravity,
         AgentKind::Dsh,
+        AgentKind::DshNvidia,
     ];
 
     /// The name as written in `harness.toml`, e.g. `"codex"`.
@@ -39,14 +43,16 @@ impl AgentKind {
             AgentKind::Codex => "codex",
             AgentKind::Antigravity => "antigravity",
             AgentKind::Dsh => "dsh",
+            AgentKind::DshNvidia => "dsh+nvidia",
         }
     }
 
     /// Whose login the agent needs, the folder name in `~/.harness/credentials/`:
-    /// `DeepSeek` Harness uses the `DeepSeek` key.
+    /// `DeepSeek` Harness uses the `DeepSeek` key, or the NVIDIA key with NVIDIA's models.
     pub fn login_name(self) -> &'static str {
         match self {
             AgentKind::Dsh => "deepseek",
+            AgentKind::DshNvidia => "nvidia",
             AgentKind::Claude | AgentKind::Codex | AgentKind::Antigravity => self.as_str(),
         }
     }
@@ -55,7 +61,7 @@ impl AgentKind {
     pub fn has_plugins(self) -> bool {
         match self {
             AgentKind::Claude | AgentKind::Codex => true,
-            AgentKind::Antigravity | AgentKind::Dsh => false,
+            AgentKind::Antigravity | AgentKind::Dsh | AgentKind::DshNvidia => false,
         }
     }
 }
@@ -78,7 +84,10 @@ pub enum UnknownAgent {
     )]
     Removed,
     /// Any other text that is not an agent name.
-    #[error("{0:?} is not an agent; use \"claude\", \"codex\", \"antigravity\" or \"dsh\"")]
+    #[error(
+        "{0:?} is not an agent; use \"claude\", \"codex\", \"antigravity\", \"dsh\" \
+         or \"dsh+nvidia\""
+    )]
     Other(String),
 }
 
@@ -92,6 +101,7 @@ impl FromStr for AgentKind {
             "codex" => Ok(AgentKind::Codex),
             "antigravity" => Ok(AgentKind::Antigravity),
             "dsh" => Ok(AgentKind::Dsh),
+            "dsh+nvidia" => Ok(AgentKind::DshNvidia),
             "codex+deepseek" => Err(UnknownAgent::Removed),
             _ => Err(UnknownAgent::Other(text.to_string())),
         }
@@ -138,6 +148,7 @@ mod tests {
     #[test]
     fn deepseek_harness_uses_the_deepseek_login() {
         assert_eq!(AgentKind::Dsh.login_name(), "deepseek");
+        assert_eq!(AgentKind::DshNvidia.login_name(), "nvidia");
         assert_eq!(AgentKind::Codex.login_name(), "codex");
     }
 

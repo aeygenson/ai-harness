@@ -3,7 +3,7 @@
 use harness_core::models::Model;
 use serde_json::Value;
 
-use crate::adapters::dsh::DEFAULT_MODEL as DEEPSEEK_DEFAULT_MODEL;
+use crate::adapters::dsh::Provider;
 
 /// Claude Code's answer to `initialize`: `response.models`. The entry
 /// `default` only names another model; that one becomes the default.
@@ -107,12 +107,14 @@ pub fn parse_codex(output: &str) -> Result<Vec<Model>, String> {
     Ok(models)
 }
 
-/// `DeepSeek`'s `GET /models`; no effort levels: reasoning is its own model.
-pub fn parse_deepseek(output: &str) -> Result<Vec<Model>, String> {
+/// The `GET /models` answer of a dsh `provider`'s API (`DeepSeek`, NVIDIA),
+/// in `OpenAI`'s format; without effort levels (see [`with_dsh_efforts`]).
+pub fn parse_api_models(output: &str, provider: Provider) -> Result<Vec<Model>, String> {
+    let vendor = provider.name();
     let json: Value = serde_json::from_str(output)
-        .map_err(|error| format!("DeepSeek gave no model list: {error}"))?;
+        .map_err(|error| format!("{vendor} gave no model list: {error}"))?;
     if let Some(message) = json["error"]["message"].as_str() {
-        return Err(format!("DeepSeek: {message}"));
+        return Err(format!("{vendor}: {message}"));
     }
     let ids: Vec<String> = json["data"]
         .as_array()
@@ -120,8 +122,9 @@ pub fn parse_deepseek(output: &str) -> Result<Vec<Model>, String> {
         .flatten()
         .filter_map(|m| m["id"].as_str().map(str::to_string))
         .collect();
-    let default = if ids.iter().any(|id| id == DEEPSEEK_DEFAULT_MODEL) {
-        DEEPSEEK_DEFAULT_MODEL.to_string()
+    let wanted = provider.default_model();
+    let default = if ids.iter().any(|id| id == wanted) {
+        wanted.to_string()
     } else {
         ids.first().cloned().unwrap_or_default()
     };

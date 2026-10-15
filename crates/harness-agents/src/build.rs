@@ -12,10 +12,11 @@ use harness_core::plugins::{Plugin, Plugins};
 use harness_core::retro::suggest;
 use harness_core::task::handoff::Role;
 
+use crate::adapters::dsh::{self, Provider};
 use crate::install::catalog;
 use crate::install::credentials::{self, Secret};
 use crate::role_settings::RoleSettings;
-use crate::{adapters::dsh, Antigravity, AnyAgent, ClaudeCode, Codex, Dsh, Team};
+use crate::{Antigravity, AnyAgent, ClaudeCode, Codex, Dsh, Team};
 
 /// Why an agent cannot be built, in words for Lisa: a missing login or a
 /// broken setting.
@@ -128,7 +129,15 @@ pub fn build_agent(
         ))),
         AgentKind::Dsh => {
             check_dsh_effort(choice)?;
-            Ok(AnyAgent::Dsh(Dsh::new(deepseek_key(&dir)?, settings)))
+            let key = api_key(&dir, Provider::DeepSeek)?;
+            Ok(AnyAgent::Dsh(Dsh::new(key, settings)))
+        }
+        // NVIDIA's models each know their own effort levels; dsh checks them.
+        AgentKind::DshNvidia => {
+            let key = api_key(&dir, Provider::Nvidia)?;
+            Ok(AnyAgent::Dsh(
+                Dsh::new(key, settings).with_provider(Provider::Nvidia),
+            ))
         }
     }
 }
@@ -199,13 +208,13 @@ fn check_dsh_effort(choice: &AgentChoice) -> Result<(), BuildError> {
     }
 }
 
-/// The `DeepSeek` API key: one in the shell wins; otherwise the one the Agents
-/// tab («Sign in») saved.
-fn deepseek_key(dir: &Path) -> Result<Secret, BuildError> {
-    match std::env::var(dsh::KEY_ENV) {
-        Ok(key) if !key.trim().is_empty() => Ok(Secret::new(key.trim())),
-        _ => credentials::load_token(dir, "deepseek").map_err(|_missing| {
-            problem("no DeepSeek API key saved; sign in on the Agents tab first")
-        }),
-    }
+/// The API key of a dsh `provider`: one in the shell wins; otherwise the one
+/// the Agents tab («Sign in») saved.
+fn api_key(dir: &Path, provider: Provider) -> Result<Secret, BuildError> {
+    credentials::load_api_key(dir, provider).map_err(|_missing| {
+        problem(format!(
+            "no {} API key saved; sign in on the Agents tab first",
+            provider.name()
+        ))
+    })
 }

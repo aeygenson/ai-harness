@@ -54,10 +54,12 @@ max_rounds = 5
 agent_timeout_minutes = 30
 
 # Which agent works as each role: "claude" (Claude Code), "codex" (Codex CLI),
-# "antigravity" (Antigravity CLI) or "dsh" (DeepSeek Harness, DeepSeek's own
-# agent; the Agents tab («Sign in») saves the API key).
-# Add `model = "..."` to pick a model, for example "opus" for claude or
-# "deepseek-v4-pro" for dsh (default "deepseek-flash"), and
+# "antigravity" (Antigravity CLI), "dsh" (DeepSeek Harness, DeepSeek's own
+# agent; the Agents tab («Sign in») saves the API key) or "dsh+nvidia" (the
+# same agent with NVIDIA's free models from build.nvidia.com, with an NVIDIA key).
+# Add `model = "..."` to pick a model, for example "opus" for claude,
+# "deepseek-v4-pro" for dsh (default "deepseek-flash") or "z-ai/glm-5.3" for
+# dsh+nvidia (default "moonshotai/kimi-k2.6"), and
 # `effort = "..."` for how hard it thinks, for example "high". `harness models`
 # lists what each agent offers.
 #

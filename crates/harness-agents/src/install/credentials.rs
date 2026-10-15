@@ -8,6 +8,8 @@ use std::path::{Path, PathBuf};
 
 use harness_core::config::AgentKind;
 
+use crate::adapters::dsh::Provider;
+
 const TOKEN_FILE: &str = "oauth-token";
 
 /// Lives in `harness_core`, because MCP server settings carry secrets too.
@@ -40,12 +42,18 @@ pub fn has_login(dir: &Path, agent: AgentKind) -> bool {
     match agent {
         AgentKind::Claude => dir.join("claude").join(TOKEN_FILE).is_file(),
         AgentKind::Codex => dir.join("codex").join("auth.json").is_file(),
-        AgentKind::Dsh => {
-            dir.join("deepseek").join(TOKEN_FILE).is_file()
-                || std::env::var(crate::adapters::dsh::KEY_ENV)
-                    .is_ok_and(|key| !key.trim().is_empty())
-        }
+        AgentKind::Dsh => load_api_key(dir, Provider::DeepSeek).is_ok(),
+        AgentKind::DshNvidia => load_api_key(dir, Provider::Nvidia).is_ok(),
         AgentKind::Antigravity => dir.join("antigravity/.gemini/antigravity-cli").is_dir(),
+    }
+}
+
+/// The API key of a dsh `provider`: one in Lisa's shell wins; otherwise the
+/// one «Sign in» saved. Fails when there is neither.
+pub fn load_api_key(dir: &Path, provider: Provider) -> io::Result<Secret> {
+    match std::env::var(provider.key_env()) {
+        Ok(key) if !key.trim().is_empty() => Ok(Secret::new(key.trim())),
+        _ => load_token(dir, provider.agent().login_name()),
     }
 }
 
@@ -92,10 +100,10 @@ pub fn secret_names(dir: &Path) -> io::Result<Vec<String>> {
     Ok(names)
 }
 
-/// The saved tokens (Claude Code, `DeepSeek`) and MCP secrets, to hide
+/// The saved tokens (Claude Code, `DeepSeek`, NVIDIA) and MCP secrets, to hide
 /// them in text that leaves the computer. What cannot be read is skipped.
 pub fn saved_secrets(dir: &Path) -> Vec<Secret> {
-    let tokens = ["claude", "deepseek"]
+    let tokens = ["claude", "deepseek", "nvidia"]
         .into_iter()
         .filter_map(|agent| load_token(dir, agent).ok());
     let secrets = secret_names(dir)
@@ -135,6 +143,14 @@ mod tests {
         save_token(dir, "deepseek", &Secret::new("k")).unwrap();
         assert!(has_login(dir, AgentKind::Dsh));
         assert_eq!(login_name("dsh"), "deepseek");
+        assert!(!has_login(dir, AgentKind::DshNvidia));
+        save_token(dir, "nvidia", &Secret::new("nvapi-k")).unwrap();
+        assert!(has_login(dir, AgentKind::DshNvidia));
+        assert_eq!(login_name("dsh+nvidia"), "nvidia");
+        assert_eq!(
+            load_api_key(dir, Provider::Nvidia).unwrap().expose(),
+            "nvapi-k"
+        );
     }
 
     #[test]

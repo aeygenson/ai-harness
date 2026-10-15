@@ -280,7 +280,11 @@ pub fn server(
 pub fn agent_runs(agent: AgentKind, _server: &crate::config::McpConfig) -> bool {
     // No `_` arm: a new agent must be checked here before it gets servers.
     match agent {
-        AgentKind::Claude | AgentKind::Codex | AgentKind::Antigravity | AgentKind::Dsh => true,
+        AgentKind::Claude
+        | AgentKind::Codex
+        | AgentKind::Antigravity
+        | AgentKind::Dsh
+        | AgentKind::DshNvidia => true,
     }
 }
 

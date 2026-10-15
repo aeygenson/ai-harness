@@ -52,7 +52,7 @@ pub fn agent_note(agent: AgentKind) -> &'static str {
         AgentKind::Claude => "agent-claude",
         AgentKind::Codex => "agent-codex",
         AgentKind::Antigravity => "agent-antigravity",
-        AgentKind::Dsh => "agent-dsh",
+        AgentKind::Dsh | AgentKind::DshNvidia => "agent-dsh",
     }
 }
 
