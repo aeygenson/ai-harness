@@ -9,9 +9,10 @@ edition = "2021"
 tokio = { version = "1", features = ["signal", "macros", "rt"] }
 
 # Only for noticing a closed terminal (see `input`) without `unsafe`: its safe
-# `poll`. crossterm already brings this crate in, so it adds nothing new.
+# `poll`; and, on Linux, for stopping a process through a pidfd (see
+# `run_mark`). crossterm already brings this crate in, so it adds nothing new.
 [target.'cfg(unix)'.dependencies]
-rustix = { version = "1.1", features = ["event"] }
+rustix = { version = "1.1", features = ["event", "process"] }
 
 # Only for reading a secret on Windows, which has no `stty`.
 [target.'cfg(windows)'.dependencies]
@@ -24,7 +25,7 @@ tokio = { version = "1", features = ["signal", "macros", "rt", "time"] }
 
 # Tests make a pseudo-terminal, the real thing a closed window hangs up.
 [target.'cfg(unix)'.dev-dependencies]
-rustix = { version = "1.1", features = ["event", "pty"] }
+rustix = { version = "1.1", features = ["event", "process", "pty"] }
 
 [lints]
 workspace = true

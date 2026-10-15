@@ -4,7 +4,6 @@
 use std::io::ErrorKind;
 use std::path::Path;
 use std::process::{Command, ExitStatus, Stdio};
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::Sender;
 use std::sync::Mutex;
 use std::time::Duration;
@@ -70,7 +69,7 @@ pub async fn run(
     harness_platform::process::own_group(&mut command);
     // Some agents (Codex) move their commands to process groups of their
     // own; the mark still finds them (see `harness_platform::run_mark`).
-    let mark = run_mark();
+    let mark = harness_platform::run_mark::new_mark();
     harness_platform::run_mark::mark(&mut command, &mark);
     let mut command = tokio::process::Command::from(command);
     command
@@ -125,7 +124,7 @@ pub async fn run(
 /// Dropping it stops them all, so they are stopped on every way out of
 /// [`run`], including when the caller stops waiting (the future is dropped).
 struct ProcessTree {
-    /// The agent's process id, which is also its process group.
+    /// The agent's process id (on Linux and macOS also its process group).
     pid: u32,
     /// The mark in the environment of every process the agent started.
     mark: String,
@@ -136,19 +135,6 @@ impl ProcessTree {
         harness_platform::process::kill_tree_of(self.pid);
         harness_platform::run_mark::kill_marked(&self.mark);
     }
-}
-
-/// A mark no other agent run has: this harness's process id, the time it
-/// started and a count of the runs so far.
-fn run_mark() -> String {
-    // A plain counter, not shared state: two runs started in the same
-    // instant (tests run in parallel) still get different marks.
-    static RUNS: AtomicU64 = AtomicU64::new(0);
-    let run = RUNS.fetch_add(1, Ordering::Relaxed);
-    let nanos = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |time| time.as_nanos());
-    format!("{}-{nanos}-{run}", std::process::id())
 }
 
 impl Drop for ProcessTree {
@@ -396,7 +382,7 @@ mod tests {
         assert!(!still_running(&pid_file));
     }
 
-    // Windows has no process groups to leave (see `harness_platform::run_mark`).
+    // Not on Windows: there `harness_platform::run_mark` finds nothing yet.
     #[cfg(unix)]
     #[tokio::test]
     async fn what_an_agent_left_in_a_group_of_its_own_is_stopped() {

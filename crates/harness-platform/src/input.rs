@@ -114,9 +114,14 @@ mod tests {
     fn pseudo_terminal() -> (std::os::fd::OwnedFd, std::fs::File) {
         use rustix::pty::{grantpt, openpt, ptsname, unlockpt, OpenptFlags};
 
-        let window = openpt(OpenptFlags::RDWR | OpenptFlags::NOCTTY).unwrap();
-        // Without this, a program another test starts at the same moment
-        // inherits the window's end and keeps it open after `drop`.
+        // Without "close on exec", a long-lived program another test starts
+        // inherits the window's end and keeps it open after `drop`. Linux
+        // sets it at once; macOS only right after, which narrows the race.
+        #[cfg(target_os = "linux")]
+        let flags = OpenptFlags::RDWR | OpenptFlags::NOCTTY | OpenptFlags::CLOEXEC;
+        #[cfg(not(target_os = "linux"))]
+        let flags = OpenptFlags::RDWR | OpenptFlags::NOCTTY;
+        let window = openpt(flags).unwrap();
         rustix::io::fcntl_setfd(&window, rustix::io::FdFlags::CLOEXEC).unwrap();
         grantpt(&window).unwrap();
         unlockpt(&window).unwrap();

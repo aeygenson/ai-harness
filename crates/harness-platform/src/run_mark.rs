@@ -3,19 +3,30 @@
 //! group of its own, so a server it leaves in the background survives
 //! [`crate::process::kill_tree_of`].
 //!
-//! The run gets a mark in its environment ([`mark`]); every process it starts
-//! inherits it, whatever group or session it moves to. [`kill_marked`] stops
-//! all processes that carry the mark.
+//! The run gets a mark in its environment ([`new_mark`], [`mark`]); every
+//! process it starts inherits it, whatever group or session it moves to.
+//! [`kill_marked`] stops all processes of this user that carry the mark.
 //!
-//! - Linux: the mark is read from `/proc/<pid>/environ`.
-//! - macOS: from `ps -E`, which shows the environment of the user's own
-//!   processes.
-//! - Windows: not supported yet; there [`kill_marked`] does nothing.
+//! - Linux: the mark is read from `/proc/<pid>/environ`, and each process is
+//!   held by a pidfd from the check to the kill, so a process id that was
+//!   reused meanwhile is never hit.
+//! - macOS: the mark is read from `ps -E`. Between that look and `kill` a
+//!   process can end and its id be reused; the window is short, but it exists.
+//! - Windows: not supported yet; there [`kill_marked`] does nothing, and a
+//!   helper whose parent has ended is still missed (see `process`).
 //!
-//! A program that clears its children's environment drops the mark; its
-//! children are then found only through the process group, as before.
+//! Limits. The mark is only a strong hint, not a sandbox:
+//! - a program can drop it: clear its children's environment (`env -i`),
+//!   start them through a service manager (`systemd-run`, `launchctl`,
+//!   `docker`), or an agent can remove it on purpose;
+//! - a process whose environment cannot be read (another user, `sudo`) is
+//!   skipped;
+//! - a shared server the run started (a build daemon, a tmux server) carries
+//!   the mark, and is stopped with the run even if something else uses it.
 
-use std::process::{Command, Stdio};
+use std::process::Command;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 /// The environment variable that carries the mark. It holds no secret.
 pub const VARIABLE: &str = "HARNESS_RUN_MARK";
@@ -23,6 +34,19 @@ pub const VARIABLE: &str = "HARNESS_RUN_MARK";
 /// How many times [`kill_marked`] looks again: a process can start a child
 /// between the look and the kill, so one pass may miss it.
 const PASSES: usize = 5;
+
+/// A mark no other run has: this program's id, the time and a count.
+pub fn new_mark() -> String {
+    // The count is the one piece of state shared by all runs of this
+    // program: two runs started in the same instant (tests in parallel)
+    // still get different marks.
+    static RUNS: AtomicU64 = AtomicU64::new(0);
+    let run = RUNS.fetch_add(1, Ordering::Relaxed);
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |time| time.as_nanos());
+    format!("{}-{nanos}-{run}", std::process::id())
+}
 
 /// Gives `command` the mark `mark`, so [`kill_marked`] finds it and every
 /// process it starts.
@@ -35,57 +59,67 @@ pub fn mark<'a>(command: &'a mut Command, mark: &str) -> &'a mut Command {
 pub fn kill_marked(mark: &str) {
     let entry = format!("{VARIABLE}={mark}");
     for _ in 0..PASSES {
-        let pids = marked_pids(&entry);
-        if pids.is_empty() {
+        if kill_pass(&entry) == 0 {
             return;
         }
-        kill(&pids);
     }
 }
 
-/// The ids of the processes whose environment holds `entry` (`NAME=value`).
+/// One look at all processes: stops those whose environment holds `entry`
+/// (`NAME=value`) and returns how many it stopped.
 #[cfg(target_os = "linux")]
-fn marked_pids(entry: &str) -> Vec<u32> {
+fn kill_pass(entry: &str) -> usize {
+    use rustix::process::{pidfd_open, pidfd_send_signal, Pid, PidfdFlags, Signal};
+
     let Ok(folders) = std::fs::read_dir("/proc") else {
-        return Vec::new();
+        return 0;
     };
-    folders
-        .filter_map(|folder| folder.ok()?.file_name().to_str()?.parse::<u32>().ok())
-        .filter(|pid| {
-            // Another user's process cannot be read: that is not ours.
-            std::fs::read(format!("/proc/{pid}/environ"))
-                .is_ok_and(|environ| environ.split(|&b| b == 0).any(|v| v == entry.as_bytes()))
-        })
-        .collect()
+    let mut stopped = 0;
+    for folder in folders.flatten() {
+        let Some(pid) = folder.file_name().to_str().and_then(|n| n.parse().ok()) else {
+            continue;
+        };
+        let Some(pid) = Pid::from_raw(pid) else {
+            continue;
+        };
+        // Hold the process first, then check it: if the id was reused
+        // before `pidfd_open`, the check below reads the new process, which
+        // has no mark, and nothing is sent.
+        let Ok(handle) = pidfd_open(pid, PidfdFlags::empty()) else {
+            continue;
+        };
+        // Another user's process cannot be read: that is not ours.
+        let marked = std::fs::read(format!("/proc/{pid}/environ"))
+            .is_ok_and(|environ| environ.split(|&b| b == 0).any(|v| v == entry.as_bytes()));
+        if marked && pidfd_send_signal(&handle, Signal::KILL).is_ok() {
+            stopped += 1;
+        }
+    }
+    stopped
 }
 
-/// The ids of the processes whose environment holds `entry` (`NAME=value`).
+/// One look at all processes: stops those whose environment holds `entry`
+/// (`NAME=value`) and returns how many it stopped.
 #[cfg(target_os = "macos")]
-fn marked_pids(entry: &str) -> Vec<u32> {
+fn kill_pass(entry: &str) -> usize {
+    use std::process::Stdio;
+
     // `-E` adds the environment after the command, separated by spaces.
     let Ok(output) = Command::new("ps")
         .args(["-A", "-ww", "-E", "-o", "pid=,command="])
         .stderr(Stdio::null())
         .output()
     else {
-        return Vec::new();
+        return 0;
     };
-    String::from_utf8_lossy(&output.stdout)
+    let pids: Vec<String> = String::from_utf8_lossy(&output.stdout)
         .lines()
         .filter(|line| line.split(' ').any(|word| word == entry))
-        .filter_map(|line| line.split_whitespace().next()?.parse().ok())
-        .collect()
-}
-
-/// Windows is not supported yet: no process is found.
-#[cfg(not(any(target_os = "linux", target_os = "macos")))]
-fn marked_pids(_entry: &str) -> Vec<u32> {
-    Vec::new()
-}
-
-/// Stops the processes `pids` at once.
-fn kill(pids: &[u32]) {
-    let pids: Vec<String> = pids.iter().map(u32::to_string).collect();
+        .filter_map(|line| Some(line.split_whitespace().next()?.to_string()))
+        .collect();
+    if pids.is_empty() {
+        return 0;
+    }
     let _ = Command::new("kill")
         .args(["-KILL", "--"])
         .args(&pids)
@@ -93,6 +127,13 @@ fn kill(pids: &[u32]) {
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .status();
+    pids.len()
+}
+
+/// Windows is not supported yet: nothing is found.
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+fn kill_pass(_entry: &str) -> usize {
+    0
 }
 
 #[cfg(all(test, unix))]
@@ -144,23 +185,26 @@ mod tests {
             "perl -e 'setpgrp(0, 0); exec @ARGV' sleep 30 & echo $! > '{}'",
             pid_file.display()
         );
+        // Fresh marks: another test run on this machine has others.
+        let ours = new_mark();
+        let other = new_mark();
         let mut command = Command::new("sh");
         command.args(["-c", &script]);
-        mark(&mut command, "test-mark-1");
-        let mut shell = crate::process::own_group(&mut command).spawn().unwrap();
-        shell.wait().unwrap();
+        mark(&mut command, &ours);
+        crate::process::own_group(&mut command).status().unwrap();
         let pid = std::fs::read_to_string(&pid_file).unwrap();
         let pid = pid.trim().to_string();
-        // Wait until the sleep has left the shell's group; stopping that
-        // group then misses it.
         wait_for_own_group(&pid);
-        crate::process::kill_tree_of(shell.id());
-        assert!(still_running(&pid));
 
-        kill_marked("test-mark-2");
+        kill_marked(&other);
         assert!(still_running(&pid), "another mark must not stop it");
-        kill_marked("test-mark-1");
+        kill_marked(&ours);
 
         assert!(!still_running(&pid));
+    }
+
+    #[test]
+    fn every_mark_is_new() {
+        assert_ne!(new_mark(), new_mark());
     }
 }
