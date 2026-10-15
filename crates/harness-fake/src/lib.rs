@@ -30,7 +30,8 @@
 //! | `need-text FILE TEXT else CODE` | Exits with CODE unless FILE contains TEXT. |
 //! | `when-arg N VALUE COMMAND…` | Runs COMMAND when argument N is VALUE. |
 //! | `spawn-sleep SECONDS PIDFILE` | Starts a sleeping child (like `sleep 30 &`), saves its id. |
-//! | `wait` | Waits for the children started by `spawn-sleep`. |
+//! | `spawn-sleep-alone SECONDS PIDFILE` | Like `spawn-sleep`, but the child gets a process group of its own (Linux, macOS). |
+//! | `wait` | Waits for the children started by `spawn-sleep` and `spawn-sleep-alone`. |
 //! | `sleep SECONDS` | Sleeps; fractions are fine. |
 //! | `exit CODE` | Stops with that exit code. |
 //!

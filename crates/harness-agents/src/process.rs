@@ -4,6 +4,7 @@
 use std::io::ErrorKind;
 use std::path::Path;
 use std::process::{Command, ExitStatus, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Sender;
 use std::sync::Mutex;
 use std::time::Duration;
@@ -56,9 +57,11 @@ pub struct Finished {
 /// [`set_live_log`]), with `secrets` hidden. `Err` holds a short explanation
 /// for Lisa.
 ///
-/// The agent runs in its own process group. When it ends, times out, or the
+/// The agent runs in its own process group and with a mark in its
+/// environment (`harness_platform::run_mark`). When it ends, times out, or the
 /// harness stops waiting (Ctrl+C), everything it started is stopped too: a
-/// test run, a build or a server it left in the background.
+/// test run, a build or a server it left in the background, even in another
+/// process group. Windows finds only what is still linked to the agent.
 pub async fn run(
     mut command: Command,
     prompt: &str,
@@ -67,6 +70,10 @@ pub async fn run(
 ) -> Result<Finished, String> {
     let program = command.get_program().to_string_lossy().into_owned();
     harness_platform::process::own_group(&mut command);
+    // Some agents (Codex) move their commands to process groups of their
+    // own; the mark still finds them (see `harness_platform::run_mark`).
+    let mark = harness_platform::run_mark::new_mark();
+    harness_platform::run_mark::mark(&mut command, &mark);
     let mut command = tokio::process::Command::from(command);
     command
         .stdin(Stdio::piped())
@@ -78,7 +85,11 @@ pub async fn run(
         .spawn()
         .map_err(|e| format!("cannot start {program}: {e}"))?;
     // From here on, leaving this function in any way stops the whole tree.
-    let tree = child.id().map(ProcessTree);
+    let tree = child.id().map(|pid| ProcessTree {
+        pid,
+        mark,
+        stopped: AtomicBool::new(false),
+    });
     let stdin = child.stdin.take();
     let stdout = child.stdout.take();
     let stderr = child.stderr.take();
@@ -116,14 +127,30 @@ pub async fn run(
     }
 }
 
-/// The process group of a running agent. Dropping it stops the whole group,
-/// so it is stopped on every way out of [`run`], including when the caller
-/// stops waiting (the future is dropped).
-struct ProcessTree(u32);
+/// A running agent: its process group and the mark of everything it started.
+/// Dropping it stops them all, so they are stopped on every way out of
+/// [`run`], including when the caller stops waiting (the future is dropped).
+struct ProcessTree {
+    /// The agent's process id (on Linux and macOS also its process group).
+    pid: u32,
+    /// The mark in the environment of every process the agent started.
+    mark: String,
+    /// The group was already stopped: by a second time its id may belong to
+    /// another program.
+    stopped: AtomicBool,
+}
 
 impl ProcessTree {
     fn stop(&self) {
-        harness_platform::process::kill_tree_of(self.0);
+        // An atomic flag can be changed through a shared `&self` (the tree
+        // is borrowed by the waiting code and dropped at the end) and still
+        // lets the future move between threads.
+        if !self.stopped.swap(true, Ordering::Relaxed) {
+            harness_platform::process::kill_tree_of(self.pid);
+        }
+        // The mark is looked for every time: a second look catches what the
+        // first missed, and it never hits a process without the mark.
+        harness_platform::run_mark::kill_marked(&self.mark);
     }
 }
 
@@ -332,13 +359,14 @@ mod tests {
                 .unwrap();
             String::from_utf8_lossy(&output.stdout).contains(pid)
         } else {
-            // `kill -0` sends no signal, it only checks that the process exists.
-            Command::new("kill")
-                .args(["-0", pid])
-                .stderr(Stdio::null())
-                .status()
-                .unwrap()
-                .success()
+            // A stopped process nobody has reaped yet (state `Z`, left when
+            // its parent is gone) no longer runs.
+            let output = Command::new("ps")
+                .args(["-o", "stat=", "-p", pid])
+                .output()
+                .unwrap();
+            let state = String::from_utf8_lossy(&output.stdout);
+            !state.trim().is_empty() && !state.trim().starts_with('Z')
         }
     }
 
@@ -368,6 +396,25 @@ mod tests {
 
         assert_eq!(finished.stdout, "done\n");
         assert!(start.elapsed() < Duration::from_secs(10));
+        assert!(!still_running(&pid_file));
+    }
+
+    // Not on Windows: there `harness_platform::run_mark` finds nothing yet.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn what_an_agent_left_in_a_group_of_its_own_is_stopped() {
+        let dir = tempfile::tempdir().unwrap();
+        let pid_file = dir.path().join("pid");
+        // Like Codex: the helper moves to a process group of its own, so
+        // stopping the agent's group alone would miss it.
+        let script = format!("spawn-sleep-alone 30 {}\nprint done\n", pid_file.display());
+        let command = fake_agent(dir.path(), &script);
+
+        let finished = run(command, "", Duration::from_secs(20), &[])
+            .await
+            .unwrap();
+
+        assert_eq!(finished.stdout, "done\n");
         assert!(!still_running(&pid_file));
     }
 

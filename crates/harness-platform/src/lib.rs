@@ -5,6 +5,7 @@
 //! - [`env`]: the variables an agent inherits, and the ones a server may not set;
 //! - [`private`]: files and folders only Lisa can read;
 //! - [`process`]: stopping a program with everything it started, or becoming it;
+//! - [`run_mark`]: finding the processes an agent run started that left its group;
 //! - [`stop`]: noticing that the system asks the harness to stop (terminal closed);
 //! - [`open`]: opening an address in the browser;
 //! - [`program`]: finding a program by name (`codex.cmd` on Windows);
@@ -27,5 +28,6 @@ pub mod path;
 pub mod private;
 pub mod process;
 pub mod program;
+pub mod run_mark;
 pub mod stop;
 pub mod terminal;
