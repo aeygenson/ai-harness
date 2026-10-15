@@ -122,6 +122,7 @@ mod tests {
         #[cfg(not(target_os = "linux"))]
         let flags = OpenptFlags::RDWR | OpenptFlags::NOCTTY;
         let window = openpt(flags).unwrap();
+        #[cfg(not(target_os = "linux"))]
         rustix::io::fcntl_setfd(&window, rustix::io::FdFlags::CLOEXEC).unwrap();
         grantpt(&window).unwrap();
         unlockpt(&window).unwrap();

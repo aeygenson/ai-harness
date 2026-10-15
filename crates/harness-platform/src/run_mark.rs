@@ -9,20 +9,27 @@
 //!
 //! - Linux: the mark is read from `/proc/<pid>/environ`, and each process is
 //!   held by a pidfd from the check to the kill, so a process id that was
-//!   reused meanwhile is never hit.
+//!   reused meanwhile is never hit. A kernel without pidfd (before 5.3) gets
+//!   a plain kill right after the check, with the macOS risk below.
 //! - macOS: the mark is read from `ps -E`. Between that look and `kill` a
 //!   process can end and its id be reused; the window is short, but it exists.
-//! - Windows: not supported yet; there [`kill_marked`] does nothing, and a
-//!   helper whose parent has ended is still missed (see `process`).
+//! - Other systems (Windows): not supported yet; [`kill_marked`] does
+//!   nothing, and a helper whose parent has ended is still missed.
 //!
 //! Limits. The mark is only a strong hint, not a sandbox:
-//! - a program can drop it: clear its children's environment (`env -i`),
-//!   start them through a service manager (`systemd-run`, `launchctl`,
-//!   `docker`), or an agent can remove it on purpose;
-//! - a process whose environment cannot be read (another user, `sudo`) is
-//!   skipped;
+//! - a program can lose it: clear its children's environment (`env -i`; the
+//!   MCP servers Codex starts get a cleared one), overwrite it while setting
+//!   its process title (`postgres`, `nginx`, Perl's `$0 =`), start through a
+//!   service manager (`systemd-run`, `launchctl`, `docker`); an agent can
+//!   also remove it on purpose;
+//! - a process whose environment cannot be read is skipped: another user's,
+//!   `sudo`, or one that forbids it (`ssh-agent`, `gpg-agent`);
+//! - a harness started inside a run replaces the mark with its own, so its
+//!   agents are not found through the outer mark;
 //! - a shared server the run started (a build daemon, a tmux server) carries
-//!   the mark, and is stopped with the run even if something else uses it.
+//!   the mark, and is stopped with the run even if something else uses it;
+//! - reading the environment of a process stuck on a hung network drive can
+//!   block, and the harness waits with it.
 
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -69,7 +76,7 @@ pub fn kill_marked(mark: &str) {
 /// (`NAME=value`) and returns how many it stopped.
 #[cfg(target_os = "linux")]
 fn kill_pass(entry: &str) -> usize {
-    use rustix::process::{pidfd_open, pidfd_send_signal, Pid, PidfdFlags, Signal};
+    use rustix::process::{kill_process, pidfd_open, pidfd_send_signal, Pid, PidfdFlags, Signal};
 
     let Ok(folders) = std::fs::read_dir("/proc") else {
         return 0;
@@ -85,13 +92,19 @@ fn kill_pass(entry: &str) -> usize {
         // Hold the process first, then check it: if the id was reused
         // before `pidfd_open`, the check below reads the new process, which
         // has no mark, and nothing is sent.
-        let Ok(handle) = pidfd_open(pid, PidfdFlags::empty()) else {
-            continue;
-        };
+        let handle = pidfd_open(pid, PidfdFlags::empty());
         // Another user's process cannot be read: that is not ours.
         let marked = std::fs::read(format!("/proc/{pid}/environ"))
             .is_ok_and(|environ| environ.split(|&b| b == 0).any(|v| v == entry.as_bytes()));
-        if marked && pidfd_send_signal(&handle, Signal::KILL).is_ok() {
+        if !marked {
+            continue;
+        }
+        let killed = match &handle {
+            Ok(handle) => pidfd_send_signal(handle, Signal::KILL),
+            // An old kernel without pidfd: a plain kill right after the check.
+            Err(_) => kill_process(pid, Signal::KILL),
+        };
+        if killed.is_ok() {
             stopped += 1;
         }
     }
@@ -130,7 +143,7 @@ fn kill_pass(entry: &str) -> usize {
     pids.len()
 }
 
-/// Windows is not supported yet: nothing is found.
+/// Other systems (Windows) are not supported yet: nothing is found.
 #[cfg(not(any(target_os = "linux", target_os = "macos")))]
 fn kill_pass(_entry: &str) -> usize {
     0
@@ -160,41 +173,32 @@ mod tests {
         true
     }
 
-    /// Waits until process `pid` leads a process group of its own.
-    fn wait_for_own_group(pid: &str) {
-        for _ in 0..100 {
-            let output = Command::new("ps")
-                .args(["-o", "pgid=", "-p", pid])
-                .output()
-                .unwrap();
-            if String::from_utf8_lossy(&output.stdout).trim() == pid {
-                return;
-            }
-            std::thread::sleep(Duration::from_millis(20));
-        }
-        panic!("process {pid} never left the group");
+    /// Does process `pid` lead a process group of its own?
+    fn in_own_group(pid: &str) -> bool {
+        let output = Command::new("ps")
+            .args(["-o", "pgid=", "-p", pid])
+            .output()
+            .unwrap();
+        String::from_utf8_lossy(&output.stdout).trim() == pid
     }
 
     #[test]
     fn a_process_that_left_the_group_is_stopped_by_its_mark() {
         let dir = tempfile::tempdir().unwrap();
         let pid_file = dir.path().join("pid");
-        // The background `sleep` moves to a process group of its own (perl's
-        // `setpgrp`), as Codex does with its commands; the shell ends at once.
-        let script = format!(
-            "perl -e 'setpgrp(0, 0); exec @ARGV' sleep 30 & echo $! > '{}'",
-            pid_file.display()
-        );
+        // The fake starts a sleeping helper in a process group of its own,
+        // as Codex does with its commands, and ends at once.
+        let script = format!("spawn-sleep-alone 30 {}\n", pid_file.display());
+        let program = harness_fake::install(dir.path(), "agent", &script);
         // Fresh marks: another test run on this machine has others.
         let ours = new_mark();
         let other = new_mark();
-        let mut command = Command::new("sh");
-        command.args(["-c", &script]);
+        let mut command = Command::new(program);
         mark(&mut command, &ours);
         crate::process::own_group(&mut command).status().unwrap();
         let pid = std::fs::read_to_string(&pid_file).unwrap();
         let pid = pid.trim().to_string();
-        wait_for_own_group(&pid);
+        assert!(in_own_group(&pid));
 
         kill_marked(&other);
         assert!(still_running(&pid), "another mark must not stop it");

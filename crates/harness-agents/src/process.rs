@@ -4,6 +4,7 @@
 use std::io::ErrorKind;
 use std::path::Path;
 use std::process::{Command, ExitStatus, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Sender;
 use std::sync::Mutex;
 use std::time::Duration;
@@ -56,9 +57,11 @@ pub struct Finished {
 /// [`set_live_log`]), with `secrets` hidden. `Err` holds a short explanation
 /// for Lisa.
 ///
-/// The agent runs in its own process group. When it ends, times out, or the
+/// The agent runs in its own process group and with a mark in its
+/// environment (`harness_platform::run_mark`). When it ends, times out, or the
 /// harness stops waiting (Ctrl+C), everything it started is stopped too: a
-/// test run, a build or a server it left in the background.
+/// test run, a build or a server it left in the background, even in another
+/// process group. Windows finds only what is still linked to the agent.
 pub async fn run(
     mut command: Command,
     prompt: &str,
@@ -82,7 +85,11 @@ pub async fn run(
         .spawn()
         .map_err(|e| format!("cannot start {program}: {e}"))?;
     // From here on, leaving this function in any way stops the whole tree.
-    let tree = child.id().map(|pid| ProcessTree { pid, mark });
+    let tree = child.id().map(|pid| ProcessTree {
+        pid,
+        mark,
+        stopped: AtomicBool::new(false),
+    });
     let stdin = child.stdin.take();
     let stdout = child.stdout.take();
     let stderr = child.stderr.take();
@@ -128,10 +135,19 @@ struct ProcessTree {
     pid: u32,
     /// The mark in the environment of every process the agent started.
     mark: String,
+    /// Already stopped: a second stop would be slow, and the group's id may
+    /// by then belong to another program.
+    stopped: AtomicBool,
 }
 
 impl ProcessTree {
     fn stop(&self) {
+        // An atomic flag can be changed through a shared `&self` (the tree
+        // is borrowed by the waiting code and dropped at the end) and still
+        // lets the future move between threads.
+        if self.stopped.swap(true, Ordering::Relaxed) {
+            return;
+        }
         harness_platform::process::kill_tree_of(self.pid);
         harness_platform::run_mark::kill_marked(&self.mark);
     }
