@@ -125,9 +125,10 @@ mod tests {
 
     #[test]
     fn only_nvidia_turns_its_route_on_names_the_key_and_stops_web_search() {
-        assert!(Provider::DeepSeek
-            .patch_entries("deepseek-flash")
-            .is_empty());
+        assert_eq!(
+            Provider::DeepSeek.patch_entries("deepseek-flash"),
+            Vec::<Value>::new()
+        );
         let entries = Provider::Nvidia.patch_entries("z-ai/glm-5.3");
         let entry = |id: &str| entries.iter().find(|e| e["id"] == id).unwrap();
         let route = &entry("llm-pi-ai")["config"]["providers"]["nvidia"];
@@ -140,6 +141,6 @@ mod tests {
     #[test]
     fn only_deepseek_takes_levels() {
         assert_eq!(Provider::DeepSeek.efforts(), ["off", "low", "high", "max"]);
-        assert!(Provider::Nvidia.efforts().is_empty());
+        assert_eq!(Provider::Nvidia.efforts(), [] as [&str; 0]);
     }
 }
