@@ -7,7 +7,8 @@
 <p align="center">
   <b>A conductor for a team of AI coding agents.</b><br>
   It leads a task through Architect, Developer, Tester and Security roles,<br>
-  each played by a real console agent: Claude Code, Codex CLI, Antigravity CLI or DeepSeek Harness.
+  each played by a real console agent: Claude Code, Codex CLI, Antigravity CLI or DeepSeek Harness<br>
+  (with DeepSeek's models or NVIDIA's free ones).
 </p>
 
 <p align="center">
@@ -76,7 +77,7 @@ next. The harness then **trusts, but verifies**:
 
 | | |
 |---|---|
-| **Four agents, one interface** | Claude Code, OpenAI Codex CLI, Google Antigravity CLI and DeepSeek Harness, behind one Rust trait (plus a mock agent for tests). Choose an agent, model and effort level per role, per project. |
+| **Four agents, one interface** | Claude Code, OpenAI Codex CLI, Google Antigravity CLI and DeepSeek Harness (with DeepSeek's API or NVIDIA's free models), behind one Rust trait (plus a mock agent for tests). Choose an agent, model and effort level per role, per project. |
 | **Full-screen terminal UI** | `harness tui` (Ratatui) with tabs for Tasks, Roles, Skills, MCP, Plugins, Retro, Agents and Projects. Works with mouse and keyboard, in English and Russian, with five colour themes. |
 | **Skills** | Each role gets built-in instructions that work with any language or framework. Projects keep their own copies and add their own skills, shared by all agents. |
 | **MCP servers and plugins** | Give a role extra tools: MCP servers (local or on the web, with OAuth sign-in) and agent plugins from plugin catalogs. |

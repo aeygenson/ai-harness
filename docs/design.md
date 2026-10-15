@@ -281,6 +281,7 @@ MCP-серверы для каждой роли — раздел 5.5 (этап 6
 | `codex` | OpenAI Codex CLI | подписка ChatGPT | |
 | `antigravity` | Antigravity CLI (`agy`) | аккаунт Google / подписка Google AI Pro | |
 | `dsh` | DeepSeek Harness, собственный агент DeepSeek | тот же ключ API DeepSeek | раздел 5.4a |
+| `dsh+nvidia` | тот же DeepSeek Harness с моделями NVIDIA (build.nvidia.com) | бесплатный ключ API NVIDIA | раздел 5.4a |
 | `mock` | заранее записанный «агент» | бесплатно | для тестов всего цикла без интернета |
 
 **Подписки Лизы** (27.09.2026): Claude за $100 (Max), OpenAI за $100, Google AI Pro (Gemini Pro).
@@ -346,6 +347,7 @@ MCP-серверы для каждой роли — раздел 5.5 (этап 6
 | Claude Code | на Linux `~/.claude/.credentials.json`, на macOS — в Keychain | долгоживущий токен из `claude setup-token` → переменная `CLAUDE_CODE_OAUTH_TOKEN` (или файл `.credentials.json` в `CLAUDE_CONFIG_DIR`) |
 | Antigravity CLI | несколько служебных файлов в `~/.gemini/antigravity-cli/` и `~/.gemini/config/` (одного файла с токеном нет; проверено на agy 1.2.12) | скопировать всю сохранённую папку входа (без логов и истории) во временный `HOME` |
 | DeepSeek Harness | просто ключ API | `harness login deepseek` → `~/.harness/credentials/deepseek/`; перед ролью ключ кладётся в `.credentials.yaml` временной `DSH_HOME` (права 600), не в окружение |
+| DeepSeek Harness + NVIDIA | просто ключ API | `harness login nvidia` → `~/.harness/credentials/nvidia/`; дальше так же, как у DeepSeek |
 
 Точные имена файлов и флаги проверим на практике при написании каждого адаптера.
 
@@ -536,6 +538,24 @@ github.com/deepseek-ai/deepseek-harness, npm `@deepseek-ai/dsh`, нужен Node
 | Модели | тот же `GET /models` API DeepSeek, с уровнями `dsh` (по умолчанию `high`) |
 
 Что ещё не закрыто: сеть песочница `dsh` не ограничивает ни для одной роли.
+
+**Модели NVIDIA** (`agent = "dsh+nvidia"`). NVIDIA даёт бесплатный ключ API на
+build.nvidia.com: Kimi, GLM, Nemotron, Qwen и другие модели через API в формате OpenAI
+(`https://integrate.api.nvidia.com/v1`). Своего агента у NVIDIA нет, поэтому роль идёт
+через тот же `dsh`: в нём уже есть маршрут `nvidia` (`llm-pi-ai`). Отличия от `dsh`:
+
+| Что | Как |
+|-----|-----|
+| Вход | `harness login nvidia` (кнопка «Войти» у «DeepSeek Harness + NVIDIA») сохраняет ключ `nvapi-…` в `~/.harness/credentials/nvidia/`. Переменная `NVIDIA_API_KEY` в оболочке важнее сохранённого |
+| Ключ | в `.credentials.yaml` под именем `NVIDIA_API_KEY`; маршрут ссылается на это имя (`apiKeyEnv`), `dsh` берёт значение из файла, не из окружения (проверено на 0.2.0-rc.2) |
+| Настройки роли | `agent-default-model` с провайдером `nvidia` и запись `llm-pi-ai`, которая включает маршрут и перечисляет модель роли. Модель, которой нет в каталоге `dsh`, тоже запустится, но без уровней и с ограничениями `dsh` по умолчанию (окно 262 144 токена). Модель по умолчанию `moonshotai/kimi-k2.6` |
+| Поиск в интернете | выключен (`tool-web.search = false`, `web-search-deepseek` отключён): `dsh` ищет через API DeepSeek, ключа DeepSeek здесь нет, а из `.env` проекта он отправил бы запросы роли в DeepSeek. Чтение страниц (`web_fetch`) осталось, как у `dsh` |
+| Уровни | нет: с настройками каталога `dsh` его слой `pi-ai` не передаёт уровень в API NVIDIA (`supportsReasoningEffort: false`), так что уровень молча ничего бы не менял. Поэтому `effort` у `dsh+nvidia` Harness отклоняет до запуска, а список моделей уровней не предлагает |
+| Модели | `GET https://integrate.api.nvidia.com/v1/models` с сохранённым ключом. NVIDIA перечисляет все свои модели, и не только для чата. Ошибка ключа показывается со словами NVIDIA и советом войти снова |
+
+Ограничения бесплатного доступа: около 40 запросов в минуту на модель, в часы пик бывают
+ошибки 429; по условиям NVIDIA он для прототипов и разработки, не для продакшена; код
+проекта уходит на серверы NVIDIA.
 
 ### 5.5. MCP-серверы для ролей ✅ (этап 6b)
 
@@ -1282,7 +1302,8 @@ DeepSeek Harness — `reasoningEffort` в его файле настроек (`o
   модель по умолчанию;
 - Codex — `codex debug models`: модели, их уровни и уровень по умолчанию;
 - DeepSeek Harness — `GET https://api.deepseek.com/models` с сохранённым ключом
-  (ключ в закрытом файле, не в командной строке) и уровни `dsh`;
+  (ключ в закрытом файле, не в командной строке) и уровни `dsh`; с NVIDIA —
+  `GET https://integrate.api.nvidia.com/v1/models`, без уровней;
 - Antigravity — `agy models`; уровень у него часть имени модели
   (`gemini-3.8-flash-high`).
 

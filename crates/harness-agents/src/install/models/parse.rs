@@ -1,9 +1,13 @@
 //! Reading each agent's list of models from what it printed.
 
 use harness_core::models::Model;
+use harness_core::text;
 use serde_json::Value;
 
-use crate::adapters::dsh::DEFAULT_MODEL as DEEPSEEK_DEFAULT_MODEL;
+use crate::adapters::dsh::Provider;
+
+/// The longest error reason from an API shown to Lisa: one line is enough.
+const MAX_REASON_CHARS: usize = 300;
 
 /// Claude Code's answer to `initialize`: `response.models`. The entry
 /// `default` only names another model; that one becomes the default.
@@ -107,21 +111,36 @@ pub fn parse_codex(output: &str) -> Result<Vec<Model>, String> {
     Ok(models)
 }
 
-/// `DeepSeek`'s `GET /models`; no effort levels: reasoning is its own model.
-pub fn parse_deepseek(output: &str) -> Result<Vec<Model>, String> {
+/// The `GET /models` answer of a dsh `provider`'s API (`DeepSeek`, NVIDIA),
+/// in `OpenAI`'s format; without effort levels (see [`with_dsh_efforts`]).
+pub fn parse_api_models(output: &str, provider: Provider) -> Result<Vec<Model>, String> {
+    let vendor = provider;
     let json: Value = serde_json::from_str(output)
-        .map_err(|error| format!("DeepSeek gave no model list: {error}"))?;
+        .map_err(|error| format!("{vendor} gave no model list: {error}"))?;
     if let Some(message) = json["error"]["message"].as_str() {
-        return Err(format!("DeepSeek: {message}"));
+        return Err(format!("{vendor}: {message}"));
     }
-    let ids: Vec<String> = json["data"]
-        .as_array()
-        .into_iter()
-        .flatten()
+    // An error in another shape (NVIDIA's gateway has its own) has no list.
+    let Some(list) = json["data"].as_array() else {
+        // The gateway's own words, if any: untrusted, so one short clean line.
+        let reason = json["detail"]
+            .as_str()
+            .or(json["title"].as_str())
+            .map_or_else(String::new, |text| {
+                format!(": {}", text::safe_line(text, MAX_REASON_CHARS))
+            });
+        return Err(format!(
+            "{vendor} gave no model list{reason}; check the API key \
+             (sign in again on the Agents tab)"
+        ));
+    };
+    let ids: Vec<String> = list
+        .iter()
         .filter_map(|m| m["id"].as_str().map(str::to_string))
         .collect();
-    let default = if ids.iter().any(|id| id == DEEPSEEK_DEFAULT_MODEL) {
-        DEEPSEEK_DEFAULT_MODEL.to_string()
+    let wanted = provider.default_model();
+    let default = if ids.iter().any(|id| id == wanted) {
+        wanted.to_string()
     } else {
         ids.first().cloned().unwrap_or_default()
     };

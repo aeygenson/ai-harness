@@ -73,7 +73,9 @@ fn the_agents_tab_shows_the_catalog_with_what_is_installed() {
         "! Codex CLI",
         "○ Antigravity CLI",
         "○ GitHub Copilot CLI  · not implemented",
-        "Agents installed: 3 of",
+        // DeepSeek Harness, and NVIDIA's models inside it, count both.
+        "Agents installed: 4 of",
+        "✓ DeepSeek Harness + NVIDIA",
         "○ Claude Code + GLM",
         "✓ Installed: /bin/claude · version 2.1.300",
         "No login: press «Sign in».",
@@ -375,6 +377,16 @@ fn sign_in_is_offered_for_installed_agents_the_harness_runs() {
     app.agents.select(deepseek);
     key(&mut app, KeyCode::Char('l'));
     assert_eq!(app.sign_in.take().map(|(login, _)| login), Some("deepseek"));
+    // NVIDIA's models in it sign in with the NVIDIA key.
+    let nvidia = app
+        .agents
+        .statuses
+        .iter()
+        .position(|s| s.entry.id == "dsh+nvidia")
+        .unwrap();
+    app.agents.select(nvidia);
+    key(&mut app, KeyCode::Char('l'));
+    assert_eq!(app.sign_in.take().map(|(login, _)| login), Some("nvidia"));
     // Not installed, or only in the catalog: nothing to sign in to.
     for id in ["antigravity", "copilot"] {
         let index = app

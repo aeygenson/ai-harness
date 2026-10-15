@@ -198,5 +198,7 @@ fn a_new_skill_gets_a_file_and_can_be_chosen_on_roles() {
 
     click(&mut app, "2 Roles");
     click(&mut app, "developer  claude");
-    assert!(screen(&mut app).contains("[ ] rust-errors"));
+    // The role's panel lists five agents, then the models and the skills:
+    // the new skill is below row 30, so the screen is taller here.
+    assert!(screen_of_size(&mut app, 120, 40).contains("[ ] rust-errors"));
 }

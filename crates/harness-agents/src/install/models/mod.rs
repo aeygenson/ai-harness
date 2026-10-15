@@ -9,7 +9,8 @@
 //! - Codex: `codex debug models`;
 //! - Antigravity: `agy models`;
 //! - `DeepSeek` Harness: `GET /models` of `DeepSeek`'s API with the saved key,
-//!   with dsh's effort levels.
+//!   with dsh's effort levels; with NVIDIA, `GET /v1/models` of NVIDIA's API.
+//!   NVIDIA lists every model it serves, also ones not made for chat.
 
 mod parse;
 
@@ -21,18 +22,20 @@ use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use harness_core::config::AgentKind;
-use harness_core::models::ModelList;
+use harness_core::models::{Model, ModelList};
 
 use crate::adapters::codex::{keep_refreshed_login, AUTH_FILE};
-use crate::adapters::dsh::KEY_ENV as DEEPSEEK_KEY_ENV;
-use crate::install::credentials::{self, Secret};
+use crate::adapters::dsh::Provider;
+use crate::install::credentials;
 use crate::process::base_command;
-pub use parse::{parse_agy, parse_claude, parse_codex, parse_deepseek, with_dsh_efforts};
+pub use parse::{parse_agy, parse_api_models, parse_claude, parse_codex, with_dsh_efforts};
 
 /// How long one agent may take to answer.
 const TIME_LIMIT: Duration = Duration::from_secs(90);
 
 const DEEPSEEK_MODELS_URL: &str = "https://api.deepseek.com/models";
+/// NVIDIA's free API (build.nvidia.com), which dsh's `nvidia` route uses too.
+const NVIDIA_MODELS_URL: &str = "https://integrate.api.nvidia.com/v1/models";
 
 /// The programs to run; tests put fake ones here.
 #[derive(Debug, Clone)]
@@ -41,7 +44,7 @@ pub struct Programs {
     pub claude: PathBuf,
     /// The Codex CLI program.
     pub codex: PathBuf,
-    /// The `curl` program, which asks `DeepSeek`'s API for its models.
+    /// The `curl` program, which asks `DeepSeek`'s and NVIDIA's APIs for their models.
     pub curl: PathBuf,
     /// The Antigravity CLI program.
     pub agy: PathBuf,
@@ -131,26 +134,15 @@ pub fn ask(
             kept?;
             list
         }
-        AgentKind::Dsh => {
-            let key = match std::env::var(DEEPSEEK_KEY_ENV) {
-                Ok(key) if !key.trim().is_empty() => Secret::new(key.trim()),
-                _ => credentials::load_token(credentials_dir, "deepseek")
-                    .map_err(|_missing| "no DeepSeek API key saved".to_string())?,
-            };
-            // The key goes in a private file, not on the command line.
-            let header = tmp.join("header");
-            credentials::write_private(
-                &header,
-                &format!("Authorization: Bearer {}\n", key.expose()),
-            )
-            .map_err(|e| e.to_string())?;
-            let mut command = base_command(&programs.curl, tmp);
-            command
-                .args(["-sS", "-m", "60", "-H"])
-                .arg(format!("@{}", header.display()))
-                .arg(DEEPSEEK_MODELS_URL);
-            with_dsh_efforts(parse_deepseek(&run(command, "", &[key.expose()])?)?)
-        }
+        AgentKind::Dsh => with_dsh_efforts(ask_api(
+            Provider::DeepSeek,
+            credentials_dir,
+            &programs.curl,
+            tmp,
+        )?),
+        // Each NVIDIA model knows its own levels, and the list does not say
+        // which, so none are offered; the model's own default is used.
+        AgentKind::DshNvidia => ask_api(Provider::Nvidia, credentials_dir, &programs.curl, tmp)?,
         AgentKind::Antigravity => {
             let home = tmp.join("home");
             crate::adapters::antigravity::copy_dir(&credentials_dir.join("antigravity"), &home)
@@ -174,6 +166,34 @@ pub fn ask(
         fetched,
         models,
     })
+}
+
+/// Asks a dsh `provider`'s API for its models with `curl` (`GET /models`).
+/// The key goes in a private file in `tmp`, not on the command line.
+fn ask_api(
+    provider: Provider,
+    credentials_dir: &Path,
+    curl: &Path,
+    tmp: &Path,
+) -> Result<Vec<Model>, String> {
+    let key = credentials::load_api_key(credentials_dir, provider)
+        .map_err(|_missing| format!("no {provider} API key saved"))?;
+    let header = tmp.join("header");
+    credentials::write_private(
+        &header,
+        &format!("Authorization: Bearer {}\n", key.expose()),
+    )
+    .map_err(|e| e.to_string())?;
+    let url = match provider {
+        Provider::DeepSeek => DEEPSEEK_MODELS_URL,
+        Provider::Nvidia => NVIDIA_MODELS_URL,
+    };
+    let mut command = base_command(curl, tmp);
+    command
+        .args(["-sS", "-m", "60", "-H"])
+        .arg(format!("@{}", header.display()))
+        .arg(url);
+    parse_api_models(&run(command, "", &[key.expose()])?, provider)
 }
 
 /// Runs `command` with `input`, waits at most `TIME_LIMIT`, returns what it
@@ -254,6 +274,7 @@ pub(crate) fn run_for(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::install::credentials::Secret;
 
     #[test]
     fn claudes_initialize_answer_gives_models_and_levels() {
@@ -295,19 +316,69 @@ mod tests {
     }
 
     #[test]
-    fn deepseek_and_antigravity_lists_have_no_levels() {
-        let models = parse_deepseek(
-            r#"{"object":"list","data":[{"id":"deepseek-v4-pro"},{"id":"deepseek-flash"}]}"#,
+    fn nvidia_lists_its_models_without_levels_and_picks_its_default() {
+        let models = parse_api_models(
+            r#"{"object":"list","data":[{"id":"z-ai/glm-5.3"},{"id":"moonshotai/kimi-k2.6"}]}"#,
+            Provider::Nvidia,
         )
         .unwrap();
         assert!(models[1].default && !models[0].default);
-        assert!(parse_deepseek(r#"{"error":{"message":"bad key"}}"#)
-            .unwrap_err()
-            .contains("bad key"));
+        assert!(models.iter().all(|m| m.efforts.is_empty()));
+        let error = parse_api_models("<html>", Provider::Nvidia).unwrap_err();
+        assert!(error.starts_with("NVIDIA gave no model list"), "{error}");
+        let error = parse_api_models(
+            r#"{"status":401,"title":"Unauthorized","detail":"Bad key\u001b[31m"}"#,
+            Provider::Nvidia,
+        )
+        .unwrap_err();
+        assert!(error.contains(": Bad key"), "{error}");
+        assert!(error.contains("sign in again"), "{error}");
+        assert!(!error.contains('\u{1b}'), "{error}");
+    }
+
+    #[test]
+    fn nvidia_is_asked_with_its_own_key_in_a_header_file() {
+        let creds = tempfile::tempdir().unwrap();
+        let bin = tempfile::tempdir().unwrap();
+        credentials::save_token(creds.path(), "nvidia", &Secret::new("nvapi-secret")).unwrap();
+        let programs = Programs {
+            // `-sS -m 60 -H @<file> <url>`: the key must be in the file, the
+            // URL must be NVIDIA's. (`NVIDIA_API_KEY` in the shell running
+            // the tests would win over the saved key, so only its place is checked.)
+            curl: harness_fake::install(
+                bin.path(),
+                "curl",
+                r#"need-text ${5#@} Authorization: else 4
+need-args -sS -m 60 -H ${5} https://integrate.api.nvidia.com/v1/models else 5
+print {"data":[{"id":"moonshotai/kimi-k2.6"}]}"#,
+            ),
+            ..Programs::default()
+        };
+        let list = ask(AgentKind::DshNvidia, creds.path(), &programs).unwrap();
+        assert_eq!(list.agent, AgentKind::DshNvidia);
+        assert_eq!(list.models[0].id, "moonshotai/kimi-k2.6");
+    }
+
+    #[test]
+    fn deepseek_and_antigravity_lists_have_no_levels() {
+        let models = parse_api_models(
+            r#"{"object":"list","data":[{"id":"deepseek-v4-pro"},{"id":"deepseek-flash"}]}"#,
+            Provider::DeepSeek,
+        )
+        .unwrap();
+        assert!(models[1].default && !models[0].default);
+        assert!(
+            parse_api_models(r#"{"error":{"message":"bad key"}}"#, Provider::DeepSeek)
+                .unwrap_err()
+                .contains("bad key")
+        );
 
         let dsh = with_dsh_efforts(
-            parse_deepseek(r#"{"data":[{"id":"deepseek-flash"},{"id":"deepseek-v4-pro"}]}"#)
-                .unwrap(),
+            parse_api_models(
+                r#"{"data":[{"id":"deepseek-flash"},{"id":"deepseek-v4-pro"}]}"#,
+                Provider::DeepSeek,
+            )
+            .unwrap(),
         );
         assert_eq!(dsh[1].efforts, ["off", "low", "high", "max"]);
         assert_eq!(dsh[0].default_effort.as_deref(), Some("high"));
@@ -383,6 +454,11 @@ print {"models":[{"slug":"gpt-x","visibility":"list","supported_reasoning_levels
             .into_iter()
             .map(|(agent, _)| agent)
             .collect();
-        assert_eq!(asked, [AgentKind::Codex, AgentKind::Dsh]);
+        // A key in the shell running the tests counts as a login too.
+        let mut expected = vec![AgentKind::Codex, AgentKind::Dsh];
+        if credentials::has_login(creds.path(), AgentKind::DshNvidia) {
+            expected.push(AgentKind::DshNvidia);
+        }
+        assert_eq!(asked, expected);
     }
 }

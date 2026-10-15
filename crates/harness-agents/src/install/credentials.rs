@@ -8,6 +8,8 @@ use std::path::{Path, PathBuf};
 
 use harness_core::config::AgentKind;
 
+use crate::adapters::dsh::Provider;
+
 const TOKEN_FILE: &str = "oauth-token";
 
 /// Lives in `harness_core`, because MCP server settings carry secrets too.
@@ -34,19 +36,40 @@ pub fn load_token(dir: &Path, agent: &str) -> io::Result<Secret> {
     Ok(Secret::new(clean(&text)))
 }
 
-/// Is a login for `agent` (as `harness.toml` names it) saved? The same
-/// places the agents are started from; nothing is read beyond "is it there".
+/// Is a login for `agent` (as `harness.toml` names it) there? The same
+/// places the agents are started from: for dsh that is also a key in Lisa's
+/// shell, and its key is read (a blank one does not count); for the others
+/// nothing is read beyond "is it there".
 pub fn has_login(dir: &Path, agent: AgentKind) -> bool {
     match agent {
         AgentKind::Claude => dir.join("claude").join(TOKEN_FILE).is_file(),
         AgentKind::Codex => dir.join("codex").join("auth.json").is_file(),
-        AgentKind::Dsh => {
-            dir.join("deepseek").join(TOKEN_FILE).is_file()
-                || std::env::var(crate::adapters::dsh::KEY_ENV)
-                    .is_ok_and(|key| !key.trim().is_empty())
-        }
+        AgentKind::Dsh => load_api_key(dir, Provider::DeepSeek).is_ok(),
+        AgentKind::DshNvidia => load_api_key(dir, Provider::Nvidia).is_ok(),
         AgentKind::Antigravity => dir.join("antigravity/.gemini/antigravity-cli").is_dir(),
     }
+}
+
+/// The API key of a dsh `provider`: one in Lisa's shell wins; otherwise the
+/// one «Sign in» saved. Fails when there is neither, or it is blank.
+pub fn load_api_key(dir: &Path, provider: Provider) -> io::Result<Secret> {
+    api_key_from(std::env::var(provider.key_env()).ok(), dir, provider)
+}
+
+/// [`load_api_key`] with the shell's value given, so tests do not depend on
+/// Lisa's environment.
+fn api_key_from(shell: Option<String>, dir: &Path, provider: Provider) -> io::Result<Secret> {
+    if let Some(key) = shell_key(shell) {
+        return Ok(key);
+    }
+    let saved = load_token(dir, provider.agent().login_name())?;
+    if saved.expose().is_empty() {
+        return Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            "the saved key is blank",
+        ));
+    }
+    Ok(saved)
 }
 
 /// Whose login `agent` needs: `DeepSeek` Harness needs the `DeepSeek` key. A
@@ -92,12 +115,32 @@ pub fn secret_names(dir: &Path) -> io::Result<Vec<String>> {
     Ok(names)
 }
 
-/// The saved tokens (Claude Code, `DeepSeek`) and MCP secrets, to hide
-/// them in text that leaves the computer. What cannot be read is skipped.
+/// A key from Lisa's shell, cleaned like a saved one; `None` when blank.
+fn shell_key(value: Option<String>) -> Option<Secret> {
+    value
+        .map(|key| clean(&key))
+        .filter(|key| !key.is_empty())
+        .map(Secret::new)
+}
+
+/// The tokens and API keys the agents use (Claude Code, `DeepSeek`, NVIDIA)
+/// and MCP secrets, to hide them in text that leaves the computer: both the
+/// saved key and one in Lisa's shell, since either may be in use. What cannot
+/// be read is skipped.
 pub fn saved_secrets(dir: &Path) -> Vec<Secret> {
-    let tokens = ["claude", "deepseek"]
+    secrets_with(dir, &|name| std::env::var(name).ok())
+}
+
+/// [`saved_secrets`] with `shell` looking up a variable, so tests do not
+/// depend on Lisa's environment.
+fn secrets_with(dir: &Path, shell: &dyn Fn(&str) -> Option<String>) -> Vec<Secret> {
+    let saved = ["claude", "deepseek", "nvidia"]
         .into_iter()
-        .filter_map(|agent| load_token(dir, agent).ok());
+        .filter_map(|login| load_token(dir, login).ok());
+    let shell = [Provider::DeepSeek, Provider::Nvidia]
+        .into_iter()
+        .filter_map(|provider| shell_key(shell(provider.key_env())));
+    let tokens = saved.chain(shell);
     let secrets = secret_names(dir)
         .unwrap_or_default()
         .into_iter()
@@ -135,6 +178,54 @@ mod tests {
         save_token(dir, "deepseek", &Secret::new("k")).unwrap();
         assert!(has_login(dir, AgentKind::Dsh));
         assert_eq!(login_name("dsh"), "deepseek");
+        save_token(dir, "nvidia", &Secret::new("nvapi-k")).unwrap();
+        assert!(has_login(dir, AgentKind::DshNvidia));
+        assert_eq!(login_name("dsh+nvidia"), "nvidia");
+    }
+
+    #[test]
+    fn a_key_in_the_shell_wins_and_a_blank_one_falls_back_to_the_saved_one() {
+        let dir = tempfile::tempdir().unwrap();
+        let dir = dir.path();
+        let nvidia = Provider::Nvidia;
+        api_key_from(None, dir, nvidia).unwrap_err();
+        save_token(dir, "nvidia", &Secret::new("nvapi-saved")).unwrap();
+        let key = |shell: Option<&str>| {
+            api_key_from(shell.map(str::to_string), dir, nvidia)
+                .unwrap()
+                .expose()
+                .to_string()
+        };
+        assert_eq!(key(None), "nvapi-saved");
+        assert_eq!(key(Some(" nvapi-shell \n")), "nvapi-shell");
+        assert_eq!(key(Some("  ")), "nvapi-saved");
+        // A blank saved key is no key.
+        save_token(dir, "nvidia", &Secret::new("")).unwrap();
+        api_key_from(None, dir, nvidia).unwrap_err();
+        // The DeepSeek key is looked up in its own folder.
+        api_key_from(None, dir, Provider::DeepSeek).unwrap_err();
+    }
+
+    #[test]
+    fn every_saved_key_is_hidden() {
+        let dir = tempfile::tempdir().unwrap();
+        save_token(dir.path(), "nvidia", &Secret::new("nvapi-saved")).unwrap();
+        save_token(dir.path(), "deepseek", &Secret::new("sk-saved")).unwrap();
+        let hidden: Vec<String> = saved_secrets(dir.path())
+            .iter()
+            .map(|s| s.expose().to_string())
+            .collect();
+        assert!(hidden.contains(&"nvapi-saved".to_string()), "{hidden:?}");
+        assert!(hidden.contains(&"sk-saved".to_string()), "{hidden:?}");
+
+        // A key in the shell is hidden too, cleaned like a saved one.
+        let shell = |name: &str| (name == "NVIDIA_API_KEY").then(|| " nvapi-sh\nell ".to_string());
+        let hidden: Vec<String> = secrets_with(dir.path(), &shell)
+            .iter()
+            .map(|s| s.expose().to_string())
+            .collect();
+        assert!(hidden.contains(&"nvapi-shell".to_string()), "{hidden:?}");
+        assert!(hidden.contains(&"nvapi-saved".to_string()), "{hidden:?}");
     }
 
     #[test]

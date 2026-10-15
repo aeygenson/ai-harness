@@ -180,7 +180,13 @@ fn screen(app: &mut App) -> String {
 /// The screen drawn `width` columns wide: wide enough for a temporary folder
 /// path, which on macOS is long (`/private/var/folders/…/T/…`).
 fn screen_of_width(app: &mut App, width: u16) -> String {
-    let mut terminal = Terminal::new(TestBackend::new(width, 30)).unwrap();
+    screen_of_size(app, width, 30)
+}
+
+/// The screen drawn `width` columns wide and `height` rows high, for a panel
+/// longer than the usual 30 rows.
+fn screen_of_size(app: &mut App, width: u16, height: u16) -> String {
+    let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
     terminal.draw(|frame| app.draw(frame)).unwrap();
     let buffer = terminal.backend().buffer();
     let width = usize::from(buffer.area.width);
