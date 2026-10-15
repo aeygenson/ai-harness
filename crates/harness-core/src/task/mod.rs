@@ -187,6 +187,16 @@ impl TaskState {
         }
     }
 
+    /// Gives the task `extra` more rounds than it has used so far.
+    ///
+    /// Counting from the rounds already used, not from the old limit, means a
+    /// task that went past its limit with Lisa's help still gets all `extra`
+    /// rounds. Only the limit changes; the stage stays as it is.
+    pub fn add_rounds(&mut self, extra: u32) {
+        let used = self.round.saturating_sub(1);
+        self.max_rounds = self.max_rounds.max(used).saturating_add(extra);
+    }
+
     /// Who must write the next handoff, or `None` if the task is done.
     pub fn expected_author(&self) -> Option<Role> {
         match self.stage {
@@ -483,6 +493,61 @@ mod tests {
         ))
         .unwrap();
         assert_eq!(task.stage, Stage::Working(Role::Developer));
+    }
+
+    #[test]
+    fn more_rounds_let_the_roles_go_on_past_the_old_limit() {
+        // Arrange: the tester rejected the work in the last allowed round.
+        let mut task = new_task();
+        task.round = DEFAULT_MAX_ROUNDS;
+        task.stage = Stage::Working(Role::Tester);
+        task.apply(&handoff(
+            Role::Tester,
+            DEFAULT_MAX_ROUNDS,
+            Verdict::Rejected,
+            NextStep::To(Role::Developer),
+        ))
+        .unwrap();
+        assert_eq!(
+            task.stage,
+            Stage::WaitingForHuman(WaitReason::RoundLimitReached)
+        );
+
+        // Act: Lisa adds rounds and sends the work back to the developer.
+        task.add_rounds(5);
+        let round = task.round;
+        task.apply(&handoff(
+            Role::Human,
+            round,
+            Verdict::Approved,
+            NextStep::To(Role::Developer),
+        ))
+        .unwrap();
+        task.apply(&handoff(
+            Role::Developer,
+            round,
+            Verdict::Approved,
+            NextStep::To(Role::Tester),
+        ))
+        .unwrap();
+
+        // Assert: the developer's handoff goes on to the tester.
+        assert_eq!(task.max_rounds, DEFAULT_MAX_ROUNDS + 5);
+        assert_eq!(task.stage, Stage::Working(Role::Tester));
+    }
+
+    #[test]
+    fn more_rounds_count_from_the_rounds_already_used() {
+        // A task Lisa pushed well past its limit still gets all the new rounds.
+        let mut task = new_task();
+        task.round = 9;
+        task.add_rounds(5);
+        assert_eq!(task.max_rounds, 13);
+
+        // A task far from its limit keeps the rounds it had, plus the new ones.
+        let mut task = new_task();
+        task.add_rounds(5);
+        assert_eq!(task.max_rounds, DEFAULT_MAX_ROUNDS + 5);
     }
 
     #[test]

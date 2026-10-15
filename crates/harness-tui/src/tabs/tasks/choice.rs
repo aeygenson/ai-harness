@@ -9,6 +9,10 @@ use harness_core::task::{Stage, WaitReason};
 use super::tab::TasksTab;
 use crate::tabs::tasks::runner::RunChoice;
 
+/// How many rounds «more rounds» adds: as many as a new task gets by default,
+/// enough for a few more review cycles without letting the roles loop forever.
+pub const MORE_ROUNDS: u32 = harness_core::task::DEFAULT_MAX_ROUNDS;
+
 impl TasksTab {
     /// Everything «To» lists, and whether it can be chosen now. The roles
     /// are always listed, so it is clear who can get a message; they are
@@ -17,8 +21,12 @@ impl TasksTab {
         let stage = self.current().map(|t| t.state.stage);
         let waiting = matches!(stage, Some(Stage::WaitingForHuman(_)));
         let mut items = vec![(Choice::NewTask, true)];
-        if let Some(Stage::Working(role)) = stage {
-            items.push((Choice::Continue(role), true));
+        match stage {
+            Some(Stage::Working(role)) => items.push((Choice::Continue(role), true)),
+            Some(Stage::WaitingForHuman(WaitReason::RoundLimitReached)) => {
+                items.push((Choice::MoreRounds(self.after_round_limit()), true));
+            }
+            _ => {}
         }
         for &role in self.scenario.roles() {
             items.push((Choice::Role(role), waiting));
@@ -81,13 +89,20 @@ impl TasksTab {
             }
             Stage::WaitingForHuman(WaitReason::RoleAskedForHelp(role)) => Choice::Role(role),
             Stage::WaitingForHuman(WaitReason::RoundLimitReached) => {
-                let suggested = task.steps.last().and_then(|s| match s.handoff.next_role {
-                    NextStep::To(role) if role != Role::Human => Some(role),
-                    _ => None,
-                });
-                Choice::Role(suggested.unwrap_or(Role::Developer))
+                Choice::Role(self.after_round_limit())
             }
         }
+    }
+
+    /// The role the work was going to when the round limit stopped it; the
+    /// developer when the last step does not say.
+    fn after_round_limit(&self) -> Role {
+        let last = self.current().and_then(|t| t.steps.last());
+        let suggested = last.and_then(|s| match s.handoff.next_role {
+            NextStep::To(role) if role != Role::Human => Some(role),
+            _ => None,
+        });
+        suggested.unwrap_or(Role::Developer)
     }
 
     /// A new task, or a new step in it, brings back the default choice.
@@ -149,7 +164,7 @@ impl TasksTab {
     pub fn target(&self) -> Option<Role> {
         match self.choice {
             Choice::NewTask => Some(Role::Architect),
-            Choice::Role(role) | Choice::Continue(role) => Some(role),
+            Choice::Role(role) | Choice::Continue(role) | Choice::MoreRounds(role) => Some(role),
             Choice::Finish | Choice::Publish | Choice::Merge => None,
         }
     }
@@ -274,6 +289,9 @@ pub enum Choice {
     Role(Role),
     /// A role stopped part-way: run it again.
     Continue(Role),
+    /// The task hit its round limit: give it `MORE_ROUNDS` more and send
+    /// the work on to this role.
+    MoreRounds(Role),
     /// Approve and finish the task.
     Finish,
     /// Send the done task to GitHub: push its branch and open its pull request.

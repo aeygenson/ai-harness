@@ -8,7 +8,7 @@ use harness_core::task::handoff::{NextStep, Role, Verdict};
 use harness_core::task::orchestrator::{self, StopReason};
 use harness_core::task::{Stage, WaitReason};
 
-use super::choice::Choice;
+use super::choice::{Choice, MORE_ROUNDS};
 use super::github::github_text;
 use super::steps::sized_list;
 use super::tab::{Focus, TasksTab};
@@ -57,14 +57,24 @@ impl TasksTab {
                     },
                     next: NextStep::To(role),
                     notes,
+                    extra_rounds: 0,
                 }
             }
+            (Choice::MoreRounds(role), Some((task, stage))) => Request::Decide {
+                task,
+                seen: stage,
+                verdict: Verdict::Approved,
+                next: NextStep::To(role),
+                notes,
+                extra_rounds: MORE_ROUNDS,
+            },
             (Choice::Finish, Some((task, stage))) => Request::Decide {
                 task,
                 seen: stage,
                 verdict: Verdict::Approved,
                 next: NextStep::Done,
                 notes,
+                extra_rounds: 0,
             },
             (Choice::Continue(_), Some((task, _))) => Request::Continue(task),
             (Choice::Publish, Some((task, _))) => Request::Publish(task),
