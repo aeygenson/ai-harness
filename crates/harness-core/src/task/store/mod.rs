@@ -270,6 +270,15 @@ impl TaskStore {
         Ok(())
     }
 
+    /// Gives the task `extra` more rounds and saves the new limit in `state.json`.
+    pub fn add_rounds(&self, state: &mut TaskState, extra: u32) -> Result<(), StoreError> {
+        let mut next = state.clone();
+        next.add_rounds(extra);
+        self.save_state(&next)?;
+        *state = next;
+        Ok(())
+    }
+
     /// The task's folder, for example `runs/task-001`.
     pub fn dir(&self) -> &Path {
         &self.dir
@@ -364,6 +373,18 @@ mod tests {
         let description = fs::read_to_string(store.dir().join("task.md")).unwrap();
         assert_eq!(description, "Build a parser");
         assert!(store.dir().join("state.json").exists());
+    }
+
+    #[test]
+    fn added_rounds_are_saved_in_the_state_file() {
+        let runs = tempfile::tempdir().unwrap();
+        let (store, mut state) = new_task(runs.path());
+
+        store.add_rounds(&mut state, 5).unwrap();
+
+        let (_, reopened) = TaskStore::open(runs.path(), "task-001").unwrap();
+        assert_eq!(state.max_rounds, DEFAULT_MAX_ROUNDS + 5);
+        assert_eq!(reopened, state);
     }
 
     #[test]

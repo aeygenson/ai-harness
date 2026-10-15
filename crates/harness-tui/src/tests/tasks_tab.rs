@@ -192,6 +192,57 @@ fn the_to_list_offers_the_roles_and_finishing() {
 }
 
 #[test]
+fn more_rounds_raise_the_limit_and_send_the_work_on() {
+    use harness_core::task::{Stage, WaitReason};
+    let env = Env::new();
+    let (root, mut app) = empty_project(&env);
+    // A task with a limit of one round: the tester's rejection stops it.
+    let repo = Repo::open(&root).unwrap();
+    let (store, mut state) =
+        orchestrator::create_task(&repo, "task-001", "Build a parser", Workflow::Task, 1).unwrap();
+    let steps = [
+        (Role::Architect, Verdict::Approved, Role::Human),
+        (Role::Human, Verdict::Approved, Role::Developer),
+        (Role::Developer, Verdict::Approved, Role::Tester),
+        (Role::Tester, Verdict::Rejected, Role::Developer),
+    ];
+    for (role, verdict, next) in steps {
+        let mut step = handoff(role, verdict, NextStep::To(next), "step");
+        if verdict == Verdict::Rejected {
+            step.issues = vec![Issue {
+                severity: Severity::High,
+                location: None,
+                description: "Panics on empty input".into(),
+            }];
+        }
+        store.record(&mut state, &step, "notes").unwrap();
+    }
+    repo.commit_all("task at its round limit").unwrap();
+    key(&mut app, KeyCode::F(5));
+    assert_eq!(
+        stage(&app),
+        Stage::WaitingForHuman(WaitReason::RoundLimitReached)
+    );
+
+    click(&mut app, " To: developer ▾ ");
+    click(&mut app, "developer · 5 more rounds");
+    assert!(screen(&mut app).contains(" To: developer · 5 more rounds ▾ "));
+    click(&mut app, "Write here");
+    type_text(&mut app, "Try once more");
+    send(&mut app);
+    wait(&mut app);
+
+    // The roles went on to the end instead of stopping at the old limit.
+    assert_eq!(stage(&app), Stage::Done);
+    let (_, state) = TaskStore::open(&root.join(".harness/runs"), "task-001").unwrap();
+    assert_eq!(state.max_rounds, 6);
+    let steps = store.steps().unwrap();
+    assert_eq!(steps[4].handoff.role, Role::Human);
+    assert_eq!(steps[4].handoff.next_role, NextStep::To(Role::Developer));
+    assert_eq!(steps.last().unwrap().handoff.role, Role::Security);
+}
+
+#[test]
 fn a_missing_login_stops_before_anything_is_saved() {
     let env = Env::new();
     let (root, mut app) = empty_project(&env);

@@ -48,6 +48,8 @@ pub enum Request {
         verdict: Verdict,
         next: NextStep,
         notes: String,
+        /// Rounds added to the task's limit before the decision; 0 for none.
+        extra_rounds: u32,
     },
     /// A role stopped part-way (a limit, a failure): run the task again.
     Continue(String),
@@ -276,6 +278,7 @@ fn work(job: Job, events: &Sender<Event>, stop: oneshot::Receiver<()>) -> Result
             verdict,
             next,
             notes,
+            extra_rounds,
         } => {
             let (store, mut state) = TaskStore::open(&runs, &task).map_err(|e| text(&e))?;
             if state.stage != seen {
@@ -283,6 +286,12 @@ fn work(job: Job, events: &Sender<Event>, stop: oneshot::Receiver<()>) -> Result
                     "{task} has moved on in its branch {}; look at it again and decide",
                     branch::task_branch(&task)
                 ));
+            }
+            // The new limit is saved first, so the decision's commit carries it.
+            if extra_rounds > 0 {
+                store
+                    .add_rounds(&mut state, extra_rounds)
+                    .map_err(|e| text(&e))?;
             }
             orchestrator::record_human_decision(&repo, &store, &mut state, verdict, next, &notes)
                 .map_err(|e| text(&e))?;

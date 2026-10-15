@@ -6,7 +6,7 @@ use ratatui::text::Line;
 use ratatui::widgets::{ListItem, Paragraph};
 use ratatui::Frame;
 
-use super::choice::{Choice, Menu};
+use super::choice::{Choice, Menu, MORE_ROUNDS};
 use super::draw::draw_list;
 use super::tab::{Focus, TasksTab};
 use crate::ui::i18n::I18n;
@@ -20,6 +20,10 @@ impl TasksTab {
             Choice::NewTask => tr.t("tasks.choice_new").to_string(),
             Choice::Role(role) => role.as_str().to_string(),
             Choice::Continue(role) => tr.f("tasks.choice_continue", &[("role", &role)]),
+            Choice::MoreRounds(role) => tr.f(
+                "tasks.choice_more_rounds",
+                &[("role", &role), ("rounds", &MORE_ROUNDS)],
+            ),
             Choice::Finish => tr.t("tasks.choice_finish").to_string(),
             Choice::Publish => tr.t("tasks.choice_publish").to_string(),
             Choice::Merge => tr.t("tasks.choice_merge").to_string(),
