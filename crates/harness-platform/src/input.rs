@@ -115,6 +115,9 @@ mod tests {
         use rustix::pty::{grantpt, openpt, ptsname, unlockpt, OpenptFlags};
 
         let window = openpt(OpenptFlags::RDWR | OpenptFlags::NOCTTY).unwrap();
+        // Without this, a program another test starts at the same moment
+        // inherits the window's end and keeps it open after `drop`.
+        rustix::io::fcntl_setfd(&window, rustix::io::FdFlags::CLOEXEC).unwrap();
         grantpt(&window).unwrap();
         unlockpt(&window).unwrap();
         let name = ptsname(&window, Vec::new()).unwrap();

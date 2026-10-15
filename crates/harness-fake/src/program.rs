@@ -129,7 +129,8 @@ impl Fake {
                     self.run(&command, rest);
                 }
             }
-            "spawn-sleep" => self.spawn_sleep(words[0], words[1]),
+            "spawn-sleep" => self.spawn_sleep(words[0], words[1], false),
+            "spawn-sleep-alone" => self.spawn_sleep(words[0], words[1], true),
             "wait" => {
                 for helper in &mut self.helpers {
                     let _ = helper.wait();
@@ -153,11 +154,16 @@ impl Fake {
     }
 
     /// Starts a copy of itself that only sleeps and keeps standard output
-    /// open, like `sleep 30 &` in a shell, and saves its process id.
-    fn spawn_sleep(&mut self, seconds: &str, pid_file: &str) {
+    /// open, like `sleep 30 &` in a shell, and saves its process id. With
+    /// `alone` it gets a process group of its own.
+    fn spawn_sleep(&mut self, seconds: &str, pid_file: &str, alone: bool) {
         let me = env::current_exe().expect("the fake knows where it is");
-        let helper = Command::new(me)
-            .env(SLEEP_VARIABLE, seconds)
+        let mut command = Command::new(me);
+        command.env(SLEEP_VARIABLE, seconds);
+        if alone {
+            own_group(&mut command);
+        }
+        let helper = command
             .spawn()
             .unwrap_or_else(|e| fail(&format!("cannot start the helper: {e}")));
         save(pid_file, &helper.id().to_string());
@@ -273,4 +279,16 @@ fn exit(code: i32) -> ! {
 fn fail(message: &str) -> ! {
     err(&format!("harness-fake: {message}\n"));
     process::exit(101)
+}
+
+/// Puts `command` in a process group of its own, as Codex does with the
+/// commands it runs. Windows has no process groups: there nothing changes.
+fn own_group(command: &mut Command) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        command.process_group(0);
+    }
+    #[cfg(not(unix))]
+    let _ = command;
 }
