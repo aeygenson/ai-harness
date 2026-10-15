@@ -2,10 +2,11 @@
 //! putting it in the place of this program (`harness update`, «Update
 //! Harness» in the TUI).
 //!
-//! Only a program built by the release workflow replaces itself: that build
-//! sets `HARNESS_RELEASE_TARGET` (for example `x86_64-unknown-linux-musl`),
-//! which also names the archive to download. A harness built from the source
-//! (`cargo install`, `install.sh --dev`) is updated the way it was built.
+//! A program built by the release workflow downloads the newest release:
+//! that build sets `HARNESS_RELEASE_TARGET` (for example
+//! `x86_64-unknown-linux-musl`), which also names the archive to download. A
+//! harness built from the source (`cargo install`, `install.sh --dev`) is
+//! updated the way it was built, from its git folder (`source.rs`).
 //!
 //! Each release carries `version.txt` (its number), `SHA256SUMS.txt` and one
 //! archive per system. The archive is checked against `SHA256SUMS.txt`
@@ -22,16 +23,19 @@ use sha2::{Digest, Sha256};
 use super::catalog::{older, parse_version};
 use super::models::run_for;
 
+mod source;
+
 /// The version of this harness (every crate of the workspace has the same one).
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// The harness's Releases page; `<it>/latest/download/<file>` is a file of the newest release.
 pub const RELEASES_URL: &str = "https://github.com/aeygenson/ai-harness/releases";
 
-/// What to say when this harness was not built by the release workflow.
-pub const FROM_SOURCE: &str = "this harness was built from the source code, so it does not \
-replace itself: get the new code (`git pull`) and build it again the way it was built \
-(`cargo install --path crates/harness-cli --locked`, or on macOS and Linux the installer with --dev)";
+/// What to say when this harness was built from source code whose git folder is gone.
+pub const FROM_SOURCE: &str = "this harness was built from source code that is no longer in \
+its folder, so it does not replace itself: get the new code (`git pull`) and build it again \
+the way it was built (`cargo install --path crates/harness-cli --locked`, or on macOS and \
+Linux the installer with --dev)";
 
 /// Asking for the newest version number is quick; longer means the network is in trouble.
 const CHECK_LIMIT: Duration = Duration::from_secs(20);
@@ -52,25 +56,45 @@ pub struct Releases {
     pub curl: PathBuf,
     /// The `tar` program that unpacks (`.tar.gz`, and `.zip` on Windows).
     pub tar: PathBuf,
+    /// The git folder this program was built from; `None` for a release build.
+    pub checkout: Option<PathBuf>,
+    /// The `git` program that gets the new code of `checkout`.
+    pub git: PathBuf,
+    /// The `cargo` program that builds it.
+    pub cargo: PathBuf,
 }
 
 impl Default for Releases {
     fn default() -> Self {
+        // Set only by `.github/workflows/release.yml` while it builds.
+        let target = option_env!("HARNESS_RELEASE_TARGET").map(str::to_string);
+        let checkout = match target {
+            Some(_) => None,
+            None => source::checkout_of_this_build(),
+        };
         Self {
             url: RELEASES_URL.to_string(),
-            // Set only by `.github/workflows/release.yml` while it builds.
-            target: option_env!("HARNESS_RELEASE_TARGET").map(str::to_string),
+            target,
             current: VERSION.to_string(),
             curl: harness_platform::program::resolve("curl"),
             tar: harness_platform::program::tar(),
+            checkout,
+            git: harness_platform::program::resolve("git"),
+            cargo: harness_platform::program::resolve("cargo"),
         }
     }
 }
 
 impl Releases {
-    /// Can this program replace itself? Only a release build can.
+    /// Was this program built from the source code rather than by the release workflow?
     pub fn from_source(&self) -> bool {
         self.target.is_none()
+    }
+
+    /// Can this program replace itself? A release build can, and so can a
+    /// build from the source whose git folder is still there.
+    pub fn can_update(&self) -> bool {
+        self.target.is_some() || self.checkout.is_some()
     }
 }
 
@@ -84,35 +108,45 @@ pub fn latest_version(releases: &Releases) -> Result<String, String> {
     parse_version(text.trim()).ok_or_else(|| "the Releases page gave no version number".to_string())
 }
 
-/// The newest release's number when it is newer than this harness, `None` when this is the newest.
+/// The newest release's number when it is newer than this harness, `None`
+/// when this is the newest. For a build from the source: what the new
+/// commits of its git folder bring, such as `0.7.1 (a1b2c3d)`.
 ///
 /// # Errors
-/// As [`latest_version`].
+/// As [`latest_version`]; for a build from the source, a failed `git fetch`.
 pub fn newer_version(releases: &Releases) -> Result<Option<String>, String> {
+    if let (None, Some(checkout)) = (&releases.target, &releases.checkout) {
+        return source::newer_code(releases, checkout);
+    }
     let latest = latest_version(releases)?;
     Ok(older(&releases.current, &latest).then_some(latest))
 }
 
 /// Downloads the newest release and puts it in the place of `program` (this
 /// harness's own file). Tells each step through `on_line`. Returns the new
-/// version, or `None` when this already is the newest.
+/// version, or `None` when this already is the newest. A build from the
+/// source instead pulls the new commits of its git folder and builds them
+/// (`source.rs`).
 ///
 /// The harness that runs now keeps running the old version until it is
 /// started again.
 ///
 /// # Errors
-/// A harness built from the source ([`FROM_SOURCE`]), no connection, a
-/// download that does not match `SHA256SUMS.txt`, or a folder that cannot
-/// be written to. On any error `program` stays as it was.
+/// A harness built from source code that is gone ([`FROM_SOURCE`]), no
+/// connection, a download that does not match `SHA256SUMS.txt`, a failed
+/// pull or build, or a folder that cannot be written to. On any error
+/// `program` stays as it was.
 pub fn update(
     releases: &Releases,
     program: &Path,
     mut on_line: impl FnMut(String),
 ) -> Result<Option<String>, String> {
-    let target = releases
-        .target
-        .as_deref()
-        .ok_or_else(|| FROM_SOURCE.to_string())?;
+    let Some(target) = releases.target.as_deref() else {
+        return match &releases.checkout {
+            Some(checkout) => source::update(releases, checkout, program, &mut on_line),
+            None => Err(FROM_SOURCE.to_string()),
+        };
+    };
     on_line(format!("This harness: {}", releases.current));
     let Some(version) = newer_version(releases)? else {
         on_line("It is the newest version.".to_string());
@@ -371,19 +405,21 @@ mod tests {
     }
 
     #[test]
-    fn a_harness_built_from_source_does_not_replace_itself() {
+    fn a_harness_built_from_source_without_its_folder_does_not_replace_itself() {
         let dir = tempfile::tempdir().unwrap();
         let program = dir.path().join("harness");
         fs::write(&program, "old").unwrap();
         let releases = Releases {
             target: None,
+            checkout: None,
             ..releases("file:///nowhere".into(), "0.4.0")
         };
 
         let error = update(&releases, &program, |_| {}).unwrap_err();
 
         assert!(releases.from_source());
-        assert!(error.contains("built from the source"), "{error}");
+        assert!(!releases.can_update());
+        assert!(error.contains("built from source code"), "{error}");
         assert_eq!(fs::read_to_string(&program).unwrap(), "old");
     }
 

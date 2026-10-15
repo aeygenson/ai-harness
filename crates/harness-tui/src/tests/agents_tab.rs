@@ -505,6 +505,8 @@ fn release_app(env: &Env, from_source: bool) -> App {
         let _ = tx.send(JobEvent::Done(Ok(())));
     };
     app.agents.release.from_source = from_source;
+    // A release build: the tests themselves are built from a git folder.
+    app.agents.release.source_folder = None;
     key(&mut app, KeyCode::Char('8'));
     wait_for_agents(&mut app);
     for _ in 0..200 {
@@ -583,4 +585,19 @@ fn a_harness_built_from_source_shows_its_version_but_no_update() {
     assert!(!text.contains("↑ Update to"), "{text}");
     key(&mut app, KeyCode::Char('u'));
     assert!(app.form.is_none());
+}
+
+#[test]
+fn a_harness_built_from_its_git_folder_is_pulled_and_built() {
+    let env = Env::new();
+    let mut app = release_app(&env, false);
+    app.agents.release.source_folder = Some(env.code.path().to_path_buf());
+
+    key(&mut app, KeyCode::Char('u'));
+
+    let (_, form) = app.form.as_ref().unwrap();
+    assert!(form.text.contains("git pull --ff-only"), "{}", form.text);
+    assert!(form.text.contains("cargo install"), "{}", form.text);
+    let folder = env.code.path().display().to_string();
+    assert!(form.text.contains(&folder), "{}", form.text);
 }

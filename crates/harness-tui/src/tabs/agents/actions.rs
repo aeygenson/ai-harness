@@ -152,10 +152,20 @@ impl App {
         self.show(Tab::Agents);
         let program = std::env::current_exe().unwrap_or_default();
         let tr = &self.tr;
-        let text = tr.f(
-            "agents.confirm_update_harness_text",
-            &[("version", &version), ("path", &program.display())],
-        );
+        let text = match &self.agents.release.source_folder {
+            Some(folder) => tr.f(
+                "agents.confirm_update_harness_source_text",
+                &[
+                    ("version", &version),
+                    ("path", &program.display()),
+                    ("folder", &folder.display()),
+                ],
+            ),
+            None => tr.f(
+                "agents.confirm_update_harness_text",
+                &[("version", &version), ("path", &program.display())],
+            ),
+        };
         let title = tr.f("agents.confirm_update_harness", &[("version", &version)]);
         let form = Form::new(&title, &text, tr.t("agents.run_update"));
         self.form = Some((Purpose::UpdateHarness, form));

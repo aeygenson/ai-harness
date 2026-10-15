@@ -595,6 +595,7 @@ harness_source = "built from the source code: update it the same way"
 harness_updated = "AI Harness {version} is installed: close the harness (q) and open it again"
 confirm_update_harness = "Update AI Harness to {version}?"
 confirm_update_harness_text = "The harness downloads version {version} from its Releases page on GitHub, checks it against SHA256SUMS.txt and puts it in the place of this program:\n\n  {path}\n\nThe harness keeps working as it is; the new version starts the next time you open it. Only the program changes: projects, settings and logins stay."
+confirm_update_harness_source_text = "The harness gets the new code of its folder\n\n  {folder}\n\n(git pull --ff-only), builds {version} with cargo install (a few minutes) and puts it in the place of this program:\n\n  {path}\n\nThe harness keeps working as it is; the new version starts the next time you open it. Only the program changes: projects, settings and logins stay."
 
 [errors]
 no_home = "HOME is not set, so the harness cannot find ~/.harness"
