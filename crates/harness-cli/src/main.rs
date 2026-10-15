@@ -22,6 +22,7 @@
 //! harness tui                          full-screen window: tasks, settings, projects
 //! harness doctor                       is everything the harness needs installed?
 //! harness update                       install the newest release (--check: only look)
+//! harness mcp-serve                    let an AI agent watch the tasks (read-only MCP server)
 //! ```
 
 mod catalogs;
@@ -103,6 +104,10 @@ async fn main() -> Result<()> {
                 "cannot start the MCP server from {}: {error}",
                 file.display()
             )
+        }
+        Command::McpServe => {
+            let repo = open_repo(project)?;
+            harness_agents::mcp::serve::run(repo.root()).context("the harness MCP server stopped")
         }
         Command::McpRemote => {
             harness_agents::mcp::remote::run_from_env().map_err(anyhow::Error::msg)
