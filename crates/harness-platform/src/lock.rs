@@ -61,7 +61,21 @@ mod tests {
         assert!(try_hold(&path).unwrap().is_none(), "a held lock is not");
 
         drop(first);
-        assert!(try_hold(&path).unwrap().is_some(), "a dropped lock is free");
+        assert!(hold_soon(&path).is_some(), "a dropped lock is free");
+    }
+
+    /// Takes the lock, trying again for a moment. Other tests start programs
+    /// at the same time, and a program being started holds a copy of every
+    /// open file (this lock included) until it has really begun running;
+    /// only then are those copies closed.
+    fn hold_soon(path: &Path) -> Option<Held> {
+        for _ in 0..40 {
+            if let Some(held) = try_hold(path).unwrap() {
+                return Some(held);
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        None
     }
 
     #[test]
@@ -74,7 +88,7 @@ mod tests {
         let mut child = std::process::Command::new(program).spawn().unwrap();
 
         drop(held);
-        let again = try_hold(&path).unwrap();
+        let again = hold_soon(&path);
 
         child.kill().unwrap();
         child.wait().unwrap();

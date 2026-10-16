@@ -287,8 +287,6 @@ mod tests {
         assert!(first.is_some());
         let error = second.unwrap_err().to_string();
         assert!(error.contains("already open"), "{error}");
-        drop(first);
-        assert!(hold_the_window(Some(home.path())).unwrap().is_some());
     }
 
     #[test]
