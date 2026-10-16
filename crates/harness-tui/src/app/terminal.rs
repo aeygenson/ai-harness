@@ -9,9 +9,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use anyhow::{bail, Result};
+use anyhow::{bail, Context, Result};
 use harness_platform::editor;
 use harness_platform::input::{self, Input};
+use harness_platform::lock::{self, Held};
 use harness_platform::stop::StopSignals;
 use ratatui::crossterm::cursor::Hide;
 use ratatui::crossterm::event::{
@@ -25,6 +26,9 @@ use ratatui::{DefaultTerminal, Terminal};
 
 use crate::ui::i18n::I18n;
 use crate::App;
+
+/// The lock file in `~/.harness` that the open TUI holds.
+const WINDOW_LOCK: &str = "tui.lock";
 
 /// How often the open project is read again.
 const RELOAD_EVERY: Duration = Duration::from_secs(3);
@@ -54,6 +58,27 @@ fn check_size_of(columns: u16, rows: u16) -> Result<()> {
         );
     }
     Ok(())
+}
+
+/// Stops with a clear error when another TUI window is already open.
+///
+/// Two windows would read and change the same tasks and settings at once,
+/// for example both start the same role. One window per user is allowed,
+/// whatever project it shows, since all of them share `~/.harness`. Without
+/// a home folder there is nothing to share and nothing is locked.
+pub(crate) fn hold_the_window(harness_home: Option<&Path>) -> Result<Option<Held>> {
+    let Some(home) = harness_home else {
+        return Ok(None);
+    };
+    let path = home.join(WINDOW_LOCK);
+    match lock::try_hold(&path) {
+        Ok(Some(held)) => Ok(Some(held)),
+        Ok(None) => bail!(
+            "the harness is already open in another window; switch to that window, \
+             or close it there with `q` and start `harness tui` again"
+        ),
+        Err(error) => Err(error).with_context(|| format!("cannot lock {}", path.display())),
+    }
 }
 
 /// Starts catching the system's stop signals (the terminal window closed,
@@ -251,6 +276,25 @@ fn take_terminal_back(terminal: &mut DefaultTerminal) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_second_window_is_refused_while_the_first_is_open() {
+        let home = tempfile::tempdir().unwrap();
+
+        let first = hold_the_window(Some(home.path())).unwrap();
+        let second = hold_the_window(Some(home.path()));
+
+        assert!(first.is_some());
+        let error = second.unwrap_err().to_string();
+        assert!(error.contains("already open"), "{error}");
+        drop(first);
+        assert!(hold_the_window(Some(home.path())).unwrap().is_some());
+    }
+
+    #[test]
+    fn without_a_home_folder_nothing_is_locked() {
+        assert!(hold_the_window(None).unwrap().is_none());
+    }
 
     // Sending a signal to the test program itself works only on Linux and macOS.
     #[cfg(unix)]

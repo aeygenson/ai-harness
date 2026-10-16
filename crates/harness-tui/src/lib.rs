@@ -190,6 +190,10 @@ enum Pick {
 /// a harness project, otherwise with the project opened last.
 pub fn run(start: &Path) -> Result<()> {
     app::terminal::check_size()?;
+    // Held until `run` returns. A named variable on purpose: `let _ = ...`
+    // would drop the lock at once.
+    let home = projects::harness_home();
+    let _one_window = app::terminal::hold_the_window(home.as_deref())?;
     // First of all: from here on, closing the window no longer kills the TUI
     // while an agent runs; the app is closed normally instead.
     let stop = app::terminal::watch_stop_signals().context("cannot listen for stop signals")?;
@@ -208,7 +212,7 @@ pub fn run(start: &Path) -> Result<()> {
         let _ = ratatui::try_restore();
         hook(info);
     }));
-    let mut app = App::new(projects::harness_home(), start);
+    let mut app = App::new(home, start);
     app.native = true;
     app.splash.open = app.splash.at_start;
     // Which agents are installed: asked once at the start, in the background.
