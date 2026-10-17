@@ -10,10 +10,12 @@ mod merge;
 mod publish;
 mod pull;
 mod ready;
+mod wait;
 
 pub use connect::{connect, connect_with, Connection};
 pub use merge::{merge, merge_with, Folder, Merged};
 pub use publish::{publish, publish_with, GitHub, PUSH_URL_START};
+pub use wait::{Waiting, MERGE_WAIT_LIMIT, MERGE_WAIT_PAUSE};
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
