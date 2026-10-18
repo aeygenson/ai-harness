@@ -4,6 +4,7 @@
 use harness_core::config::AgentKind;
 use harness_core::models::ModelList;
 use harness_core::task::handoff::{NextStep, Role};
+use harness_core::task::permissions::WriteRule;
 use harness_core::task::{Stage, WaitReason};
 
 use super::tab::TasksTab;
@@ -87,10 +88,29 @@ impl TasksTab {
             Stage::WaitingForHuman(WaitReason::ApproveDesign) => {
                 Choice::Role(task.state.workflow.after_approval())
             }
-            Stage::WaitingForHuman(WaitReason::RoleAskedForHelp(role)) => Choice::Role(role),
+            Stage::WaitingForHuman(WaitReason::RoleAskedForHelp(role)) => {
+                Choice::Role(self.after_help_request(role))
+            }
             Stage::WaitingForHuman(WaitReason::RoundLimitReached) => {
                 Choice::Role(self.after_round_limit())
             }
+        }
+    }
+
+    /// Who gets Lisa's answer when `role` asked for help: usually that role
+    /// again, but a role that may not change files (security) and listed
+    /// issues cannot fix them itself, so the developer is suggested.
+    fn after_help_request(&self, role: Role) -> Role {
+        let has_issues = self
+            .current()
+            .and_then(|t| t.steps.last())
+            .is_some_and(|s| !s.handoff.issues.is_empty());
+        let read_only = role.spec().writes == WriteRule::Nothing;
+        let developer_here = self.scenario.roles().contains(&Role::Developer);
+        if read_only && has_issues && developer_here {
+            Role::Developer
+        } else {
+            role
         }
     }
 
