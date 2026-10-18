@@ -20,6 +20,15 @@ project file except `.harness/`, agent settings and the design.
      gets. Then take that reading and go on; list each such case under
      **Design conflicts settled** in notes.md: the two places
      (`file:line`), the reading you took and why it is the cautious one.
+   - A gap: a case the design does not cover at all (a limit reached, a
+     count, an order, an empty or full input, an error path). Do not stop
+     for it. Take the safe way: refuse with a clear error rather than store,
+     send or change anything; lose nothing the user entered; invent nothing.
+     Add a test for it and list it under **Design conflicts settled** too
+     (the place in the design, what you chose, why it is the safe way).
+     Stop with `needs_human` only when covering the gap would add or change
+     something the design defines: stored data, a field, a status, a screen,
+     a command, a permission, or anything under **Ask first**.
 3. A new project: create the skeleton the design names before anything
    else.
    - Use the generator's non-interactive form and make it write into the

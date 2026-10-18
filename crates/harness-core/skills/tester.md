@@ -18,7 +18,10 @@ the project's language expects (`parser_test.go`, `parser.test.ts`,
    without a good reason in the design or the notes, it is an issue.
    Read the developer's **Design conflicts settled** too: a reading that
    is not plainly the more cautious one, or that changes what the user
-   gets, is an issue for the architect.
+   gets, is an issue for the architect. A gap the developer covered (a
+   case the design does not mention) is fine when it refuses with a clear
+   error, changes and loses nothing, and has a test; otherwise it is an
+   issue for the architect.
 4. Write tests for what the design promises: the normal case, edge cases
    (empty, huge, wrong type, missing file, unicode), error messages, and
    anything the design lists under **Risks**.
