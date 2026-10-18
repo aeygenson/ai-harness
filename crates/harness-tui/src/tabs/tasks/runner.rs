@@ -10,7 +10,7 @@ use std::sync::mpsc::{channel, Receiver, Sender};
 use std::thread::{self, JoinHandle};
 
 use harness_agents::build::BuildError;
-use harness_agents::github::Merged;
+use harness_agents::github::{Merged, Waiting, MERGE_WAIT_LIMIT, MERGE_WAIT_PAUSE};
 use harness_agents::process;
 use harness_agents::Team;
 use harness_core::config::Config;
@@ -23,7 +23,7 @@ use harness_core::task::pull_request::PullRequest;
 use harness_core::task::store::TaskStore;
 use harness_core::task::Stage;
 use harness_core::text;
-use tokio::sync::oneshot;
+use tokio::sync::oneshot::{self, error::TryRecvError};
 
 use super::github::{send_to_github, without_roles};
 
@@ -304,11 +304,9 @@ fn work(job: Job, events: &Sender<Event>, stop: oneshot::Receiver<()>) -> Result
     let task = state.task_id.clone();
     let _ = events.send(Event::Started(task.clone()));
     let Some((team, skills)) = agents else {
-        let before = (repo.current_branch().ok(), repo.head().ok());
-        let outcome = without_roles(merging, &repo, &config, &store, &mut state);
-        // A merge moves the folder to the main branch, or that branch
-        // forward: the tab reads settings and tasks again.
-        if (repo.current_branch().ok(), repo.head().ok()) != before {
+        let merge = merge_waiting(merging, stop);
+        let (outcome, moved) = without_roles(merge, &repo, &config, &store, &mut state);
+        if moved {
             let _ = events.send(Event::SwitchedBranch);
         }
         return Ok(outcome);
@@ -333,6 +331,20 @@ fn work(job: Job, events: &Sender<Event>, stop: oneshot::Receiver<()>) -> Result
         stop: Some(stop),
         published,
         merged: None,
+    })
+}
+
+/// How «Merge pull request» waits for GitHub in the TUI, when `merging`:
+/// up to [`MERGE_WAIT_LIMIT`], saying in the live log what it waits for, and
+/// only until `stop` fires (the TUI quits).
+fn merge_waiting(merging: bool, mut stop: oneshot::Receiver<()>) -> Option<Waiting<'static>> {
+    merging.then(|| Waiting {
+        limit: MERGE_WAIT_LIMIT,
+        pause: MERGE_WAIT_PAUSE,
+        // `Empty`: the sender is still there, so nobody asked to stop. It is
+        // dropped (`Closed`) to stop.
+        stopped: Box::new(move || !matches!(stop.try_recv(), Err(TryRecvError::Empty))),
+        note: Box::new(process::note_live),
     })
 }
 

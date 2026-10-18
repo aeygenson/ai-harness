@@ -199,6 +199,12 @@ pub fn set_live_log(sink: Option<Sender<String>>) {
     }
 }
 
+/// Sends a line of the harness's own (not an agent's) to the live log, for
+/// example what a merge is waiting for. Nothing happens without a live log.
+pub fn note_live(line: &str) {
+    send_live(line.as_bytes(), &[]);
+}
+
 fn send_live(line: &[u8], secrets: &[&str]) {
     let Ok(mut live_log) = LIVE_LOG.lock() else {
         return;

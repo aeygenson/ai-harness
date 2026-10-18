@@ -1,7 +1,7 @@
 //! The GitHub steps of a done task: sending it (its pull request) and
 //! merging that pull request, and the bottom line's message about them.
 
-use harness_agents::github::Folder;
+use harness_agents::github::{Folder, Waiting};
 use harness_core::config::Config;
 use harness_core::git::Repo;
 use harness_core::task::branch::task_branch;
@@ -31,29 +31,30 @@ pub(super) fn send_to_github(
     harness_agents::github::publish(repo, config, store, state).transpose()
 }
 
-/// The work when no role runs: merge the task's pull request, or send the
-/// done task to GitHub.
+/// The work when no role runs: merge the task's pull request when `merge`
+/// says how to wait for GitHub, otherwise send the done task to GitHub.
 pub(super) fn without_roles(
-    merging: bool,
+    merge: Option<Waiting>,
     repo: &Repo,
     config: &Config,
     store: &TaskStore,
     state: &mut TaskState,
-) -> Outcome {
-    let (published, merged) = if merging {
-        (
-            None,
-            Some(harness_agents::github::merge(repo, config, state)),
-        )
+) -> (Outcome, bool) {
+    let before = (repo.current_branch().ok(), repo.head().ok());
+    let (published, merged) = if let Some(mut wait) = merge {
+        let merged = harness_agents::github::merge(repo, config, state, &mut wait);
+        (None, Some(merged))
     } else {
         (send_to_github(repo, config, store, state), None)
     };
-    Outcome {
+    let outcome = Outcome {
         task: state.task_id.clone(),
         stop: None,
         published,
         merged,
-    }
+    };
+    let moved = (repo.current_branch().ok(), repo.head().ok()) != before;
+    (outcome, moved)
 }
 
 /// The message about sending or merging, when the work did one of them.

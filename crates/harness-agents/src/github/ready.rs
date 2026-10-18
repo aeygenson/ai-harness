@@ -21,6 +21,16 @@ enum Checks {
     Failed(Vec<String>),
 }
 
+/// Why an open pull request is not merged now.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) enum NotReady {
+    /// GitHub is still busy with it (checks running, conflicts not worked
+    /// out yet, commits just sent): asking again later may let it through.
+    Later(String),
+    /// Someone has to do something first; waiting does not help.
+    Refused(String),
+}
+
 /// Refuses a pull request that is not this task's: from another branch or
 /// a fork, or into another branch than `base`.
 pub(super) fn check_identity(
@@ -53,84 +63,97 @@ pub(super) fn check_identity(
 /// Refuses to merge an open pull request that is a draft, is not at the
 /// commit of the task's branch here, may have conflicts or has checks that
 /// did not pass; also while the folder has uncommitted changes, which would
-/// not be in the merge.
+/// not be in the merge. Says which refusals may pass by waiting.
 pub(super) fn check_ready(
     repo: &Repo,
     github: &GitHub,
     branch: &str,
     number: u64,
     seen: &View,
-) -> Result<(), String> {
+) -> Result<(), NotReady> {
+    let refused = |e: &dyn std::fmt::Display| NotReady::Refused(e.to_string());
     if seen.is_draft {
-        return Err(format!(
+        return Err(NotReady::Refused(format!(
             "pull request #{number} is a draft; mark it ready on GitHub, then merge"
-        ));
+        )));
     }
-    let files = repo.changed_files().map_err(|e| e.to_string())?;
+    let files = repo.changed_files().map_err(|e| refused(&e))?;
     if !files.is_empty() {
-        return Err(format!(
+        return Err(NotReady::Refused(format!(
             "these files have uncommitted changes, which would not be in the merge: {}. \
              Nothing was merged; commit them or put them aside (git stash) first",
             files.join(", ")
-        ));
+        )));
     }
     let local = repo
         .branch_head(branch)
-        .map_err(|e| e.to_string())?
-        .ok_or_else(|| format!("the branch {branch} is not in this project; nothing was merged"))?;
+        .map_err(|e| refused(&e))?
+        .ok_or_else(|| {
+            NotReady::Refused(format!(
+                "the branch {branch} is not in this project; nothing was merged"
+            ))
+        })?;
     let remote = &seen.head_ref_oid;
     if *remote != local {
         // Commits the harness made after sending (state.json, a retro):
         // they are sent now, and their checks have to run before merging.
         if repo.is_ancestor(remote, &local) {
-            repo.push_branch(&github.push_url, branch)
-                .map_err(|e| format!("cannot send the last commits of {branch} to GitHub: {e}"))?;
-            return Err(format!(
+            repo.push_branch(&github.push_url, branch).map_err(|e| {
+                refused(&format!(
+                    "cannot send the last commits of {branch} to GitHub: {e}"
+                ))
+            })?;
+            return Err(NotReady::Later(format!(
                 "sent the last commits of {branch} to GitHub; nothing was merged yet. Merge \
                  again when its checks have passed"
-            ));
+            )));
         }
-        return Err(format!(
+        return Err(NotReady::Refused(format!(
             "pull request #{number} is at commit {remote}, which the harness did not make (an \
              agent or someone else may have pushed it); nothing was merged. Look at it on GitHub"
-        ));
+        )));
     }
     match seen.mergeable.as_str() {
         "MERGEABLE" => {}
         "CONFLICTING" => {
-            return Err(format!(
+            return Err(NotReady::Refused(format!(
                 "pull request #{number} has conflicts with the main branch; nothing was \
                  merged. Resolve them on GitHub, then merge again"
-            ))
+            )))
         }
         // `UNKNOWN`: GitHub has not worked it out yet, which takes a moment.
         _ => {
-            return Err(format!(
+            return Err(NotReady::Later(format!(
                 "GitHub is still checking pull request #{number} for conflicts; merge again \
                  in a moment"
-            ))
+            )))
         }
     }
     let rollup = seen.status_check_rollup.as_deref().unwrap_or_default();
     match checks(rollup) {
         // Right after sending, GitHub may not have started the CI yet: no
         // checks at all is "passed" only in a project without workflows.
-        Checks::Passed if rollup.is_empty() && base_has_workflows(repo, github)? => Err(format!(
-            "GitHub shows no checks for pull request #{number} yet, but the project has \
-             workflows; merge again when they have run. If they do not run on pull requests, \
-             merge it on GitHub; then «Merge pull request» only updates the folder"
-        )),
+        Checks::Passed
+            if rollup.is_empty()
+                && base_has_workflows(repo, github).map_err(NotReady::Refused)? =>
+        {
+            Err(NotReady::Later(format!(
+                "GitHub shows no checks for pull request #{number} yet, but the project has \
+                 workflows; merge again when they have run. If they do not run on pull \
+                 requests, merge it on GitHub; then «Merge pull request» only updates the folder"
+            )))
+        }
         Checks::Passed => Ok(()),
-        Checks::Running(names) => Err(format!(
+        Checks::Running(names) => Err(NotReady::Later(format!(
             "the checks of pull request #{number} are still running ({}); merge again when \
              they finish",
             names.join(", ")
-        )),
-        Checks::Failed(names) => Err(format!(
+        ))),
+        Checks::Failed(names) => Err(NotReady::Refused(format!(
             "checks failed on pull request #{number} ({}); nothing was merged. Look at them \
              on GitHub",
             names.join(", ")
-        )),
+        ))),
     }
 }
 
