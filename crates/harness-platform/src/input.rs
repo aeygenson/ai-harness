@@ -144,6 +144,13 @@ mod tests {
         rustix::io::write(&window, b"q\n").unwrap();
         assert_eq!(wait_on(&program, SHORT).unwrap(), Input::Ready);
 
+        // The TUI reads the key before it waits again. A key left unread
+        // would hide the closed window on macOS, which reports the waiting
+        // key first and the closed window only once the key is read.
+        let mut key = [0_u8; 8];
+        let read = std::io::Read::read(&mut &program, &mut key).unwrap();
+        assert_eq!(&key[..read], b"q\n");
+
         drop(window);
         assert_eq!(wait_on(&program, SHORT).unwrap(), Input::Closed);
     }

@@ -367,6 +367,9 @@ mod tests {
         let heading = "**Design conflicts settled**";
         assert!(built_in("developer").unwrap().contains(heading));
         assert!(built_in("tester").unwrap().contains(heading));
+        // A gap the developer covers alone is checked by the tester too.
+        assert!(built_in("developer").unwrap().contains("A gap"));
+        assert!(built_in("tester").unwrap().contains("A gap"));
     }
 
     #[test]
