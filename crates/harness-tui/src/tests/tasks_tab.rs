@@ -719,3 +719,67 @@ fn a_done_task_on_github_shows_its_pull_request_or_offers_to_send_it() {
     click(&mut app, " To: Send to GitHub ▾ ");
     assert!(!screen(&mut app).contains("Merge pull request"));
 }
+
+#[test]
+fn a_fix_asked_for_by_security_goes_to_the_developer_by_default() {
+    let env = Env::new();
+    let (root, mut app) = empty_project(&env);
+    let repo = Repo::open(&root).unwrap();
+    let (store, mut state) =
+        orchestrator::create_task(&repo, "task-001", "Build a parser", Workflow::Task, 5).unwrap();
+    for (role, next) in [
+        (Role::Architect, Role::Human),
+        (Role::Human, Role::Developer),
+        (Role::Developer, Role::Tester),
+        (Role::Tester, Role::Security),
+    ] {
+        let step = handoff(role, Verdict::Approved, NextStep::To(next), "step");
+        store.record(&mut state, &step, "notes").unwrap();
+    }
+    // Security may not change files; it found something that needs one.
+    let mut asked = handoff(
+        Role::Security,
+        Verdict::NeedsHuman,
+        NextStep::To(Role::Human),
+        "notices missing",
+    );
+    asked.issues = vec![Issue {
+        severity: Severity::Medium,
+        location: None,
+        description: "A licence notice is missing".into(),
+    }];
+    store.record(&mut state, &asked, "notes").unwrap();
+    repo.commit_all("security asked for a fix").unwrap();
+    key(&mut app, KeyCode::F(5));
+
+    assert!(screen(&mut app).contains(" To: developer ▾ "));
+}
+
+#[test]
+fn a_question_from_security_without_issues_goes_back_to_security() {
+    let env = Env::new();
+    let (root, mut app) = empty_project(&env);
+    let repo = Repo::open(&root).unwrap();
+    let (store, mut state) =
+        orchestrator::create_task(&repo, "task-001", "Build a parser", Workflow::Task, 5).unwrap();
+    for (role, next) in [
+        (Role::Architect, Role::Human),
+        (Role::Human, Role::Developer),
+        (Role::Developer, Role::Tester),
+        (Role::Tester, Role::Security),
+    ] {
+        let step = handoff(role, Verdict::Approved, NextStep::To(next), "step");
+        store.record(&mut state, &step, "notes").unwrap();
+    }
+    let asked = handoff(
+        Role::Security,
+        Verdict::NeedsHuman,
+        NextStep::To(Role::Human),
+        "may this port be opened?",
+    );
+    store.record(&mut state, &asked, "notes").unwrap();
+    repo.commit_all("security asked a question").unwrap();
+    key(&mut app, KeyCode::F(5));
+
+    assert!(screen(&mut app).contains(" To: security ▾ "));
+}
