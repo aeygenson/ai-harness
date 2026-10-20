@@ -26,6 +26,31 @@ pub struct Context<'a> {
     pub facts: &'a str,
     /// The role's skills.
     pub skills: &'a RoleSkills,
+    /// A limit stopped this role's previous run and left these changed files
+    /// in the folder: the agent continues from them.
+    pub resumed: Option<&'a [String]>,
+}
+
+/// At most this many unfinished files are named in the prompt.
+const MAX_RESUMED_SHOWN: usize = 50;
+
+/// Told to a role whose previous run a limit stopped, before anything else it
+/// reads about earlier steps: which files it had already changed.
+fn resumed_text(files: &[String]) -> String {
+    let mut text = String::from(
+        "Your previous run of this step stopped before you wrote a handoff (a time or \
+         usage limit, or a failure after that). The files you had changed are still in the \
+         project folder, uncommitted. Read them first and continue from them; do not start \
+         over and do not undo them without a reason. Changed files:\n",
+    );
+    for file in files.iter().take(MAX_RESUMED_SHOWN) {
+        let _ = writeln!(text, "- {}", crate::text::safe_line(file, 300));
+    }
+    if files.len() > MAX_RESUMED_SHOWN {
+        let _ = writeln!(text, "- and {} more", files.len() - MAX_RESUMED_SHOWN);
+    }
+    text.push('\n');
+    text
 }
 
 /// Builds the whole prompt an agent receives for `role` in this task.
@@ -43,6 +68,9 @@ pub fn build(role: Role, state: &TaskState, context: Context<'_>, output_dir: &P
     // see what really changed before it reads what the author says about it,
     // or it tends to confirm the author's view.
     prompt.push_str(context.facts);
+    if let Some(files) = context.resumed {
+        prompt.push_str(&resumed_text(files));
+    }
     if let Some(previous) = context.previous {
         prompt.push_str(&previous_text(previous));
     }
@@ -229,7 +257,24 @@ mod tests {
             previous,
             facts: "",
             skills,
+            resumed: None,
         }
+    }
+
+    #[test]
+    fn resumed_work_names_its_files_up_to_a_limit() {
+        let files: Vec<String> = (0..MAX_RESUMED_SHOWN + 3)
+            .map(|n| format!("src/f{n}.rs"))
+            .collect();
+
+        let text = resumed_text(&files);
+
+        assert!(text.contains("- src/f0.rs\n"), "{text}");
+        assert!(
+            !text.contains(&format!("src/f{MAX_RESUMED_SHOWN}.rs")),
+            "{text}"
+        );
+        assert!(text.contains("- and 3 more\n"), "{text}");
     }
 
     fn prompt_for(role: Role) -> String {

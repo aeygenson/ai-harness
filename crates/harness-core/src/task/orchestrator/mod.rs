@@ -16,6 +16,7 @@
 //! 3. If the role's work is accepted, everything is committed:
 //!    `task-001 round 2: tester (rejected) - ...`. A failed attempt is thrown away.
 
+mod changes;
 mod create;
 mod guard;
 mod human;
@@ -41,11 +42,11 @@ use crate::task::agent::{AgentRunner, RunEnd};
 use crate::task::agent_stubs;
 use crate::task::handoff::{Handoff, Role, Verdict};
 use crate::task::manifest::AgentFacts;
-use crate::task::permissions;
 use crate::task::store::{StoreError, TaskStore};
 use crate::task::tripwire::Watched;
 use crate::task::{Stage, TaskState};
 use crate::text;
+use changes::{after_failure, check_changes, stop_at_limit, AfterFailure, RoleAt};
 use guard::Before;
 use job::prepare_job;
 
@@ -146,9 +147,15 @@ pub async fn run_watching<A: AgentRunner>(
         // Before looking at git status: a block an unwatched run of Claude
         // Code left in `info/exclude` would hide files from it.
         agent_stubs::clear_leftovers(repo)?;
-        let dirty = repo.changed_files()?;
-        if !dirty.is_empty() {
-            return Ok(StopReason::DirtyWorkingTree(dirty));
+        // A limit stopped this role's last run in this round: its unfinished
+        // changes are still in the folder, exactly as recorded, and the agent
+        // continues from them. Any other change stops the run.
+        let mut resumed = changes::resumable(RoleAt::new(repo, store, state, role))?;
+        if resumed.is_none() {
+            let dirty = repo.changed_files()?;
+            if !dirty.is_empty() {
+                return Ok(StopReason::DirtyWorkingTree(dirty));
+            }
         }
 
         let mut problem = String::new();
@@ -158,7 +165,7 @@ pub async fn run_watching<A: AgentRunner>(
         let mut failure_logs: Vec<PathBuf> = Vec::new();
         for _ in 0..ATTEMPTS_PER_ROLE {
             let before = Before::take(repo, setup.watched)?;
-            let (job, manifest) = prepare_job(repo, store, state, role, setup)?;
+            let (job, manifest) = prepare_job(repo, store, state, role, setup, resumed.as_deref())?;
             let outcome = agent.run(&job).await;
             if let Some(stop) = before.check(repo, setup.watched, role)? {
                 return Ok(stop);
@@ -170,14 +177,12 @@ pub async fn run_watching<A: AgentRunner>(
             }
             match &outcome.end {
                 RunEnd::Succeeded => {}
-                RunEnd::UsageLimit => {
-                    repo.discard_changes()?;
+                RunEnd::UsageLimit | RunEnd::TimedOut(_) => {
                     failure_logs.push(store.save_failure_log(state.round, role, &outcome.log)?);
-                    commit_failure_logs(repo, &failure_logs, state, role, "paused by usage limit")?;
-                    return Ok(StopReason::UsageLimitReached(role));
+                    let at = RoleAt::new(repo, store, state, role);
+                    return stop_at_limit(at, &outcome.end, &failure_logs);
                 }
                 RunEnd::Failed(message) => {
-                    repo.discard_changes()?;
                     let log = store.save_failure_log(state.round, role, &outcome.log)?;
                     problem = format!(
                         "the agent failed: {} (full log: {})",
@@ -185,41 +190,38 @@ pub async fn run_watching<A: AgentRunner>(
                         log.display()
                     );
                     failure_logs.push(log);
-                    continue;
+                    let at = RoleAt::new(repo, store, state, role);
+                    match after_failure(at, resumed.is_some(), &mut failure_logs, &mut problem)? {
+                        AfterFailure::Stop(stop) => return Ok(stop),
+                        AfterFailure::Retry(kept) => {
+                            resumed = kept;
+                            continue;
+                        }
+                    }
                 }
             }
-            let agent_changes: Vec<String> = repo
-                .changed_files()?
-                .into_iter()
-                .filter(|path| !failure_logs.contains(&repo.root().join(path)))
-                .collect();
-            let forbidden = permissions::forbidden_changes(role, &agent_changes);
-            if !forbidden.is_empty() {
-                return Ok(StopReason::ForbiddenChanges {
-                    role,
-                    files: forbidden,
-                });
-            }
-            let too_large = oversized_changes(repo.root(), &agent_changes, MAX_CHANGE_BYTES);
-            if !too_large.is_empty() {
-                return Ok(StopReason::TooLarge {
-                    role,
-                    files: too_large,
-                });
+            if let Some(stop) = check_changes(repo, role, &failure_logs)? {
+                return Ok(stop);
             }
             match accept_inbox(store, state)? {
                 Acceptance::Accepted { handoff, step_dir } => {
                     store.save_log(&step_dir, &outcome.log)?;
                     store.save_manifest(&step_dir, &manifest)?;
+                    // The unfinished work is now part of this step.
+                    changes::remove_record(store)?;
                     repo.commit_all(&commit_message(&handoff))?;
                     accepted = true;
                     break;
                 }
                 Acceptance::Refused(why) => {
-                    repo.discard_changes()?;
                     let log = store.save_failure_log(state.round, role, &outcome.log)?;
                     problem = format!("{why} (full log: {})", log.display());
                     failure_logs.push(log);
+                    let at = RoleAt::new(repo, store, state, role);
+                    match after_failure(at, resumed.is_some(), &mut failure_logs, &mut problem)? {
+                        AfterFailure::Stop(stop) => return Ok(stop),
+                        AfterFailure::Retry(kept) => resumed = kept,
+                    }
                 }
             }
         }
@@ -233,7 +235,7 @@ pub async fn run_watching<A: AgentRunner>(
 
 /// Commits only the failure logs (nothing an agent wrote), so the next run
 /// starts with a clean project.
-fn commit_failure_logs(
+pub(super) fn commit_failure_logs(
     repo: &Repo,
     logs: &[PathBuf],
     state: &TaskState,

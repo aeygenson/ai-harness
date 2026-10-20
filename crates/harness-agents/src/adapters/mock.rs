@@ -43,6 +43,10 @@ pub enum MockStep {
     WriteGarbage,
     /// Pretend the subscription limit was hit.
     UsageLimit,
+    /// Change project files, then stop as if the time limit was reached.
+    TimeOut(Vec<(String, String)>),
+    /// Change project files, then stop as if the subscription limit was hit.
+    UsageLimitAfterWriting(Vec<(String, String)>),
     /// Write these files into the output folder only, like the retrospective.
     WriteOutput(Vec<(String, String)>),
 }
@@ -85,6 +89,7 @@ fn owned(files: &[(&str, &str)]) -> Vec<(String, String)> {
 pub struct MockAgent {
     script: Mutex<HashMap<Role, VecDeque<MockStep>>>,
     calls: Mutex<Vec<Role>>,
+    prompts: Mutex<Vec<String>>,
 }
 
 impl MockAgent {
@@ -117,6 +122,15 @@ impl MockAgent {
         self.calls.lock().unwrap().clone()
     }
 
+    /// The prompt of every run, in order. Useful in tests.
+    ///
+    /// # Panics
+    ///
+    /// Only if another thread panicked while it held the mock's lock (a broken test).
+    pub fn prompts(&self) -> Vec<String> {
+        self.prompts.lock().unwrap().clone()
+    }
+
     fn next_step(&self, role: Role) -> MockStep {
         self.script
             .lock()
@@ -129,6 +143,7 @@ impl MockAgent {
     /// Does the next scripted step for `job.role` and reports how it ended.
     fn outcome(&self, job: &RoleJob) -> AgentOutcome {
         self.calls.lock().unwrap().push(job.role);
+        self.prompts.lock().unwrap().push(job.prompt.clone());
         let log = format!("mock {:?}, round {}", job.role, job.round);
 
         match self.next_step(job.role) {
@@ -136,6 +151,13 @@ impl MockAgent {
                 end: RunEnd::UsageLimit,
                 log,
             },
+            MockStep::TimeOut(files) => {
+                let end = RunEnd::TimedOut("timed out after 1 s; the agent was stopped".into());
+                stop_after_writing(job, &files, end, log)
+            }
+            MockStep::UsageLimitAfterWriting(files) => {
+                stop_after_writing(job, &files, RunEnd::UsageLimit, log)
+            }
             MockStep::WriteNothing => AgentOutcome {
                 end: RunEnd::Succeeded,
                 log,
@@ -224,6 +246,22 @@ impl AgentRunner for MockAgent {
     fn run(&self, job: &RoleJob) -> impl Future<Output = AgentOutcome> + Send {
         std::future::ready(self.outcome(job))
     }
+}
+
+/// Writes `files` into the project, then ends with `end` (a limit); a failed
+/// write reads like a crash.
+fn stop_after_writing(
+    job: &RoleJob,
+    files: &[(String, String)],
+    end: RunEnd,
+    log: String,
+) -> AgentOutcome {
+    let end = if write_files(&job.project_dir, files).is_ok() {
+        end
+    } else {
+        RunEnd::Failed("the mock agent's step did not work".into())
+    };
+    AgentOutcome { end, log }
 }
 
 /// `Succeeded` when the mock's step worked; a failed step reads like a crash.

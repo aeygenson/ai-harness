@@ -238,6 +238,164 @@ async fn usage_limit_pauses_without_changing_anything() {
     assert_eq!(state, before);
 }
 
+fn half_done() -> Vec<(String, String)> {
+    vec![
+        ("src/half_done.rs".to_string(), "fn half() {}".to_string()),
+        (
+            "README.md".to_string(),
+            "A parser, in progress\n".to_string(),
+        ),
+    ]
+}
+
+fn developer_finishes() -> MockStep {
+    MockStep::finish_writing(
+        Verdict::NeedsHuman,
+        NextStep::To(Role::Human),
+        &[("src/parser.rs", "fn parse() {}")],
+    )
+}
+
+#[tokio::test]
+async fn a_timed_out_role_keeps_its_unfinished_work_for_the_next_run() {
+    let (_dir, repo) = new_project();
+    let (store, mut state) = new_task(&repo);
+    state.stage = Stage::Working(Role::Developer);
+    let agent = MockAgent::new()
+        .then(Role::Developer, MockStep::TimeOut(half_done()))
+        .then(Role::Developer, developer_finishes());
+
+    let stop = orchestrator::run(&repo, &store, &mut state, &agent)
+        .await
+        .unwrap();
+
+    // Stopped once, without a second attempt; the work stays in the folder,
+    // uncommitted; only the harness's records are committed.
+    assert_eq!(stop, StopReason::TimedOut(Role::Developer));
+    assert_eq!(agent.calls(), [Role::Developer]);
+    assert_eq!(state.stage, Stage::Working(Role::Developer));
+    assert_eq!(
+        repo.changed_files().unwrap(),
+        ["README.md", "src/half_done.rs"]
+    );
+    assert!(git_log(&repo)[0].contains("developer stopped at the time limit"));
+
+    orchestrator::run(&repo, &store, &mut state, &agent)
+        .await
+        .unwrap();
+
+    // The second run continued from the work and was told which files; the
+    // step's one commit holds both runs' work.
+    assert!(agent.prompts()[1].contains("- src/half_done.rs"));
+    assert!(!agent.prompts()[0].contains("Your previous run"));
+    let readme = fs::read_to_string(repo.root().join("README.md")).unwrap();
+    assert_eq!(readme, "A parser, in progress\n");
+    assert!(repo.root().join("src/parser.rs").exists());
+    assert_eq!(repo.changed_files().unwrap(), Vec::<String>::new());
+    assert!(!store.dir().join("unfinished.json").exists());
+}
+
+#[tokio::test]
+async fn usage_limit_keeps_the_unfinished_work_too() {
+    let (_dir, repo) = new_project();
+    let (store, mut state) = new_task(&repo);
+    state.stage = Stage::Working(Role::Developer);
+    let agent = MockAgent::new()
+        .then(
+            Role::Developer,
+            MockStep::UsageLimitAfterWriting(half_done()),
+        )
+        .then(Role::Developer, developer_finishes());
+
+    let stop = orchestrator::run(&repo, &store, &mut state, &agent)
+        .await
+        .unwrap();
+    assert_eq!(stop, StopReason::UsageLimitReached(Role::Developer));
+    assert_eq!(repo.changed_files().unwrap().len(), 2);
+
+    orchestrator::run(&repo, &store, &mut state, &agent)
+        .await
+        .unwrap();
+    assert!(agent.prompts()[1].contains("- README.md"));
+    assert!(repo.root().join("src/half_done.rs").exists());
+    assert_eq!(repo.changed_files().unwrap(), Vec::<String>::new());
+}
+
+#[tokio::test]
+async fn a_change_by_someone_else_after_the_stop_is_not_resumed() {
+    let (_dir, repo) = new_project();
+    let (store, mut state) = new_task(&repo);
+    state.stage = Stage::Working(Role::Developer);
+    let agent = MockAgent::new()
+        .then(Role::Developer, MockStep::TimeOut(half_done()))
+        .then(Role::Developer, developer_finishes());
+    orchestrator::run(&repo, &store, &mut state, &agent)
+        .await
+        .unwrap();
+
+    fs::write(repo.root().join("README.md"), "Lisa's own edit\n").unwrap();
+    let stop = orchestrator::run(&repo, &store, &mut state, &agent)
+        .await
+        .unwrap();
+
+    assert!(matches!(stop, StopReason::DirtyWorkingTree(_)), "{stop:?}");
+    assert_eq!(agent.calls(), [Role::Developer]);
+}
+
+#[tokio::test]
+async fn a_resumed_run_that_fails_keeps_the_work_for_the_next_run() {
+    let (_dir, repo) = new_project();
+    let (store, mut state) = new_task(&repo);
+    state.stage = Stage::Working(Role::Developer);
+    let agent = MockAgent::new()
+        .then(Role::Developer, MockStep::TimeOut(half_done()))
+        .then(Role::Developer, MockStep::WriteGarbage)
+        .then(Role::Developer, MockStep::WriteGarbage)
+        .then(Role::Developer, developer_finishes());
+    orchestrator::run(&repo, &store, &mut state, &agent)
+        .await
+        .unwrap();
+
+    let stop = orchestrator::run(&repo, &store, &mut state, &agent)
+        .await
+        .unwrap();
+
+    // Both attempts of the resumed run were refused: never a retry from
+    // scratch, the work stays and the next run continues it.
+    assert!(matches!(stop, StopReason::RoleFailed { .. }), "{stop:?}");
+    assert!(repo.root().join("src/half_done.rs").exists());
+    assert!(agent.prompts()[2].contains("- src/half_done.rs"));
+    orchestrator::run(&repo, &store, &mut state, &agent)
+        .await
+        .unwrap();
+    assert!(agent.prompts()[3].contains("- src/half_done.rs"));
+    assert!(repo.root().join("src/parser.rs").exists());
+    assert_eq!(repo.changed_files().unwrap(), Vec::<String>::new());
+}
+
+#[tokio::test]
+async fn a_resumed_role_gets_its_second_attempt_with_the_work_kept() {
+    let (_dir, repo) = new_project();
+    let (store, mut state) = new_task(&repo);
+    state.stage = Stage::Working(Role::Developer);
+    let agent = MockAgent::new()
+        .then(Role::Developer, MockStep::TimeOut(half_done()))
+        .then(Role::Developer, MockStep::WriteGarbage)
+        .then(Role::Developer, developer_finishes());
+    orchestrator::run(&repo, &store, &mut state, &agent)
+        .await
+        .unwrap();
+
+    orchestrator::run(&repo, &store, &mut state, &agent)
+        .await
+        .unwrap();
+
+    assert!(agent.prompts()[2].contains("- src/half_done.rs"));
+    assert!(repo.root().join("src/half_done.rs").exists());
+    assert!(repo.root().join("src/parser.rs").exists());
+    assert_eq!(repo.changed_files().unwrap(), Vec::<String>::new());
+}
+
 #[tokio::test]
 async fn continues_after_a_restart() {
     let (_dir, repo) = new_project();

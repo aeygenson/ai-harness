@@ -274,7 +274,9 @@ fn run_error(end: &RunEnd) -> Option<SuggestError> {
         RunEnd::UsageLimit => Some(SuggestError::AgentFailed(
             "the usage limit was reached".to_string(),
         )),
-        RunEnd::Failed(message) => Some(SuggestError::AgentFailed(text::safe_line(message, 500))),
+        RunEnd::Failed(message) | RunEnd::TimedOut(message) => {
+            Some(SuggestError::AgentFailed(text::safe_line(message, 500)))
+        }
     }
 }
 

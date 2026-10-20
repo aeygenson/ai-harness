@@ -81,6 +81,28 @@ impl Repo {
         (!commit.is_empty()).then(|| commit.to_string())
     }
 
+    /// The files changed between the last commit that changed `path`
+    /// (relative to the project, with `/`) and the commit checked out;
+    /// `None` if `path` was never committed.
+    pub fn changed_since_last_change(&self, path: &str) -> Option<Vec<String>> {
+        let commit = self
+            .git_literal(&["log", "-1", "--format=%H", "--", path])
+            .ok()?;
+        let commit = commit.trim();
+        if commit.is_empty() {
+            return None;
+        }
+        let out = self
+            .git(&["diff", "--name-only", "-z", commit, "HEAD"])
+            .ok()?;
+        Some(
+            out.split('\0')
+                .filter(|p| !p.is_empty())
+                .map(String::from)
+                .collect(),
+        )
+    }
+
     /// The day of the last commit that changed `path` (relative to the
     /// project), as `2026-10-02`; `None` if it was never committed.
     pub fn last_change_date(&self, path: &str) -> Option<String> {

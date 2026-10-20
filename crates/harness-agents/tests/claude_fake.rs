@@ -194,14 +194,11 @@ async fn a_hanging_agent_is_stopped_by_the_time_out() {
         .await
         .unwrap();
 
-    match stop {
-        StopReason::RoleFailed { role, problem } => {
-            assert_eq!(role, Role::Architect);
-            assert!(problem.contains("timed out"), "{problem}");
-        }
-        other => panic!("expected RoleFailed, got {other:?}"),
-    }
+    // One attempt only: a second one would hit the same limit.
+    assert_eq!(stop, StopReason::TimedOut(Role::Architect));
     assert!(started.elapsed() < Duration::from_secs(5));
+    let failures = store.failures().unwrap();
+    assert_eq!(failures.len(), 1, "{failures:?}");
 }
 
 #[tokio::test]

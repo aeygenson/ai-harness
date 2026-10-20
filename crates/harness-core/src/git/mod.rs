@@ -5,11 +5,14 @@
 //! and there is no extra dependency to learn.
 
 mod branch;
+mod fingerprint;
 mod history;
 mod push;
 mod remote;
 mod restore;
 
+pub(crate) use fingerprint::is_harness;
+pub use fingerprint::FileFingerprint;
 pub use remote::{fetch, head_commit};
 
 use std::fs;
