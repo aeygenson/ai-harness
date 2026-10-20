@@ -37,9 +37,11 @@ pub struct AgentOutcome {
 pub enum RunEnd {
     /// The agent finished its work (the handoff is checked separately).
     Succeeded,
-    /// The agent crashed or exited with an error: one short line for Lisa,
-    /// for example "timed out after 1800 s".
+    /// The agent crashed or exited with an error: one short line for Lisa.
     Failed(String),
+    /// The time limit (`agent_timeout_minutes`) stopped the agent: one short
+    /// line for Lisa. Its unfinished changes stay in the folder, not thrown away.
+    TimedOut(String),
     /// The subscription's usage limit stopped the agent.
     UsageLimit,
 }

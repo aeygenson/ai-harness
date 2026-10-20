@@ -16,7 +16,12 @@ pub enum StopReason {
     /// The task waits for Lisa, for the reason given.
     WaitingForHuman(WaitReason),
     /// The subscription's usage limit stopped this role; run again later.
+    /// Its unfinished changes stay in the folder for the next run.
     UsageLimitReached(Role),
+    /// The time limit (`agent_timeout_minutes`) stopped this role. Its
+    /// unfinished changes stay in the folder for the next run; Lisa can raise
+    /// the limit first.
+    TimedOut(Role),
     /// The role did not produce an acceptable handoff after every attempt.
     RoleFailed {
         /// The role that failed.

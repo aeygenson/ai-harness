@@ -130,7 +130,14 @@ fn explain(stop: &StopReason, task_id: &str) -> String {
              harness approve {task_id} --to <role|done> --notes \"...\""
         ),
         StopReason::UsageLimitReached(role) => format!(
-            "The subscription limit stopped the {role:?}. Nothing was saved; run again later."
+            "The subscription limit stopped the {role:?}. Its unfinished work is kept and comes \
+             back when you run again later:\n  harness run {task_id}"
+        ),
+        StopReason::TimedOut(role) => format!(
+            "The time limit (agent_timeout_minutes in harness.toml) stopped the {role:?}. Its \
+             unfinished work stays in the folder for the next run. If the step needs more time, raise \
+             the limit and commit harness.toml (any other uncommitted change stops the run), \
+             then:\n  harness run {task_id}"
         ),
         StopReason::RoleFailed { role, problem } => {
             format!("The {role:?} failed twice. Last problem:\n{problem}")

@@ -170,6 +170,9 @@ fn outcome_text(outcome: &Outcome, tr: &I18n) -> Message {
         StopReason::UsageLimitReached(r) => {
             Message::error(tr.f("tasks.stop_usage", &[("task", task), ("role", &role(r))]))
         }
+        StopReason::TimedOut(r) => {
+            Message::error(tr.f("tasks.stop_timeout", &[("task", task), ("role", &role(r))]))
+        }
         StopReason::RoleFailed { role: r, problem } => Message::error(tr.f(
             "tasks.stop_failed",
             &[

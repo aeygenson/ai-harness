@@ -52,6 +52,10 @@ pub struct Finished {
     pub status: ExitStatus,
 }
 
+/// How [`run`] starts its message when the time limit stopped the agent;
+/// [`failed`] reads it to report [`RunEnd::TimedOut`].
+const TIMED_OUT: &str = "timed out after";
+
 /// Starts the command, writes `prompt` to its standard input and waits at most
 /// `timeout`. Each line the agent prints also goes to the live log (see
 /// [`set_live_log`]), with `secrets` hidden. `Err` holds a short explanation
@@ -121,7 +125,7 @@ pub async fn run(
         }),
         Ok(Err(e)) => Err(format!("error while waiting for the agent: {e}")),
         Err(_) => Err(format!(
-            "timed out after {} s; the agent was stopped",
+            "{TIMED_OUT} {} s; the agent was stopped",
             timeout.as_secs()
         )),
     }
@@ -252,10 +256,14 @@ pub fn hide_secrets<'a>(
 pub fn failed(mut log: String, message: String) -> AgentOutcome {
     log.push_str(&message);
     log.push('\n');
-    AgentOutcome {
-        end: RunEnd::Failed(message),
-        log,
-    }
+    // [`run`] reports its time limit as text, like every other error; the
+    // words it starts with tell the two apart.
+    let end = if message.starts_with(TIMED_OUT) {
+        RunEnd::TimedOut(message)
+    } else {
+        RunEnd::Failed(message)
+    };
+    AgentOutcome { end, log }
 }
 
 /// How a run that finished turned out. `done` says the agent did its work;
@@ -291,6 +299,22 @@ pub fn looks_like_usage_limit(text: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_time_limit_is_reported_apart_from_other_failures() {
+        let timed_out = failed(
+            String::new(),
+            format!("{TIMED_OUT} 60 s; the agent was stopped"),
+        );
+        let crashed = failed(
+            String::new(),
+            "error while waiting for the agent: gone".into(),
+        );
+
+        assert!(matches!(timed_out.end, RunEnd::TimedOut(_)));
+        assert!(matches!(crashed.end, RunEnd::Failed(_)));
+        assert!(timed_out.log.contains("60 s"));
+    }
 
     #[test]
     fn usage_limit_phrases_are_recognised() {

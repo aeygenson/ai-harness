@@ -19,6 +19,7 @@ pub(super) fn prepare_job(
     state: &TaskState,
     role: Role,
     setup: RunSetup<'_>,
+    resumed: Option<&[String]>,
 ) -> Result<(RoleJob, Manifest), StoreError> {
     let output_dir = store.prepare_inbox()?;
     let steps = store.steps()?;
@@ -29,6 +30,7 @@ pub(super) fn prepare_job(
         previous: steps.last().map(|step| &step.handoff),
         facts: &facts,
         skills: &skills,
+        resumed,
     };
     let prompt = prompt::build(role, state, context, &output_dir);
     let manifest = manifest::build(role, setup.agents, &skills, &prompt);
