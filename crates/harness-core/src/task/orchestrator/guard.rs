@@ -33,8 +33,9 @@ impl Before {
 
     /// Compares with now: git's settings, the tripwire, the commit and the
     /// branches. Puts back what can be put back and returns why the task
-    /// must stop. Removes the empty stub files Claude Code made (see
-    /// [`crate::task::agent_stubs`]) and returns `None` when all is as before.
+    /// must stop, or `None` when all is as before. When Claude Code's stub
+    /// block was there, removes its new empty stub files (see
+    /// [`crate::task::agent_stubs`]), except after a commit or branch change.
     pub(super) fn check(
         &self,
         repo: &Repo,

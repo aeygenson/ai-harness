@@ -13,9 +13,10 @@
 //! the new empty stub files so they do not end up in the role's commit. Any
 //! other change to `info/exclude` still stops the task. When the role is
 //! stopped for another reason (not a commit), the new empty stub files are
-//! removed too, without running git, so the next run does not stop on them. A block left by a run
-//! the harness did not watch (Lisa's own Claude Code, the retrospective) is
-//! removed before git status is trusted again, so it cannot hide files.
+//! removed too, without running git, so the next run does not stop on them.
+//! A block left by a run the harness did not watch (Lisa's own Claude Code,
+//! the retrospective) is removed before git status is trusted again, so it
+//! cannot hide files.
 
 use std::fs;
 use std::io;
@@ -220,8 +221,10 @@ impl MissingStubs {
 
     /// Removes the noted files that are now empty plain files, without
     /// asking git. For a role that is stopped anyway: git must not run then.
-    /// The files were missing before the role, so none of them is Lisa's.
-    /// Best effort: a file that cannot be removed stays for Lisa to see.
+    /// The files were missing before the role, so none of them is Lisa's;
+    /// unlike [`Self::remove_new_empty`] this also removes one that Lisa's
+    /// `.gitignore` hides. Best effort: a file that cannot be removed stays
+    /// for Lisa to see.
     pub(crate) fn remove_empty_without_git(&self) {
         for path in &self.paths {
             if is_empty_file(path) {

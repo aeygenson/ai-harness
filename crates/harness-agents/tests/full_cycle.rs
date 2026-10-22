@@ -917,6 +917,42 @@ async fn claude_codes_empty_stub_files_are_removed_when_the_task_stops() {
 }
 
 #[tokio::test]
+async fn stubs_are_removed_without_git_when_the_task_stops() {
+    let (dir, repo) = new_project();
+    let (store, mut state) = new_task(&repo);
+    let home = tempfile::tempdir().unwrap();
+    let watched = watched_with_home(&repo, home.path());
+    let exclude = dir.path().join(".git/info/exclude");
+    let old_exclude = fs::read_to_string(&exclude).unwrap_or_default();
+    let new_exclude = format!("{old_exclude}\n\n# claude-code scrub-mode stubs\n/package.json");
+    let config = dir.path().join(".git/config");
+    let new_config = format!(
+        "{}\n[harness-test]\n\tkey = 1\n",
+        fs::read_to_string(&config).unwrap()
+    );
+    // A broken index makes `git status` fail. Had the harness run git on
+    // this stop, the error would hide why the task stopped.
+    let agent = MockAgent::new().then(
+        Role::Architect,
+        MockStep::finish_writing(
+            Verdict::Approved,
+            NextStep::To(Role::Human),
+            &[
+                (".git/info/exclude", new_exclude.as_str()),
+                ("package.json", ""),
+                (".git/config", new_config.as_str()),
+                (".git/index", "not an index"),
+            ],
+        ),
+    );
+
+    let stop = run_with(&repo, &store, &mut state, &agent, &watched).await;
+
+    assert_eq!(stop, StopReason::GitConfigChanged(Role::Architect));
+    assert!(!dir.path().join("package.json").exists());
+}
+
+#[tokio::test]
 async fn claude_codes_stubs_are_removed_when_it_also_made_a_home_file() {
     let (dir, repo) = new_project();
     let (store, mut state) = new_task(&repo);
