@@ -187,6 +187,7 @@ impl App {
                         self.press(ButtonId::TaskPullRequest(index));
                     }
                 }
+                KeyCode::Char('n') => self.press(ButtonId::TaskQuestions),
                 code => {
                     if let Some(tasks) = &mut self.tasks {
                         tasks.on_key(code);

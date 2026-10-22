@@ -7,6 +7,7 @@ use harness_core::task::handoff::{NextStep, Role};
 use harness_core::task::permissions::WriteRule;
 use harness_core::task::{Stage, WaitReason};
 
+use super::steps::wrote_design;
 use super::tab::TasksTab;
 use crate::tabs::tasks::runner::RunChoice;
 
@@ -99,16 +100,21 @@ impl TasksTab {
 
     /// Who gets Lisa's answer when `role` asked for help: usually that role
     /// again, but a role that may not change files (security) and listed
-    /// issues cannot fix them itself, so the developer is suggested.
+    /// issues cannot fix them itself, so the developer is suggested. An
+    /// architect that wrote a design asks about it: the answer usually
+    /// approves it, so the role that takes approved work is suggested.
     fn after_help_request(&self, role: Role) -> Role {
-        let has_issues = self
-            .current()
-            .and_then(|t| t.steps.last())
-            .is_some_and(|s| !s.handoff.issues.is_empty());
+        let Some(task) = self.current() else {
+            return role;
+        };
+        let last = task.steps.last();
+        let has_issues = last.is_some_and(|s| !s.handoff.issues.is_empty());
         let read_only = role.spec().writes == WriteRule::Nothing;
         let developer_here = self.scenario.roles().contains(&Role::Developer);
         if read_only && has_issues && developer_here {
             Role::Developer
+        } else if role == Role::Architect && last.is_some_and(wrote_design) {
+            task.state.workflow.after_approval()
         } else {
             role
         }

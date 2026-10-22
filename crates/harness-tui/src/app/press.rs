@@ -61,27 +61,12 @@ impl App {
                     self.skill_action(action);
                 }
             }
-            ButtonId::TaskZoom(zoom) => {
-                if let Some(tasks) = &mut self.tasks {
-                    tasks.toggle_zoom(zoom);
-                }
-            }
-            ButtonId::TaskFile(index) => {
-                if let Some(tasks) = &mut self.tasks {
-                    tasks.open_file(index);
-                }
-            }
+            ButtonId::TaskZoom(_)
+            | ButtonId::TaskFile(_)
+            | ButtonId::TaskQuestions
+            | ButtonId::Input
+            | ButtonId::Menu(_) => self.press_on_tasks(id),
             ButtonId::TaskPullRequest(index) => self.open_pull_request(index),
-            ButtonId::Input => {
-                if let Some(tasks) = &mut self.tasks {
-                    tasks.focus_input();
-                }
-            }
-            ButtonId::Menu(menu) => {
-                if let Some(tasks) = &mut self.tasks {
-                    tasks.toggle_menu(menu);
-                }
-            }
             ButtonId::Send => self.send_message(),
             ButtonId::UseProject => self.use_project(),
             ButtonId::NewProject => self.pick(Pick::NewProject),
@@ -109,6 +94,22 @@ impl App {
             }
             ButtonId::Cancel => self.browser = None,
             ButtonId::Ok => {}
+        }
+    }
+
+    /// A button of the Tasks tab that only changes the tab itself.
+    fn press_on_tasks(&mut self, id: ButtonId) {
+        let Some(tasks) = &mut self.tasks else {
+            return;
+        };
+        match id {
+            ButtonId::TaskZoom(zoom) => tasks.toggle_zoom(zoom),
+            ButtonId::TaskFile(index) => tasks.open_file(index),
+            ButtonId::TaskQuestions => tasks.open_questions(),
+            ButtonId::Input => tasks.focus_input(),
+            ButtonId::Menu(menu) => tasks.toggle_menu(menu),
+            // `press` sends only the buttons above here.
+            _ => {}
         }
     }
 

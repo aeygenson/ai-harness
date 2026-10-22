@@ -103,6 +103,9 @@ pub enum ButtonId {
     Skill(crate::tabs::skills::SkillButton),
     /// A link in «Files» of the step on the Tasks tab.
     TaskFile(usize),
+    /// The questions link on the message box of the Tasks tab: opens the
+    /// notes of the role whose answer the task waits for.
+    TaskQuestions,
     /// The pull request of a task on the Tasks tab (its place in the list):
     /// opens it in the browser.
     TaskPullRequest(usize),

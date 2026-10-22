@@ -1,7 +1,7 @@
 //! The steps of a task as the tab shows them: list rows, the step's text and its files.
 
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 use ratatui::style::{Modifier, Style};
@@ -20,7 +20,35 @@ use crate::tabs::tasks::labels::{next_name, severity_label, usage_label, verdict
 use crate::ui::i18n::I18n;
 use crate::ui::theme;
 
+/// The folder the architect writes its designs to (see its skill): a step
+/// that created or changed a file there wrote a design.
+const DESIGN_DIR: &str = "docs/design/";
+
 impl TasksTab {
+    /// The notes Lisa answers while the selected task waits for her: the
+    /// `notes.md` of its last step made by a role (not by her), and that role.
+    /// `None` when the task does not wait for her or the notes are not there.
+    pub fn questions(&self) -> Option<(Role, PathBuf)> {
+        let task = self.current()?;
+        if !matches!(task.state.stage, Stage::WaitingForHuman(_)) {
+            return None;
+        }
+        let step = task
+            .steps
+            .iter()
+            .rev()
+            .find(|s| s.handoff.role != Role::Human)?;
+        let path = self.root.join(&step.dir).join("notes.md");
+        path.is_file().then_some((step.handoff.role, path))
+    }
+
+    /// A click on the questions link (or n): the app opens the notes.
+    pub fn open_questions(&mut self) {
+        if let Some((_, path)) = self.questions() {
+            self.open = Some(path);
+        }
+    }
+
     /// The files of `step`, as links in its «Files»: what its commit
     /// created, changed or deleted (outside the run records), then its notes
     /// and log. Before the commit is there, what its handoff lists.
@@ -125,6 +153,14 @@ pub(super) fn waits_on(task: &TaskView, role: Role) -> bool {
             .is_some_and(|s| s.handoff.next_role == NextStep::To(role)),
         Stage::Done => false,
     }
+}
+
+/// Did `step` create or change a file in the design folder?
+pub(super) fn wrote_design(step: &Step) -> bool {
+    step.handoff.files.iter().any(|file| {
+        let changed = matches!(file.action, FileAction::Created | FileAction::Modified);
+        changed && file.path.starts_with(DESIGN_DIR)
+    })
 }
 
 /// `target (812 MB), data.bin (60 MB)`

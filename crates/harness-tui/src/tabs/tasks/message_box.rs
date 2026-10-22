@@ -1,7 +1,7 @@
 //! Drawing the message box at the bottom of the Tasks tab and its open list.
 
 use ratatui::layout::Rect;
-use ratatui::style::Style;
+use ratatui::style::{Modifier, Style};
 use ratatui::text::Line;
 use ratatui::widgets::{ListItem, Paragraph};
 use ratatui::Frame;
@@ -32,9 +32,11 @@ impl TasksTab {
 
     /// The message box: several lines of text, «To ▾» and «Send».
     pub(super) fn draw_input(&self, frame: &mut Frame, area: Rect, hits: &mut Hits, tr: &I18n) {
-        let block = panel(tr.t("tasks.input_title"), self.focus == Focus::Input);
+        let title = tr.t("tasks.input_title");
+        let block = panel(title, self.focus == Focus::Input);
         let inner = block.inner(area);
         frame.render_widget(block, area);
+        self.draw_questions(frame, area, title, hits, tr);
         if inner.height == 0 {
             return;
         }
@@ -133,6 +135,40 @@ impl TasksTab {
             x += width(label) + 1;
         }
         self.draw_menu(frame, hits, menu, x, area.y, tr);
+    }
+
+    /// The link to the notes Lisa answers, on the box's top border after its
+    /// title, so it is right where she writes; nothing when there are none.
+    fn draw_questions(
+        &self,
+        frame: &mut Frame,
+        area: Rect,
+        title: &str,
+        hits: &mut Hits,
+        tr: &I18n,
+    ) {
+        let Some((role, _)) = self.questions() else {
+            return;
+        };
+        if area.height == 0 {
+            return;
+        }
+        let label = format!(" {} ", tr.f("tasks.questions", &[("role", &role)]));
+        // The title starts one column in, after the corner; one dash between.
+        let title_width = u16::try_from(Line::from(title).width()).unwrap_or(u16::MAX);
+        let x = area.x.saturating_add(title_width).saturating_add(2);
+        // Room up to the right corner; a narrow window cuts the label.
+        let room = area.right().saturating_sub(1).saturating_sub(x);
+        let width = u16::try_from(Line::from(label.as_str()).width())
+            .unwrap_or(u16::MAX)
+            .min(room);
+        if width == 0 {
+            return;
+        }
+        let link = Rect::new(x, area.y, width, 1);
+        let look = theme::accent().add_modifier(Modifier::UNDERLINED);
+        frame.render_widget(Paragraph::new(Line::styled(label, look)), link);
+        hits.add(link, Target::Button(ButtonId::TaskQuestions));
     }
 
     /// The open list, above the box; what cannot be chosen now is grey.
