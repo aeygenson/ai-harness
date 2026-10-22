@@ -11,7 +11,9 @@
 //! The tripwire puts `info/exclude` back after every role. When the only
 //! change was this block, it does not stop the task, and the harness removes
 //! the new empty stub files so they do not end up in the role's commit. Any
-//! other change to `info/exclude` still stops the task. A block left by a run
+//! other change to `info/exclude` still stops the task. When the role is
+//! stopped for another reason (not a commit), the new empty stub files are
+//! removed too, without running git, so the next run does not stop on them. A block left by a run
 //! the harness did not watch (Lisa's own Claude Code, the retrospective) is
 //! removed before git status is trusted again, so it cannot hide files.
 
@@ -215,6 +217,19 @@ impl MissingStubs {
     pub(crate) fn remove_new_empty(&self, repo: &Repo) -> Result<(), GitError> {
         remove_visible_empty(repo, &self.paths)
     }
+
+    /// Removes the noted files that are now empty plain files, without
+    /// asking git. For a role that is stopped anyway: git must not run then.
+    /// The files were missing before the role, so none of them is Lisa's.
+    /// Best effort: a file that cannot be removed stays for Lisa to see.
+    pub(crate) fn remove_empty_without_git(&self) {
+        for path in &self.paths {
+            if is_empty_file(path) {
+                // Ignored on purpose: see above.
+                let _ = fs::remove_file(path);
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -309,6 +324,22 @@ mod tests {
             "Lisa's .gitignore hides it"
         );
         assert_eq!(repo.changed_files().unwrap(), [".npmrc"]);
+    }
+
+    #[test]
+    fn without_git_only_noted_empty_files_are_removed() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        fs::write(root.join(".env"), "KEY=lisas\n").unwrap();
+        let missing = MissingStubs::note(root);
+        fs::write(root.join("package.json"), "").unwrap();
+        fs::write(root.join(".npmrc"), "registry=https://example.com/\n").unwrap();
+
+        missing.remove_empty_without_git();
+
+        assert!(!root.join("package.json").exists());
+        assert!(root.join(".npmrc").exists(), "it has content");
+        assert!(root.join(".env").exists(), "it was there before the role");
     }
 
     #[test]

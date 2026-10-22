@@ -34,9 +34,7 @@ impl Before {
     /// Compares with now: git's settings, the tripwire, the commit and the
     /// branches. Puts back what can be put back and returns why the task
     /// must stop. Removes the empty stub files Claude Code made (see
-    /// [`crate::task::agent_stubs`]) also when the task stops, so the next
-    /// run does not find them as uncommitted changes. Returns `None` when all
-    /// is as before.
+    /// [`crate::task::agent_stubs`]) and returns `None` when all is as before.
     pub(super) fn check(
         &self,
         repo: &Repo,
@@ -49,37 +47,48 @@ impl Before {
             repo.restore_local_config(&self.config)?;
         }
         let changes = self.hidden.check_and_restore(watched)?;
-        // Removing the stubs runs `git status`, which reads `~/.gitconfig`
-        // and its filters. That is safe only when nothing outside the project
-        // was left changed: the local settings and hooks are put back above.
-        // Claude Code's empty stub files would otherwise stay in the folder.
-        // Only when its block was there: another agent's empty file is its
-        // own work.
-        if changes.claude_stubs && changes.reported.is_empty() {
-            self.stubs.remove_new_empty(repo)?;
-        }
         // A new branch at the same commit would make the harness commit the
         // role's work on that branch, so a switch counts like a commit. So
         // does a made, moved or deleted branch: the harness later checks out
         // a task's branch and reads its settings, which no role may change.
         // Branches cannot be put back, and the next run would take them as
-        // they are, so this reason wins when there are several.
+        // they are, so this reason wins when there are several. Lisa checks
+        // the folder herself after this stop, so the stubs stay.
         let git_changed = repo.head()? != self.head
             || repo.current_branch()? != self.branch
             || repo.branch_heads()? != self.branch_heads;
         if git_changed {
             return Ok(Some(StopReason::AgentCommitted(role)));
         }
-        if config_changed {
-            return Ok(Some(StopReason::GitConfigChanged(role)));
-        }
-        if !changes.is_empty() {
-            return Ok(Some(StopReason::HiddenChanges {
+        let claude_stubs = changes.claude_stubs;
+        let stop = if config_changed {
+            Some(StopReason::GitConfigChanged(role))
+        } else if changes.is_empty() {
+            None
+        } else {
+            Some(StopReason::HiddenChanges {
                 role,
                 put_back: changes.put_back,
                 reported: changes.reported,
-            }));
+            })
+        };
+        // Claude Code's empty stub files would otherwise end up in the role's
+        // commit, or stop the next run as uncommitted changes, once
+        // `info/exclude` no longer hides them. Only when its block was there:
+        // another agent's empty file is its own work.
+        if claude_stubs {
+            match stop {
+                // No git here: something was changed that should not have
+                // been, and `git status` would run with whatever else the
+                // agent planted. A file that cannot be removed is shown to
+                // Lisa by the next run; the stop reason matters more.
+                Some(_) => self.stubs.remove_empty_without_git(),
+                // Only now, with nothing left that could make git run the
+                // agent's command (`git status` reads `~/.gitconfig` and its
+                // filters).
+                None => self.stubs.remove_new_empty(repo)?,
+            }
         }
-        Ok(None)
+        Ok(stop)
     }
 }
