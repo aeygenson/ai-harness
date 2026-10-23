@@ -47,6 +47,8 @@ the project's language expects (`parser_test.go`, `parser.test.ts`,
      and you tried to break it;
    - `rejected` with issues when something fails or is missing (code defects
      go to the developer; a wrong design goes to the architect);
-   - `needs_human` only when the design itself is unclear.
+   - `needs_human` only when the design itself is unclear, or when the same
+     disagreement has already gone back and forth twice (see **Do not go
+     round in circles** in the rules for every role).
 9. In notes.md: commands you ran, pass/fail counts, the conditions you
    turned around and what happened, what you could not test.

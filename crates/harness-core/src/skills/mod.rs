@@ -321,6 +321,18 @@ mod tests {
     }
 
     #[test]
+    fn every_role_is_told_to_stop_a_dispute_after_two_rounds() {
+        // `common` reaches every role, so one rule there covers the developer,
+        // the tester and security; the tester's verdict list points to it.
+        let common = built_ins::built_in("common").unwrap();
+        let tester = built_ins::built_in("tester").unwrap();
+
+        assert!(common.contains("## Do not go round in circles"));
+        assert!(common.contains("gone back and forth twice"));
+        assert!(tester.contains("Do not go\n     round in circles"));
+    }
+
+    #[test]
     fn a_project_file_replaces_a_built_in_skill() {
         let copy = copy_of_built_in("tester").unwrap();
         assert!(copy.starts_with("---\nbuiltin: "), "{copy}");

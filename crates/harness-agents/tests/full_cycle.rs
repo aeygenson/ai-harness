@@ -873,6 +873,124 @@ async fn claude_codes_empty_stub_files_do_not_stop_the_task() {
 }
 
 #[tokio::test]
+async fn claude_codes_empty_stub_files_are_removed_when_the_task_stops() {
+    let (dir, repo) = new_project();
+    let (store, mut state) = new_task(&repo);
+    let home = tempfile::tempdir().unwrap();
+    let watched = watched_with_home(&repo, home.path());
+    let exclude = dir.path().join(".git/info/exclude");
+    let old_exclude = fs::read_to_string(&exclude).unwrap_or_default();
+    let new_exclude =
+        format!("{old_exclude}\n\n# claude-code scrub-mode stubs\n/package.json\n/.npmrc");
+    let config = dir.path().join(".git/config");
+    let new_config = format!(
+        "{}\n[harness-test]\n\tkey = 1\n",
+        fs::read_to_string(&config).unwrap()
+    );
+    // Claude Code's stubs, plus a change of git's settings that stops the task.
+    let agent = MockAgent::new().then(
+        Role::Architect,
+        MockStep::finish_writing(
+            Verdict::Approved,
+            NextStep::To(Role::Human),
+            &[
+                (".git/info/exclude", new_exclude.as_str()),
+                ("package.json", ""),
+                (".npmrc", ""),
+                (".git/config", new_config.as_str()),
+            ],
+        ),
+    );
+
+    let stop = run_with(&repo, &store, &mut state, &agent, &watched).await;
+
+    assert_eq!(stop, StopReason::GitConfigChanged(Role::Architect));
+    // Without the removal the next run would stop on them as uncommitted
+    // changes, because `info/exclude` no longer hides them.
+    assert!(!dir.path().join("package.json").exists());
+    assert!(!dir.path().join(".npmrc").exists());
+    assert_eq!(
+        fs::read_to_string(&exclude).unwrap_or_default(),
+        old_exclude
+    );
+    assert_eq!(repo.changed_files().unwrap(), Vec::<String>::new());
+}
+
+#[tokio::test]
+async fn stubs_are_removed_without_git_when_the_task_stops() {
+    let (dir, repo) = new_project();
+    let (store, mut state) = new_task(&repo);
+    let home = tempfile::tempdir().unwrap();
+    let watched = watched_with_home(&repo, home.path());
+    let exclude = dir.path().join(".git/info/exclude");
+    let old_exclude = fs::read_to_string(&exclude).unwrap_or_default();
+    let new_exclude = format!("{old_exclude}\n\n# claude-code scrub-mode stubs\n/package.json");
+    let config = dir.path().join(".git/config");
+    let new_config = format!(
+        "{}\n[harness-test]\n\tkey = 1\n",
+        fs::read_to_string(&config).unwrap()
+    );
+    // A broken index makes `git status` fail. Had the harness run git on
+    // this stop, the error would hide why the task stopped.
+    let agent = MockAgent::new().then(
+        Role::Architect,
+        MockStep::finish_writing(
+            Verdict::Approved,
+            NextStep::To(Role::Human),
+            &[
+                (".git/info/exclude", new_exclude.as_str()),
+                ("package.json", ""),
+                (".git/config", new_config.as_str()),
+                (".git/index", "not an index"),
+            ],
+        ),
+    );
+
+    let stop = run_with(&repo, &store, &mut state, &agent, &watched).await;
+
+    assert_eq!(stop, StopReason::GitConfigChanged(Role::Architect));
+    assert!(!dir.path().join("package.json").exists());
+}
+
+#[tokio::test]
+async fn claude_codes_stubs_are_removed_when_it_also_made_a_home_file() {
+    let (dir, repo) = new_project();
+    let (store, mut state) = new_task(&repo);
+    let home = tempfile::tempdir().unwrap();
+    let watched = watched_with_home(&repo, home.path());
+    let bashrc = home.path().join(".bashrc");
+    let exclude = dir.path().join(".git/info/exclude");
+    let old_exclude = fs::read_to_string(&exclude).unwrap_or_default();
+    let new_exclude =
+        format!("{old_exclude}\n\n# claude-code scrub-mode stubs\n/package.json\n/.npmrc");
+    // Claude Code makes a missing shell start-up file empty: a stop for Lisa.
+    let agent = MockAgent::new().then(
+        Role::Architect,
+        MockStep::finish_writing(
+            Verdict::Approved,
+            NextStep::To(Role::Human),
+            &[
+                (".git/info/exclude", new_exclude.as_str()),
+                ("package.json", ""),
+                (".npmrc", ""),
+                (bashrc.to_str().unwrap(), ""),
+            ],
+        ),
+    );
+
+    let stop = run_with(&repo, &store, &mut state, &agent, &watched).await;
+
+    let StopReason::HiddenChanges { reported, .. } = stop else {
+        panic!("{stop:?}");
+    };
+    assert_eq!(reported, std::slice::from_ref(&bashrc));
+    assert!(bashrc.exists(), "outside the project Lisa decides");
+    assert!(!dir.path().join("package.json").exists());
+    assert!(!dir.path().join(".npmrc").exists());
+    assert_eq!(repo.changed_files().unwrap(), Vec::<String>::new());
+}
+
+#[tokio::test]
 async fn a_file_hidden_by_an_old_stub_block_stops_the_run_before_any_role() {
     let (dir, repo) = new_project();
     let (store, mut state) = new_task(&repo);
