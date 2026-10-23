@@ -9,9 +9,10 @@ use harness_core::config::Config;
 use harness_core::git::{Repo, HARNESS_DIR};
 use harness_core::skills::Skills;
 use harness_core::task::branch;
-use harness_core::task::handoff::{NextStep, Role, Verdict};
+use harness_core::task::handoff::{AnswerTo, NextStep, Role, Verdict, MAX_REASON_CHARS};
 use harness_core::task::orchestrator::{self, Project, SameText, StopReason};
-use harness_core::task::{Stage, WaitReason};
+use harness_core::task::store::TaskStore;
+use harness_core::task::{Stage, TaskState, WaitReason};
 use harness_platform::stop::StopSignals;
 
 use crate::{open_repo, open_task};
@@ -84,7 +85,8 @@ pub(crate) async fn run(project: &Path, task_id: &str) -> Result<()> {
         agent_versions: agent.versions(),
     };
     let stop = orchestrator::run_project(&repo, &store, &mut state, &agent, project).await?;
-    println!("{}", explain(&stop, task_id));
+    let suggested = suggestion(&store, &state, &stop);
+    println!("{}", explain(&stop, task_id, suggested.as_ref()));
     if stop == StopReason::Done {
         // Running a done task again sends it again: the way to retry after a
         // failed push.
@@ -113,18 +115,59 @@ fn enter_branch(repo: &Repo, task_id: &str) -> Result<()> {
     Ok(())
 }
 
-/// The message telling Lisa why the run stopped and which command comes next.
-fn explain(stop: &StopReason, task_id: &str) -> String {
+/// Whom the role that asked for help suggests for Lisa's answer (its
+/// handoff's `answer_to`); `None` when the run stopped for another reason.
+///
+/// It is only a hint: if the history cannot be read, the stop message is
+/// still printed, just without it (`ok()` on purpose).
+fn suggestion(store: &TaskStore, state: &TaskState, stop: &StopReason) -> Option<AnswerTo> {
+    if !matches!(
+        stop,
+        StopReason::WaitingForHuman(WaitReason::RoleAskedForHelp(_))
+    ) {
+        return None;
+    }
+    // The last handoff is the question of the role that asked.
+    let last = store.history().ok()?.pop()?;
+    last.suggested_answer(state.workflow.scenario()).cloned()
+}
+
+/// What to say when `role` asked for help: where its questions are, whom it
+/// suggests for the answer, and the command that answers.
+fn help_request_text(role: Role, task_id: &str, suggested: Option<&AnswerTo>) -> String {
+    let Some(answer) = suggested else {
+        return format!(
+            "The {role} needs your help; see its notes.md. Answer with:\n  \
+             harness approve {task_id} --notes \"...\""
+        );
+    };
+    // The reason is the agent's text: one clean line.
+    let reason = harness_core::text::safe_line(&answer.reason, MAX_REASON_CHARS);
+    let to = answer.role;
+    let without_to = if to == role {
+        String::new()
+    } else {
+        format!("\n(without --to, the {role} gets it)")
+    };
+    format!(
+        "The {role} needs your help; see its notes.md.\n\
+         It suggests that the {to} gets your answer: {reason}\n\
+         Answer with:\n  harness approve {task_id} --to {to} --notes \"...\"{without_to}"
+    )
+}
+
+/// The message telling Lisa why the run stopped and which command comes next;
+/// `suggested` is whom a role that asked for help suggests for the answer.
+fn explain(stop: &StopReason, task_id: &str, suggested: Option<&AnswerTo>) -> String {
     match stop {
         StopReason::Done => "Done: security approved the work.".into(),
         StopReason::WaitingForHuman(WaitReason::ApproveDesign) => format!(
             "The architect's design is ready. Read it, then:\n  \
              harness approve {task_id}   or   harness reject {task_id} --to architect --notes \"...\""
         ),
-        StopReason::WaitingForHuman(WaitReason::RoleAskedForHelp(role)) => format!(
-            "The {role:?} needs your help; see its notes.md. Answer with:\n  \
-             harness approve {task_id} --notes \"...\""
-        ),
+        StopReason::WaitingForHuman(WaitReason::RoleAskedForHelp(role)) => {
+            help_request_text(*role, task_id, suggested)
+        }
         StopReason::WaitingForHuman(WaitReason::RoundLimitReached) => format!(
             "The round limit is reached. Decide who continues:\n  \
              harness approve {task_id} --to <role|done> --notes \"...\""
@@ -338,7 +381,7 @@ mod tests {
         ];
 
         for stop in &stops {
-            let text = explain(stop, "task-001");
+            let text = explain(stop, "task-001", None);
             assert!(
                 text.starts_with("While the Architect was working"),
                 "{text}"
@@ -352,5 +395,77 @@ mod tests {
             assert!(!text.contains("The role's"), "{text}");
             assert!(text.contains("check"), "{text}");
         }
+    }
+
+    #[test]
+    fn a_help_request_names_the_suggested_role_and_how_to_answer_it() {
+        let stop = StopReason::WaitingForHuman(WaitReason::RoleAskedForHelp(Role::Tester));
+        let answer = AnswerTo {
+            role: Role::Developer,
+            reason: "the parser\nmust \u{1b}[2Jchange".into(),
+        };
+
+        let text = explain(&stop, "task-001", Some(&answer));
+
+        assert!(
+            text.contains(
+                "It suggests that the developer gets your answer: the parser must change\n"
+            ),
+            "{text}"
+        );
+        assert!(
+            text.contains("harness approve task-001 --to developer --notes \"...\""),
+            "{text}"
+        );
+        assert!(text.contains("without --to, the tester gets it"), "{text}");
+    }
+
+    #[test]
+    fn a_help_request_without_a_suggestion_answers_the_asking_role() {
+        let stop = StopReason::WaitingForHuman(WaitReason::RoleAskedForHelp(Role::Tester));
+
+        let text = explain(&stop, "task-001", None);
+
+        assert!(text.contains("harness approve task-001 --notes"), "{text}");
+        assert!(!text.contains("suggests"), "{text}");
+    }
+
+    #[test]
+    fn a_role_that_suggests_itself_gets_no_note_about_another_role() {
+        let stop = StopReason::WaitingForHuman(WaitReason::RoleAskedForHelp(Role::Tester));
+        let answer = AnswerTo {
+            role: Role::Tester,
+            reason: "only a decision".into(),
+        };
+
+        let text = explain(&stop, "task-001", Some(&answer));
+
+        assert!(text.contains("--to tester --notes"), "{text}");
+        assert!(!text.contains("without --to"), "{text}");
+    }
+
+    #[test]
+    fn the_cli_takes_the_suggestion_from_the_last_question_only() {
+        let dir = tempfile::tempdir().unwrap();
+        let project = dir.path();
+        projects::init(project).unwrap();
+        new_task(project, "task-001", "Add a parser", false).unwrap();
+        let repo = open_repo(project).unwrap();
+        let (store, mut state) = open_task(&repo, "task-001").unwrap();
+        let asking = StopReason::WaitingForHuman(WaitReason::RoleAskedForHelp(Role::Architect));
+        assert_eq!(suggestion(&store, &state, &asking), None);
+        let asked = harness_core::task::handoff::Handoff::from_json(
+            r#"{"schema_version": 1, "task_id": "task-001", "round": 1,
+                "role": "architect", "verdict": "needs_human", "next_role": "human",
+                "summary": "JSON or TOML?",
+                "answer_to": {"role": "developer", "reason": "code"}}"#,
+        )
+        .unwrap();
+        store.record(&mut state, &asked, "notes").unwrap();
+
+        let found = suggestion(&store, &state, &asking);
+
+        assert_eq!(found.map(|a| a.role), Some(Role::Developer));
+        assert_eq!(suggestion(&store, &state, &StopReason::Done), None);
     }
 }

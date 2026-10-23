@@ -175,6 +175,7 @@ mod tests {
                 skills_used: vec![],
                 files: vec![],
                 issues: vec![],
+                answer_to: None,
             },
             notes: String::new(),
         }

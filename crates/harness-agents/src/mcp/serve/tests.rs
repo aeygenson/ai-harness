@@ -35,6 +35,7 @@ fn project() -> tempfile::TempDir {
         skills_used: vec![],
         files: vec![],
         issues: vec![],
+        answer_to: None,
     };
     let step_dir = store.record(&mut state, &handoff, "See design.md").unwrap();
     // A terminal escape in the log must not reach the agent.

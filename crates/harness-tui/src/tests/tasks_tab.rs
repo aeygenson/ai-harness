@@ -756,6 +756,44 @@ fn a_fix_asked_for_by_security_goes_to_the_developer_by_default() {
 }
 
 #[test]
+fn a_suggestion_wins_over_the_rule_for_security_with_issues() {
+    let env = Env::new();
+    let (root, mut app) = empty_project(&env);
+    let repo = Repo::open(&root).unwrap();
+    let (store, mut state) =
+        orchestrator::create_task(&repo, "task-001", "Build a parser", Workflow::Task, 5).unwrap();
+    for (role, next) in [
+        (Role::Architect, Role::Human),
+        (Role::Human, Role::Developer),
+        (Role::Developer, Role::Tester),
+        (Role::Tester, Role::Security),
+    ] {
+        let step = handoff(role, Verdict::Approved, NextStep::To(next), "step");
+        store.record(&mut state, &step, "notes").unwrap();
+    }
+    let mut asked = handoff(
+        Role::Security,
+        Verdict::NeedsHuman,
+        NextStep::To(Role::Human),
+        "is this risk accepted?",
+    );
+    asked.issues = vec![Issue {
+        severity: Severity::Low,
+        location: None,
+        description: "Logs keep user names".into(),
+    }];
+    asked.answer_to = Some(AnswerTo {
+        role: Role::Security,
+        reason: "only a decision".into(),
+    });
+    store.record(&mut state, &asked, "notes").unwrap();
+    repo.commit_all("security asked").unwrap();
+    key(&mut app, KeyCode::F(5));
+
+    assert!(screen(&mut app).contains(" To: security ▾ "));
+}
+
+#[test]
 fn a_question_from_security_without_issues_goes_back_to_security() {
     let env = Env::new();
     let (root, mut app) = empty_project(&env);
@@ -867,4 +905,79 @@ fn no_questions_link_while_a_role_works() {
     project(&root);
     let mut app = env.app(&root);
     assert!(!screen(&mut app).contains("Questions:"));
+}
+
+/// A task whose tester asked Lisa for help, suggesting `answer_to` (role and
+/// reason) for her answer, or nothing.
+fn tester_asked(env: &Env, answer_to: Option<(Role, &str)>) -> App {
+    let (root, mut app) = empty_project(env);
+    let repo = Repo::open(&root).unwrap();
+    let (store, mut state) =
+        orchestrator::create_task(&repo, "task-001", "Build a parser", Workflow::Task, 5).unwrap();
+    for (role, next) in [
+        (Role::Architect, Role::Human),
+        (Role::Human, Role::Developer),
+        (Role::Developer, Role::Tester),
+    ] {
+        let step = handoff(role, Verdict::Approved, NextStep::To(next), "step");
+        store.record(&mut state, &step, "notes").unwrap();
+    }
+    let mut asked = handoff(
+        Role::Tester,
+        Verdict::NeedsHuman,
+        NextStep::To(Role::Human),
+        "is empty input an error?",
+    );
+    asked.answer_to = answer_to.map(|(role, reason)| AnswerTo {
+        role,
+        reason: reason.into(),
+    });
+    store.record(&mut state, &asked, "notes").unwrap();
+    repo.commit_all("the tester asked").unwrap();
+    key(&mut app, KeyCode::F(5));
+    app
+}
+
+#[test]
+fn a_tester_that_suggests_the_developer_sends_the_answer_there() {
+    let env = Env::new();
+    // The line break shows the reason is cleaned into one line.
+    let mut app = tester_asked(&env, Some((Role::Developer, "the parser\nmust change")));
+
+    let text = screen(&mut app);
+
+    assert!(text.contains(" To: developer ▾ "), "{text}");
+    assert!(
+        text.contains("open (n) ─ suggested: developer — the parser must change ─"),
+        "{text}"
+    );
+}
+
+#[test]
+fn a_tester_that_suggests_the_architect_sends_the_answer_there() {
+    let env = Env::new();
+    let mut app = tester_asked(&env, Some((Role::Architect, "the design is unclear")));
+
+    let text = screen(&mut app);
+
+    assert!(text.contains(" To: architect ▾ "), "{text}");
+    assert!(
+        text.contains("suggested: architect — the design is unclear"),
+        "{text}"
+    );
+    // The choice is only the default: the menu still lists every role.
+    click(&mut app, " To: architect ▾ ");
+    click(&mut app, "│  tester ");
+    assert!(screen(&mut app).contains(" To: tester ▾ "));
+}
+
+#[test]
+fn without_a_suggestion_the_answer_goes_back_to_the_tester() {
+    let env = Env::new();
+    let mut app = tester_asked(&env, None);
+
+    let text = screen(&mut app);
+
+    assert!(text.contains(" To: tester ▾ "), "{text}");
+    assert!(!text.contains("suggested:"), "{text}");
 }

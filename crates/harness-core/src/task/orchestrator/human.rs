@@ -44,6 +44,7 @@ pub fn record_human_decision(
         skills_used: vec![],
         files: vec![],
         issues,
+        answer_to: None,
     };
     let step_dir = store.record(state, &handoff, notes)?;
     // Commit only the task folder: code Lisa changed herself is hers to commit.

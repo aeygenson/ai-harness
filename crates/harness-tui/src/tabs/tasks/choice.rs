@@ -98,12 +98,17 @@ impl TasksTab {
         }
     }
 
-    /// Who gets Lisa's answer when `role` asked for help: usually that role
-    /// again, but a role that may not change files (security) and listed
-    /// issues cannot fix them itself, so the developer is suggested. An
-    /// architect that wrote a design asks about it: the answer usually
-    /// approves it, so the role that takes approved work is suggested.
+    /// Who gets Lisa's answer when `role` asked for help: the role its
+    /// handoff names in `answer_to`, if it names one of the scenario.
+    /// Otherwise usually that role again, but a role that may not change
+    /// files (security) and listed issues cannot fix them itself, so the
+    /// developer is suggested. An architect that wrote a design asks about
+    /// it: the answer usually approves it, so the role that takes approved
+    /// work is suggested.
     fn after_help_request(&self, role: Role) -> Role {
+        if let Some(answer) = self.suggested_answer() {
+            return answer.role;
+        }
         let Some(task) = self.current() else {
             return role;
         };

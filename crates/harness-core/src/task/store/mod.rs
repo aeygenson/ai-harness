@@ -352,6 +352,7 @@ mod tests {
             skills_used: vec![],
             files: vec![],
             issues,
+            answer_to: None,
         }
     }
 

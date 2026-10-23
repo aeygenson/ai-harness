@@ -79,6 +79,13 @@ pub enum Workflow {
 }
 
 impl Workflow {
+    /// The scenario this workflow belongs to: its roles are the ones that work here.
+    pub fn scenario(self) -> Scenario {
+        match self {
+            Workflow::Task => Scenario::Software,
+        }
+    }
+
     /// The role a new task of this workflow starts with.
     pub fn start(self) -> Role {
         match self {
@@ -117,6 +124,7 @@ mod tests {
             assert!(!scenario.roles().is_empty(), "{scenario}");
             assert!(scenario.workflows().contains(&scenario.default_workflow()));
             for workflow in scenario.workflows() {
+                assert_eq!(workflow.scenario(), scenario);
                 assert!(scenario.roles().contains(&workflow.start()));
                 assert!(scenario.roles().contains(&workflow.after_approval()));
             }

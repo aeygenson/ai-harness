@@ -11,7 +11,7 @@ use crate::ui::ButtonId;
 use harness_core::config::projects::Projects;
 use harness_core::git::Repo;
 use harness_core::models;
-use harness_core::task::handoff::{Handoff, Issue, NextStep, Role, Severity, Verdict};
+use harness_core::task::handoff::{AnswerTo, Handoff, Issue, NextStep, Role, Severity, Verdict};
 use harness_core::task::orchestrator;
 use harness_core::task::scenario::Workflow;
 use harness_core::task::store::TaskStore;
@@ -46,6 +46,7 @@ fn handoff(role: Role, verdict: Verdict, next: NextStep, summary: &str) -> Hando
         skills_used: vec![],
         files: vec![],
         issues: vec![],
+        answer_to: None,
     }
 }
 

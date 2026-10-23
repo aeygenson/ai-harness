@@ -310,6 +310,7 @@ fn write_result(
         skills_used: vec![],
         files: vec![],
         issues,
+        answer_to: None,
     };
     let json = serde_json::to_string_pretty(&handoff)?;
     fs::write(job.output_dir.join("handoff.json"), json)?;

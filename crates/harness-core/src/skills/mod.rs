@@ -333,6 +333,17 @@ mod tests {
     }
 
     #[test]
+    fn every_role_says_whom_lisas_answer_goes_to() {
+        let common = built_ins::built_in("common").unwrap();
+
+        assert!(common.contains("## Whom Lisa's answer goes to"));
+        assert!(common.contains("finish with `needs_human`, fill `answer_to`"));
+        assert!(common.contains("change in the code: `developer`"));
+        assert!(common.contains("the design or the scope: `architect`"));
+        assert!(common.contains("yourself: your own role"));
+    }
+
+    #[test]
     fn the_tester_stops_rejecting_the_same_kind_of_problem() {
         let tester = built_ins::built_in("tester").unwrap();
 
