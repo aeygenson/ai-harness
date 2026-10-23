@@ -783,3 +783,88 @@ fn a_question_from_security_without_issues_goes_back_to_security() {
 
     assert!(screen(&mut app).contains(" To: security ▾ "));
 }
+
+/// A task whose architect asked Lisa for help; `design` says whether its
+/// handoff lists a design it wrote.
+fn architect_asked(env: &Env, design: bool) -> (PathBuf, App) {
+    let (root, mut app) = empty_project(env);
+    let repo = Repo::open(&root).unwrap();
+    let (store, mut state) =
+        orchestrator::create_task(&repo, "task-001", "Build a parser", Workflow::Task, 5).unwrap();
+    let mut asked = handoff(
+        Role::Architect,
+        Verdict::NeedsHuman,
+        NextStep::To(Role::Human),
+        "JSON or TOML?",
+    );
+    if design {
+        asked.files = vec![harness_core::task::handoff::FileChange {
+            path: "docs/design/task-001.md".into(),
+            action: harness_core::task::handoff::FileAction::Created,
+        }];
+    }
+    store
+        .record(&mut state, &asked, "Which format should the parser read?")
+        .unwrap();
+    repo.commit_all("the architect asked").unwrap();
+    key(&mut app, KeyCode::F(5));
+    (root, app)
+}
+
+#[test]
+fn an_architect_that_wrote_a_design_hands_the_answer_to_the_developer() {
+    let env = Env::new();
+    let (_, mut app) = architect_asked(&env, true);
+    assert!(screen(&mut app).contains(" To: developer ▾ "));
+}
+
+#[test]
+fn a_question_from_the_architect_without_a_design_goes_back_to_it() {
+    let env = Env::new();
+    let (_, mut app) = architect_asked(&env, false);
+    assert!(screen(&mut app).contains(" To: architect ▾ "));
+}
+
+#[test]
+fn the_questions_of_the_waiting_role_open_from_the_message_box() {
+    let env = Env::new();
+    let (root, mut app) = architect_asked(&env, false);
+    // Zed is not started in the tests: a command that does nothing.
+    app.viewer = |_| Some(std::process::Command::new("true"));
+    let link = "Questions: architect notes.md — open (n)";
+    let text = screen(&mut app);
+    // The link is on the top border of the message box.
+    let (_, row) = find(&text, link);
+    assert_eq!(row, find(&text, " Message ").1, "{text}");
+
+    click(&mut app, link);
+    let opened = app.tasks.as_ref().unwrap().open.clone().unwrap();
+    assert!(opened.starts_with(&root), "{opened:?}");
+    assert!(opened.ends_with("notes.md"), "{opened:?}");
+    app.open_task_file();
+    let (message, problem) = shown(&app);
+    assert!(
+        !problem && message.starts_with("Opened in Zed: "),
+        "{message}"
+    );
+
+    // The key does the same.
+    key(&mut app, KeyCode::Char('n'));
+    assert_eq!(app.tasks.as_ref().unwrap().open, Some(opened.clone()));
+    app.open_task_file();
+
+    // Without the notes there is no link, and the key does nothing.
+    fs::remove_file(&opened).unwrap();
+    assert!(!screen(&mut app).contains(link));
+    key(&mut app, KeyCode::Char('n'));
+    assert_eq!(app.tasks.as_ref().unwrap().open, None);
+}
+
+#[test]
+fn no_questions_link_while_a_role_works() {
+    let env = Env::new();
+    let root = env.path("test");
+    project(&root);
+    let mut app = env.app(&root);
+    assert!(!screen(&mut app).contains("Questions:"));
+}
