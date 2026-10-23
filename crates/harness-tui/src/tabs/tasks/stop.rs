@@ -4,7 +4,6 @@
 
 use harness_core::task::stop_request::{StopRequest, StopWhen};
 
-use super::runner::push_line;
 use super::tab::TasksTab;
 use crate::ui::i18n::I18n;
 use crate::ui::ButtonId;
@@ -39,7 +38,7 @@ impl TasksTab {
             Some(StopWhen::Now) => "tasks.stop_now_asked",
         };
         let text = tr.t(key).to_string();
-        push_line(&mut self.log, format!("── {text}"));
+        self.log.push(format!("── {text}"));
         Some(text)
     }
 
@@ -51,7 +50,7 @@ impl TasksTab {
         }
         self.stop_request()?.stop_now();
         let text = tr.t("tasks.stop_now_asked").to_string();
-        push_line(&mut self.log, format!("── {text}"));
+        self.log.push(format!("── {text}"));
         Some(text)
     }
 

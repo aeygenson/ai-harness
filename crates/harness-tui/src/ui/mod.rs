@@ -39,6 +39,9 @@ pub enum Target {
     Window,
     /// A line of a tab's details that can be chosen, by its index.
     Row(usize),
+    /// The live log of the Tasks tab: the wheel scrolls it, a click gives
+    /// it the focus. Its lines are not links, so no row is needed.
+    Log,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

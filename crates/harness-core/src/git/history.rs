@@ -103,6 +103,35 @@ impl Repo {
         )
     }
 
+    /// Every file under `path` (relative to the project, with `/`) with the
+    /// time of the commit that added it, in seconds since 1970, newest
+    /// commits first. Empty when nothing there was committed or git failed.
+    pub fn added_times(&self, path: &str) -> Vec<(String, u64)> {
+        // Each commit prints a line «\u{1}<time>» and then the files it
+        // added; no file name starts with that control character.
+        let Ok(out) = self.git_literal(&[
+            "log",
+            "--no-renames",
+            "--diff-filter=A",
+            "--name-only",
+            "--format=%x01%ct",
+            "--",
+            path,
+        ]) else {
+            return Vec::new();
+        };
+        let mut time = None;
+        let mut files = Vec::new();
+        for line in out.lines().filter(|l| !l.is_empty()) {
+            if let Some(seconds) = line.strip_prefix('\u{1}') {
+                time = seconds.trim().parse().ok();
+            } else if let Some(time) = time {
+                files.push((line.to_string(), time));
+            }
+        }
+        files
+    }
+
     /// The day of the last commit that changed `path` (relative to the
     /// project), as `2026-10-02`; `None` if it was never committed.
     pub fn last_change_date(&self, path: &str) -> Option<String> {
@@ -111,5 +140,56 @@ impl Repo {
             .ok()?;
         let day = day.trim();
         (!day.is_empty()).then(|| day.to_string())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+
+    use super::*;
+
+    /// Writes `file` and commits it as if at `seconds` since 1970.
+    fn commit_at(repo: &Repo, file: &str, text: &str, seconds: u64) {
+        let path = repo.root().join(file);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(&path, text).unwrap();
+        repo.git(&["add", "--all"]).unwrap();
+        let date = format!("@{seconds} +0000");
+        repo.run(
+            &["commit", "-q", "-m", file],
+            &[("GIT_COMMITTER_DATE", &date)],
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn each_added_file_comes_with_the_time_of_its_commit() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = Repo::init(dir.path()).unwrap();
+        // No commit yet: nothing, and no error.
+        assert_eq!(repo.added_times("runs"), []);
+
+        commit_at(&repo, "runs/t/task.md", "do it", 1_000);
+        commit_at(
+            &repo,
+            "runs/t/round-01/01-developer/handoff.json",
+            "{}",
+            1_600,
+        );
+        commit_at(&repo, "README.md", "outside", 2_000);
+        // Changing a file later does not move its time.
+        commit_at(&repo, "runs/t/task.md", "do it well", 3_000);
+
+        assert_eq!(
+            repo.added_times("runs"),
+            [
+                (
+                    "runs/t/round-01/01-developer/handoff.json".to_string(),
+                    1_600
+                ),
+                ("runs/t/task.md".to_string(), 1_000),
+            ]
+        );
     }
 }

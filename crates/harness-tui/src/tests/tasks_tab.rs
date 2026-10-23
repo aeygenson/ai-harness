@@ -520,7 +520,7 @@ fn a_click_on_a_title_shows_the_window_over_the_whole_tab() {
         .as_mut()
         .unwrap()
         .log
-        .push_back("cargo test: ok".to_string());
+        .push("cargo test: ok".to_string());
     click(&mut app, "⤢ Agent log");
     let text = screen(&mut app);
     assert!(text.contains("⤡ Agent log"), "{text}");
@@ -1174,4 +1174,242 @@ fn stop_now_asks_first_keeps_the_work_and_takes_a_note() {
         .unwrap();
     assert_eq!(steps[0].handoff.summary, "Keep the old API");
     assert_eq!(steps[1].handoff.role, Role::Developer);
+}
+
+/// A turn of the mouse wheel at column `x`, row `y`.
+fn wheel(app: &mut App, (x, y): (u16, u16), down: bool) {
+    app.on_mouse(MouseEvent {
+        kind: if down {
+            MouseEventKind::ScrollDown
+        } else {
+            MouseEventKind::ScrollUp
+        },
+        column: x,
+        row: y,
+        modifiers: KeyModifiers::NONE,
+    });
+}
+
+/// The sample project with a live log of `count` lines «line 000», «line 001», ….
+fn project_with_log(env: &Env, count: usize) -> App {
+    let root = env.path("test");
+    project(&root);
+    let mut app = env.app(&root);
+    for i in 0..count {
+        app.tasks.as_mut().unwrap().log.push(format!("line {i:03}"));
+    }
+    app
+}
+
+#[test]
+fn the_live_log_scrolls_with_the_wheel_and_keys_and_end_follows_again() {
+    let env = Env::new();
+    let mut app = project_with_log(&env, 100);
+    let text = screen(&mut app);
+    assert!(text.contains("line 099"), "{text}");
+    assert!(!text.contains("↓ End: newest"), "{text}");
+
+    // The wheel over the log scrolls it, not the step above it.
+    let at = find(&text, "line 099");
+    wheel(&mut app, at, false);
+    let text = screen(&mut app);
+    assert!(text.contains("line 096"), "{text}");
+    assert!(!text.contains("line 097"), "{text}");
+    assert!(text.contains("Agent log · ↓ End: newest"), "{text}");
+    assert_eq!(app.tasks.as_ref().unwrap().scroll, 0);
+
+    // New lines do not move a scrolled view.
+    app.tasks.as_mut().unwrap().log.push("line 100".into());
+    let text = screen(&mut app);
+    assert!(text.contains("line 096"), "{text}");
+    assert!(!text.contains("line 100"), "{text}");
+
+    // The wheel gave the log the focus: PageUp scrolls it ten lines further.
+    key(&mut app, KeyCode::PageUp);
+    let text = screen(&mut app);
+    assert!(text.contains("line 086"), "{text}");
+    assert!(!text.contains("line 087"), "{text}");
+    assert_eq!(app.tasks.as_ref().unwrap().scroll, 0);
+    key(&mut app, KeyCode::Down);
+    assert!(screen(&mut app).contains("line 087"));
+
+    // End: the newest line again, and the log follows new ones.
+    key(&mut app, KeyCode::End);
+    let text = screen(&mut app);
+    assert!(text.contains("line 100"), "{text}");
+    assert!(!text.contains("↓ End: newest"), "{text}");
+    app.tasks.as_mut().unwrap().log.push("line 101".into());
+    assert!(screen(&mut app).contains("line 101"));
+
+    // Wheel down to the end resumes following too.
+    let at = find(&screen(&mut app), "line 101");
+    wheel(&mut app, at, false);
+    wheel(&mut app, at, true);
+    wheel(&mut app, at, true);
+    let text = screen(&mut app);
+    assert!(text.contains("line 101"), "{text}");
+    assert!(!text.contains("↓ End: newest"), "{text}");
+}
+
+#[test]
+fn the_keyboard_alone_reaches_and_scrolls_the_live_log() {
+    let env = Env::new();
+    let mut app = project_with_log(&env, 100);
+    // Tab: the tasks, the steps, then the log; its keys show in its title.
+    key(&mut app, KeyCode::Tab);
+    key(&mut app, KeyCode::Tab);
+    let text = screen(&mut app);
+    assert!(
+        text.contains("Agent log · ↑↓ PgUp PgDn Home End: scroll"),
+        "{text}"
+    );
+    let step = app.tasks.as_ref().unwrap().step;
+    key(&mut app, KeyCode::Up);
+    let text = screen(&mut app);
+    assert!(!text.contains("line 099"), "{text}");
+    assert!(text.contains("line 098"), "{text}");
+    // The arrows moved the log, not the selected step.
+    assert_eq!(app.tasks.as_ref().unwrap().step, step);
+    // Then on to the message box.
+    key(&mut app, KeyCode::Tab);
+    assert!(app.tasks.as_ref().unwrap().typing());
+}
+
+#[test]
+fn the_live_log_stays_in_range_when_the_window_is_resized() {
+    let env = Env::new();
+    let mut app = project_with_log(&env, 100);
+    screen(&mut app);
+    // Home: the oldest lines, in the usual window.
+    key(&mut app, KeyCode::Home);
+    let text = screen(&mut app);
+    assert!(text.contains("line 000"), "{text}");
+    assert!(text.contains("↓ End: newest"), "{text}");
+
+    // A much taller window: still from the oldest line, and the panel full.
+    let tall = screen_of_size(&mut app, 120, 80);
+    assert!(tall.contains("line 000"), "{tall}");
+    assert!(tall.contains("line 015"), "{tall}");
+    // One page down moves the view at once, however far up it went before.
+    key(&mut app, KeyCode::End);
+    key(&mut app, KeyCode::Home);
+    screen_of_size(&mut app, 120, 80);
+    key(&mut app, KeyCode::Tab);
+    key(&mut app, KeyCode::Tab);
+    key(&mut app, KeyCode::PageDown);
+    let tall = screen_of_size(&mut app, 120, 80);
+    assert!(!tall.contains("line 009"), "{tall}");
+    assert!(tall.contains("line 010"), "{tall}");
+
+    // So tall everything fits: the log follows again.
+    let huge = screen_of_size(&mut app, 120, 400);
+    assert!(huge.contains("line 000"), "{huge}");
+    assert!(huge.contains("line 099"), "{huge}");
+    assert!(!huge.contains("↓ End: newest"), "{huge}");
+}
+
+#[test]
+fn the_running_role_and_the_task_show_how_long_they_have_worked() {
+    let env = Env::new();
+    let (_root, mut app) = developer_next(&env, developer_until_any_stop);
+    click(&mut app, " Send ");
+    let start = Instant::now();
+    let mut text = screen(&mut app);
+    while !text.contains("task-001 · developer · ") {
+        assert!(
+            start.elapsed() < Duration::from_secs(30),
+            "no running role:\n{text}"
+        );
+        std::thread::sleep(Duration::from_millis(20));
+        app.tick();
+        text = screen(&mut app);
+    }
+    // «0 s» or a few seconds on a slow machine.
+    assert!(text.contains(" s · working… "), "{text}");
+    assert!(text.contains(" · task "), "{text}");
+    key(&mut app, KeyCode::Char('s'));
+    wait(&mut app);
+}
+
+/// Commits everything in `root` as if at `seconds` since 1970.
+fn commit_at(root: &Path, seconds: u64) {
+    let date = format!("@{seconds} +0000");
+    for args in [
+        &["add", "--all"][..],
+        &[
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@t",
+            "commit",
+            "-q",
+            "-m",
+            "step",
+        ][..],
+    ] {
+        let status = std::process::Command::new("git")
+            .current_dir(root)
+            .args(args)
+            .env("GIT_COMMITTER_DATE", &date)
+            .status()
+            .unwrap();
+        assert!(status.success());
+    }
+}
+
+#[test]
+fn each_step_shows_how_long_it_took_from_its_commits() {
+    let env = Env::new();
+    let root = env.path("timed");
+    projects::init(&root).unwrap();
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    // Created two hours ago; the architect took 10 min, Lisa answered after
+    // 30 s, the developer took 1 h 02 min 05 s.
+    let created = now - 2 * 3_600;
+    fs::create_dir_all(root.join(".harness/runs")).unwrap();
+    let (store, mut state) = TaskStore::create(
+        &root.join(".harness/runs"),
+        "task-001",
+        "Build a parser",
+        Workflow::Task,
+        5,
+    )
+    .unwrap();
+    commit_at(&root, created);
+    let steps = [
+        (Role::Architect, NextStep::To(Role::Human), 600),
+        (Role::Human, NextStep::To(Role::Developer), 30),
+        (Role::Developer, NextStep::To(Role::Tester), 3_725),
+    ];
+    let mut time = created;
+    for (role, next, took) in steps {
+        let step = handoff(role, Verdict::Approved, next, "done");
+        store.record(&mut state, &step, "").unwrap();
+        time += took;
+        commit_at(&root, time);
+    }
+    let mut app = env.app(&root);
+    let text = screen(&mut app);
+
+    assert!(
+        text.contains("r1 architect  approved → human          10 min done"),
+        "{text}"
+    );
+    assert!(
+        text.contains("r1 developer  approved → tester     1 h 02 min done"),
+        "{text}"
+    );
+    // Lisa's own step has no time: only how long the task waited for her.
+    assert!(
+        text.contains("r1 human      approved → developer             done"),
+        "{text}"
+    );
+    // The task is not done: it runs until now.
+    assert!(
+        text.contains("· working: tester · task 2 h 00 min"),
+        "{text}"
+    );
 }
