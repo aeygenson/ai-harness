@@ -161,8 +161,10 @@ fn explain(stop: &StopReason, task_id: &str) -> String {
                 .join("\n  ")
         ),
         StopReason::AgentCommitted(role) => format!(
-            "The {role:?} made a git commit or changed git branches itself. Check `git log`, \
-             `git branch` and `git status` before running again."
+            "While the {role:?} was working, a new git commit appeared or the git branch \
+             changed. The role or something else on this computer (another program, a git \
+             command you ran) did it. Check `git log`, `git branch` and `git status` before \
+             running again."
         ),
         StopReason::ProtectedFilesChanged { role, files, log } => format!(
             "The {role:?} changed files no role may change (agent instructions and settings, \
@@ -177,8 +179,10 @@ fn explain(stop: &StopReason, task_id: &str) -> String {
             reported,
         } => hidden_changes_text(*role, put_back, reported),
         StopReason::GitConfigChanged(role) => format!(
-            "The {role:?} changed the project's git settings (.git/config). The old settings \
-             are back; its other changes are left uncommitted for you to check."
+            "While the {role:?} was working, the project's git settings (.git/config) \
+             changed. The role or something else on this computer (another program, a git \
+             command you ran) did it. The old settings are back; the project changes are left \
+             uncommitted for you to check."
         ),
     }
 }
@@ -190,7 +194,10 @@ fn hidden_changes_text(role: Role, put_back: &[PathBuf], reported: &[PathBuf]) -
         let lines: Vec<String> = files.iter().map(|f| f.display().to_string()).collect();
         format!("\n  {}", lines.join("\n  "))
     };
-    let mut text = format!("The {role:?} changed files that git does not show.");
+    let mut text = format!(
+        "While the {role:?} was working, files that git does not show changed \
+         (the role or another program did it)."
+    );
     if !put_back.is_empty() {
         text.push_str("\nGit's own files (hooks, info/), now put back as they were:");
         text.push_str(&list(put_back));
@@ -312,5 +319,30 @@ mod tests {
         assert!(text.contains("\n  /home/lisa/.bashrc"));
         let only_hooks = hidden_changes_text(Role::Tester, &[PathBuf::from("h")], &[]);
         assert!(!only_hooks.contains("outside the project"));
+    }
+
+    #[test]
+    fn git_stops_say_what_changed_without_blaming_the_role() {
+        // Another program or Lisa's own git command can make these changes
+        // while a role runs, so the message must not say the role did it.
+        let stops = [
+            StopReason::GitConfigChanged(Role::Architect),
+            StopReason::AgentCommitted(Role::Architect),
+            StopReason::HiddenChanges {
+                role: Role::Architect,
+                put_back: vec![PathBuf::from("h")],
+                reported: Vec::new(),
+            },
+        ];
+
+        for stop in &stops {
+            let text = explain(stop, "task-001");
+            assert!(
+                text.starts_with("While the Architect was working"),
+                "{text}"
+            );
+            assert!(!text.contains("The Architect changed"), "{text}");
+            assert!(!text.contains("The Architect made"), "{text}");
+        }
     }
 }

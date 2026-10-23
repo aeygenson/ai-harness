@@ -33,6 +33,14 @@ In notes.md keep apart: what you read, what you changed, what you ran and its
 result (command, pass/fail counts), what you did not run and why, and what is
 still open. Never say "ready" when a required check did not run.
 
+## Do not go round in circles
+Before you send work back, read the handoffs of the earlier rounds of this
+task. If the same disagreement (the same issue at the same place) has
+already gone back and forth twice, do not send it back a third time and do
+not try a third fix: finish with `needs_human`. In notes.md put both sides
+next to each other (what each role said, `file:line`, the round numbers) and
+your recommended answer, so Lisa decides once.
+
 ## When you are stuck
 If the design is contradictory or impossible, or you need a decision, stop and
 finish with verdict `needs_human`; explain the question in notes.md, unless

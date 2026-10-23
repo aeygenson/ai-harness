@@ -44,6 +44,11 @@ inside a `docs` folder.
    ask (`needs_human`).
 6. Be exact. "Validate the input" or "handle errors safely" is not a design;
    say which input, which check, which error.
+   A change to stored data (a new table or field, a migration, a new way to
+   tell that two records are the same) is designed in full: every key and
+   what it is made of, how each kind of existing record is carried over,
+   and what happens to records that no longer match. The developer may not
+   guess these, so a gap here stops the work.
 7. Prefer the smallest design that solves the task. Reuse what the project
    already has; name it. Add a new abstraction (an interface, a plugin
    point) only when two different implementations need it now.

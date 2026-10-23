@@ -103,10 +103,10 @@ stop_steps = "{task}: stopped after too many steps in one run; choose «Continue
 stop_dirty = "{task}: the project has uncommitted changes ({files}); commit or remove them, then choose «Continue»"
 stop_forbidden = "{task}: the {role} changed files it may not touch ({files}); they are left uncommitted for you to check"
 stop_too_large = "{task}: the {role} made files too big to commit ({files}); usually this is build output: add it to .gitignore or delete it, commit or remove the rest, then choose «Continue»"
-stop_committed = "{task}: the {role} made a git commit or changed git branches itself; check git log, git branch and git status before going on"
+stop_committed = "{task}: while the {role} was working, a new git commit appeared or the git branch changed. The role or something else on this computer (another program, a git command you ran) did it. Check git log, git branch and git status before going on"
 stop_protected = "{task}: the {role} changed files no role may change ({files}); they are put back, what it wrote is in {log}, its other changes are left uncommitted for you to check"
-stop_hidden = "{task}: the {role} changed files git does not show. Git's hooks put back: {put_back}. Outside the project, NOT put back, check them yourself (all is well if you changed them): {reported}. Its project changes are left uncommitted"
-stop_git_config = "{task}: the {role} changed the project's git settings (.git/config); the old ones are back, its other changes are left uncommitted for you to check"
+stop_hidden = "{task}: while the {role} was working, files git does not show changed (the role or another program did it). Git's hooks put back: {put_back}. Outside the project, NOT put back, check them yourself (all is well if you changed them): {reported}. The project changes are left uncommitted"
+stop_git_config = "{task}: while the {role} was working, the project's git settings (.git/config) changed. The role or something else on this computer (another program, a git command you ran) did it. The old settings are back; the project changes are left uncommitted for you to check"
 [roles]
 title = " Roles "
 save = "Save"

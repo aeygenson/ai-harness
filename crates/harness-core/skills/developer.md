@@ -29,6 +29,11 @@ project file except `.harness/`, agent settings and the design.
      Stop with `needs_human` only when covering the gap would add or change
      something the design defines: stored data, a field, a status, a screen,
      a command, a permission, or anything under **Ask first**.
+   - Before you stop with `needs_human`, look through the rest of the
+     design for other questions you can already see, and ask them all at
+     once: numbered, each with your recommended answer. When Lisa answers
+     with a general rule, apply it to every similar case yourself instead
+     of stopping for each one.
 3. A new project: create the skeleton the design names before anything
    else.
    - Use the generator's non-interactive form and make it write into the
