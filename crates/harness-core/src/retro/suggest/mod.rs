@@ -28,6 +28,7 @@ use crate::skills::SkillError;
 use crate::task::agent::{AgentRunner, RoleJob, RunEnd};
 use crate::task::agent_stubs;
 use crate::task::handoff::Role;
+use crate::task::stop_request::StopRequest;
 use crate::text;
 pub use apply::apply;
 pub use prompt::{past_settings, prompt};
@@ -187,6 +188,8 @@ pub async fn suggest<A: AgentRunner>(
             )
         },
         output_dir: inbox.clone(),
+        // The retrospective has no stop buttons: nobody asks it to stop.
+        stop: StopRequest::new(),
     };
     let head = repo.head()?;
     let branch = repo.current_branch()?;
@@ -277,6 +280,9 @@ fn run_error(end: &RunEnd) -> Option<SuggestError> {
         RunEnd::Failed(message) | RunEnd::TimedOut(message) => {
             Some(SuggestError::AgentFailed(text::safe_line(message, 500)))
         }
+        RunEnd::StoppedByLisa => Some(SuggestError::AgentFailed(
+            "the agent was stopped".to_string(),
+        )),
     }
 }
 

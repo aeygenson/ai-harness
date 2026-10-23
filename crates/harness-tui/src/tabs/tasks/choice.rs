@@ -24,7 +24,12 @@ impl TasksTab {
         let waiting = matches!(stage, Some(Stage::WaitingForHuman(_)));
         let mut items = vec![(Choice::NewTask, true)];
         match stage {
-            Some(Stage::Working(role)) => items.push((Choice::Continue(role), true)),
+            // Lisa stopped it: the stopped role (or the next one) may simply go on.
+            Some(
+                Stage::Working(role) | Stage::WaitingForHuman(WaitReason::StoppedByLisa(role)),
+            ) => {
+                items.push((Choice::Continue(role), true));
+            }
             Some(Stage::WaitingForHuman(WaitReason::RoundLimitReached)) => {
                 items.push((Choice::MoreRounds(self.after_round_limit()), true));
             }
@@ -77,7 +82,7 @@ impl TasksTab {
 
     /// What the selected task needs next: the role its workflow gives the
     /// approved work to (the developer after the design), the role that asked
-    /// for help, a new task when it is done.
+    /// for help, the role Lisa stopped, a new task when it is done.
     fn default_choice(&self) -> Choice {
         let Some(task) = self.current() else {
             return Choice::NewTask;
@@ -95,6 +100,8 @@ impl TasksTab {
             Stage::WaitingForHuman(WaitReason::RoundLimitReached) => {
                 Choice::Role(self.after_round_limit())
             }
+            // A note to the role Lisa stopped; «Continue» is in the list too.
+            Stage::WaitingForHuman(WaitReason::StoppedByLisa(role)) => Choice::Role(role),
         }
     }
 
@@ -136,9 +143,12 @@ impl TasksTab {
         suggested.unwrap_or(Role::Developer)
     }
 
-    /// A new task, or a new step in it, brings back the default choice.
+    /// A new task, a new step in it or a new stage (Lisa stopped it, which
+    /// adds no step) brings back the default choice.
     pub(super) fn sync_choice(&mut self) {
-        let now = self.current().map(|t| (t.id.clone(), t.steps.len()));
+        let now = self
+            .current()
+            .map(|t| (t.id.clone(), t.steps.len(), t.state.stage));
         if now != self.choice_for || !self.options().contains(&self.choice) {
             self.set_choice(self.default_choice());
             self.choice_for = now;

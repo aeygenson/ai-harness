@@ -1,17 +1,22 @@
 //! What every console agent adapter shares: a clean environment, starting the
-//! program with the prompt on standard input, the time-out, and the log.
+//! program with the prompt on standard input, the time-out, Lisa's «Stop
+//! now», and the log.
 
 use std::io::ErrorKind;
 use std::path::Path;
 use std::process::{Command, ExitStatus, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::Sender;
-use std::sync::Mutex;
 use std::time::Duration;
 
 use harness_core::secret;
 use harness_core::task::agent::{AgentOutcome, RunEnd};
+use harness_core::task::stop_request::StopRequest;
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWriteExt, BufReader};
+
+mod live_log;
+
+use live_log::send_live;
+pub use live_log::{note_live, set_live_log};
 
 /// `program`, started in the project folder with an empty environment plus
 /// the whitelist. Each adapter adds its own variables and flags.
@@ -56,23 +61,38 @@ pub struct Finished {
 /// [`failed`] reads it to report [`RunEnd::TimedOut`].
 const TIMED_OUT: &str = "timed out after";
 
+/// How [`run`] starts its message when Lisa pressed «Stop now»; [`failed`]
+/// reads it to report [`RunEnd::StoppedByLisa`].
+const STOPPED_BY_LISA: &str = "stopped by Lisa";
+
+/// How often [`run`] looks whether Lisa pressed «Stop now». The button is
+/// pressed in another thread; looking five times a second is quick enough
+/// for a person and costs nothing next to an agent's work.
+const STOP_CHECK_PAUSE: Duration = Duration::from_millis(200);
+
 /// Starts the command, writes `prompt` to its standard input and waits at most
-/// `timeout`. Each line the agent prints also goes to the live log (see
-/// [`set_live_log`]), with `secrets` hidden. `Err` holds a short explanation
-/// for Lisa.
+/// `timeout`, or until Lisa presses «Stop now» (`stop`). Each line the agent
+/// prints also goes to the live log (see [`set_live_log`]), with `secrets`
+/// hidden. `Err` holds a short explanation for Lisa.
 ///
 /// The agent runs in its own process group and with a mark in its
-/// environment (`harness_platform::run_mark`). When it ends, times out, or the
-/// harness stops waiting (Ctrl+C), everything it started is stopped too: a
-/// test run, a build or a server it left in the background, even in another
-/// process group. Windows finds only what is still linked to the agent.
+/// environment (`harness_platform::run_mark`). When it ends, times out, is
+/// stopped by Lisa, or the harness stops waiting (Ctrl+C), everything it
+/// started is stopped too: a test run, a build or a server it left in the
+/// background, even in another process group. Windows finds only what is
+/// still linked to the agent.
 pub async fn run(
     mut command: Command,
     prompt: &str,
     timeout: Duration,
     secrets: &[&str],
+    stop: &StopRequest,
 ) -> Result<Finished, String> {
     let program = command.get_program().to_string_lossy().into_owned();
+    // Pressed before the agent started (between two attempts): no need to start it.
+    if stop.now() {
+        return Err(format!("{STOPPED_BY_LISA} before the agent started"));
+    }
     harness_platform::process::own_group(&mut command);
     // Some agents (Codex) move their commands to process groups of their
     // own; the mark still finds them (see `harness_platform::run_mark`).
@@ -117,7 +137,17 @@ pub async fn run(
         );
         Ok::<_, std::io::Error>((stdout?, stderr?, status?))
     };
-    match tokio::time::timeout(timeout, work).await {
+    // `select!` waits for whichever comes first and drops the other. When
+    // «Stop now» comes first, `work` is dropped half-way; leaving this
+    // function then drops `tree`, which stops the agent with everything it
+    // started, exactly as after the time limit.
+    let waited = tokio::select! {
+        waited = tokio::time::timeout(timeout, work) => waited,
+        () = stop_now_pressed(stop) => {
+            return Err(format!("{STOPPED_BY_LISA}; the agent was stopped"));
+        }
+    };
+    match waited {
         Ok(Ok((stdout, stderr, status))) => Ok(Finished {
             stdout: String::from_utf8_lossy(&stdout).into_owned(),
             stderr: String::from_utf8_lossy(&stderr).into_owned(),
@@ -128,6 +158,15 @@ pub async fn run(
             "{TIMED_OUT} {} s; the agent was stopped",
             timeout.as_secs()
         )),
+    }
+}
+
+/// Ends once Lisa has pressed «Stop now». The request is a plain shared
+/// value (it lives in `harness-core`, which has no `tokio`), so it is looked
+/// at again every [`STOP_CHECK_PAUSE`].
+async fn stop_now_pressed(stop: &StopRequest) {
+    while !stop.now() {
+        tokio::time::sleep(STOP_CHECK_PAUSE).await;
     }
 }
 
@@ -192,39 +231,6 @@ async fn read_lines<R: AsyncRead + Unpin>(
     }
 }
 
-/// Where the live log goes: the TUI shows what the running agent prints.
-static LIVE_LOG: Mutex<Option<Sender<String>>> = Mutex::new(None);
-
-/// From now on every line an agent prints is also sent to `sink`, with the
-/// agent's secrets hidden; `None` stops it. The command line never sets it.
-pub fn set_live_log(sink: Option<Sender<String>>) {
-    if let Ok(mut live_log) = LIVE_LOG.lock() {
-        *live_log = sink;
-    }
-}
-
-/// Sends a line of the harness's own (not an agent's) to the live log, for
-/// example what a merge is waiting for. Nothing happens without a live log.
-pub fn note_live(line: &str) {
-    send_live(line.as_bytes(), &[]);
-}
-
-fn send_live(line: &[u8], secrets: &[&str]) {
-    let Ok(mut live_log) = LIVE_LOG.lock() else {
-        return;
-    };
-    let Some(sink) = live_log.as_ref() else {
-        return;
-    };
-    let line = secret::hide(String::from_utf8_lossy(line).trim_end(), secrets);
-    if sink.send(line).is_err() {
-        // Nobody listens any more.
-        *live_log = None;
-    }
-}
-
-/// `text` with every secret replaced by `***`. A very short value would hide
-/// ordinary words too; real keys are long.
 /// Adds the agent's output to the log.
 pub fn append_output(log: &mut String, finished: &Finished) {
     log.push_str(&finished.stdout);
@@ -256,10 +262,12 @@ pub fn hide_secrets<'a>(
 pub fn failed(mut log: String, message: String) -> AgentOutcome {
     log.push_str(&message);
     log.push('\n');
-    // [`run`] reports its time limit as text, like every other error; the
-    // words it starts with tell the two apart.
+    // [`run`] reports its time limit and Lisa's «Stop now» as text, like
+    // every other error; the words it starts with tell them apart.
     let end = if message.starts_with(TIMED_OUT) {
         RunEnd::TimedOut(message)
+    } else if message.starts_with(STOPPED_BY_LISA) {
+        RunEnd::StoppedByLisa
     } else {
         RunEnd::Failed(message)
     };
@@ -310,9 +318,15 @@ mod tests {
             String::new(),
             "error while waiting for the agent: gone".into(),
         );
+        let stopped = failed(
+            String::new(),
+            format!("{STOPPED_BY_LISA}; the agent was stopped"),
+        );
 
         assert!(matches!(timed_out.end, RunEnd::TimedOut(_)));
         assert!(matches!(crashed.end, RunEnd::Failed(_)));
+        assert_eq!(stopped.end, RunEnd::StoppedByLisa);
+        assert!(stopped.log.contains("the agent was stopped"));
         assert!(timed_out.log.contains("60 s"));
     }
 
@@ -347,6 +361,7 @@ mod tests {
             "hello\n",
             Duration::from_secs(10),
             &["key-12345678"],
+            &StopRequest::new(),
         )
         .await
         .unwrap();
@@ -420,9 +435,15 @@ mod tests {
 
         // The helper keeps the agent's output open; without stopping it the
         // reading would wait for the whole time limit.
-        let finished = run(command, "", Duration::from_secs(20), &[])
-            .await
-            .unwrap();
+        let finished = run(
+            command,
+            "",
+            Duration::from_secs(20),
+            &[],
+            &StopRequest::new(),
+        )
+        .await
+        .unwrap();
 
         assert_eq!(finished.stdout, "done\n");
         assert!(start.elapsed() < Duration::from_secs(10));
@@ -440,9 +461,15 @@ mod tests {
         let script = format!("spawn-sleep-alone 30 {}\nprint done\n", pid_file.display());
         let command = fake_agent(dir.path(), &script);
 
-        let finished = run(command, "", Duration::from_secs(20), &[])
-            .await
-            .unwrap();
+        let finished = run(
+            command,
+            "",
+            Duration::from_secs(20),
+            &[],
+            &StopRequest::new(),
+        )
+        .await
+        .unwrap();
 
         assert_eq!(finished.stdout, "done\n");
         assert!(!still_running(&pid_file));
@@ -454,9 +481,15 @@ mod tests {
         let pid_file = dir.path().join("pid");
         let command = agent_with_a_helper(dir.path(), &pid_file, "wait");
 
-        let error = run(command, "", Duration::from_millis(500), &[])
-            .await
-            .unwrap_err();
+        let error = run(
+            command,
+            "",
+            Duration::from_millis(500),
+            &[],
+            &StopRequest::new(),
+        )
+        .await
+        .unwrap_err();
 
         assert!(error.contains("timed out"), "{error}");
         assert!(!still_running(&pid_file));
@@ -469,12 +502,65 @@ mod tests {
         let command = agent_with_a_helper(dir.path(), &pid_file, "wait");
 
         // Like Ctrl+C in the command line: the run is dropped half-way.
+        let stop = StopRequest::new();
         tokio::select! {
-            _ = run(command, "", Duration::from_secs(20), &[]) => panic!("ended by itself"),
+            _ = run(command, "", Duration::from_secs(20), &[], &stop) => panic!("ended by itself"),
             () = tokio::time::sleep(Duration::from_millis(500)) => {}
         }
 
         assert!(!still_running(&pid_file));
+    }
+
+    #[tokio::test]
+    async fn stop_now_stops_the_agent_with_everything_it_started() {
+        let dir = tempfile::tempdir().unwrap();
+        let pid_file = dir.path().join("pid");
+        // An agent that would work for a long time, with a helper of its own.
+        let command = agent_with_a_helper(dir.path(), &pid_file, "wait");
+        let stop = StopRequest::new();
+        let button = stop.clone();
+        let watched = pid_file.clone();
+        // Lisa presses «Stop now» from another thread, like the TUI does,
+        // once the helper runs.
+        let lisa = std::thread::spawn(move || {
+            while std::fs::read_to_string(&watched).map_or(true, |pid| pid.trim().is_empty()) {
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            button.stop_now();
+        });
+        let start = std::time::Instant::now();
+
+        let error = run(command, "", Duration::from_secs(60), &[], &stop)
+            .await
+            .unwrap_err();
+        lisa.join().unwrap();
+
+        assert!(error.starts_with(STOPPED_BY_LISA), "{error}");
+        assert_eq!(failed(String::new(), error).end, RunEnd::StoppedByLisa);
+        assert!(start.elapsed() < Duration::from_secs(20));
+        assert!(!still_running(&pid_file));
+    }
+
+    #[tokio::test]
+    async fn an_agent_is_not_started_after_stop_now() {
+        let dir = tempfile::tempdir().unwrap();
+        let started = dir.path().join("started");
+        let script = format!("save-text {} yes\n", started.display());
+        let stop = StopRequest::new();
+        stop.stop_now();
+
+        let error = run(
+            fake_agent(dir.path(), &script),
+            "",
+            Duration::from_secs(10),
+            &[],
+            &stop,
+        )
+        .await
+        .unwrap_err();
+
+        assert!(error.starts_with(STOPPED_BY_LISA), "{error}");
+        assert!(!started.exists());
     }
 
     #[tokio::test]
@@ -485,9 +571,15 @@ mod tests {
         let prompt = "x".repeat(1_000_000);
         let start = std::time::Instant::now();
 
-        let error = run(command, &prompt, Duration::from_millis(300), &[])
-            .await
-            .unwrap_err();
+        let error = run(
+            command,
+            &prompt,
+            Duration::from_millis(300),
+            &[],
+            &StopRequest::new(),
+        )
+        .await
+        .unwrap_err();
 
         assert!(error.contains("timed out"), "{error}");
         assert!(start.elapsed() < Duration::from_secs(10));
@@ -497,9 +589,15 @@ mod tests {
     async fn a_slow_agent_is_stopped() {
         let dir = tempfile::tempdir().unwrap();
         let command = fake_agent(dir.path(), "sleep 5\n");
-        let error = run(command, "", Duration::from_millis(200), &[])
-            .await
-            .unwrap_err();
+        let error = run(
+            command,
+            "",
+            Duration::from_millis(200),
+            &[],
+            &StopRequest::new(),
+        )
+        .await
+        .unwrap_err();
         assert!(error.contains("timed out"), "{error}");
     }
 }

@@ -27,11 +27,19 @@ const DESIGN_DIR: &str = "docs/design/";
 impl TasksTab {
     /// The notes Lisa answers while the selected task waits for her: the
     /// `notes.md` of its last step made by a role (not by her), and that role.
-    /// `None` when the task does not wait for her or the notes are not there.
+    /// `None` when the task does not wait for her, the notes are not there,
+    /// or she stopped it herself (then nobody asked her anything).
     pub fn questions(&self) -> Option<(Role, PathBuf)> {
         let task = self.current()?;
-        if !matches!(task.state.stage, Stage::WaitingForHuman(_)) {
-            return None;
+        match task.state.stage {
+            Stage::WaitingForHuman(
+                WaitReason::ApproveDesign
+                | WaitReason::RoleAskedForHelp(_)
+                | WaitReason::RoundLimitReached,
+            ) => {}
+            Stage::WaitingForHuman(WaitReason::StoppedByLisa(_))
+            | Stage::Working(_)
+            | Stage::Done => return None,
         }
         let step = task
             .steps
@@ -158,7 +166,9 @@ impl TasksTab {
 pub(super) fn waits_on(task: &TaskView, role: Role) -> bool {
     match task.state.stage {
         Stage::Working(working) => working == role,
-        Stage::WaitingForHuman(WaitReason::RoleAskedForHelp(asking)) => asking == role,
+        Stage::WaitingForHuman(
+            WaitReason::RoleAskedForHelp(asking) | WaitReason::StoppedByLisa(asking),
+        ) => asking == role,
         Stage::WaitingForHuman(WaitReason::ApproveDesign) => role == Role::Architect,
         Stage::WaitingForHuman(WaitReason::RoundLimitReached) => task
             .steps

@@ -70,20 +70,14 @@ impl TasksTab {
                 levels,
             ));
         }
-        items.push((send.to_string(), ButtonId::Send, self.running.is_none()));
-        let width = |label: &str| crate::ui::button_width(label);
-        let total = |items: &[(String, ButtonId, bool)]| {
-            items
-                .iter()
-                .map(|(label, _, _)| width(label) + 1)
-                .sum::<u16>()
-                .saturating_sub(1)
-        };
-        // In a narrow window «Send» stays; the model and level go first.
-        if total(&items) > inner.width && items.len() > 2 {
-            items.drain(1..3);
+        let stops = self.stop_buttons(tr);
+        let stopping = !stops.is_empty();
+        for (label, id) in stops {
+            items.push((label, id, true));
         }
-        let buttons_width = total(&items).min(inner.width);
+        items.push((send.to_string(), ButtonId::Send, self.running.is_none()));
+        fit_buttons(&mut items, inner.width, stopping);
+        let buttons_width = buttons_total(&items).min(inner.width);
         let bottom = inner.bottom() - 1;
         let row = Rect::new(inner.right() - buttons_width, bottom, buttons_width, 1);
 
@@ -135,7 +129,7 @@ impl TasksTab {
             if *id == wanted {
                 break;
             }
-            x += width(label) + 1;
+            x += crate::ui::button_width(label) + 1;
         }
         self.draw_menu(frame, hits, menu, x, area.y, tr);
     }
@@ -252,6 +246,33 @@ impl TasksTab {
     }
 }
 
+/// The width the buttons take in a row, with one column between them.
+fn buttons_total(items: &[(String, ButtonId, bool)]) -> u16 {
+    items
+        .iter()
+        .map(|(label, _, _)| crate::ui::button_width(label) + 1)
+        .sum::<u16>()
+        .saturating_sub(1)
+}
+
+/// Drops buttons until they fit in `room` columns. The model and level go
+/// first. While roles work (`stopping`), the stop buttons matter most: then
+/// «To» and the grey «Working…» go too (nothing can be sent then anyway),
+/// and last «Stop after this step».
+fn fit_buttons(items: &mut Vec<(String, ButtonId, bool)>, room: u16, stopping: bool) {
+    if buttons_total(items) > room {
+        items.retain(|(_, id, _)| !matches!(id, ButtonId::Menu(Menu::Model | Menu::Level)));
+    }
+    if stopping && buttons_total(items) > room {
+        items.retain(|(_, id, _)| !matches!(id, ButtonId::Menu(Menu::To) | ButtonId::Send));
+    }
+    // Still too wide: «Stop now» stays, since nothing else stops the agent
+    // at once; «Stop after this step» keeps its key (s).
+    if stopping && buttons_total(items) > room {
+        items.retain(|(_, id, _)| *id != ButtonId::StopAfterStep);
+    }
+}
+
 /// Draws `label` on the top border of `area` from column `x`, cut at the
 /// right corner; the place it took, or `None` when there is no room.
 fn border_text(frame: &mut Frame, area: Rect, x: u16, label: String, look: Style) -> Option<Rect> {
@@ -289,4 +310,73 @@ pub(super) fn wrap(text: &str, width: usize) -> Vec<String> {
         }
     }
     lines
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn row(stopping: bool) -> Vec<(String, ButtonId, bool)> {
+        let mut items = vec![
+            (
+                "To: developer ▾".to_string(),
+                ButtonId::Menu(Menu::To),
+                true,
+            ),
+            (
+                "Model: default ▾".to_string(),
+                ButtonId::Menu(Menu::Model),
+                true,
+            ),
+            (
+                "Level: default ▾".to_string(),
+                ButtonId::Menu(Menu::Level),
+                true,
+            ),
+        ];
+        if stopping {
+            let after = "✓ Stops after this step (s: cancel)".to_string();
+            items.push((after, ButtonId::StopAfterStep, true));
+            items.push(("Stop now (x)".to_string(), ButtonId::StopNow, true));
+        }
+        items.push(("Send".to_string(), ButtonId::Send, !stopping));
+        items
+    }
+
+    fn ids(items: &[(String, ButtonId, bool)]) -> Vec<ButtonId> {
+        items.iter().map(|(_, id, _)| *id).collect()
+    }
+
+    #[test]
+    fn a_narrow_row_keeps_to_and_send_when_nothing_runs() {
+        let mut items = row(false);
+        fit_buttons(&mut items, 10, false);
+        assert_eq!(ids(&items), [ButtonId::Menu(Menu::To), ButtonId::Send]);
+    }
+
+    #[test]
+    fn a_narrow_row_keeps_the_stop_buttons_while_roles_work() {
+        let stops = [ButtonId::StopAfterStep, ButtonId::StopNow];
+        let both = buttons_total(&row(true)[3..5]);
+        let mut items = row(true);
+        fit_buttons(&mut items, both, true);
+        assert_eq!(ids(&items), stops);
+        assert!(buttons_total(&items) <= both);
+        // Narrower still: «Stop now» is the one that stays.
+        let mut items = row(true);
+        fit_buttons(&mut items, both - 1, true);
+        assert_eq!(ids(&items), [ButtonId::StopNow]);
+        // With room enough only the model and level go.
+        let mut items = row(true);
+        fit_buttons(&mut items, buttons_total(&row(true)) - 1, true);
+        assert_eq!(
+            ids(&items),
+            [
+                ButtonId::Menu(Menu::To),
+                ButtonId::StopAfterStep,
+                ButtonId::StopNow,
+                ButtonId::Send
+            ]
+        );
+    }
 }

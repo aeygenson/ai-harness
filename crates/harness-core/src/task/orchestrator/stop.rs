@@ -107,6 +107,17 @@ pub enum RunError {
     /// Reading or putting back git's hooks or `info/` failed.
     #[error("cannot check git's hooks: {0}")]
     Tripwire(#[from] std::io::Error),
+    /// Lisa wanted to finish the task while a role's unfinished work is still
+    /// uncommitted in the folder; the task is not finished.
+    #[error(
+        "unfinished work of a stopped role is still in the folder ({}); continue that role, \
+         or commit or remove the files, before finishing the task",
+        files.join(", ")
+    )]
+    UnfinishedWork {
+        /// The uncommitted files of the recorded unfinished work.
+        files: Vec<String>,
+    },
     /// An unfinished task already has this text: a second one is not created.
     #[error(
         "{task} already has this text and is not done ({stage}); continue it or change the text"

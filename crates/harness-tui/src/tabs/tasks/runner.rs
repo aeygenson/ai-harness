@@ -2,6 +2,10 @@
 //! does. The same core functions as `harness task new`, `harness approve` and
 //! `harness run`, in a thread with its own small tokio runtime. What the agent
 //! prints comes back line by line for the live log.
+//!
+//! Lisa's stop buttons reach the run through a [`StopRequest`] the screen and
+//! the run share (see `harness_core::task::stop_request`): the run loop reads
+//! it before each role, the agent's process while the agent works.
 
 use std::collections::VecDeque;
 use std::future::Future;
@@ -20,6 +24,7 @@ use harness_core::task::branch;
 use harness_core::task::handoff::{NextStep, Role, Verdict};
 use harness_core::task::orchestrator::{self, Project, SameText, StopReason};
 use harness_core::task::pull_request::PullRequest;
+use harness_core::task::stop_request::StopRequest;
 use harness_core::task::store::TaskStore;
 use harness_core::task::Stage;
 use harness_core::text;
@@ -150,6 +155,21 @@ struct Job {
     request: Request,
     choice: Option<RunChoice>,
     builder: Builder,
+    /// Lisa's stop buttons, shared with the screen.
+    stop: StopRequest,
+}
+
+/// Does `request` run roles? Finishing a task, sending it to GitHub and
+/// merging it run none.
+fn runs_roles(request: &Request) -> bool {
+    !matches!(
+        request,
+        Request::Decide {
+            next: NextStep::Done,
+            ..
+        } | Request::Publish(_)
+            | Request::Merge(_)
+    )
 }
 
 /// Work in the background.
@@ -161,6 +181,8 @@ pub struct Running {
     pub task: Option<String>,
     /// The work checked out the task's branch; reset by whoever reacts.
     pub switched_branch: bool,
+    /// Lisa's stop buttons for this run; `None` when it runs no roles.
+    pub stop: Option<StopRequest>,
     /// Kept to stop the agents when this is dropped.
     _background: Background,
 }
@@ -175,11 +197,14 @@ impl Running {
     ) -> Self {
         let (events, events_rx) = channel();
         let (log, log_rx) = channel();
+        let stop = StopRequest::new();
+        let buttons = runs_roles(&request).then(|| stop.clone());
         let job = Job {
             root: root.to_path_buf(),
             request,
             choice,
             builder,
+            stop,
         };
         let background = Background::start(move |stop| {
             process::set_live_log(Some(log));
@@ -192,6 +217,7 @@ impl Running {
             log: log_rx,
             task: None,
             switched_branch: false,
+            stop: buttons,
             _background: background,
         }
     }
@@ -229,6 +255,7 @@ fn work(job: Job, events: &Sender<Event>, stop: oneshot::Receiver<()>) -> Result
         request,
         choice,
         builder,
+        stop: stop_request,
     } = job;
     let root = root.as_path();
     let text = |e: &dyn std::fmt::Display| e.to_string();
@@ -250,15 +277,7 @@ fn work(job: Job, events: &Sender<Event>, stop: oneshot::Receiver<()>) -> Result
     let merging = matches!(request, Request::Merge(_));
     // Everything the agents need is checked before anything is saved: a
     // missing login leaves the task as it was.
-    let needs_run = !matches!(
-        request,
-        Request::Decide {
-            next: NextStep::Done,
-            ..
-        } | Request::Publish(_)
-            | Request::Merge(_)
-    );
-    let agents = if needs_run {
+    let agents = if runs_roles(&request) {
         let team = builder(&config, root).map_err(|e| text(&e))?;
         let skills = Skills::load(&harness_dir, &config).map_err(|e| text(&e))?;
         Some((team, skills))
@@ -297,7 +316,13 @@ fn work(job: Job, events: &Sender<Event>, stop: oneshot::Receiver<()>) -> Result
                 .map_err(|e| text(&e))?;
             (store, state)
         }
-        Request::Continue(task) | Request::Publish(task) | Request::Merge(task) => {
+        Request::Continue(task) => {
+            let (store, mut state) = TaskStore::open(&runs, &task).map_err(|e| text(&e))?;
+            // A task Lisa stopped goes on with the role she stopped.
+            orchestrator::continue_stopped(&repo, &store, &mut state).map_err(|e| text(&e))?;
+            (store, state)
+        }
+        Request::Publish(task) | Request::Merge(task) => {
             TaskStore::open(&runs, &task).map_err(|e| text(&e))?
         }
     };
@@ -315,6 +340,7 @@ fn work(job: Job, events: &Sender<Event>, stop: oneshot::Receiver<()>) -> Result
         config: &config,
         skills: &skills,
         agent_versions: team.versions(),
+        stop: &stop_request,
     };
     let stop = run_until_stopped(
         orchestrator::run_project(&repo, &store, &mut state, &team, project),
@@ -479,6 +505,24 @@ mod tests {
     fn work_that_ends_by_itself_gives_its_result() {
         let (_stop, stop_rx) = oneshot::channel::<()>();
         assert_eq!(run_until_stopped(async { 42 }, stop_rx), Ok(42));
+    }
+
+    #[test]
+    fn only_work_that_runs_roles_gets_stop_buttons() {
+        let decide = |next| Request::Decide {
+            task: "task-001".into(),
+            seen: harness_core::task::Stage::Done,
+            verdict: Verdict::Approved,
+            next,
+            notes: String::new(),
+            extra_rounds: 0,
+        };
+        assert!(runs_roles(&Request::New("Do it".into())));
+        assert!(runs_roles(&Request::Continue("task-001".into())));
+        assert!(runs_roles(&decide(NextStep::To(Role::Developer))));
+        assert!(!runs_roles(&decide(NextStep::Done)));
+        assert!(!runs_roles(&Request::Publish("task-001".into())));
+        assert!(!runs_roles(&Request::Merge("task-001".into())));
     }
 
     #[test]

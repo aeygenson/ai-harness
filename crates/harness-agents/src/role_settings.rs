@@ -132,6 +132,7 @@ mod tests {
             project_dir: PathBuf::from("/p"),
             prompt: String::new(),
             output_dir: PathBuf::from("/p/out"),
+            stop: harness_core::task::stop_request::StopRequest::new(),
         }
     }
 

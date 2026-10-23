@@ -4,7 +4,8 @@
 //! the same `TasksTab` by topic: `choice.rs` (whom the message goes to, model
 //! and level), `events.rs` (keys and mouse), `run.rs` (sending the message),
 //! `draw.rs` and `message_box.rs` (drawing), `steps.rs` (a step's text and
-//! files), `github.rs` (sending a done task and merging its pull request).
+//! files), `github.rs` (sending a done task and merging its pull request),
+//! `stop.rs` (Lisa's stop buttons while roles work).
 //! `runner.rs` runs the roles in the background while the tab keeps
 //! working.
 
@@ -17,6 +18,7 @@ mod message_box;
 mod run;
 pub(crate) mod runner;
 mod steps;
+mod stop;
 mod tab;
 
 pub(crate) use choice::Menu;

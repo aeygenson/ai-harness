@@ -172,6 +172,7 @@ impl AgentRunner for Antigravity {
             "",
             self.settings.timeout(),
             &secrets,
+            &job.stop,
         )
         .await;
         drop(home);
@@ -234,6 +235,7 @@ mod tests {
             project_dir: PathBuf::from("/work/app"),
             prompt: "do it".into(),
             output_dir: PathBuf::from("/work/app/.harness/runs/task-001/inbox"),
+            stop: harness_core::task::stop_request::StopRequest::new(),
         }
     }
 

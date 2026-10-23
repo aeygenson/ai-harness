@@ -41,6 +41,7 @@ pub(super) fn prepare_job(
         project_dir: repo.root().to_path_buf(),
         prompt,
         output_dir,
+        stop: setup.stop.clone(),
     };
     Ok((job, manifest))
 }

@@ -17,20 +17,27 @@
 //!    so build output never lands in git.
 //! 3. If the role's work is accepted, everything is committed:
 //!    `task-001 round 2: tester (rejected) - ...`. A failed attempt is thrown away.
+//!
+//! Lisa can stop a run (see [`manual`]): after the running role's step, or at
+//! once, keeping the role's unfinished changes like a time limit does.
 
+mod accept;
 mod changes;
 mod create;
 mod guard;
 mod human;
 mod job;
+mod manual;
 mod protect;
 mod size;
 mod stop;
 
+pub use changes::unfinished_left;
 pub use create::{
     create_project_task, create_task, create_task_anyway, same_task, words, SameText,
 };
 pub use human::record_human_decision;
+pub use manual::continue_stopped;
 pub use size::oversized_changes;
 pub use stop::{RunError, StopReason};
 
@@ -44,10 +51,12 @@ use crate::task::agent::{AgentRunner, RunEnd};
 use crate::task::agent_stubs;
 use crate::task::handoff::{Handoff, Role, Verdict};
 use crate::task::manifest::AgentFacts;
-use crate::task::store::{StoreError, TaskStore};
+use crate::task::stop_request::StopRequest;
+use crate::task::store::TaskStore;
 use crate::task::tripwire::Watched;
-use crate::task::{Stage, TaskState};
+use crate::task::{Stage, TaskState, WaitReason};
 use crate::text;
+use accept::{accept_inbox, Acceptance};
 use changes::{after_failure, check_changes, stop_at_limit, AfterFailure, RoleAt};
 use guard::Before;
 use job::prepare_job;
@@ -82,6 +91,8 @@ pub async fn run<A: AgentRunner>(
             config: None,
             versions: &BTreeMap::new(),
         },
+        // Nobody can press a stop button here.
+        stop: &StopRequest::new(),
     };
     run_watching(repo, store, state, agent, setup).await
 }
@@ -95,6 +106,9 @@ pub struct Project<'a> {
     pub skills: &'a Skills,
     /// What each agent's `--version` said, for the steps' manifests.
     pub agent_versions: &'a BTreeMap<AgentKind, String>,
+    /// Lisa's stop buttons (see [`manual`]); a new [`StopRequest`] when
+    /// nobody can press them.
+    pub stop: &'a StopRequest,
 }
 
 /// Like [`run`], with the project's skills and settings: every role gets its
@@ -114,6 +128,7 @@ pub async fn run_project<A: AgentRunner>(
             config: Some(project.config),
             versions: project.agent_versions,
         },
+        stop: project.stop,
     };
     run_watching(repo, store, state, agent, setup).await
 }
@@ -127,6 +142,8 @@ pub struct RunSetup<'a> {
     pub watched: &'a Watched,
     /// The settings and versions the steps' manifests record.
     pub agents: AgentFacts<'a>,
+    /// Lisa's stop buttons (see [`manual`]).
+    pub stop: &'a StopRequest,
 }
 
 /// Like [`run_project`], with the files the tripwire watches given
@@ -139,12 +156,17 @@ pub async fn run_watching<A: AgentRunner>(
     setup: RunSetup<'_>,
 ) -> Result<StopReason, RunError> {
     repo.ensure_harness_ignores()?;
+    // Has a step of this run been accepted? Then «Stop after this step» stops.
+    let mut step_done = false;
     for _ in 0..MAX_STEPS_PER_RUN {
         let role = match state.stage {
             Stage::Done => return Ok(StopReason::Done),
             Stage::WaitingForHuman(reason) => return Ok(StopReason::WaitingForHuman(reason)),
             Stage::Working(role) => role,
         };
+        if let Some(stop) = manual::stop_before(repo, store, state, role, setup.stop, step_done)? {
+            return Ok(stop);
+        }
 
         // Before looking at git status: a block an unwatched run of Claude
         // Code left in `info/exclude` would hide files from it.
@@ -183,10 +205,15 @@ pub async fn run_watching<A: AgentRunner>(
             }
             match &outcome.end {
                 RunEnd::Succeeded => {}
-                RunEnd::UsageLimit | RunEnd::TimedOut(_) => {
-                    failure_logs.push(store.save_failure_log(state.round, role, &outcome.log)?);
+                RunEnd::UsageLimit | RunEnd::TimedOut(_) | RunEnd::StoppedByLisa => {
+                    failure_logs.push(manual::save_stop_log(store, state, role, &outcome)?);
                     let at = RoleAt::new(repo, store, state, role);
-                    return stop_at_limit(at, &outcome.end, &failure_logs);
+                    let stop = stop_at_limit(at, &outcome.end, &failure_logs)?;
+                    // «Stop now»: the kept work is recorded; the task waits for Lisa.
+                    if stop == StopReason::WaitingForHuman(WaitReason::StoppedByLisa(role)) {
+                        return manual::wait_for_lisa(repo, store, state, role);
+                    }
+                    return Ok(stop);
                 }
                 RunEnd::Failed(message) => {
                     let log = store.save_failure_log(state.round, role, &outcome.log)?;
@@ -217,6 +244,7 @@ pub async fn run_watching<A: AgentRunner>(
                     changes::remove_record(store)?;
                     repo.commit_all(&commit_message(&handoff))?;
                     accepted = true;
+                    step_done = true;
                     break;
                 }
                 Acceptance::Refused(why) => {
@@ -252,28 +280,6 @@ pub(super) fn commit_failure_logs(
     let paths: Vec<&Path> = logs.iter().map(PathBuf::as_path).collect();
     repo.commit_paths(&paths, &message)?;
     Ok(())
-}
-
-/// Was the agent's handoff taken into the task?
-enum Acceptance {
-    /// Yes: the saved handoff and its step folder.
-    Accepted { handoff: Handoff, step_dir: PathBuf },
-    /// No: why, in one line for the next attempt's problem text.
-    Refused(String),
-}
-
-/// Reads the agent's handoff and saves it as the next step. `Err` is only a
-/// real harness error (for example the disk is full).
-fn accept_inbox(store: &TaskStore, state: &mut TaskState) -> Result<Acceptance, StoreError> {
-    let (handoff, notes) = match store.read_inbox() {
-        Ok(found) => found,
-        Err(e) => return Ok(Acceptance::Refused(format!("no valid handoff: {e}"))),
-    };
-    match store.record(state, &handoff, &notes) {
-        Ok(step_dir) => Ok(Acceptance::Accepted { handoff, step_dir }),
-        Err(StoreError::Refused(e)) => Ok(Acceptance::Refused(format!("handoff refused: {e}"))),
-        Err(e) => Err(e),
-    }
 }
 
 /// `task-001 round 2: tester (rejected) - Parser fails on empty input`

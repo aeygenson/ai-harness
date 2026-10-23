@@ -337,6 +337,9 @@ pub fn stage_text(stage: Stage) -> String {
         Stage::WaitingForHuman(WaitReason::RoundLimitReached) => {
             "waiting: round limit reached".into()
         }
+        Stage::WaitingForHuman(WaitReason::StoppedByLisa(role)) => {
+            format!("waiting: stopped by Lisa, {} next", role.as_str())
+        }
         Stage::Done => "done".into(),
     }
 }
@@ -449,6 +452,12 @@ mod tests {
             vec![security],
         );
         vec![first, second]
+    }
+
+    #[test]
+    fn a_task_stopped_by_lisa_says_who_continues() {
+        let stage = Stage::WaitingForHuman(WaitReason::StoppedByLisa(Role::Tester));
+        assert_eq!(stage_text(stage), "waiting: stopped by Lisa, tester next");
     }
 
     fn config() -> Config {

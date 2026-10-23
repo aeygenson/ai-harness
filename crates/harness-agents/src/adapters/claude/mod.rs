@@ -198,7 +198,14 @@ impl ClaudeCode {
         };
         let mut secrets = self.settings.server_secrets(job.role);
         secrets.push(self.token.expose());
-        let result = process::run(command, &job.prompt, self.settings.timeout(), &secrets).await;
+        let result = process::run(
+            command,
+            &job.prompt,
+            self.settings.timeout(),
+            &secrets,
+            &job.stop,
+        )
+        .await;
         let result = process::hide_secrets(result, secrets);
         let finished = match result {
             Ok(finished) => finished,
@@ -259,6 +266,7 @@ mod tests {
             project_dir: PathBuf::from("/work/app"),
             prompt: "do it".into(),
             output_dir: PathBuf::from("/work/app/.harness/runs/task-001/inbox"),
+            stop: harness_core::task::stop_request::StopRequest::new(),
         }
     }
 

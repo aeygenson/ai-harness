@@ -16,6 +16,7 @@ use harness_core::task::orchestrator::{
     MAX_CHANGE_BYTES,
 };
 use harness_core::task::scenario::Workflow;
+use harness_core::task::stop_request::StopRequest;
 use harness_core::task::store::TaskStore;
 use harness_core::task::tripwire::Watched;
 use harness_core::task::{Stage, TaskState, WaitReason, DEFAULT_MAX_ROUNDS};
@@ -821,6 +822,7 @@ async fn hooks_and_files_outside_the_project_are_noticed() {
             config: None,
             versions: &BTreeMap::new(),
         },
+        stop: &StopRequest::new(),
     };
     let stop = orchestrator::run_watching(&repo, &store, &mut state, &agent, setup)
         .await
@@ -865,6 +867,7 @@ async fn run_with(
             config: None,
             versions: &BTreeMap::new(),
         },
+        stop: &StopRequest::new(),
     };
     orchestrator::run_watching(repo, store, state, agent, setup)
         .await

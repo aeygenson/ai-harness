@@ -1,15 +1,15 @@
 //! What happens to a role's changes after an attempt that was not accepted:
 //! checked, kept in the folder for the next run, or thrown away.
 //!
-//! When a limit (time or usage) stops a role, its changes stay in the project
-//! folder, uncommitted, and `unfinished.json` in the task's folder records
-//! which files they are and a hash of each. The next run of the same role in
-//! the same round accepts exactly that dirty folder and tells the agent to
-//! continue; anything else (Lisa edited a file, also under `.harness/`
-//! without committing it, or committed a change to the project) stops the
-//! run as before. No commit
-//! is made for the unfinished work: every step stays one commit, which the
-//! facts and the weakened-checks report read.
+//! When a limit (time or usage) or Lisa's «Stop now» stops a role, its
+//! changes stay in the project folder, uncommitted, and `unfinished.json` in
+//! the task's folder records which files they are and a hash of each. The
+//! next run of the same role in the same round accepts exactly that dirty
+//! folder and tells the agent to continue; anything else (Lisa edited a file,
+//! also under `.harness/` without committing it, or committed a change to the
+//! project) stops the run as before. No commit is made for the unfinished
+//! work: every step stays one commit, which the facts and the weakened-checks
+//! report read.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -21,7 +21,7 @@ use crate::task::agent::RunEnd;
 use crate::task::handoff::Role;
 use crate::task::permissions;
 use crate::task::store::{StoreError, TaskStore};
-use crate::task::TaskState;
+use crate::task::{TaskState, WaitReason};
 
 use super::{oversized_changes, RunError, StopReason, MAX_CHANGE_BYTES};
 
@@ -152,6 +152,20 @@ pub(super) fn recorded_files(store: &TaskStore) -> Vec<String> {
         .unwrap_or_default()
 }
 
+/// The recorded unfinished work that is still uncommitted in the folder;
+/// empty when there is none. Finishing the task would leave it stranded.
+pub fn unfinished_left(repo: &Repo, store: &TaskStore) -> Result<Vec<String>, GitError> {
+    let recorded = recorded_files(store);
+    if recorded.is_empty() {
+        return Ok(Vec::new());
+    }
+    let changed = repo.changed_files()?;
+    Ok(recorded
+        .into_iter()
+        .filter(|file| changed.contains(file))
+        .collect())
+}
+
 /// The record, or `None` when it is missing or unreadable (then nothing is
 /// resumed and a dirty folder stops the run, as without this feature).
 fn read_record(path: &Path) -> Option<Unfinished> {
@@ -188,23 +202,31 @@ pub(super) fn check_changes(
     Ok(None)
 }
 
-/// Stops the run after a limit (time or usage): the role's work stays in the
-/// folder for the next run of this role, after the same checks as accepted
-/// work; only the harness's records are committed. Running again at once would
-/// hit the same limit, and throwing the work away would lose it.
+/// Stops the run after a limit (time or usage) or Lisa's «Stop now»: the
+/// role's work stays in the folder for the next run of this role, after the
+/// same checks as accepted work; only the harness's records are committed.
+/// Running again at once would hit the same limit, and throwing the work away
+/// would lose it.
 pub(super) fn stop_at_limit(
     at: RoleAt,
     end: &RunEnd,
     failure_logs: &[PathBuf],
 ) -> Result<StopReason, RunError> {
     let mut paths = failure_logs.to_vec();
-    let (what, limit) = if matches!(end, RunEnd::UsageLimit) {
-        (
+    let (what, limit) = match end {
+        RunEnd::UsageLimit => (
             "paused by usage limit",
             StopReason::UsageLimitReached(at.role),
-        )
-    } else {
-        ("stopped at the time limit", StopReason::TimedOut(at.role))
+        ),
+        // The caller then moves the task to waiting for Lisa.
+        RunEnd::StoppedByLisa => (
+            "stopped by Lisa",
+            StopReason::WaitingForHuman(WaitReason::StoppedByLisa(at.role)),
+        ),
+        // Only the limits come here; a finished or failed run never does.
+        RunEnd::TimedOut(_) | RunEnd::Succeeded | RunEnd::Failed(_) => {
+            ("stopped at the time limit", StopReason::TimedOut(at.role))
+        }
     };
     let mut stop = limit;
     if let Some(refused) = check_changes(at.repo, at.role, failure_logs)? {

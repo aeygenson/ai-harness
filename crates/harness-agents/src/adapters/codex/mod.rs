@@ -208,7 +208,14 @@ impl AgentRunner for Codex {
         };
         let command = self.command(job, secrets.path());
         let hidden = self.settings.server_secrets(job.role);
-        let result = process::run(command, &job.prompt, self.settings.timeout(), &hidden).await;
+        let result = process::run(
+            command,
+            &job.prompt,
+            self.settings.timeout(),
+            &hidden,
+            &job.stop,
+        )
+        .await;
         drop(secrets);
         if let Err(e) = self.clean_up(job, Some(&given)) {
             // `write!` into a String cannot fail.
@@ -293,6 +300,7 @@ mod tests {
             project_dir: PathBuf::from("/work/app"),
             prompt: "do it".into(),
             output_dir: PathBuf::from("/work/app/.harness/runs/task-001/inbox"),
+            stop: harness_core::task::stop_request::StopRequest::new(),
         }
     }
 

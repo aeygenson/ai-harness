@@ -1,6 +1,7 @@
 //! Tests of the Tasks tab: starting tasks, running roles, answers, windows and files.
 
 use super::*;
+use harness_agents::MockStep;
 
 #[test]
 fn the_mouse_moves_through_tasks_and_steps() {
@@ -980,4 +981,186 @@ fn without_a_suggestion_the_answer_goes_back_to_the_tester() {
 
     assert!(text.contains(" To: tester ▾ "), "{text}");
     assert!(!text.contains("suggested:"), "{text}");
+}
+
+/// The mock agents, with `developer` for the developer: the others approve.
+fn team_with_developer(developer: MockStep) -> harness_agents::Team {
+    use harness_agents::{AnyAgent, MockAgent, Team};
+    let agent = |role, step| AnyAgent::Mock(MockAgent::new().then(role, step));
+    let approve = |next| MockStep::finish(Verdict::Approved, next);
+    Team::new()
+        .with(Role::Developer, agent(Role::Developer, developer))
+        .with(
+            Role::Tester,
+            agent(Role::Tester, approve(NextStep::To(Role::Security))),
+        )
+        .with(
+            Role::Security,
+            agent(Role::Security, approve(NextStep::Done)),
+        )
+}
+
+/// A developer that works until «Stop after this step», then sends the
+/// work to the tester.
+#[expect(
+    clippy::unnecessary_wraps,
+    reason = "a fake must match the `Builder` function type"
+)]
+fn developer_until_any_stop(
+    _: &harness_core::config::Config,
+    _: &Path,
+) -> Result<harness_agents::Team, harness_agents::build::BuildError> {
+    Ok(team_with_developer(MockStep::WorkUntilStopped {
+        files: vec![],
+        next: Some(NextStep::To(Role::Tester)),
+    }))
+}
+
+/// A developer that half-writes `src/half.rs` and works until «Stop now»;
+/// once that file is there, it finishes and asks Lisa.
+#[expect(
+    clippy::unnecessary_wraps,
+    reason = "a fake must match the `Builder` function type"
+)]
+fn developer_until_stop_now(
+    _: &harness_core::config::Config,
+    root: &Path,
+) -> Result<harness_agents::Team, harness_agents::build::BuildError> {
+    let developer = if root.join("src/half.rs").exists() {
+        MockStep::finish_writing(
+            Verdict::NeedsHuman,
+            NextStep::To(Role::Human),
+            &[("src/done.rs", "fn done() {}")],
+        )
+    } else {
+        MockStep::WorkUntilStopped {
+            files: vec![("src/half.rs".into(), "fn half() {}".into())],
+            next: None,
+        }
+    };
+    Ok(team_with_developer(developer))
+}
+
+/// A project whose task-001 waits for the developer to work.
+fn developer_next(env: &Env, builder: tabs::tasks::runner::Builder) -> (PathBuf, App) {
+    let root = env.path("stoppable");
+    projects::init(&root).unwrap();
+    let repo = Repo::open(&root).unwrap();
+    let (store, mut state) =
+        orchestrator::create_task(&repo, "task-001", "Build a parser", Workflow::Task, 5).unwrap();
+    store
+        .save_stage(
+            &mut state,
+            harness_core::task::Stage::Working(Role::Developer),
+        )
+        .unwrap();
+    repo.commit_all("the developer is next").unwrap();
+    let mut app = env.app(&root);
+    app.builder = builder;
+    (root, app)
+}
+
+#[test]
+fn stop_after_this_step_lets_the_role_finish_then_waits_for_lisa() {
+    use harness_core::task::{Stage, WaitReason};
+    let env = Env::new();
+    let (_root, mut app) = developer_next(&env, developer_until_any_stop);
+    // No stop buttons while no role works.
+    assert!(!screen(&mut app).contains("Stop after this step"));
+
+    click(&mut app, " Send ");
+    let text = screen(&mut app);
+    assert!(text.contains("Stop after this step (s)"), "{text}");
+    assert!(text.contains("Stop now (x)"), "{text}");
+    key(&mut app, KeyCode::Char('s'));
+    let text = screen(&mut app);
+    assert!(
+        text.contains("✓ Stops after this step (s: cancel)"),
+        "{text}"
+    );
+    assert!(shown(&app).0.contains("stops after this step"));
+    wait(&mut app);
+
+    // The developer's step is done; the tester did not start.
+    assert_eq!(
+        stage(&app),
+        Stage::WaitingForHuman(WaitReason::StoppedByLisa(Role::Tester))
+    );
+    let (message, problem) = shown(&app);
+    assert!(
+        message.contains("stopped as you asked; the tester is next"),
+        "{message}"
+    );
+    assert!(!problem);
+    let text = screen(&mut app);
+    assert!(!text.contains("Stop now (x)"), "{text}");
+    assert!(text.contains("waiting: stopped, tester next"), "{text}");
+    assert!(text.contains(" To: tester ▾ "), "{text}");
+
+    // «Continue: tester» goes on without a note.
+    click(&mut app, " To: tester ▾ ");
+    click(&mut app, "Continue: tester");
+    click(&mut app, " Send ");
+    wait(&mut app);
+    assert_eq!(stage(&app), Stage::Done);
+}
+
+#[test]
+fn stop_now_asks_first_keeps_the_work_and_takes_a_note() {
+    use harness_core::task::{Stage, WaitReason};
+    let env = Env::new();
+    let (root, mut app) = developer_next(&env, developer_until_stop_now);
+    click(&mut app, " Send ");
+
+    // «Stop after this step» with the mouse, then taken back with its key.
+    click(&mut app, "Stop after this step (s)");
+    assert!(screen(&mut app).contains("✓ Stops after this step"));
+    key(&mut app, KeyCode::Char('s'));
+    assert!(screen(&mut app).contains("Stop after this step (s)"));
+    assert!(shown(&app).0.contains("cancelled"));
+
+    // «Stop now» asks first; Esc keeps the agent working.
+    key(&mut app, KeyCode::Char('x'));
+    assert!(screen(&mut app).contains("Stop the agent now?"));
+    key(&mut app, KeyCode::Esc);
+    assert!(app.form.is_none());
+    assert!(app.tasks.as_ref().unwrap().is_running());
+    assert_eq!(app.tasks.as_ref().unwrap().stop_asked(), None);
+
+    click(&mut app, "Stop now (x)");
+    assert!(app.form.is_some());
+    key(&mut app, KeyCode::Enter);
+    assert!(shown(&app).0.contains("Stopping the agent"));
+    wait(&mut app);
+
+    assert_eq!(
+        stage(&app),
+        Stage::WaitingForHuman(WaitReason::StoppedByLisa(Role::Developer))
+    );
+    assert!(shown(&app).0.contains("the developer is next"));
+    let store_dir = root.join(".harness/runs/task-001");
+    assert!(store_dir.join("unfinished.json").exists());
+    assert!(root.join("src/half.rs").exists());
+    let text = screen(&mut app);
+    assert!(text.contains(" To: developer ▾ "), "{text}");
+    // Nobody asked a question: no link to one.
+    assert!(!text.contains("Questions:"), "{text}");
+
+    // A note to the stopped developer: it continues from its work.
+    click(&mut app, "Write here");
+    type_text(&mut app, "Keep the old API");
+    send(&mut app);
+    wait(&mut app);
+    assert_eq!(
+        stage(&app),
+        Stage::WaitingForHuman(WaitReason::RoleAskedForHelp(Role::Developer))
+    );
+    assert!(!store_dir.join("unfinished.json").exists());
+    let steps = TaskStore::open(&root.join(".harness/runs"), "task-001")
+        .unwrap()
+        .0
+        .steps()
+        .unwrap();
+    assert_eq!(steps[0].handoff.summary, "Keep the old API");
+    assert_eq!(steps[1].handoff.role, Role::Developer);
 }

@@ -6,6 +6,7 @@ use harness_agents::install::credentials;
 use crate::tabs::projects::has_config;
 use crate::tabs::projects::picker::FolderButton;
 use crate::tabs::roles::Action;
+use crate::tabs::tasks::TasksTab;
 use crate::ui::message::Message;
 use crate::ui::{i18n, theme};
 use crate::ui::{ButtonId, Form};
@@ -68,6 +69,8 @@ impl App {
             | ButtonId::Menu(_) => self.press_on_tasks(id),
             ButtonId::TaskPullRequest(index) => self.open_pull_request(index),
             ButtonId::Send => self.send_message(),
+            ButtonId::StopAfterStep => self.stop_after_step(),
+            ButtonId::StopNow => self.ask_to_stop_now(),
             ButtonId::UseProject => self.use_project(),
             ButtonId::NewProject => self.pick(Pick::NewProject),
             ButtonId::OpenFolder => self.pick(Pick::Open),
@@ -128,6 +131,44 @@ impl App {
                 Err(error) => Message::error(error),
             });
         }
+    }
+
+    /// «Stop after this step» (s): asked, or taken back; nothing when no role works.
+    fn stop_after_step(&mut self) {
+        if let Some(text) = self
+            .tasks
+            .as_mut()
+            .and_then(|t| t.toggle_stop_after_step(&self.tr))
+        {
+            self.message = Some(Message::info(text));
+        }
+    }
+
+    /// «Stop now» (x): first asks Lisa, since the agent's work is cut off.
+    fn ask_to_stop_now(&mut self) {
+        if !self.tasks.as_ref().is_some_and(TasksTab::can_stop) {
+            return;
+        }
+        let tr = &self.tr;
+        self.form = Some((
+            Purpose::StopNow,
+            Form::new(
+                tr.t("tasks.stop_now_title"),
+                tr.t("tasks.stop_now_text"),
+                tr.t("tasks.stop_now_ok"),
+            ),
+        ));
+    }
+
+    /// Lisa confirmed «Stop now». The roles may have finished meanwhile:
+    /// then there is nothing left to stop.
+    pub(crate) fn confirm_stop_now(&mut self) {
+        let tr = &self.tr;
+        let text = match self.tasks.as_mut().and_then(|t| t.stop_now(tr)) {
+            Some(text) => text,
+            None => tr.t("tasks.stop_nothing").to_string(),
+        };
+        self.message = Some(Message::info(text));
     }
 
     /// Starts signing in to the agent, or the program of the «Computer»
