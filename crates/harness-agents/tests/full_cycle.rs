@@ -322,6 +322,42 @@ async fn usage_limit_keeps_the_unfinished_work_too() {
 }
 
 #[tokio::test]
+async fn an_empty_stub_named_file_of_unfinished_work_is_resumed() {
+    let (_dir, repo) = new_project();
+    let (store, mut state) = new_task(&repo);
+    state.stage = Stage::Working(Role::Developer);
+    let mut work = half_done();
+    // The role's own empty file (no Claude Code block): part of the work.
+    work.push((".env.test".to_string(), String::new()));
+    let agent = MockAgent::new()
+        .then(Role::Developer, MockStep::UsageLimitAfterWriting(work))
+        .then(Role::Developer, developer_finishes());
+    let stop = orchestrator::run(&repo, &store, &mut state, &agent)
+        .await
+        .unwrap();
+    assert_eq!(stop, StopReason::UsageLimitReached(Role::Developer));
+    // Lisa raises a limit and has not committed it yet: nothing is resumed
+    // on this run, but the recorded work must survive for the next one.
+    let config = repo.root().join(".harness/harness.toml");
+    fs::create_dir_all(config.parent().unwrap()).unwrap();
+    fs::write(&config, "agent_timeout_minutes = 90\n").unwrap();
+    let stop = orchestrator::run(&repo, &store, &mut state, &agent)
+        .await
+        .unwrap();
+    assert!(matches!(stop, StopReason::DirtyWorkingTree(_)), "{stop:?}");
+    assert!(repo.root().join(".env.test").exists());
+    repo.commit_paths(&[&config], "Lisa: a longer time limit")
+        .unwrap();
+
+    orchestrator::run(&repo, &store, &mut state, &agent)
+        .await
+        .unwrap();
+
+    assert_eq!(agent.calls(), [Role::Developer, Role::Developer]);
+    assert!(agent.prompts()[1].contains("- .env.test"), "resumed");
+}
+
+#[tokio::test]
 async fn a_change_by_someone_else_after_the_stop_is_not_resumed() {
     let (_dir, repo) = new_project();
     let (store, mut state) = new_task(&repo);
@@ -950,6 +986,100 @@ async fn stubs_are_removed_without_git_when_the_task_stops() {
 
     assert_eq!(stop, StopReason::GitConfigChanged(Role::Architect));
     assert!(!dir.path().join("package.json").exists());
+}
+
+#[tokio::test]
+async fn after_a_tripwire_stop_the_next_run_does_not_stop_on_claude_codes_stubs() {
+    let (dir, repo) = new_project();
+    let (store, mut state) = new_task(&repo);
+    let home = tempfile::tempdir().unwrap();
+    let watched = watched_with_home(&repo, home.path());
+    let exclude = dir.path().join(".git/info/exclude");
+    let old_exclude = fs::read_to_string(&exclude).unwrap_or_default();
+    let stubs = [
+        ".env.development",
+        ".env.production",
+        ".env.test",
+        ".gitmodules",
+        ".npmrc",
+        ".yarnrc",
+        ".yarnrc.yml",
+        "bunfig.toml",
+        "package-lock.json",
+        "package.json",
+        "pnpm-lock.yaml",
+        "yarn.lock",
+    ];
+    let block: Vec<String> = stubs.iter().map(|name| format!("/{name}")).collect();
+    let new_exclude = format!(
+        "{old_exclude}\n\n# claude-code scrub-mode stubs\n{}",
+        block.join("\n")
+    );
+    let config = dir.path().join(".git/config");
+    let new_config = format!(
+        "{}\n[branch \"lisas-work\"]\n\tremote = origin\n",
+        fs::read_to_string(&config).unwrap()
+    );
+    let head = repo.head().unwrap().unwrap();
+    // The incident: while the architect ran, Lisa made a branch and pushed it
+    // in the same repository (a new branch, a changed `.git/config`), and
+    // Claude Code's sandbox made its empty stub files.
+    let mut files: Vec<(&str, &str)> = vec![
+        (".git/info/exclude", new_exclude.as_str()),
+        (".git/config", new_config.as_str()),
+        (".git/refs/heads/lisas-work", head.as_str()),
+    ];
+    files.extend(stubs.iter().map(|name| (*name, "")));
+    let agent = MockAgent::new()
+        .then(
+            Role::Architect,
+            MockStep::finish_writing(Verdict::Approved, NextStep::To(Role::Human), &files),
+        )
+        .then(Role::Architect, approve(Role::Human));
+
+    let first = run_with(&repo, &store, &mut state, &agent, &watched).await;
+    // «Continue»: the same role runs again.
+    let second = run_with(&repo, &store, &mut state, &agent, &watched).await;
+
+    assert_eq!(first, StopReason::AgentCommitted(Role::Architect));
+    assert!(
+        matches!(second, StopReason::WaitingForHuman(_)),
+        "{second:?}"
+    );
+    assert_eq!(agent.calls(), [Role::Architect, Role::Architect]);
+    for name in stubs {
+        assert!(!dir.path().join(name).exists(), "{name}");
+    }
+    assert_eq!(
+        fs::read_to_string(&exclude).unwrap_or_default(),
+        old_exclude
+    );
+}
+
+#[tokio::test]
+async fn leftover_empty_stubs_do_not_stop_a_run_but_other_files_do() {
+    let (dir, repo) = new_project();
+    let (store, mut state) = new_task(&repo);
+    fs::write(dir.path().join(".gitmodules"), "").unwrap();
+    repo.commit_all("an empty file the project tracks").unwrap();
+    // Left by an earlier run whose `info/exclude` is already put back.
+    fs::write(dir.path().join("package.json"), "").unwrap();
+    fs::write(dir.path().join(".env.test"), "").unwrap();
+    fs::write(dir.path().join(".npmrc"), "registry=https://example.com/\n").unwrap();
+    let agent = MockAgent::new().then(Role::Architect, approve(Role::Human));
+
+    let stop = orchestrator::run(&repo, &store, &mut state, &agent)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        stop,
+        StopReason::DirtyWorkingTree(vec![".npmrc".to_string()]),
+        "a stub with content may be Lisa's"
+    );
+    assert!(!dir.path().join("package.json").exists());
+    assert!(!dir.path().join(".env.test").exists());
+    assert!(dir.path().join(".gitmodules").exists(), "it is tracked");
 }
 
 #[tokio::test]

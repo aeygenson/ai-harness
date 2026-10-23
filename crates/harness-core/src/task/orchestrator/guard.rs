@@ -35,7 +35,8 @@ impl Before {
     /// branches. Puts back what can be put back and returns why the task
     /// must stop, or `None` when all is as before. When Claude Code's stub
     /// block was there, removes its new empty stub files (see
-    /// [`crate::task::agent_stubs`]), except after a commit or branch change.
+    /// [`crate::task::agent_stubs`]), except after a commit or branch change
+    /// (then the next run removes them).
     pub(super) fn check(
         &self,
         repo: &Repo,
@@ -53,8 +54,11 @@ impl Before {
         // does a made, moved or deleted branch: the harness later checks out
         // a task's branch and reads its settings, which no role may change.
         // Branches cannot be put back, and the next run would take them as
-        // they are, so this reason wins when there are several. Lisa checks
-        // the folder herself after this stop, so the stubs stay.
+        // they are, so this reason wins when there are several. The stubs
+        // stay here: whether the new commit holds them only `git status`
+        // could tell, which does not run on a stop, and a tracked file is
+        // never removed. The next run removes them if they are still empty
+        // and untracked (`agent_stubs::remove_leftover_stubs`).
         let git_changed = repo.head()? != self.head
             || repo.current_branch()? != self.branch
             || repo.branch_heads()? != self.branch_heads;

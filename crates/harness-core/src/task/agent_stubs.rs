@@ -16,7 +16,10 @@
 //! removed too, without running git, so the next run does not stop on them.
 //! A block left by a run the harness did not watch (Lisa's own Claude Code,
 //! the retrospective) is removed before git status is trusted again, so it
-//! cannot hide files.
+//! cannot hide files. Before every role the harness also removes empty,
+//! untracked stub files that are still there (except those of unfinished
+//! work a limit left): once `info/exclude` is put back, nothing else would
+//! remove them, and the run would stop on them as uncommitted changes.
 
 use std::fs;
 use std::io;
@@ -135,10 +138,29 @@ fn strip_stub_blocks(text: &[u8]) -> Option<Vec<u8>> {
 /// Removes what an earlier unwatched run of Claude Code left: its block in
 /// `info/exclude`, then the stub files that are now visible to git and empty.
 /// A stub with content stays, so git status shows it and Lisa checks it.
+/// Without a block nothing is removed: then an empty stub-named file is the
+/// work of whatever made it (see [`remove_leftover_stubs`] for the run loop).
 ///
 /// # Errors
 /// Git failed, or reading or writing `info/exclude` or a stub file failed.
 pub fn clear_leftovers(repo: &Repo) -> Result<(), GitError> {
+    if !clear_stub_block(repo)? {
+        return Ok(());
+    }
+    let all: Vec<PathBuf> = STUB_FILES
+        .iter()
+        .map(|name| repo.root().join(name))
+        .collect();
+    remove_visible_empty(repo, &all)
+}
+
+/// Removes Claude Code's block from `info/exclude`, left by a run the
+/// harness did not watch (Lisa's own Claude Code, a harness that was killed),
+/// so it hides no files from `git status`. Returns whether there was one.
+///
+/// # Errors
+/// Git failed, or reading or writing `info/exclude` failed.
+pub(crate) fn clear_stub_block(repo: &Repo) -> Result<bool, GitError> {
     let path = repo.git_common_dir()?.join("info").join("exclude");
     let io_error = |source| GitError::Io {
         path: path.clone(),
@@ -146,20 +168,51 @@ pub fn clear_leftovers(repo: &Repo) -> Result<(), GitError> {
     };
     let text = match fs::read(&path) {
         Ok(text) => text,
-        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(false),
         Err(e) => return Err(io_error(e)),
     };
     let Some(new_text) = strip_stub_blocks(&text) else {
-        return Ok(());
+        return Ok(false);
     };
     // Removed first, so writing never follows a link put in its place.
     fs::remove_file(&path).map_err(io_error)?;
     fs::write(&path, new_text).map_err(io_error)?;
-    let all: Vec<PathBuf> = STUB_FILES
-        .iter()
-        .map(|name| repo.root().join(name))
-        .collect();
-    remove_visible_empty(repo, &all)
+    Ok(true)
+}
+
+/// Removes the stub files at the top of the project that are empty plain
+/// files, new to git (not tracked, not in the last commit, not ignored) and
+/// not in `keep`.
+///
+/// The run loop calls it before a role, after [`clear_stub_block`]. It
+/// catches stubs an earlier role left whatever way it ended: a stop after
+/// which the harness keeps them (a commit or branch change during the role),
+/// an error of the harness, or a harness that was killed. By then
+/// `info/exclude` is already put back, so only the names tell them apart.
+/// `keep` holds the files of unfinished work a limit left: an empty file
+/// there is the role's work. Best effort: a file that cannot be removed (on
+/// Windows, one another program holds open) stays, and the check for
+/// uncommitted changes shows it to Lisa.
+///
+/// # Errors
+/// Git failed.
+pub(crate) fn remove_leftover_stubs(repo: &Repo, keep: &[String]) -> Result<(), GitError> {
+    let changed = repo.changed_files()?;
+    for name in STUB_FILES {
+        let shown = changed.iter().any(|c| c == name);
+        if !shown || keep.iter().any(|k| k == name) {
+            continue;
+        }
+        let path = repo.root().join(name);
+        // `file_at_head`: after `git rm --cached` a file is untracked but
+        // still in the last commit, so it is the project's.
+        let new_to_git = !repo.is_tracked(Path::new(name)) && repo.file_at_head(name).is_none();
+        if is_empty_file(&path) && new_to_git {
+            // Ignored on purpose: see "Best effort" above.
+            let _ = fs::remove_file(&path);
+        }
+    }
+    Ok(())
 }
 
 /// Removes those of `paths` that git shows as new (not tracked, not ignored)
@@ -327,6 +380,64 @@ mod tests {
             "Lisa's .gitignore hides it"
         );
         assert_eq!(repo.changed_files().unwrap(), [".npmrc"]);
+    }
+
+    #[test]
+    fn leftover_stubs_without_a_block_are_removed() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = Repo::init(dir.path()).unwrap();
+        let root = dir.path();
+        fs::write(root.join(".gitmodules"), "").unwrap();
+        fs::write(root.join(".gitignore"), "/.env.local\n").unwrap();
+        repo.commit_all("the project's own files").unwrap();
+        // What a stopped role left once the tripwire put `info/exclude` back.
+        for name in [
+            ".env.development",
+            "package.json",
+            "yarn.lock",
+            ".env.local",
+        ] {
+            fs::write(root.join(name), "").unwrap();
+        }
+        fs::write(root.join(".npmrc"), "registry=https://example.com/\n").unwrap();
+        fs::write(root.join("notes.txt"), "").unwrap();
+
+        remove_leftover_stubs(&repo, &[]).unwrap();
+
+        assert!(!root.join(".env.development").exists());
+        assert!(!root.join("package.json").exists());
+        assert!(!root.join("yarn.lock").exists());
+        assert!(root.join(".npmrc").exists(), "it has content");
+        assert!(root.join(".gitmodules").exists(), "it is tracked");
+        assert!(
+            root.join(".env.local").exists(),
+            "Lisa's .gitignore hides it"
+        );
+        assert!(root.join("notes.txt").exists(), "not a stub name");
+        assert_eq!(repo.changed_files().unwrap(), [".npmrc", "notes.txt"]);
+    }
+
+    #[test]
+    fn recorded_and_committed_stubs_are_not_leftovers() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = Repo::init(dir.path()).unwrap();
+        let root = dir.path();
+        fs::write(root.join(".env"), "").unwrap();
+        repo.commit_all("the project's empty .env").unwrap();
+        // Untracked now, but still in the last commit.
+        let status = std::process::Command::new("git")
+            .current_dir(root)
+            .args(["rm", "-q", "--cached", ".env"])
+            .status()
+            .unwrap();
+        assert!(status.success());
+        // Unfinished work a limit left.
+        fs::write(root.join("package.json"), "").unwrap();
+
+        remove_leftover_stubs(&repo, &["package.json".to_string()]).unwrap();
+
+        assert!(root.join(".env").exists());
+        assert!(root.join("package.json").exists());
     }
 
     #[test]

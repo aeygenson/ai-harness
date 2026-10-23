@@ -333,6 +333,27 @@ mod tests {
     }
 
     #[test]
+    fn the_tester_stops_rejecting_the_same_kind_of_problem() {
+        let tester = built_ins::built_in("tester").unwrap();
+
+        assert!(tester.contains("A repeated kind of problem"));
+        assert!(tester.contains("do not\n     reject again: finish with `needs_human`"));
+        assert!(tester.contains("change the rule itself instead of adding cases"));
+    }
+
+    #[test]
+    fn the_developer_asks_its_questions_together_and_applies_standing_rules() {
+        let developer = built_ins::built_in("developer").unwrap();
+
+        assert!(developer.contains("ask them together in one `needs_human` handoff"));
+        assert!(developer.contains("does not depend on an answer"));
+        assert!(developer.contains("general rule or standing authority"));
+        assert!(developer.contains("how you applied the rule"));
+        // The old limit stays: what nothing covers still goes to Lisa.
+        assert!(developer.contains("nor such a rule covers still needs `needs_human`"));
+    }
+
+    #[test]
     fn a_project_file_replaces_a_built_in_skill() {
         let copy = copy_of_built_in("tester").unwrap();
         assert!(copy.starts_with("---\nbuiltin: "), "{copy}");

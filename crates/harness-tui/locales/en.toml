@@ -104,10 +104,10 @@ stop_steps = "{task}: stopped after too many steps in one run; choose «Continue
 stop_dirty = "{task}: the project has uncommitted changes ({files}); commit or remove them, then choose «Continue»"
 stop_forbidden = "{task}: the {role} changed files it may not touch ({files}); they are left uncommitted for you to check"
 stop_too_large = "{task}: the {role} made files too big to commit ({files}); usually this is build output: add it to .gitignore or delete it, commit or remove the rest, then choose «Continue»"
-stop_committed = "{task}: while the {role} was working, a new git commit appeared or the git branch changed. The role or something else on this computer (another program, a git command you ran) did it. Check git log, git branch and git status before going on"
+stop_committed = "{task}: while the {role} was working, a new git commit appeared or the git branches changed. The role may have done it, or someone else working in this repository (you, another program, a git command). Before going on, check with git log, git branch and git status that the commits and branches are the ones you expect and that the task's branch is checked out"
 stop_protected = "{task}: the {role} changed files no role may change ({files}); they are put back, what it wrote is in {log}, its other changes are left uncommitted for you to check"
-stop_hidden = "{task}: while the {role} was working, files git does not show changed (the role or another program did it). Git's hooks put back: {put_back}. Outside the project, NOT put back, check them yourself (all is well if you changed them): {reported}. The project changes are left uncommitted"
-stop_git_config = "{task}: while the {role} was working, the project's git settings (.git/config) changed. The role or something else on this computer (another program, a git command you ran) did it. The old settings are back; the project changes are left uncommitted for you to check"
+stop_hidden = "{task}: while the {role} was working, files git does not show changed. The role may have done it, or someone else working in this repository or on this computer. Git's hooks put back: {put_back}. Outside the project, NOT put back, check them yourself before going on (all is well if you changed them): {reported}. The project changes are left uncommitted"
+stop_git_config = "{task}: while the {role} was working, the project's git settings (.git/config) changed. The role may have done it, or someone else working in this repository (you, another program, a git command such as git push -u). The old settings are back: if the change was yours, make it again after the role. Before going on, check the project changes, which are left uncommitted"
 [roles]
 title = " Roles "
 save = "Save"
