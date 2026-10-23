@@ -5,7 +5,9 @@
 //! 1. Before: the project must have no uncommitted changes, so everything that
 //!    changes afterwards was done by this role. Stub lines an unwatched run of
 //!    Claude Code left in `.git/info/exclude` are removed first, so they hide
-//!    nothing (see [`crate::task::agent_stubs`]).
+//!    nothing, and so are the empty untracked stub files an earlier role left,
+//!    except those of unfinished work a limit left (see
+//!    [`crate::task::agent_stubs`]).
 //! 2. After: git's hooks and a few files outside the project are compared
 //!    with before (see [`crate::task::tripwire`]), and the empty stub files
 //!    Claude Code made are removed; files no role may change
@@ -146,7 +148,11 @@ pub async fn run_watching<A: AgentRunner>(
 
         // Before looking at git status: a block an unwatched run of Claude
         // Code left in `info/exclude` would hide files from it.
-        agent_stubs::clear_leftovers(repo)?;
+        agent_stubs::clear_stub_block(repo)?;
+        // Claude Code's empty stub files an earlier role left (for example
+        // after a stop by the tripwire) are not Lisa's changes. Files of
+        // recorded unfinished work stay: an empty one there is the role's.
+        agent_stubs::remove_leftover_stubs(repo, &changes::recorded_files(store))?;
         // A limit stopped this role's last run in this round: its unfinished
         // changes are still in the folder, exactly as recorded, and the agent
         // continues from them. Any other change stops the run.

@@ -29,11 +29,17 @@ project file except `.harness/`, agent settings and the design.
      Stop with `needs_human` only when covering the gap would add or change
      something the design defines: stored data, a field, a status, a screen,
      a command, a permission, or anything under **Ask first**.
-   - Before you stop with `needs_human`, look through the rest of the
-     design for other questions you can already see, and ask them all at
-     once: numbered, each with your recommended answer. When Lisa answers
-     with a general rule, apply it to every similar case yourself instead
-     of stopping for each one.
+   - Questions: ask them together in one `needs_human` handoff, not one
+     per stop. First finish, as far as the work allows, everything that
+     does not depend on an answer; then look through the rest of the design
+     for other questions you can already see. In notes.md number them, each
+     with your recommended answer.
+   - When Lisa gave a general rule or standing authority for a kind of
+     decision (in her notes or an earlier answer in this task), apply it to
+     new cases of that kind yourself without stopping again, and record in
+     notes.md each case and how you applied the rule. A change to stored
+     data formats or to behaviour the design defines that neither the
+     design nor such a rule covers still needs `needs_human`.
 3. A new project: create the skeleton the design names before anything
    else.
    - Use the generator's non-interactive form and make it write into the

@@ -161,10 +161,11 @@ fn explain(stop: &StopReason, task_id: &str) -> String {
                 .join("\n  ")
         ),
         StopReason::AgentCommitted(role) => format!(
-            "While the {role:?} was working, a new git commit appeared or the git branch \
-             changed. The role or something else on this computer (another program, a git \
-             command you ran) did it. Check `git log`, `git branch` and `git status` before \
-             running again."
+            "While the {role:?} was working, a new git commit appeared or the git branches \
+             changed. The role may have done it, or someone else working in this repository \
+             (you, another program, a git command). Before running again, check with \
+             `git log`, `git branch` and `git status` that the commits and branches are the \
+             ones you expect and that the task's branch is checked out."
         ),
         StopReason::ProtectedFilesChanged { role, files, log } => format!(
             "The {role:?} changed files no role may change (agent instructions and settings, \
@@ -180,9 +181,10 @@ fn explain(stop: &StopReason, task_id: &str) -> String {
         } => hidden_changes_text(*role, put_back, reported),
         StopReason::GitConfigChanged(role) => format!(
             "While the {role:?} was working, the project's git settings (.git/config) \
-             changed. The role or something else on this computer (another program, a git \
-             command you ran) did it. The old settings are back; the project changes are left \
-             uncommitted for you to check."
+             changed. The role may have done it, or someone else working in this repository \
+             (you, another program, a git command such as `git push -u`). The old settings \
+             are back: if the change was yours, make it again after the role. Before running \
+             again, check the project changes, which are left uncommitted."
         ),
     }
 }
@@ -195,8 +197,8 @@ fn hidden_changes_text(role: Role, put_back: &[PathBuf], reported: &[PathBuf]) -
         format!("\n  {}", lines.join("\n  "))
     };
     let mut text = format!(
-        "While the {role:?} was working, files that git does not show changed \
-         (the role or another program did it)."
+        "While the {role:?} was working, files that git does not show changed. The role \
+         may have done it, or someone else working in this repository or on this computer."
     );
     if !put_back.is_empty() {
         text.push_str("\nGit's own files (hooks, info/), now put back as they were:");
@@ -204,12 +206,12 @@ fn hidden_changes_text(role: Role, put_back: &[PathBuf], reported: &[PathBuf]) -
     }
     if !reported.is_empty() {
         text.push_str(
-            "\nFiles outside the project, NOT put back; check them yourself (if you \
-             changed them during the run, all is well):",
+            "\nFiles outside the project, NOT put back; check them yourself before \
+             running again (if you changed them during the run, all is well):",
         );
         text.push_str(&list(reported));
     }
-    text.push_str("\nThe role's project changes are left uncommitted for you to check.");
+    text.push_str("\nThe project changes are left uncommitted for you to check.");
     text
 }
 
@@ -343,6 +345,12 @@ mod tests {
             );
             assert!(!text.contains("The Architect changed"), "{text}");
             assert!(!text.contains("The Architect made"), "{text}");
+            assert!(
+                text.contains("or someone else working in this repository"),
+                "{text}"
+            );
+            assert!(!text.contains("The role's"), "{text}");
+            assert!(text.contains("check"), "{text}");
         }
     }
 }

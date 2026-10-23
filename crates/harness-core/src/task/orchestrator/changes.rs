@@ -143,6 +143,15 @@ pub(super) fn resumable(at: RoleAt) -> Result<Option<Vec<String>>, GitError> {
     ))
 }
 
+/// The files of the unfinished work recorded in the task's folder, of any
+/// round or role; empty without a record. Cleaning up must leave them alone,
+/// or the work could no longer be resumed.
+pub(super) fn recorded_files(store: &TaskStore) -> Vec<String> {
+    read_record(&unfinished_path(store))
+        .map(|record| record.files.into_iter().map(|(path, _)| path).collect())
+        .unwrap_or_default()
+}
+
 /// The record, or `None` when it is missing or unreadable (then nothing is
 /// resumed and a dirty folder stops the run, as without this feature).
 fn read_record(path: &Path) -> Option<Unfinished> {

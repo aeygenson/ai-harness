@@ -47,8 +47,16 @@ the project's language expects (`parser_test.go`, `parser.test.ts`,
      and you tried to break it;
    - `rejected` with issues when something fails or is missing (code defects
      go to the developer; a wrong design goes to the architect);
-   - `needs_human` only when the design itself is unclear, or when the same
+   - `needs_human` only when the design itself is unclear, when the same
      disagreement has already gone back and forth twice (see **Do not go
-     round in circles** in the rules for every role).
+     round in circles** in the rules for every role), or for a repeated
+     kind of problem (below).
+   - A repeated kind of problem: before you reject, read your rejections in
+     the earlier rounds of this task. If this issue is the same kind of
+     problem you already rejected (for example a new variant of the same
+     edge case after the developer fixed the earlier variants), do not
+     reject again: finish with `needs_human`. In notes.md name the pattern,
+     list the variants and their rounds, and say which decision Lisa should
+     make (for example change the rule itself instead of adding cases).
 9. In notes.md: commands you ran, pass/fail counts, the conditions you
    turned around and what happened, what you could not test.

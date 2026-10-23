@@ -53,8 +53,10 @@ pub enum StopReason {
         /// Each too big file or folder with its size in bytes.
         files: Vec<(String, u64)>,
     },
-    /// The agent made a git commit, switched the branch, or made, moved or
-    /// deleted a branch itself, which agents must never do.
+    /// While the role was running, a git commit was made, the branch was
+    /// switched, or a branch was made, moved or deleted. Agents must never do
+    /// this, but the harness cannot tell who did it: the role, or someone else
+    /// working in the same repository (Lisa's own git command, another program).
     AgentCommitted(Role),
     /// The agent changed files no role may change: agent instructions and
     /// settings (`CLAUDE.md`, `.claude/`, ...) or the harness's own files
@@ -69,21 +71,24 @@ pub enum StopReason {
         /// The failure log with what the agent wrote in them.
         log: PathBuf,
     },
-    /// The agent changed files `git status` does not show (see
-    /// [`crate::task::tripwire`]): git's hooks or `info/` (put back at once)
-    /// or files outside the project such as shell start-up files or the
-    /// global git settings (left for Lisa to check, not put back).
+    /// While the role was running, files `git status` does not show changed
+    /// (see [`crate::task::tripwire`]): git's hooks or `info/` (put back at
+    /// once) or files outside the project such as shell start-up files or the
+    /// global git settings (left for Lisa to check, not put back). The role
+    /// or someone else working in the repository or on the computer did it.
     HiddenChanges {
-        /// The role that made the changes.
+        /// The role that was running when the files changed.
         role: Role,
         /// Files in git's own folders, now as they were before the role.
         put_back: Vec<PathBuf>,
         /// Files outside the project that changed during the role.
         reported: Vec<PathBuf>,
     },
-    /// The agent changed the repository's settings (`.git/config`), where a
-    /// setting can make git run any command. The old settings are put back;
-    /// the role's other changes are left uncommitted for Lisa to look at.
+    /// While the role was running, the repository's settings (`.git/config`)
+    /// changed, where a setting can make git run any command. The role or
+    /// someone else working in the repository (for example `git push -u`) did
+    /// it. The old settings are put back; the project's changes are left
+    /// uncommitted for Lisa to look at.
     GitConfigChanged(Role),
 }
 
