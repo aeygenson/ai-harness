@@ -1127,6 +1127,17 @@ fn stop_now_asks_first_keeps_the_work_and_takes_a_note() {
     assert!(app.tasks.as_ref().unwrap().is_running());
     assert_eq!(app.tasks.as_ref().unwrap().stop_asked(), None);
 
+    // The agent must have started and written its work before «Stop now»,
+    // or there is nothing to keep (a slow machine reaches here first).
+    let start = std::time::Instant::now();
+    while !root.join("src/half.rs").exists() {
+        assert!(
+            start.elapsed() < std::time::Duration::from_secs(30),
+            "the agent did not start"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        app.tick();
+    }
     click(&mut app, "Stop now (x)");
     assert!(app.form.is_some());
     key(&mut app, KeyCode::Enter);
