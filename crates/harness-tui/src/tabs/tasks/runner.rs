@@ -12,6 +12,7 @@ use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::thread::{self, JoinHandle};
+use std::time::SystemTime;
 
 use harness_agents::build::BuildError;
 use harness_agents::github::{Merged, Waiting, MERGE_WAIT_LIMIT, MERGE_WAIT_PAUSE};
@@ -31,12 +32,16 @@ use harness_core::text;
 use tokio::sync::oneshot::{self, error::TryRecvError};
 
 use super::github::{send_to_github, without_roles};
+use super::live_log::LiveLog;
 
 /// Builds the agents of the project: `build_team`, or mock agents in tests.
 pub type Builder = fn(&Config, &Path) -> Result<Team, BuildError>;
 
-/// The live log keeps this many lines.
-pub const LOG_LINES: usize = 500;
+/// The live log keeps this many lines. Lines are at most about 300
+/// characters, so this is well under a megabyte, and drawing looks only at
+/// the lines on the screen: more history to scroll back through costs
+/// almost nothing.
+pub const LOG_LINES: usize = 2000;
 
 /// What Lisa sent.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -183,6 +188,8 @@ pub struct Running {
     pub switched_branch: bool,
     /// Lisa's stop buttons for this run; `None` when it runs no roles.
     pub stop: Option<StopRequest>,
+    /// When Lisa started the run: its first role starts then.
+    pub started: SystemTime,
     /// Kept to stop the agents when this is dropped.
     _background: Background,
 }
@@ -218,16 +225,17 @@ impl Running {
             task: None,
             switched_branch: false,
             stop: buttons,
+            started: SystemTime::now(),
             _background: background,
         }
     }
 
     /// Takes what arrived: the agent's lines go to `log` (the latest
     /// [`LOG_LINES`] stay). `Some` once the work is over.
-    pub fn poll(&mut self, log: &mut VecDeque<String>) -> Option<Result<Outcome, String>> {
+    pub fn poll(&mut self, log: &mut LiveLog) -> Option<Result<Outcome, String>> {
         for line in self.log.try_iter() {
             if let Some(line) = readable(&line) {
-                push_line(log, line);
+                log.push(line);
             }
         }
         for event in self.events.try_iter() {

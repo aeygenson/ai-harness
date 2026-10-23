@@ -13,7 +13,7 @@ use super::github::github_text;
 use super::steps::sized_list;
 use super::tab::{Focus, TasksTab};
 use crate::tabs::tasks::labels::stage_label;
-use crate::tabs::tasks::runner::{push_line, Builder, Outcome, Request, Running};
+use crate::tabs::tasks::runner::{Builder, Outcome, Request, Running};
 use crate::ui::i18n::I18n;
 use crate::ui::message::Message;
 
@@ -92,7 +92,7 @@ impl TasksTab {
                     ("level", &effort.unwrap_or(default)),
                 ],
             );
-            push_line(&mut self.log, format!("── {line}"));
+            self.log.push(format!("── {line}"));
         }
         let target = self.target();
         let run = self.run.take().filter(|r| Some(r.role) == target);
@@ -131,7 +131,7 @@ impl TasksTab {
                 Message::error(error)
             }
         };
-        push_line(&mut self.log, format!("── {}", message.text));
+        self.log.push(format!("── {}", message.text));
         Some(message)
     }
 

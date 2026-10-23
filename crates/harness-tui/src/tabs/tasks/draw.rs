@@ -1,4 +1,7 @@
-//! Drawing the Tasks tab: the tasks, the steps, one step, the roles and the live log.
+//! Drawing the Tasks tab: the tasks, the steps, one step and the roles (the
+//! live log is in `log_panel.rs`).
+
+use std::time::SystemTime;
 
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::Style;
@@ -9,8 +12,9 @@ use ratatui::Frame;
 use harness_core::task::Stage;
 
 use super::message_box::input_height;
-use super::steps::{step_item, step_text};
+use super::steps::step_text;
 use super::tab::{Focus, TaskView, TasksTab, Zoom};
+use super::times::duration_label;
 use crate::tabs::tasks::labels::{short_stage, stage_label};
 use crate::ui::i18n::I18n;
 use crate::ui::theme;
@@ -37,7 +41,7 @@ impl TasksTab {
         let [roles_area, tasks_area] =
             Layout::vertical([Constraint::Length(roles_height), Constraint::Min(3)]).areas(left);
         // The live log takes the bottom of the right side while there is one.
-        let [right, log_area] = if self.running.is_some() || !self.log.is_empty() {
+        let [right, log_area] = if self.has_log() {
             Layout::vertical([Constraint::Percentage(65), Constraint::Percentage(35)]).areas(right)
         } else {
             [right, Rect::default()]
@@ -84,6 +88,11 @@ impl TasksTab {
             n => tr.f("tasks.failures", &[("count", &n)]),
         };
         let spent = self.task_spent(task, tr);
+        let took = self
+            .times_of(&task.id)
+            .and_then(|times| times.task_took(task.state.stage == Stage::Done, SystemTime::now()))
+            .map(|took| tr.f("tasks.task_time", &[("time", &duration_label(took, tr))]))
+            .unwrap_or_default();
         let title = tr.f(
             "tasks.header",
             &[
@@ -91,12 +100,13 @@ impl TasksTab {
                 ("round", &task.state.round),
                 ("max", &task.state.max_rounds),
                 ("stage", &stage_label(task.state.stage, tr)),
+                ("time", &took),
                 ("failures", &failures),
                 ("usage", &spent),
             ],
         );
         let title = self.zoom_title(Zoom::Steps, &title, steps_area, hits);
-        let items: Vec<ListItem> = task.steps.iter().map(|s| step_item(s, tr)).collect();
+        let items = self.step_items(task, tr);
         draw_list(
             frame,
             hits,
@@ -269,10 +279,15 @@ impl TasksTab {
         );
     }
 
-    /// What the agent prints, the latest lines at the bottom.
     /// `title` with ⤢ (or ⤡ when shown over the whole tab); a click on it
     /// toggles that.
-    fn zoom_title(&self, zoom: Zoom, title: &str, area: Rect, hits: &mut Hits) -> String {
+    pub(super) fn zoom_title(
+        &self,
+        zoom: Zoom,
+        title: &str,
+        area: Rect,
+        hits: &mut Hits,
+    ) -> String {
         let mark = if self.zoomed() == Some(zoom) {
             '⤡'
         } else {
@@ -292,32 +307,6 @@ impl TasksTab {
             );
         }
         title
-    }
-
-    fn draw_log(&self, frame: &mut Frame, area: Rect, hits: &mut Hits, tr: &I18n) {
-        if area.height == 0 {
-            return;
-        }
-        let title = match (
-            &self.running,
-            self.running.as_ref().and_then(|r| r.task.as_ref()),
-        ) {
-            (Some(_), Some(task)) => tr.f("tasks.log_running", &[("task", task)]),
-            (Some(_), None) => tr.f("tasks.log_running", &[("task", &"…")]),
-            (None, _) => tr.t("tasks.log_title").to_string(),
-        };
-        let title = self.zoom_title(Zoom::Log, &title, area, hits);
-        let rows = usize::from(area.height.saturating_sub(2));
-        let lines: Vec<Line> = self
-            .log
-            .iter()
-            .skip(self.log.len().saturating_sub(rows))
-            .map(|l| Line::from(l.clone()))
-            .collect();
-        frame.render_widget(
-            Paragraph::new(lines).block(panel(&title, self.running.is_some())),
-            area,
-        );
     }
 }
 

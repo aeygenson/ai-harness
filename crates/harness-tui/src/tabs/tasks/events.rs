@@ -40,11 +40,15 @@ impl TasksTab {
             }
             return;
         }
+        if self.focus == Focus::Log && self.log_key(key) {
+            return;
+        }
         match key {
             KeyCode::Tab => {
                 self.focus = match self.focus {
                     Focus::Tasks => Focus::Steps,
-                    Focus::Steps | Focus::Input => Focus::Input,
+                    Focus::Steps if self.has_log() => Focus::Log,
+                    Focus::Steps | Focus::Log | Focus::Input => Focus::Input,
                 }
             }
             KeyCode::Enter => self.focus = Focus::Input,
@@ -54,6 +58,9 @@ impl TasksTab {
             KeyCode::Down | KeyCode::Char('j') => self.move_by(1),
             KeyCode::PageDown => self.scroll = self.scroll.saturating_add(10),
             KeyCode::PageUp => self.scroll = self.scroll.saturating_sub(10),
+            // Nothing else on the tab uses them: the live log's ends.
+            KeyCode::Home => self.log.go_to_oldest(),
+            KeyCode::End => self.log.go_to_newest(),
             _ => {}
         }
     }
@@ -123,7 +130,8 @@ impl TasksTab {
                     self.sync_choice();
                 }
             }
-            Focus::Input => {}
+            // The log takes its arrow keys before this (see `log_key`).
+            Focus::Input | Focus::Log => {}
             Focus::Steps => {
                 let len = self.current().map_or(0, |t| t.steps.len());
                 self.step = moved(self.step, len);
@@ -139,12 +147,15 @@ impl TasksTab {
         } else {
             Some(zoom)
         };
+        // The log over the whole tab: its keys scroll it at once.
+        if self.zoom == Some(Zoom::Log) {
+            self.focus = Focus::Log;
+        }
     }
 
     /// The window shown over the whole tab; the log only while there is one.
     pub(super) fn zoomed(&self) -> Option<Zoom> {
-        let log = self.running.is_some() || !self.log.is_empty();
-        self.zoom.filter(|z| *z != Zoom::Log || log)
+        self.zoom.filter(|z| *z != Zoom::Log || self.has_log())
     }
 
     /// The page of the pull request of the task at `index`, if it has one

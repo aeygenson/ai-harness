@@ -26,7 +26,7 @@
 //! terminal shows up here too.
 
 use std::cell::RefCell;
-use std::collections::{BTreeMap, HashMap, VecDeque};
+use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 
 use harness_core::config::{AgentKind, Config, RoleConfig};
@@ -39,7 +39,9 @@ use harness_core::task::store::{self, Step};
 use harness_core::task::{Stage, TaskState};
 
 use super::choice::{Choice, Menu};
+use super::live_log::LiveLog;
 use super::steps::{agent_line, load_task, waits_on};
+use super::times::TaskTimes;
 use crate::tabs::tasks::runner::{RunChoice, Running};
 
 /// One task as the tab shows it.
@@ -74,6 +76,8 @@ pub enum Zoom {
 pub(super) enum Focus {
     Tasks,
     Steps,
+    /// The live log: the arrow and page keys scroll it.
+    Log,
     /// Typing the message.
     Input,
 }
@@ -118,7 +122,7 @@ pub struct TasksTab {
     /// Roles working in the background.
     pub(crate) running: Option<Running>,
     /// What the agent printed in the last run.
-    pub(crate) log: VecDeque<String>,
+    pub(crate) log: LiveLog,
     /// The background work checked out a task's branch: the other tabs
     /// show settings read from the old one and must read them again.
     pub(crate) branch_changed: bool,
@@ -132,6 +136,8 @@ pub struct TasksTab {
     /// The tokens and cost in each step's `agent.log`, by step folder. A log
     /// does not change once written, so each is read only once.
     pub(super) usages: RefCell<HashMap<PathBuf, Option<Usage>>>,
+    /// When each task and its steps were committed, by task id.
+    pub(super) times: HashMap<String, TaskTimes>,
 }
 
 impl TasksTab {
@@ -158,12 +164,13 @@ impl TasksTab {
             menu: None,
             run: None,
             running: None,
-            log: VecDeque::new(),
+            log: LiveLog::default(),
             branch_changed: false,
             open: None,
             zoom: None,
             commits: RefCell::default(),
             usages: RefCell::default(),
+            times: HashMap::new(),
         };
         tab.reload();
         tab.step = tab.last_step();
@@ -219,6 +226,7 @@ impl TasksTab {
             Err(error) => problems.push(error.to_string()),
         }
         self.problem = problems.into_iter().next();
+        self.refresh_times();
         self.apply_filter(selected);
     }
 

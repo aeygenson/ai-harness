@@ -6,7 +6,6 @@ use std::path::{Path, PathBuf};
 use anyhow::Result;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span, Text};
-use ratatui::widgets::ListItem;
 
 use harness_core::config::AgentKind;
 use harness_core::git::{Repo, HARNESS_DIR};
@@ -211,22 +210,6 @@ pub(super) fn agent_line(who: &str, agent: AgentKind, model: Option<&str>) -> St
         Some(model) => format!("{who:<10} {agent} ({model})"),
         None => format!("{who:<10} {agent}"),
     }
-}
-
-pub(super) fn step_item(step: &Step, tr: &I18n) -> ListItem<'static> {
-    let h = &step.handoff;
-    let next = match h.next_role {
-        NextStep::To(role) => theme::role(role),
-        NextStep::Done => theme::ok(),
-    };
-    ListItem::new(Line::from(vec![
-        Span::raw(format!("r{} ", h.round)),
-        Span::styled(format!("{:<10} ", h.role.as_str()), theme::role(h.role)),
-        verdict_span(h.verdict, tr),
-        Span::styled(" → ", theme::dim()),
-        Span::styled(format!("{:<10}", next_name(h.next_role, tr)), next),
-        Span::raw(format!(" {}", h.summary)),
-    ]))
 }
 
 /// The step in full; `files` become links. Also the line of each link.

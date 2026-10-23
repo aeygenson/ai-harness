@@ -48,6 +48,12 @@ impl App {
         if self.form.is_some() {
             return;
         }
+        if let (Tab::Tasks, Some((Target::Log, _))) = (self.tab, hit) {
+            if let Some(tasks) = &mut self.tasks {
+                tasks.on_log_wheel(down);
+            }
+            return;
+        }
         match (self.tab, hit.and_then(|(t, r)| Hits::row(t, r))) {
             (Tab::Tasks, Some((list, _))) => {
                 if let Some(tasks) = &mut self.tasks {
@@ -204,6 +210,11 @@ impl App {
                 if let Some(roles) = &mut self.roles {
                     let action = roles.activate(index, &self.tr);
                     self.act(action);
+                }
+            }
+            Target::Log => {
+                if let Some(tasks) = &mut self.tasks {
+                    tasks.focus_log();
                 }
             }
             Target::Field(_) | Target::Window => {}
