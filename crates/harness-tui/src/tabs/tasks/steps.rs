@@ -11,7 +11,7 @@ use ratatui::widgets::ListItem;
 use harness_core::config::AgentKind;
 use harness_core::git::{Repo, HARNESS_DIR};
 use harness_core::retro::usage::{self, Usage};
-use harness_core::task::handoff::{FileAction, NextStep, Role};
+use harness_core::task::handoff::{AnswerTo, FileAction, NextStep, Role};
 use harness_core::task::store::{Step, TaskStore};
 use harness_core::task::{Stage, WaitReason};
 
@@ -40,6 +40,19 @@ impl TasksTab {
             .find(|s| s.handoff.role != Role::Human)?;
         let path = self.root.join(&step.dir).join("notes.md");
         path.is_file().then_some((step.handoff.role, path))
+    }
+
+    /// Who the role that asked Lisa for help suggests for her answer (its
+    /// `answer_to`), while the selected task waits for that answer. `None`
+    /// when it did not say, or named a role the task's scenario does not have.
+    pub fn suggested_answer(&self) -> Option<&AnswerTo> {
+        let task = self.current()?;
+        let Stage::WaitingForHuman(WaitReason::RoleAskedForHelp(_)) = task.state.stage else {
+            return None;
+        };
+        // The task's own scenario, the one the harness checked the handoff against.
+        let scenario = task.state.workflow.scenario();
+        task.steps.last()?.handoff.suggested_answer(scenario)
     }
 
     /// A click on the questions link (or n): the app opens the notes.

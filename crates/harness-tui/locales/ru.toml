@@ -51,6 +51,7 @@ file_missing = "{path} больше нет"
 
 input_title = " Сообщение "
 questions = "Вопросы: заметки роли {role} (notes.md) — открыть (n)"
+suggested = "предлагается: {role} — {reason}"
 input_hint = "Пишите здесь (клик, Enter или Tab), выберите, кому, и нажмите «Отправить»"
 to = "Кому:"
 send = "Отправить"

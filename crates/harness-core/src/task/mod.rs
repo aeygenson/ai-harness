@@ -119,6 +119,14 @@ pub enum TransitionError {
     },
     /// The work was rejected, but the handoff lists no issues.
     RejectedWithoutIssues,
+    /// A question to Lisa suggests that a role outside the task's scenario
+    /// (or Lisa herself) gets her answer (`answer_to.role`).
+    AnswerToNotARole {
+        /// The role named in `answer_to`.
+        role: Role,
+        /// The roles that may get the answer: those of the task's scenario.
+        allowed: &'static [Role],
+    },
     /// The routes do not allow this role, with this verdict, to send work there.
     RouteNotAllowed {
         /// The role that wrote the handoff.
@@ -158,6 +166,15 @@ impl fmt::Display for TransitionError {
                 )
             }
             Self::RejectedWithoutIssues => write!(f, "a rejected handoff must list its issues"),
+            Self::AnswerToNotARole { role, allowed } => {
+                let names: Vec<&str> = allowed.iter().map(|r| r.as_str()).collect();
+                write!(
+                    f,
+                    "answer_to.role is {role}, but Lisa's answer can go only to a role of this \
+                     task: {}",
+                    names.join(", ")
+                )
+            }
             Self::RouteNotAllowed {
                 role,
                 verdict,
@@ -240,6 +257,7 @@ impl TaskState {
         if handoff.verdict == Verdict::Rejected && handoff.issues.is_empty() {
             return Err(TransitionError::RejectedWithoutIssues);
         }
+        self.check_answer_to(handoff)?;
         if !routes::is_allowed(
             self.workflow,
             handoff.role,
@@ -272,12 +290,29 @@ impl TaskState {
         };
         Ok(())
     }
+
+    /// A question to Lisa may suggest who gets her answer, but only a role of
+    /// the task's scenario. With another verdict `answer_to` is ignored
+    /// (see [`Handoff::suggested_answer`]).
+    fn check_answer_to(&self, handoff: &Handoff) -> Result<(), TransitionError> {
+        let Some(answer) = &handoff.answer_to else {
+            return Ok(());
+        };
+        let allowed = self.workflow.scenario().roles();
+        if handoff.verdict == Verdict::NeedsHuman && !allowed.contains(&answer.role) {
+            return Err(TransitionError::AnswerToNotARole {
+                role: answer.role,
+                allowed,
+            });
+        }
+        Ok(())
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::task::handoff::{Issue, Severity};
+    use crate::task::handoff::{AnswerTo, Issue, Severity};
 
     /// A minimal handoff for tests; rejected handoffs get one issue.
     fn handoff(role: Role, round: u32, verdict: Verdict, next: NextStep) -> Handoff {
@@ -301,6 +336,7 @@ mod tests {
             skills_used: vec![],
             files: vec![],
             issues,
+            answer_to: None,
         }
     }
 
@@ -464,6 +500,62 @@ mod tests {
             task.stage,
             Stage::WaitingForHuman(WaitReason::RoleAskedForHelp(Role::Security))
         );
+    }
+
+    /// A tester's handoff with `verdict`, suggesting `role` for Lisa's answer.
+    fn tester_suggesting(verdict: Verdict, next: NextStep, role: Role) -> Handoff {
+        let mut asked = handoff(Role::Tester, 1, verdict, next);
+        asked.answer_to = Some(AnswerTo {
+            role,
+            reason: "needs a change".into(),
+        });
+        asked
+    }
+
+    #[test]
+    fn a_question_may_suggest_any_role_of_the_scenario() {
+        for role in [Role::Developer, Role::Architect, Role::Tester] {
+            let mut task = new_task();
+            task.stage = Stage::Working(Role::Tester);
+            let asked = tester_suggesting(Verdict::NeedsHuman, NextStep::To(Role::Human), role);
+            task.apply(&asked).unwrap();
+            assert_eq!(
+                task.stage,
+                Stage::WaitingForHuman(WaitReason::RoleAskedForHelp(Role::Tester))
+            );
+        }
+    }
+
+    #[test]
+    fn a_question_may_not_suggest_lisa_herself() {
+        let mut task = new_task();
+        task.stage = Stage::Working(Role::Tester);
+        let before = task.clone();
+        let asked = tester_suggesting(Verdict::NeedsHuman, NextStep::To(Role::Human), Role::Human);
+
+        let err = task.apply(&asked).unwrap_err();
+
+        assert!(matches!(
+            err,
+            TransitionError::AnswerToNotARole {
+                role: Role::Human,
+                ..
+            }
+        ));
+        assert!(err
+            .to_string()
+            .contains("architect, developer, tester, security"));
+        assert_eq!(task, before);
+    }
+
+    #[test]
+    fn answer_to_with_another_verdict_is_ignored_not_refused() {
+        let mut task = new_task();
+        task.stage = Stage::Working(Role::Tester);
+        let approved =
+            tester_suggesting(Verdict::Approved, NextStep::To(Role::Security), Role::Human);
+        task.apply(&approved).unwrap();
+        assert_eq!(task.stage, Stage::Working(Role::Security));
     }
 
     #[test]

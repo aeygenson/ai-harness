@@ -58,6 +58,7 @@ file_missing = "{path} is not there any more"
 
 input_title = " Message "
 questions = "Questions: {role} notes.md — open (n)"
+suggested = "suggested: {role} — {reason}"
 input_hint = "Write here (click, Enter or Tab), choose whom it goes to, press «Send»"
 to = "To:"
 send = "Send"

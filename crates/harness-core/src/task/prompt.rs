@@ -193,9 +193,10 @@ fn handoff_format(role: Role, state: &TaskState) -> String {
          - files: list of {\"path\": \"...\", \"action\": \"created\" | \"modified\" | \"deleted\" | \"read\"}\n\
          - issues: list of {\"severity\": \"low\" | \"medium\" | \"high\" | \"critical\", \
          \"location\": \"file:line\" or null, \"description\": \"...\"}; \
-         must not be empty when the verdict is \"rejected\"\n\n\
-         Allowed next_role for you:\n",
+         must not be empty when the verdict is \"rejected\"\n",
     );
+    text.push_str(&answer_to_text(state));
+    text.push_str("\nAllowed next_role for you:\n");
     for verdict in [Verdict::Approved, Verdict::Rejected, Verdict::NeedsHuman] {
         let next = routes::allowed_next(state.workflow, role, verdict);
         let names = if next.is_empty() {
@@ -211,6 +212,24 @@ fn handoff_format(role: Role, state: &TaskState) -> String {
     let json = serde_json::to_string_pretty(&example(role, state)).unwrap_or_default();
     let _ = write!(text, "\nExample:\n{json}\n");
     text
+}
+
+/// The `answer_to` line of the format: who should get Lisa's answer to a
+/// question. Only the roles of the task's scenario are offered.
+fn answer_to_text(state: &TaskState) -> String {
+    let roles: Vec<String> = state
+        .workflow
+        .scenario()
+        .roles()
+        .iter()
+        .map(|r| quoted(NextStep::To(*r)))
+        .collect();
+    format!(
+        "- answer_to: only with the verdict \"needs_human\", otherwise leave it out: \
+         {{\"role\": {}, \"reason\": \"one short sentence\"}}, the role that should act \
+         on Lisa's answer\n",
+        roles.join(" | ")
+    )
 }
 
 /// A valid approved handoff for this role and round.
@@ -233,6 +252,7 @@ fn example(role: Role, state: &TaskState) -> Handoff {
             action: FileAction::Created,
         }],
         issues: vec![],
+        answer_to: None,
     }
 }
 
@@ -388,6 +408,24 @@ mod tests {
     fn a_role_without_skills_gets_no_skill_text() {
         assert!(!prompt_for(Role::Tester).contains("skill \""));
         assert!(!prompt_for(Role::Tester).contains("Skills you can use"));
+    }
+
+    #[test]
+    fn the_prompt_explains_answer_to_with_the_scenarios_roles() {
+        let prompt = prompt_for(Role::Tester);
+        let line = prompt
+            .lines()
+            .find(|l| l.starts_with("- answer_to:"))
+            .unwrap();
+        assert!(
+            line.contains("only with the verdict \"needs_human\""),
+            "{line}"
+        );
+        assert!(
+            line.contains("\"architect\" | \"developer\" | \"tester\" | \"security\""),
+            "{line}"
+        );
+        assert!(!line.contains("\"human\""), "{line}");
     }
 
     #[test]

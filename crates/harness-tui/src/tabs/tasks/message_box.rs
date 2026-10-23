@@ -6,6 +6,9 @@ use ratatui::text::Line;
 use ratatui::widgets::{ListItem, Paragraph};
 use ratatui::Frame;
 
+use harness_core::task::handoff::MAX_REASON_CHARS;
+use harness_core::text;
+
 use super::choice::{Choice, Menu, MORE_ROUNDS};
 use super::draw::draw_list;
 use super::tab::{Focus, TasksTab};
@@ -138,7 +141,8 @@ impl TasksTab {
     }
 
     /// The link to the notes Lisa answers, on the box's top border after its
-    /// title, so it is right where she writes; nothing when there are none.
+    /// title, so it is right where she writes; then whom the asking role
+    /// suggests for the answer. Nothing when there is neither.
     fn draw_questions(
         &self,
         frame: &mut Frame,
@@ -147,28 +151,30 @@ impl TasksTab {
         hits: &mut Hits,
         tr: &I18n,
     ) {
-        let Some((role, _)) = self.questions() else {
-            return;
-        };
         if area.height == 0 {
             return;
         }
-        let label = format!(" {} ", tr.f("tasks.questions", &[("role", &role)]));
         // The title starts one column in, after the corner; one dash between.
         let title_width = u16::try_from(Line::from(title).width()).unwrap_or(u16::MAX);
-        let x = area.x.saturating_add(title_width).saturating_add(2);
-        // Room up to the right corner; a narrow window cuts the label.
-        let room = area.right().saturating_sub(1).saturating_sub(x);
-        let width = u16::try_from(Line::from(label.as_str()).width())
-            .unwrap_or(u16::MAX)
-            .min(room);
-        if width == 0 {
-            return;
+        let mut x = area.x.saturating_add(title_width).saturating_add(2);
+        if let Some((role, _)) = self.questions() {
+            let label = format!(" {} ", tr.f("tasks.questions", &[("role", &role)]));
+            let look = theme::accent().add_modifier(Modifier::UNDERLINED);
+            let Some(link) = border_text(frame, area, x, label, look) else {
+                return;
+            };
+            hits.add(link, Target::Button(ButtonId::TaskQuestions));
+            x = link.right().saturating_add(1);
         }
-        let link = Rect::new(x, area.y, width, 1);
-        let look = theme::accent().add_modifier(Modifier::UNDERLINED);
-        frame.render_widget(Paragraph::new(Line::styled(label, look)), link);
-        hits.add(link, Target::Button(ButtonId::TaskQuestions));
+        if let Some(answer) = self.suggested_answer() {
+            // The reason is the agent's text: one clean line, nothing more.
+            let reason = text::safe_line(&answer.reason, MAX_REASON_CHARS);
+            let label = tr.f(
+                "tasks.suggested",
+                &[("role", &answer.role), ("reason", &reason)],
+            );
+            border_text(frame, area, x, format!(" {label} "), Style::new());
+        }
     }
 
     /// The open list, above the box; what cannot be chosen now is grey.
@@ -244,6 +250,21 @@ impl TasksTab {
             true,
         );
     }
+}
+
+/// Draws `label` on the top border of `area` from column `x`, cut at the
+/// right corner; the place it took, or `None` when there is no room.
+fn border_text(frame: &mut Frame, area: Rect, x: u16, label: String, look: Style) -> Option<Rect> {
+    let room = area.right().saturating_sub(1).saturating_sub(x);
+    let width = u16::try_from(Line::from(label.as_str()).width())
+        .unwrap_or(u16::MAX)
+        .min(room);
+    if width == 0 {
+        return None;
+    }
+    let place = Rect::new(x, area.y, width, 1);
+    frame.render_widget(Paragraph::new(Line::styled(label, look)), place);
+    Some(place)
 }
 
 /// Room for five lines of text and the buttons; less in a small window.

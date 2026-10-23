@@ -6,6 +6,7 @@ use std::str::FromStr;
 use serde::de::IntoDeserializer;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
+use crate::task::scenario::Scenario;
 use crate::text;
 
 /// The format version this harness reads and writes (`schema_version`).
@@ -18,6 +19,10 @@ pub const MAX_TEXT_CHARS: usize = 4000;
 
 /// The longest file path, issue location or skill name, in characters.
 pub const MAX_NAME_CHARS: usize = 500;
+
+/// The longest `answer_to.reason`, in characters: one short sentence, shown
+/// next to the «To» menu, so it must stay short.
+pub const MAX_REASON_CHARS: usize = 300;
 
 /// Who wrote a handoff: one of the four AI roles, or Lisa's own decision.
 ///
@@ -173,6 +178,18 @@ pub struct Issue {
     pub description: String,
 }
 
+/// Who should get Lisa's answer, as suggested by a role that asks for help.
+///
+/// Written as `"answer_to": {"role": "developer", "reason": "..."}`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AnswerTo {
+    /// The role that should act on the answer: a role of the task's scenario, never `human`.
+    pub role: Role,
+    /// Why that role, in one short sentence (at most [`MAX_REASON_CHARS`] characters).
+    pub reason: String,
+}
+
 /// The whole `handoff.json` file.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -200,6 +217,10 @@ pub struct Handoff {
     /// The problems found; must not be empty when the verdict is `rejected`.
     #[serde(default)]
     pub issues: Vec<Issue>,
+    /// Who should get Lisa's answer; used only with the verdict `needs_human`
+    /// (see [`Handoff::suggested_answer`]). Older handoffs do not have it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub answer_to: Option<AnswerTo>,
 }
 
 impl Handoff {
@@ -228,6 +249,22 @@ impl Handoff {
                 *location = text::safe(location);
             }
         }
+        if let Some(answer) = self.answer_to.as_mut() {
+            answer.reason = text::safe(&answer.reason);
+        }
+    }
+
+    /// The suggested receiver of Lisa's answer: `answer_to` when the verdict
+    /// is `needs_human` and its role works in `scenario`, otherwise `None`.
+    ///
+    /// With another verdict a well-formed field is ignored rather than refused
+    /// (even with the role `human`): refusing would throw away a role's
+    /// finished work over a field nobody reads. A malformed one (unknown role
+    /// name, missing `reason`, a reason too long) is refused like any field.
+    pub fn suggested_answer(&self, scenario: Scenario) -> Option<&AnswerTo> {
+        let answer = self.answer_to.as_ref()?;
+        let asks_for_help = self.verdict == Verdict::NeedsHuman;
+        (asks_for_help && scenario.roles().contains(&answer.role)).then_some(answer)
     }
 
     /// The first text that is too long, as `(field name, limit)`; `None` if all fit.
@@ -253,6 +290,13 @@ impl Handoff {
             {
                 return Some(("issues.location", MAX_NAME_CHARS));
             }
+        }
+        if self
+            .answer_to
+            .as_ref()
+            .is_some_and(|a| too_long(&a.reason, MAX_REASON_CHARS))
+        {
+            return Some(("answer_to.reason", MAX_REASON_CHARS));
         }
         None
     }
@@ -386,10 +430,75 @@ mod tests {
         assert_eq!(handoff.too_long_field(), Some(("summary", MAX_TEXT_CHARS)));
     }
 
+    /// The tester example as a question to Lisa, suggesting `role` for the answer.
+    fn asking_tester(role: &str) -> String {
+        TESTER_EXAMPLE
+            .replace("\"rejected\"", "\"needs_human\"")
+            .replace("\"next_role\": \"developer\"", "\"next_role\": \"human\"")
+            .replace(
+                "\"issues\": [",
+                &format!(
+                    "\"answer_to\": {{ \"role\": \"{role}\", \"reason\": \"A fix\\u001b[2J in code\" }},\n\"issues\": ["
+                ),
+            )
+    }
+
+    #[test]
+    fn answer_to_names_a_role_and_a_clean_reason() {
+        let handoff = Handoff::from_json(&asking_tester("developer")).unwrap();
+        let expected = AnswerTo {
+            role: Role::Developer,
+            reason: "A fix in code".to_string(),
+        };
+        assert_eq!(handoff.answer_to.as_ref(), Some(&expected));
+        assert_eq!(
+            handoff.suggested_answer(Scenario::Software),
+            Some(&expected)
+        );
+        assert_eq!(handoff.too_long_field(), None);
+    }
+
+    #[test]
+    fn a_handoff_without_answer_to_stays_valid_and_writes_none() {
+        let handoff = Handoff::from_json(TESTER_EXAMPLE).unwrap();
+        assert_eq!(handoff.answer_to, None);
+        assert!(!handoff.to_json().unwrap().contains("answer_to"));
+    }
+
+    #[test]
+    fn answer_to_with_an_unknown_role_or_field_is_refused() {
+        let banana = Handoff::from_json(&asking_tester("banana")).unwrap_err();
+        assert!(banana.to_string().contains("banana"), "{banana}");
+        let extra = asking_tester("developer").replace("\"reason\"", "\"why\"");
+        Handoff::from_json(&extra).unwrap_err();
+    }
+
+    #[test]
+    fn answer_to_counts_only_for_a_question_to_a_role_of_the_scenario() {
+        let human = Handoff::from_json(&asking_tester("human")).unwrap();
+        assert_eq!(human.suggested_answer(Scenario::Software), None);
+
+        let mut approved = Handoff::from_json(&asking_tester("architect")).unwrap();
+        approved.verdict = Verdict::Approved;
+        assert_eq!(approved.suggested_answer(Scenario::Software), None);
+    }
+
+    #[test]
+    fn a_long_answer_to_reason_is_named() {
+        let mut handoff = Handoff::from_json(&asking_tester("developer")).unwrap();
+        handoff.answer_to.as_mut().unwrap().reason = "x".repeat(MAX_REASON_CHARS + 1);
+        assert_eq!(
+            handoff.too_long_field(),
+            Some(("answer_to.reason", MAX_REASON_CHARS))
+        );
+    }
+
     #[test]
     fn survives_a_round_trip() {
-        let handoff = Handoff::from_json(TESTER_EXAMPLE).unwrap();
-        let again = Handoff::from_json(&handoff.to_json().unwrap()).unwrap();
-        assert_eq!(handoff, again);
+        for text in [TESTER_EXAMPLE.to_string(), asking_tester("architect")] {
+            let handoff = Handoff::from_json(&text).unwrap();
+            let again = Handoff::from_json(&handoff.to_json().unwrap()).unwrap();
+            assert_eq!(handoff, again);
+        }
     }
 }

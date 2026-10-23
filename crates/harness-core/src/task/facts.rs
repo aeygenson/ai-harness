@@ -302,6 +302,7 @@ mod tests {
             skills_used: vec![],
             files: files.to_vec(),
             issues: vec![],
+            answer_to: None,
         };
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("handoff.json"), handoff.to_json().unwrap()).unwrap();
