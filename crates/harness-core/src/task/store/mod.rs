@@ -13,6 +13,8 @@
 //!   round-02/
 //!     01-developer/
 //!   inbox/               scratch folder where an agent writes its result
+//!   failures/            logs of failed attempts
+//!   stopped/             logs of runs Lisa stopped («Stop now»)
 //! ```
 //!
 //! Step folders are numbered because the same role can work twice in one round
@@ -32,7 +34,7 @@ use crate::task::handoff::{Handoff, Role};
 use crate::task::manifest::{Manifest, MANIFEST_FILE};
 use crate::task::pull_request::PullRequest;
 use crate::task::scenario::Workflow;
-use crate::task::{TaskState, TransitionError};
+use crate::task::{Stage, TaskState, TransitionError};
 use files::{
     create_dir, io_error, read_handoff, read_json, read_notes, sorted_subdirs, to_json,
     write_json_new, write_new,
@@ -46,6 +48,7 @@ const NOTES_FILE: &str = "notes.md";
 const INBOX_DIR: &str = "inbox";
 const LOG_FILE: &str = "agent.log";
 const FAILURES_DIR: &str = "failures";
+const STOPPED_DIR: &str = "stopped";
 
 /// What can go wrong while saving or reading a task's files.
 #[derive(Debug, thiserror::Error)]
@@ -189,7 +192,30 @@ impl TaskStore {
         role: Role,
         log: &str,
     ) -> Result<PathBuf, StoreError> {
-        let dir = self.dir.join(FAILURES_DIR);
+        self.save_numbered_log(FAILURES_DIR, round, role, log)
+    }
+
+    /// Saves the log of a run Lisa stopped («Stop now») as
+    /// `stopped/round-01-developer-1.log`. Not in `failures/`: the agent did
+    /// not fail, so it is not counted as a failed attempt. Returns the path.
+    pub fn save_stopped_log(
+        &self,
+        round: u32,
+        role: Role,
+        log: &str,
+    ) -> Result<PathBuf, StoreError> {
+        self.save_numbered_log(STOPPED_DIR, round, role, log)
+    }
+
+    /// Saves `log` in the folder `folder` of the task with the next free number.
+    fn save_numbered_log(
+        &self,
+        folder: &str,
+        round: u32,
+        role: Role,
+        log: &str,
+    ) -> Result<PathBuf, StoreError> {
+        let dir = self.dir.join(folder);
         if !dir.exists() {
             create_dir(&dir)?;
         }
@@ -284,6 +310,22 @@ impl TaskStore {
         &self.dir
     }
 
+    /// The task's `state.json`.
+    pub fn state_file(&self) -> PathBuf {
+        self.dir.join(STATE_FILE)
+    }
+
+    /// Moves the task to `stage` without a handoff and saves it in
+    /// `state.json`. Only for the harness's own moves: Lisa's stop buttons
+    /// and «Continue» after them (see `orchestrator::manual`).
+    pub fn save_stage(&self, state: &mut TaskState, new_stage: Stage) -> Result<(), StoreError> {
+        let mut next = state.clone();
+        next.stage = new_stage;
+        self.save_state(&next)?;
+        *state = next;
+        Ok(())
+    }
+
     /// The failed attempts saved by `save_failure_log`, as (round, role), in order.
     /// Files with other names are skipped.
     pub fn failures(&self) -> Result<Vec<(u32, Role)>, StoreError> {
@@ -329,7 +371,7 @@ impl TaskStore {
 mod tests {
     use super::*;
     use crate::task::handoff::{Issue, NextStep, Severity, Verdict};
-    use crate::task::{Stage, WaitReason, DEFAULT_MAX_ROUNDS};
+    use crate::task::{WaitReason, DEFAULT_MAX_ROUNDS};
 
     fn handoff(role: Role, round: u32, verdict: Verdict, next: NextStep) -> Handoff {
         let issues = if verdict == Verdict::Rejected {

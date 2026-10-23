@@ -188,6 +188,8 @@ impl App {
                     }
                 }
                 KeyCode::Char('n') => self.press(ButtonId::TaskQuestions),
+                KeyCode::Char('s') => self.press(ButtonId::StopAfterStep),
+                KeyCode::Char('x') => self.press(ButtonId::StopNow),
                 code => {
                     if let Some(tasks) = &mut self.tasks {
                         tasks.on_key(code);

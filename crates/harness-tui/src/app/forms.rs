@@ -99,6 +99,10 @@ impl App {
                 Ok(())
             }
             Purpose::Remove(path) => self.remove_project(&path.clone()),
+            Purpose::StopNow => {
+                self.confirm_stop_now();
+                Ok(())
+            }
         };
         if let Err(error) = result {
             // Keep the form open with the problem, so nothing typed is lost.

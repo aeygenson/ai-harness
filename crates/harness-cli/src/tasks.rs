@@ -11,6 +11,7 @@ use harness_core::skills::Skills;
 use harness_core::task::branch;
 use harness_core::task::handoff::{AnswerTo, NextStep, Role, Verdict, MAX_REASON_CHARS};
 use harness_core::task::orchestrator::{self, Project, SameText, StopReason};
+use harness_core::task::stop_request::StopRequest;
 use harness_core::task::store::TaskStore;
 use harness_core::task::{Stage, TaskState, WaitReason};
 use harness_platform::stop::StopSignals;
@@ -68,7 +69,8 @@ pub(crate) async fn until_stopped(
 }
 
 /// `harness run`: runs the roles one after another until the task is done
-/// or waits for Lisa, then says what to do next.
+/// or waits for Lisa, then says what to do next. A task Lisa stopped in the
+/// TUI continues with the role she stopped (or the one that was next).
 pub(crate) async fn run(project: &Path, task_id: &str) -> Result<()> {
     let repo = open_repo(project)?;
     // First the task's branch: its settings and skills are the ones to use.
@@ -78,11 +80,17 @@ pub(crate) async fn run(project: &Path, task_id: &str) -> Result<()> {
     let skills = Skills::load(&harness_dir, &config)?;
     let agent = build_team(&config, repo.root())?;
     let (store, mut state) = open_task(&repo, task_id)?;
+    if orchestrator::continue_stopped(&repo, &store, &mut state)? {
+        println!("You stopped {task_id}; it continues now.");
+    }
     println!("Running {task_id} (round {})...", state.round);
+    // The command line has no stop buttons; Ctrl+C stops it (`until_stopped`).
+    let no_stop_buttons = StopRequest::new();
     let project = Project {
         config: &config,
         skills: &skills,
         agent_versions: agent.versions(),
+        stop: &no_stop_buttons,
     };
     let stop = orchestrator::run_project(&repo, &store, &mut state, &agent, project).await?;
     let suggested = suggestion(&store, &state, &stop);
@@ -172,6 +180,9 @@ fn explain(stop: &StopReason, task_id: &str, suggested: Option<&AnswerTo>) -> St
             "The round limit is reached. Decide who continues:\n  \
              harness approve {task_id} --to <role|done> --notes \"...\""
         ),
+        StopReason::WaitingForHuman(WaitReason::StoppedByLisa(role)) => {
+            stopped_by_lisa_text(*role, task_id)
+        }
         StopReason::UsageLimitReached(role) => format!(
             "The subscription limit stopped the {role:?}. Its unfinished work is kept and comes \
              back when you run again later:\n  harness run {task_id}"
@@ -232,6 +243,16 @@ fn explain(stop: &StopReason, task_id: &str, suggested: Option<&AnswerTo>) -> St
     }
 }
 
+/// What to say about a task Lisa stopped, with `role` the one that continues.
+fn stopped_by_lisa_text(role: Role, task_id: &str) -> String {
+    format!(
+        "You stopped {task_id}; the {role} continues next. Its unfinished changes, if any, \
+         stay in the folder for it. Continue with:\n  harness run {task_id}\n\
+         or give it a note first:\n  harness approve {task_id} --notes \"...\"\n\
+         A note to another role (--to) needs those changes committed or removed first."
+    )
+}
+
 /// What `StopReason::HiddenChanges` says: git's files that were put back,
 /// and files outside the project Lisa should look at herself.
 fn hidden_changes_text(role: Role, put_back: &[PathBuf], reported: &[PathBuf]) -> String {
@@ -273,13 +294,23 @@ pub(crate) fn decide(
     // Lisa's decision is a commit too: it goes on the task's branch.
     enter_branch(&repo, task_id)?;
     let (store, mut state) = open_task(&repo, task_id)?;
+    // Rejecting starts a new round, and recorded unfinished work belongs to
+    // this one: it could not be continued any more.
+    if verdict == Verdict::Rejected && !orchestrator::unfinished_left(&repo, &store)?.is_empty() {
+        bail!(
+            "{task_id} has unfinished work in the folder; give your note to the role \
+             that continues it with:\n  harness approve {task_id} --notes \"...\""
+        );
+    }
     let next = match to {
         Some(next) => next,
         None => match state.stage {
             Stage::WaitingForHuman(WaitReason::ApproveDesign) => {
                 NextStep::To(state.workflow.after_approval())
             }
-            Stage::WaitingForHuman(WaitReason::RoleAskedForHelp(role)) => NextStep::To(role),
+            Stage::WaitingForHuman(
+                WaitReason::RoleAskedForHelp(role) | WaitReason::StoppedByLisa(role),
+            ) => NextStep::To(role),
             _ => bail!("say who continues with --to <role|done>"),
         },
     };
@@ -296,6 +327,9 @@ pub(crate) fn status(project: &Path, task_id: &str) -> Result<()> {
         "{task_id}: round {} of {}, {:?}",
         state.round, state.max_rounds, state.stage
     );
+    if let Stage::WaitingForHuman(WaitReason::StoppedByLisa(role)) = state.stage {
+        println!("  stopped by Lisa; `harness run {task_id}` continues the {role}");
+    }
     if let Some(page) = state.pull_request.as_ref().and_then(|p| p.page()) {
         println!("  pull request: {page}");
     }
@@ -467,5 +501,55 @@ mod tests {
 
         assert_eq!(found.map(|a| a.role), Some(Role::Developer));
         assert_eq!(suggestion(&store, &state, &StopReason::Done), None);
+    }
+
+    #[test]
+    fn a_stopped_task_says_how_to_continue_or_give_a_note() {
+        let stop = StopReason::WaitingForHuman(WaitReason::StoppedByLisa(Role::Developer));
+
+        let text = explain(&stop, "task-001", None);
+
+        assert!(text.contains("the developer continues next"), "{text}");
+        assert!(text.contains("harness run task-001"), "{text}");
+        assert!(text.contains("harness approve task-001 --notes"), "{text}");
+    }
+
+    #[test]
+    fn approve_without_to_sends_a_stopped_task_back_to_its_role() {
+        let dir = tempfile::tempdir().unwrap();
+        let project = dir.path();
+        projects::init(project).unwrap();
+        new_task(project, "task-001", "Add a parser", false).unwrap();
+        let repo = open_repo(project).unwrap();
+        let (store, mut state) = open_task(&repo, "task-001").unwrap();
+        state.stage = Stage::WaitingForHuman(WaitReason::StoppedByLisa(Role::Developer));
+        fs::write(store.state_file(), serde_json::to_string(&state).unwrap()).unwrap();
+        // «Stop now» left the developer's half-done file, recorded.
+        let record = r#"{"round":1,"role":"developer","files":[["half.rs",null]]}"#;
+        fs::write(store.dir().join("unfinished.json"), record).unwrap();
+        repo.commit_all("stopped").unwrap();
+        fs::write(project.join("half.rs"), "fn half() {}").unwrap();
+
+        // Rejecting would start a new round and strand the unfinished work.
+        let error = decide(
+            project,
+            "task-001",
+            Verdict::Rejected,
+            Some(NextStep::To(Role::Developer)),
+            "No",
+        )
+        .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("harness approve task-001 --notes"),
+            "{error}"
+        );
+
+        decide(project, "task-001", Verdict::Approved, None, "Use serde").unwrap();
+
+        let (_, state) = open_task(&repo, "task-001").unwrap();
+        assert_eq!(state.stage, Stage::Working(Role::Developer));
+        assert_eq!(state.round, 1);
     }
 }

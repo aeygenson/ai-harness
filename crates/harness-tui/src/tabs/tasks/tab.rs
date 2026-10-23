@@ -36,7 +36,7 @@ use harness_core::retro::usage::Usage;
 use harness_core::task::handoff::Role;
 use harness_core::task::scenario::Scenario;
 use harness_core::task::store::{self, Step};
-use harness_core::task::TaskState;
+use harness_core::task::{Stage, TaskState};
 
 use super::choice::{Choice, Menu};
 use super::steps::{agent_line, load_task, waits_on};
@@ -107,9 +107,9 @@ pub struct TasksTab {
     /// The message being written.
     pub(crate) input: String,
     pub(crate) choice: Choice,
-    /// The task and its number of steps the choice was made for: when they
-    /// change, the choice goes back to what the task needs next.
-    pub(super) choice_for: Option<(String, usize)>,
+    /// The task, its number of steps and its stage the choice was made for:
+    /// when they change, the choice goes back to what the task needs next.
+    pub(super) choice_for: Option<(String, usize, Stage)>,
     /// The open list, if any.
     pub(crate) menu: Option<Menu>,
     /// The model and level chosen for the next launch; `harness.toml` is

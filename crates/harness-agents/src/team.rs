@@ -100,6 +100,7 @@ mod tests {
             project_dir: dir.to_path_buf(),
             prompt: String::new(),
             output_dir: PathBuf::from(dir),
+            stop: harness_core::task::stop_request::StopRequest::new(),
         }
     }
 

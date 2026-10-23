@@ -10,6 +10,10 @@ use crate::task::TaskState;
 
 /// Lisa's decision (approve the design, send work back, answer a question),
 /// saved like any other handoff with role `human`.
+///
+/// Finishing the task is refused ([`RunError::UnfinishedWork`]) while the
+/// unfinished work a limit or «Stop now» left is still uncommitted: it
+/// would be left behind in the folder of a finished task.
 pub fn record_human_decision(
     repo: &Repo,
     store: &TaskStore,
@@ -18,6 +22,12 @@ pub fn record_human_decision(
     next: NextStep,
     notes: &str,
 ) -> Result<PathBuf, RunError> {
+    if next == NextStep::Done {
+        let files = super::changes::unfinished_left(repo, store)?;
+        if !files.is_empty() {
+            return Err(RunError::UnfinishedWork { files });
+        }
+    }
     let summary = notes
         .lines()
         .next()

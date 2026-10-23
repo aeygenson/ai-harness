@@ -141,6 +141,8 @@ enum Purpose {
     UpdateHarness,
     /// Run this command in the terminal to install the program named.
     InstallTool { name: &'static str, command: String },
+    /// Stop the running agent of the Tasks tab at once («Stop now»).
+    StopNow,
 }
 
 /// What a download in the background brought.

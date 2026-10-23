@@ -7,9 +7,11 @@ use std::future::Future;
 use std::path::Path;
 use std::process::Command;
 use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 use harness_core::task::agent::{AgentOutcome, AgentRunner, RoleJob, RunEnd};
 use harness_core::task::handoff::{Handoff, Issue, NextStep, Role, Severity, Verdict};
+use harness_core::task::stop_request::StopWhen;
 
 /// What the mock does the next time a given role runs.
 #[derive(Debug, Clone)]
@@ -49,7 +51,27 @@ pub enum MockStep {
     UsageLimitAfterWriting(Vec<(String, String)>),
     /// Write these files into the output folder only, like the retrospective.
     WriteOutput(Vec<(String, String)>),
+    /// Change project files, then stop as if Lisa pressed «Stop now».
+    StopNow(Vec<(String, String)>),
+    /// Change project files, then keep working until Lisa presses a stop
+    /// button (`RoleJob::stop`): «Stop now» stops it as a real agent is
+    /// stopped; «Stop after this step» lets it finish with an approval that
+    /// sends the work to `next`. Gives up after `MOCK_WORK_LIMIT`.
+    WorkUntilStopped {
+        /// `(path in the project, contents)` pairs written at the start.
+        files: Vec<(String, String)>,
+        /// Where the approval sends the work when it finishes; `None`: it
+        /// does not finish, only «Stop now» ends it.
+        next: Option<NextStep>,
+    },
 }
+
+/// How long [`MockStep::WorkUntilStopped`] waits for a stop button at most,
+/// so a broken test fails instead of hanging.
+const MOCK_WORK_LIMIT: Duration = Duration::from_secs(30);
+
+/// How often [`MockStep::WorkUntilStopped`] looks at the stop buttons.
+const MOCK_STOP_PAUSE: Duration = Duration::from_millis(10);
 
 impl MockStep {
     /// A step that writes a valid handoff with `verdict` and `next`, changing no project files.
@@ -140,13 +162,9 @@ impl MockAgent {
             .unwrap_or(MockStep::WriteNothing)
     }
 
-    /// Does the next scripted step for `job.role` and reports how it ended.
-    fn outcome(&self, job: &RoleJob) -> AgentOutcome {
-        self.calls.lock().unwrap().push(job.role);
-        self.prompts.lock().unwrap().push(job.prompt.clone());
-        let log = format!("mock {:?}, round {}", job.role, job.round);
-
-        match self.next_step(job.role) {
+    /// Does `step`, a step that does not wait, and reports how it ended.
+    fn outcome(job: &RoleJob, step: MockStep, log: String) -> AgentOutcome {
+        match step {
             MockStep::UsageLimit => AgentOutcome {
                 end: RunEnd::UsageLimit,
                 log,
@@ -158,6 +176,12 @@ impl MockAgent {
             MockStep::UsageLimitAfterWriting(files) => {
                 stop_after_writing(job, &files, RunEnd::UsageLimit, log)
             }
+            MockStep::StopNow(files) => stop_after_writing(job, &files, RunEnd::StoppedByLisa, log),
+            // `run` handles it: it waits.
+            MockStep::WorkUntilStopped { .. } => AgentOutcome {
+                end: RunEnd::Failed("the mock agent's step did not work".into()),
+                log,
+            },
             MockStep::WriteNothing => AgentOutcome {
                 end: RunEnd::Succeeded,
                 log,
@@ -241,10 +265,59 @@ impl MockAgent {
 }
 
 impl AgentRunner for MockAgent {
-    // The mock does its work at once and has nothing to wait for, so it returns
-    // a future that is already finished (`ready`) instead of using `async fn`.
+    // Most steps are done at once; only `WorkUntilStopped` waits (without
+    // blocking the thread, so the run can still be dropped).
     fn run(&self, job: &RoleJob) -> impl Future<Output = AgentOutcome> + Send {
-        std::future::ready(self.outcome(job))
+        self.calls.lock().unwrap().push(job.role);
+        self.prompts.lock().unwrap().push(job.prompt.clone());
+        let log = format!("mock {:?}, round {}", job.role, job.round);
+        let step = self.next_step(job.role);
+        async move {
+            match step {
+                MockStep::WorkUntilStopped { files, next } => {
+                    work_until_stopped(job, &files, next, log).await
+                }
+                step => Self::outcome(job, step, log),
+            }
+        }
+    }
+}
+
+/// [`MockStep::WorkUntilStopped`]: writes `files`, then waits for a stop button.
+async fn work_until_stopped(
+    job: &RoleJob,
+    files: &[(String, String)],
+    next: Option<NextStep>,
+    log: String,
+) -> AgentOutcome {
+    if write_files(&job.project_dir, files).is_err() {
+        return AgentOutcome {
+            end: RunEnd::Failed("the mock agent's step did not work".into()),
+            log,
+        };
+    }
+    let start = Instant::now();
+    while start.elapsed() < MOCK_WORK_LIMIT {
+        match (job.stop.asked(), next) {
+            (Some(StopWhen::Now), _) => {
+                return AgentOutcome {
+                    end: RunEnd::StoppedByLisa,
+                    log,
+                }
+            }
+            (Some(StopWhen::AfterStep), Some(next)) => {
+                let written = write_result(job, Verdict::Approved, next, "finished");
+                return AgentOutcome {
+                    end: done_if(written.is_ok()),
+                    log,
+                };
+            }
+            (Some(StopWhen::AfterStep) | None, _) => tokio::time::sleep(MOCK_STOP_PAUSE).await,
+        }
+    }
+    AgentOutcome {
+        end: RunEnd::Failed("the mock agent waited too long for a stop button".into()),
+        log,
     }
 }
 

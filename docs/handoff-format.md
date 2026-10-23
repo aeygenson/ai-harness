@@ -111,7 +111,8 @@
 runs/
   task-001/
     task.md
-    state.json       # где задача; у готовой задачи на GitHub ещё pull_request
+    state.json       # где задача; у готовой задачи на GitHub ещё pull_request;
+                     # остановленная Лизой: {"waiting_for_human":{"stopped_by_lisa":"developer"}}
     round-01/
       01-architect/  notes.md  handoff.json
       02-human/      notes.md  handoff.json

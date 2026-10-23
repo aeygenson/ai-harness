@@ -5,6 +5,7 @@ use std::future::Future;
 use std::path::PathBuf;
 
 use crate::task::handoff::Role;
+use crate::task::stop_request::StopRequest;
 
 /// Everything an agent needs to do one role once.
 #[derive(Debug, Clone)]
@@ -21,6 +22,9 @@ pub struct RoleJob {
     pub prompt: String,
     /// Where the agent must write `handoff.json` and `notes.md`.
     pub output_dir: PathBuf,
+    /// Lisa's «Stop now» while the agent works: the adapter stops the agent
+    /// at once and reports [`RunEnd::StoppedByLisa`].
+    pub stop: StopRequest,
 }
 
 /// What happened when the agent ran. The handoff itself is read from `output_dir`.
@@ -44,6 +48,9 @@ pub enum RunEnd {
     TimedOut(String),
     /// The subscription's usage limit stopped the agent.
     UsageLimit,
+    /// Lisa pressed «Stop now»: the agent was stopped with everything it
+    /// started. Its unfinished changes stay in the folder, as after a time limit.
+    StoppedByLisa,
 }
 
 /// Runs one role with some agent.

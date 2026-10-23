@@ -167,6 +167,9 @@ fn outcome_text(outcome: &Outcome, tr: &I18n) -> Message {
         StopReason::WaitingForHuman(WaitReason::RoundLimitReached) => {
             Message::error(tr.f("tasks.stop_rounds", &[("task", task)]))
         }
+        StopReason::WaitingForHuman(WaitReason::StoppedByLisa(r)) => {
+            Message::info(tr.f("tasks.stop_by_lisa", &[("task", task), ("role", &role(r))]))
+        }
         StopReason::UsageLimitReached(r) => {
             Message::error(tr.f("tasks.stop_usage", &[("task", task), ("role", &role(r))]))
         }

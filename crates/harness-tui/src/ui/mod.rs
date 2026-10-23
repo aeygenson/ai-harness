@@ -99,6 +99,11 @@ pub enum ButtonId {
     /// are for the next launch only.
     Menu(crate::tabs::tasks::Menu),
     Send,
+    /// «Stop after this step» on the Tasks tab while roles work; pressed
+    /// again, it is taken back.
+    StopAfterStep,
+    /// «Stop now» on the Tasks tab while roles work, after a confirmation.
+    StopNow,
     /// A button of the Skills tab.
     Skill(crate::tabs::skills::SkillButton),
     /// A link in «Files» of the step on the Tasks tab.

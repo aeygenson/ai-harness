@@ -7,8 +7,9 @@
 //! (the run loop), `store` (saving tasks to disk), `facts` and `weakened`
 //! (what earlier steps really changed, read from git), `pull_request`
 //! (the pull request a finished task becomes on GitHub), `tripwire` (what
-//! `git status` does not show) and `agent_stubs` (the empty files Claude Code
-//! makes when it starts, which are not a reason to stop).
+//! `git status` does not show), `agent_stubs` (the empty files Claude Code
+//! makes when it starts, which are not a reason to stop) and `stop_request`
+//! (Lisa's «Stop after this step» and «Stop now»).
 
 pub mod agent;
 pub mod agent_stubs;
@@ -22,6 +23,7 @@ pub mod prompt;
 pub mod pull_request;
 pub mod routes;
 pub mod scenario;
+pub mod stop_request;
 pub mod store;
 pub mod tripwire;
 pub mod weakened;
@@ -47,6 +49,11 @@ pub enum WaitReason {
     RoleAskedForHelp(Role),
     /// Work was sent back too many times.
     RoundLimitReached,
+    /// Lisa stopped the run («Stop now» or «Stop after this step»). The
+    /// role is the one that continues when she chooses «Continue»: the
+    /// stopped one, or the one that would have run next. In `state.json`:
+    /// `{"waiting_for_human":{"stopped_by_lisa":"developer"}}`.
+    StoppedByLisa(Role),
 }
 
 /// Where the task is right now.
@@ -664,6 +671,50 @@ mod tests {
         let json = serde_json::to_string_pretty(&task).unwrap();
         let again: TaskState = serde_json::from_str(&json).unwrap();
         assert_eq!(task, again);
+    }
+
+    #[test]
+    fn a_task_stopped_by_lisa_survives_a_round_trip_through_json() {
+        let mut task = new_task();
+        task.stage = Stage::WaitingForHuman(WaitReason::StoppedByLisa(Role::Developer));
+
+        let json = serde_json::to_string(&task).unwrap();
+        let again: TaskState = serde_json::from_str(&json).unwrap();
+
+        assert!(
+            json.contains(r#""stage":{"waiting_for_human":{"stopped_by_lisa":"developer"}}"#),
+            "{json}"
+        );
+        assert_eq!(again, task);
+    }
+
+    #[test]
+    fn an_old_state_file_still_reads() {
+        // Written by a harness from before the stop buttons.
+        let old = r#"{"task_id":"task-001","workflow":"task","round":2,"max_rounds":5,
+            "stage":{"waiting_for_human":{"role_asked_for_help":"tester"}}}"#;
+
+        let state: TaskState = serde_json::from_str(old).unwrap();
+
+        assert_eq!(
+            state.stage,
+            Stage::WaitingForHuman(WaitReason::RoleAskedForHelp(Role::Tester))
+        );
+    }
+
+    #[test]
+    fn lisa_may_send_a_stopped_task_to_any_role() {
+        let mut task = new_task();
+        task.stage = Stage::WaitingForHuman(WaitReason::StoppedByLisa(Role::Developer));
+        task.apply(&handoff(
+            Role::Human,
+            1,
+            Verdict::Approved,
+            NextStep::To(Role::Architect),
+        ))
+        .unwrap();
+        assert_eq!(task.stage, Stage::Working(Role::Architect));
+        assert_eq!(task.round, 1, "a note does not start a new round");
     }
 
     #[test]
