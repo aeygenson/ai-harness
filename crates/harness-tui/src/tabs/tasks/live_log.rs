@@ -12,7 +12,19 @@ use std::collections::VecDeque;
 use ratatui::text::Line;
 use ratatui::widgets::{Paragraph, Wrap};
 
-use super::runner::push_line;
+/// The live log keeps this many lines. Lines are at most about 300
+/// characters, so this is well under a megabyte, and drawing looks only at
+/// the lines on the screen: more history to scroll back through costs
+/// almost nothing.
+pub const LOG_LINES: usize = 2000;
+
+/// Adds a line to the live log, dropping the oldest beyond [`LOG_LINES`].
+pub fn push_line(log: &mut VecDeque<String>, line: String) {
+    if log.len() >= LOG_LINES {
+        log.pop_front();
+    }
+    log.push_back(line);
+}
 
 /// What the agent printed in the last run, and the scrolled view of it.
 #[derive(Debug, Default)]
@@ -33,7 +45,7 @@ pub type View<'a> = (Vec<Line<'a>>, u16);
 impl LiveLog {
     /// Adds a line at the end. A scrolled view stays where it is.
     pub fn push(&mut self, line: String) {
-        let full = self.lines.len() >= super::runner::LOG_LINES;
+        let full = self.lines.len() >= LOG_LINES;
         push_line(&mut self.lines, line);
         if self.back > 0 {
             // The new line is below the view; when the oldest line was
@@ -240,7 +252,7 @@ mod tests {
 
     #[test]
     fn a_full_log_keeps_a_scrolled_view_on_the_same_lines() {
-        let count = super::super::runner::LOG_LINES;
+        let count = LOG_LINES;
         let mut log = log_of(count);
         log.view(20, 3);
         log.scroll(5);
@@ -251,5 +263,15 @@ mod tests {
         log.clear();
         assert!(log.is_empty());
         assert!(log.following());
+    }
+
+    #[test]
+    fn the_log_keeps_the_latest_lines() {
+        let mut log = VecDeque::new();
+        for i in 0..LOG_LINES + 5 {
+            push_line(&mut log, i.to_string());
+        }
+        assert_eq!(log.len(), LOG_LINES);
+        assert_eq!(log.front().unwrap(), "5");
     }
 }

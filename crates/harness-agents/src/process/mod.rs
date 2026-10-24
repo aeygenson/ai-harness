@@ -530,7 +530,7 @@ mod tests {
         });
         let start = std::time::Instant::now();
 
-        let error = run(command, "", Duration::from_secs(60), &[], &stop)
+        let error = run(command, "", Duration::from_mins(1), &[], &stop)
             .await
             .unwrap_err();
         lisa.join().unwrap();

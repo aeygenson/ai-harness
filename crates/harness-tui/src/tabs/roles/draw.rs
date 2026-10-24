@@ -10,7 +10,7 @@ use harness_core::config::{independence, trifecta, AgentKind};
 use harness_core::task::handoff::Role;
 
 use super::tab::{Focus, RolesTab, Row};
-use crate::tabs::tasks::draw_list;
+use crate::ui::draw_list;
 use crate::ui::i18n::I18n;
 use crate::ui::theme;
 use crate::ui::{buttons, panel, selected, ButtonId, Hits, ListId, Target};

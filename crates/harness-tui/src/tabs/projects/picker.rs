@@ -10,7 +10,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::ListItem;
 use ratatui::Frame;
 
-use crate::tabs::tasks::draw_list;
+use crate::ui::draw_list;
 use crate::ui::i18n::I18n;
 use crate::ui::theme;
 use crate::ui::{self, buttons, panel, ButtonId, Hits, ListId, Target};

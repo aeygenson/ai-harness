@@ -10,7 +10,7 @@ use harness_agents::install::catalog::{Action, Status};
 
 use super::computer::{computer_height, tool_details};
 use super::tab::{AgentsTab, Job};
-use crate::tabs::tasks::draw_list;
+use crate::ui::draw_list;
 use crate::ui::i18n::I18n;
 use crate::ui::theme;
 use crate::ui::{buttons, panel, ButtonId, Hits, ListId};

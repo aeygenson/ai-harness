@@ -13,7 +13,9 @@ use harness_core::retro::suggest::{self};
 
 use super::tab::RetroBuilder;
 use super::tab::{Focus, Generating, RetroTab};
-use crate::tabs::tasks::runner::{push_line, readable, run_until_stopped, Background};
+use crate::tabs::tasks::agent_output::readable;
+use crate::tabs::tasks::live_log::push_line;
+use crate::tabs::tasks::runner::{run_until_stopped, Background};
 use crate::ui::i18n::I18n;
 use crate::ui::message::Message;
 

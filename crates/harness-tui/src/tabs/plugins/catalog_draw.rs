@@ -11,7 +11,7 @@ use harness_core::plugins::catalog::{Entry, Source};
 use super::catalog::{unusable, CatalogView, FILTERS};
 use crate::tabs::plugins::PluginCatalogButton;
 use crate::tabs::roles::RolesTab;
-use crate::tabs::tasks::draw_list;
+use crate::ui::draw_list;
 use crate::ui::i18n::I18n;
 use crate::ui::theme;
 use crate::ui::{buttons, panel, selector, ButtonId, Hits, ListId};

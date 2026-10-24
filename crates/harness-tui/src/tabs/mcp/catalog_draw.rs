@@ -12,7 +12,7 @@ use super::catalog::Catalog;
 use super::form::join_words;
 use super::tab::{short_name, McpCatalogButton};
 use crate::tabs::roles::RolesTab;
-use crate::tabs::tasks::draw_list;
+use crate::ui::draw_list;
 use crate::ui::i18n::I18n;
 use crate::ui::theme;
 use crate::ui::{buttons, panel, ButtonId, Hits, ListId};

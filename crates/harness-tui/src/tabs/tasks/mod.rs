@@ -12,12 +12,13 @@
 //! `runner.rs` runs the roles in the background while the tab keeps
 //! working.
 
+pub(crate) mod agent_output;
 mod choice;
 mod draw;
 mod events;
 mod github;
 mod labels;
-mod live_log;
+pub(crate) mod live_log;
 mod log_panel;
 mod message_box;
 mod run;
@@ -29,7 +30,6 @@ mod tab;
 mod times;
 
 pub(crate) use choice::Menu;
-pub(crate) use draw::draw_list;
 pub(crate) use tab::{TasksTab, Zoom};
 // Only the tests pick a menu entry by name.
 #[cfg(test)]

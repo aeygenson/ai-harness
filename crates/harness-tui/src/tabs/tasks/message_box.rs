@@ -10,8 +10,8 @@ use harness_core::task::handoff::MAX_REASON_CHARS;
 use harness_core::text;
 
 use super::choice::{Choice, Menu, MORE_ROUNDS};
-use super::draw::draw_list;
 use super::tab::{Focus, TasksTab};
+use crate::ui::draw_list;
 use crate::ui::i18n::I18n;
 use crate::ui::theme;
 use crate::ui::{buttons, panel, ButtonId, Hits, ListId, Target};
