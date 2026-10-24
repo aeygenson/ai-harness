@@ -2,7 +2,7 @@
 //! sign it in, and (in `pull`) finding, opening and merging pull requests;
 //! `publish` sends a finished task to GitHub, and `merge` merges its pull
 //! request and brings the work back into the project. The harness talks to GitHub only through
-//! `gh` and `git push`, under Lisa's own login: `gh` keeps the login in the
+//! `gh` and `git push`, under the user's own login: `gh` keeps the login in the
 //! system's key store, and the harness never sees or saves the token.
 
 mod connect;
@@ -80,14 +80,14 @@ pub fn sign_in_commands(gh: &Path) -> Vec<Command> {
     vec![login, setup_git]
 }
 
-/// `gh` started for a check: Lisa's own environment (`gh` finds its login
+/// `gh` started for a check: the user's own environment (`gh` finds its login
 /// through it, for example `GH_CONFIG_DIR` or `GH_TOKEN`), but without
 /// questions or the note about a newer version.
 pub(crate) fn quiet_command(gh: &Path) -> Command {
     let mut command = Command::new(gh);
     command
         .current_dir(std::env::temp_dir())
-        // `gh` works with github.com, where git pushes, even when Lisa's
+        // `gh` works with github.com, where git pushes, even when the user's
         // environment names another host (GitHub Enterprise).
         .env("GH_HOST", HOST)
         .env("GH_PROMPT_DISABLED", "1")

@@ -26,7 +26,7 @@ pub(super) const TOOLCHAIN_HOMES: &[(&str, &str)] = &[
 ];
 
 /// The [`TOOLCHAIN_HOMES`] variables pointing at the real home folder, for
-/// those Lisa has not set herself and whose folder exists.
+/// those the user has not set themselves and whose folder exists.
 pub(super) fn toolchain_env(real_home: &Path) -> Vec<(&'static str, PathBuf)> {
     TOOLCHAIN_HOMES
         .iter()
@@ -38,7 +38,7 @@ pub(super) fn toolchain_env(real_home: &Path) -> Vec<(&'static str, PathBuf)> {
 }
 
 /// Commands no role may run: the harness makes the commits, and only it
-/// sends work to GitHub (`gh` uses Lisa's GitHub login).
+/// sends work to GitHub (`gh` uses the user's GitHub login).
 pub(super) const DENIED_FOR_ALL: &[&str] = &["git commit", "git push", "gh"];
 
 /// Commands a role without [`Commands::Any`] (see [`Role::spec`]) may not

@@ -12,7 +12,7 @@ use crate::git::{GitError, Repo};
 use crate::task::store::{following_task_id, task_ids, StoreError};
 
 /// Every task branch starts with this, so the harness's branches are easy to
-/// tell apart from Lisa's own.
+/// tell apart from the user's own.
 pub const BRANCH_PREFIX: &str = "harness/";
 
 /// The branch of a task: `task-001` -> `harness/task-001`.
@@ -91,7 +91,7 @@ pub fn start(repo: &Repo, config: &Config, task_id: &str) -> Result<(), BranchEr
 }
 
 /// Checks out the task's branch, if it has one, before anything of the task
-/// is read or saved, so the work lands there even if Lisa moved to another
+/// is read or saved, so the work lands there even if the user moved to another
 /// branch in between. Returns `true` when it switched.
 ///
 /// It does not look at `[github]`: the settings are read after the switch,

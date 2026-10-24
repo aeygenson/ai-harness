@@ -24,10 +24,10 @@ use crate::ui::theme;
 const DESIGN_DIR: &str = "docs/design/";
 
 impl TasksTab {
-    /// The notes Lisa answers while the selected task waits for her: the
-    /// `notes.md` of its last step made by a role (not by her), and that role.
-    /// `None` when the task does not wait for her, the notes are not there,
-    /// or she stopped it herself (then nobody asked her anything).
+    /// The notes the user answers while the selected task waits for them: the
+    /// `notes.md` of its last step made by a role (not by them), and that role.
+    /// `None` when the task does not wait for them, the notes are not there,
+    /// or they stopped it themselves (then nobody asked them anything).
     pub fn questions(&self) -> Option<(Role, PathBuf)> {
         let task = self.current()?;
         match task.state.stage {
@@ -36,7 +36,7 @@ impl TasksTab {
                 | WaitReason::RoleAskedForHelp(_)
                 | WaitReason::RoundLimitReached,
             ) => {}
-            Stage::WaitingForHuman(WaitReason::StoppedByLisa(_))
+            Stage::WaitingForHuman(WaitReason::StoppedByUser(_))
             | Stage::Working(_)
             | Stage::Done => return None,
         }
@@ -49,7 +49,7 @@ impl TasksTab {
         path.is_file().then_some((step.handoff.role, path))
     }
 
-    /// Who the role that asked Lisa for help suggests for her answer (its
+    /// Who the role that asked the user for help suggests for their answer (its
     /// `answer_to`), while the selected task waits for that answer. `None`
     /// when it did not say, or named a role the task's scenario does not have.
     pub fn suggested_answer(&self) -> Option<&AnswerTo> {
@@ -161,12 +161,12 @@ impl TasksTab {
     }
 }
 
-/// Is it `role`'s turn in the task, or is Lisa's answer for `role` awaited?
+/// Is it `role`'s turn in the task, or is the user's answer for `role` awaited?
 pub(super) fn waits_on(task: &TaskView, role: Role) -> bool {
     match task.state.stage {
         Stage::Working(working) => working == role,
         Stage::WaitingForHuman(
-            WaitReason::RoleAskedForHelp(asking) | WaitReason::StoppedByLisa(asking),
+            WaitReason::RoleAskedForHelp(asking) | WaitReason::StoppedByUser(asking),
         ) => asking == role,
         Stage::WaitingForHuman(WaitReason::ApproveDesign) => role == Role::Architect,
         Stage::WaitingForHuman(WaitReason::RoundLimitReached) => task

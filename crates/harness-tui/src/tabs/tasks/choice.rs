@@ -18,15 +18,15 @@ pub const MORE_ROUNDS: u32 = harness_core::task::DEFAULT_MAX_ROUNDS;
 impl TasksTab {
     /// Everything «To» lists, and whether it can be chosen now. The roles
     /// are always listed, so it is clear who can get a message; they are
-    /// grey until the selected task waits for Lisa's answer.
+    /// grey until the selected task waits for the user's answer.
     pub fn menu_items(&self) -> Vec<(Choice, bool)> {
         let stage = self.current().map(|t| t.state.stage);
         let waiting = matches!(stage, Some(Stage::WaitingForHuman(_)));
         let mut items = vec![(Choice::NewTask, true)];
         match stage {
-            // Lisa stopped it: the stopped role (or the next one) may simply go on.
+            // The user stopped it: the stopped role (or the next one) may simply go on.
             Some(
-                Stage::Working(role) | Stage::WaitingForHuman(WaitReason::StoppedByLisa(role)),
+                Stage::Working(role) | Stage::WaitingForHuman(WaitReason::StoppedByUser(role)),
             ) => {
                 items.push((Choice::Continue(role), true));
             }
@@ -82,7 +82,7 @@ impl TasksTab {
 
     /// What the selected task needs next: the role its workflow gives the
     /// approved work to (the developer after the design), the role that asked
-    /// for help, the role Lisa stopped, a new task when it is done.
+    /// for help, the role the user stopped, a new task when it is done.
     fn default_choice(&self) -> Choice {
         let Some(task) = self.current() else {
             return Choice::NewTask;
@@ -100,12 +100,12 @@ impl TasksTab {
             Stage::WaitingForHuman(WaitReason::RoundLimitReached) => {
                 Choice::Role(self.after_round_limit())
             }
-            // A note to the role Lisa stopped; «Continue» is in the list too.
-            Stage::WaitingForHuman(WaitReason::StoppedByLisa(role)) => Choice::Role(role),
+            // A note to the role the user stopped; «Continue» is in the list too.
+            Stage::WaitingForHuman(WaitReason::StoppedByUser(role)) => Choice::Role(role),
         }
     }
 
-    /// Who gets Lisa's answer when `role` asked for help: the role its
+    /// Who gets the user's answer when `role` asked for help: the role its
     /// handoff names in `answer_to`, if it names one of the scenario.
     /// Otherwise usually that role again, but a role that may not change
     /// files (security) and listed issues cannot fix them itself, so the
@@ -143,7 +143,7 @@ impl TasksTab {
         suggested.unwrap_or(Role::Developer)
     }
 
-    /// A new task, a new step in it or a new stage (Lisa stopped it, which
+    /// A new task, a new step in it or a new stage (the user stopped it, which
     /// adds no step) brings back the default choice.
     pub(super) fn sync_choice(&mut self) {
         let now = self
@@ -326,7 +326,7 @@ impl TasksTab {
 pub enum Choice {
     /// The text is a new task; the architect starts.
     NewTask,
-    /// The text is Lisa's answer to this role, which then runs.
+    /// The text is the user's answer to this role, which then runs.
     Role(Role),
     /// A role stopped part-way: run it again.
     Continue(Role),

@@ -9,7 +9,7 @@
 //!    and reads that server's metadata;
 //! 2. registers the harness as a client there (dynamic client registration),
 //!    with an address on this computer to come back to;
-//! 3. opens the browser, where Lisa signs in and agrees; the browser comes
+//! 3. opens the browser, where the user signs in and agrees; the browser comes
 //!    back to `http://127.0.0.1:<port>/callback` with a code;
 //! 4. trades the code for tokens (with PKCE, so a stolen code is useless).
 //!
@@ -44,7 +44,7 @@ use http::token_request;
 /// Where the sign-ins are kept, under `~/.harness/credentials`.
 const OAUTH_DIR: &str = "oauth";
 
-/// How long Lisa has to finish in the browser.
+/// How long the user has to finish in the browser.
 pub const BROWSER_LIMIT: Duration = Duration::from_mins(5);
 
 /// An access token that ends sooner than this is renewed first.
@@ -87,7 +87,7 @@ pub struct Tools<'a> {
     pub curl: PathBuf,
     /// Opens the address in the browser.
     pub open: &'a dyn Fn(&str) -> Result<(), String>,
-    /// How long to wait for Lisa to finish signing in in the browser.
+    /// How long to wait for the user to finish signing in in the browser.
     pub browser_limit: Duration,
 }
 
@@ -254,7 +254,7 @@ pub fn login(credentials_dir: &Path, server: &str, url: &str, tools: &Tools) -> 
     )
 }
 
-/// Opens `address` in Lisa's browser (see `harness_platform::open`).
+/// Opens `address` in the user's browser (see `harness_platform::open`).
 pub fn open_in_browser(address: &str) -> Result<(), String> {
     harness_platform::open::url(address)
 }

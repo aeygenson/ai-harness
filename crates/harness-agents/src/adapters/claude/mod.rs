@@ -1,4 +1,4 @@
-//! Runs a role with Claude Code (`claude -p`), isolated from Lisa's own setup.
+//! Runs a role with Claude Code (`claude -p`), isolated from the user's own setup.
 //!
 //! Isolation (docs/design.md, section 5.1):
 //! - an empty environment plus a short whitelist, so API keys from the terminal
@@ -120,7 +120,7 @@ impl ClaudeCode {
     }
 
     /// The role's servers as a temporary file outside the project, readable
-    /// only by Lisa. Secrets are in it, so it is not passed as an argument;
+    /// only by the user. Secrets are in it, so it is not passed as an argument;
     /// the file is deleted when the returned value is dropped.
     fn write_mcp_config(&self, role: Role) -> std::io::Result<tempfile::NamedTempFile> {
         let servers: serde_json::Map<String, serde_json::Value> = self

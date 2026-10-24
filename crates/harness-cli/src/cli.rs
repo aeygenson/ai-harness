@@ -69,7 +69,7 @@ pub(crate) enum Command {
         #[command(subcommand)]
         command: TaskCommand,
     },
-    /// Run roles until the task is done or needs Lisa. A task stopped in the
+    /// Run roles until the task is done or needs the user. A task stopped in the
     /// TUI continues with the role that was stopped (or was next). A done
     /// task of a project on GitHub is pushed and becomes a pull request.
     Run { task_id: String },

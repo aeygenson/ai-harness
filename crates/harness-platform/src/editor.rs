@@ -1,4 +1,4 @@
-//! Opening a file in Lisa's editor: to edit it and wait until she closes it,
+//! Opening a file in the user's editor: to edit it and wait until they close it,
 //! or only to look at it (Zed opens it and the TUI goes on).
 //!
 //! Zed first (`zed --wait`), then `$VISUAL`, `$EDITOR`, and last the

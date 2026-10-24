@@ -48,7 +48,7 @@ pub fn prompt(
     let tasks: Vec<&str> = stats.tasks.iter().map(|t| t.task_id.as_str()).collect();
     let mut text = format!(
         "You are the Retrospective of a team of AI roles: architect, developer, \
-         tester and security; \"human\" is Lisa, who leads the team. Your job is to \
+         tester and security; \"human\" is the user, who leads the team. Your job is to \
          learn from finished work and propose better skills for the roles.\n\n\
          Statistics the harness counted for {scope}:\n\n{stats}\n\
          The full history is in {runs}/<task>/ for {tasks}: task.md is the task; \
@@ -118,7 +118,7 @@ pub fn prompt(
         text,
         "\nYou may propose two kinds of change. A skill: a new skill file, a new \
          text for an existing one, and giving a skill to a role. A task for the \
-         team: a short request (like a task Lisa would write) that the architect, \
+         team: a short request (like a task the user would write) that the architect, \
          developer, tester and security then do; use it for a check, a test or a \
          piece of tooling the project needs. You cannot propose changes to role \
          prompts, permissions, agents, models, MCP servers or plugins; write such \
@@ -126,7 +126,7 @@ pub fn prompt(
          on. Few good proposals are better than many; propose nothing if nothing is \
          needed. A skill or a task should be short and concrete.\n\n\
          Do not change any file of the project. Write exactly two files into {out}:\n\
-         - {RETRO_MD}: a short retrospective for Lisa with these sections: What \
+         - {RETRO_MD}: a short retrospective for the user with these sections: What \
          went well; What went badly (repeated problems first); Checks; Access to \
          information; Other ideas. Leave a section out when you have nothing for it.\n\
          - {PROPOSALS_JSON}: your proposals, exactly in this format (JSON, these \

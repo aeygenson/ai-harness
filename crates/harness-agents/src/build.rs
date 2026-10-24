@@ -18,7 +18,7 @@ use crate::install::credentials::{self, Secret};
 use crate::role_settings::RoleSettings;
 use crate::{Antigravity, AnyAgent, ClaudeCode, Codex, Dsh, Team};
 
-/// Why an agent cannot be built, in words for Lisa: a missing login or a
+/// Why an agent cannot be built, in words for the user: a missing login or a
 /// broken setting.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BuildError(pub String);
@@ -101,7 +101,7 @@ pub struct AgentChoice<'a> {
 }
 
 /// Builds the agent `choice` names, with the role's model, effort, MCP
-/// servers and plugins. Fails with a message for Lisa when the agent's
+/// servers and plugins. Fails with a message for the user when the agent's
 /// login is missing.
 pub fn build_agent(
     config: &Config,

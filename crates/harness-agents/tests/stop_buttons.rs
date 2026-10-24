@@ -1,4 +1,4 @@
-//! Lisa's stop buttons, through the whole run loop with the mock agent:
+//! The user's stop buttons, through the whole run loop with the mock agent:
 //! «Stop after this step», «Stop now», and what happens after them.
 
 use std::collections::BTreeMap;
@@ -38,7 +38,7 @@ fn developer_working() -> (TempDir, Repo, TaskStore, TaskState) {
     (dir, repo, store, state)
 }
 
-/// Runs the roles with `stop` as Lisa's stop buttons.
+/// Runs the roles with `stop` as the user's stop buttons.
 async fn run_with(
     repo: &Repo,
     store: &TaskStore,
@@ -86,10 +86,10 @@ fn half_done() -> Vec<(String, String)> {
 }
 
 fn stopped(role: Role) -> StopReason {
-    StopReason::WaitingForHuman(WaitReason::StoppedByLisa(role))
+    StopReason::WaitingForHuman(WaitReason::StoppedByUser(role))
 }
 
-/// The developer finishes and asks Lisa, which ends the run.
+/// The developer finishes and asks the user, which ends the run.
 fn developer_finishes() -> MockStep {
     MockStep::finish_writing(
         Verdict::NeedsHuman,
@@ -128,7 +128,7 @@ async fn stop_after_step_keeps_the_step_and_stops_before_the_next_role() {
     assert_eq!(agent.calls(), [Role::Developer]);
     assert_eq!(
         state.stage,
-        Stage::WaitingForHuman(WaitReason::StoppedByLisa(Role::Tester))
+        Stage::WaitingForHuman(WaitReason::StoppedByUser(Role::Tester))
     );
     assert_eq!(
         TaskStore::open(&repo.runs_dir(), "task-001").unwrap().1,
@@ -140,7 +140,7 @@ async fn stop_after_step_keeps_the_step_and_stops_before_the_next_role() {
     );
     assert_eq!(repo.changed_files().unwrap(), Vec::<String>::new());
     let log = git_log(&repo);
-    assert_eq!(log[0], "task-001 round 1: stopped by Lisa, tester next");
+    assert_eq!(log[0], "task-001 round 1: stopped by the user, tester next");
     assert!(log[1].contains("developer (approved)"), "{log:?}");
 
     // «Continue»: the tester (the role that was next) goes on.
@@ -169,7 +169,7 @@ async fn stop_after_step_does_not_change_a_stop_the_step_itself_asks_for() {
 }
 
 #[tokio::test]
-async fn stop_now_keeps_the_unfinished_work_and_waits_for_lisa() {
+async fn stop_now_keeps_the_unfinished_work_and_waits_for_the_user() {
     let (_dir, repo, store, mut state) = developer_working();
     let agent = MockAgent::new()
         .then(Role::Developer, MockStep::StopNow(half_done()))
@@ -183,7 +183,7 @@ async fn stop_now_keeps_the_unfinished_work_and_waits_for_lisa() {
     assert_eq!(agent.calls(), [Role::Developer]);
     assert_eq!(
         state.stage,
-        Stage::WaitingForHuman(WaitReason::StoppedByLisa(Role::Developer))
+        Stage::WaitingForHuman(WaitReason::StoppedByUser(Role::Developer))
     );
     assert_eq!(
         repo.changed_files().unwrap(),
@@ -197,10 +197,13 @@ async fn stop_now_keeps_the_unfinished_work_and_waits_for_lisa() {
         .exists());
     assert_eq!(store.failures().unwrap(), Vec::new());
     let log = git_log(&repo);
-    assert_eq!(log[0], "task-001 round 1: stopped by Lisa, developer next");
-    assert!(log[1].contains("developer stopped by Lisa"), "{log:?}");
+    assert_eq!(
+        log[0],
+        "task-001 round 1: stopped by the user, developer next"
+    );
+    assert!(log[1].contains("developer stopped by the user"), "{log:?}");
 
-    // Lisa's note to the stopped role: it continues from its work.
+    // The user's note to the stopped role: it continues from its work.
     record_human_decision(
         &repo,
         &store,
@@ -259,7 +262,7 @@ async fn a_note_to_another_role_stops_on_the_stopped_roles_changes() {
     let reason = run_with(&repo, &store, &mut state, &agent, &StopRequest::new()).await;
 
     // The architect does not start on the developer's half-done files; they
-    // and their record stay for Lisa to commit or remove.
+    // and their record stay for the user to commit or remove.
     assert!(
         matches!(reason, StopReason::DirtyWorkingTree(_)),
         "{reason:?}"
@@ -270,7 +273,7 @@ async fn a_note_to_another_role_stops_on_the_stopped_roles_changes() {
 }
 
 #[tokio::test]
-async fn stop_now_with_forbidden_changes_leaves_them_for_lisa() {
+async fn stop_now_with_forbidden_changes_leaves_them_for_the_user() {
     let (_dir, repo, store, mut state) = developer_working();
     state.stage = Stage::Working(Role::Security);
     let agent = MockAgent::new().then(
@@ -333,7 +336,7 @@ async fn a_stopped_task_with_unfinished_work_is_not_finished() {
     assert_eq!(state, before);
     assert_eq!(store.history().unwrap(), Vec::new());
 
-    // Once Lisa removed the files herself, the task may be finished.
+    // Once the user removed the files themselves, the task may be finished.
     repo.discard_changes().unwrap();
     record_human_decision(
         &repo,

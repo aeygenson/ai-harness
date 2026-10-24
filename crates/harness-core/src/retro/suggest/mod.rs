@@ -6,8 +6,8 @@
 //! with git, just as it does for the roles. It gets the read-only rules of the
 //! security role, and no MCP servers, plugins or skills of its own.
 //!
-//! The agent writes `retro.md` (for Lisa) and `proposals.json` (see
-//! `crate::retro::proposals`). Nothing changes until Lisa picks proposals with
+//! The agent writes `retro.md` (for the user) and `proposals.json` (see
+//! `crate::retro::proposals`). Nothing changes until the user picks proposals with
 //! `harness retro apply <NNN> <ids>`; applied ids are kept in `applied.json`.
 
 mod apply;
@@ -33,11 +33,11 @@ use crate::text;
 pub use apply::apply;
 pub use prompt::{past_settings, prompt};
 
-/// The agent's report for Lisa, saved in the retrospective folder.
+/// The agent's report for the user, saved in the retrospective folder.
 pub const RETRO_MD: &str = "retro.md";
 /// The proposed skill changes (see `crate::retro::proposals`).
 pub const PROPOSALS_JSON: &str = "proposals.json";
-/// The ids of the proposals Lisa has applied (see [`Applied`]).
+/// The ids of the proposals the user has applied (see [`Applied`]).
 pub const APPLIED_JSON: &str = "applied.json";
 /// The agent's output, saved even when it fails.
 pub const AGENT_LOG: &str = "agent.log";
@@ -125,7 +125,7 @@ pub struct Suggestions {
     pub proposals: ProposalsFile,
 }
 
-/// `applied.json`: which proposals of one retrospective Lisa applied.
+/// `applied.json`: which proposals of one retrospective the user applied.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Applied {
     /// The applied proposal ids, sorted, each listed once.
@@ -233,7 +233,7 @@ pub async fn suggest<A: AgentRunner>(
     let proposals = match ProposalsFile::parse(&json, &harness_dir, config) {
         Ok(proposals) => proposals,
         Err(error) => {
-            // Keep what the agent wrote, so Lisa can see what was wrong.
+            // Keep what the agent wrote, so the user can see what was wrong.
             write(&retro_dir.join("proposals.rejected.json"), &json)?;
             let rejected = retro_dir.join("proposals.rejected.json");
             repo.commit_paths(
@@ -280,7 +280,7 @@ fn run_error(end: &RunEnd) -> Option<SuggestError> {
         RunEnd::Failed(message) | RunEnd::TimedOut(message) => {
             Some(SuggestError::AgentFailed(text::safe_line(message, 500)))
         }
-        RunEnd::StoppedByLisa => Some(SuggestError::AgentFailed(
+        RunEnd::StoppedByUser => Some(SuggestError::AgentFailed(
             "the agent was stopped".to_string(),
         )),
     }
@@ -602,7 +602,7 @@ mod tests {
             }
             other => panic!("{other:?}"),
         }
-        // The next run refuses to start until Lisa looks at the changes.
+        // The next run refuses to start until the user looks at the changes.
         let agent = FakeAgent::writing("x", "{\"proposals\": []}");
         assert!(matches!(run(agent), Err(SuggestError::Dirty(_))));
     }
@@ -638,7 +638,7 @@ mod tests {
         assert!(!repo.root().join("package.json").exists());
     }
 
-    const ORIGIN: &str = "retro 001, approved by Lisa";
+    const ORIGIN: &str = "retro 001, approved by the user";
 
     #[test]
     fn apply_writes_skills_and_roles_only_for_the_chosen_ids() {

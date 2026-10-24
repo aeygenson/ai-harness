@@ -163,7 +163,7 @@ enum PluginJob {
 struct EditJob {
     name: String,
     path: PathBuf,
-    /// The file is a fresh copy of the built-in skill: if Lisa changes
+    /// The file is a fresh copy of the built-in skill: if the user changes
     /// nothing, it is deleted again.
     copied: bool,
     /// What is edited: a skill, a plugin folder, a retrospective.
@@ -222,7 +222,7 @@ pub fn run(start: &Path) -> Result<()> {
     // A pasted text arrives as one event, so its line breaks do not send it.
     execute!(io::stdout(), EnableMouseCapture, EnableBracketedPaste)?;
     let result = app::terminal::event_loop(&mut terminal, &mut app, &stop);
-    // When Lisa quit, the shell comes back first and the agents stop after.
+    // When the user quit, the shell comes back first and the agents stop after.
     // Otherwise the window may be gone and giving the terminal back fails, so
     // the agents are stopped first (dropping the app does that). Rust
     // remembers whether `app` was moved here and drops it at the end if not.

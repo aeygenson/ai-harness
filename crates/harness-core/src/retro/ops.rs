@@ -2,7 +2,7 @@
 //!
 //! The steps are the same for both: count the statistics and commit them
 //! (`save_stats`), let the `[retro]` agent read the history
-//! (`suggest::suggest`), and later apply the proposals Lisa picks
+//! (`suggest::suggest`), and later apply the proposals the user picks
 //! (`apply`). `list` reads what was saved, newest first.
 
 use std::fs;
@@ -72,7 +72,7 @@ pub struct RetroInfo {
     pub scope: Option<Scope>,
     /// The day it was last committed, `2026-10-02`.
     pub date: Option<String>,
-    /// What the agent wrote (and Lisa may have edited), if it ran.
+    /// What the agent wrote (and the user may have edited), if it ran.
     pub retro: Option<String>,
     /// The text of `stats.md`; `None` when it cannot be read.
     pub stats: Option<String>,
@@ -226,7 +226,7 @@ pub fn apply(repo: &Repo, dir: &Path, ids: &[u32]) -> Result<Vec<u32>, OpsError>
         .map(|day| format!(" of {day}"))
         .unwrap_or_default();
     if !skills.is_empty() {
-        let origin = format!("retro {number}{made}, approved by Lisa");
+        let origin = format!("retro {number}{made}, approved by the user");
         let mut paths = suggest::apply(&harness_dir, &found.proposals, &skills, &origin)?;
         paths.push(Applied::add(dir, &skills)?);
         let refs: Vec<&Path> = paths.iter().map(PathBuf::as_path).collect();
@@ -374,7 +374,7 @@ mod tests {
         let text = fs::read_to_string(&skill).unwrap();
         let header = text.lines().nth(1).unwrap();
         assert!(header.starts_with("origin: retro 002 of 20"), "{text}");
-        assert!(header.ends_with(", approved by Lisa"), "{text}");
+        assert!(header.ends_with(", approved by the user"), "{text}");
         let toml = fs::read_to_string(repo.root().join(".harness/harness.toml")).unwrap();
         assert!(toml.contains("empty-input"), "{toml}");
         assert_eq!(list(&repo)[0].applied, [1]);

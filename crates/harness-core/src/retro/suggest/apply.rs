@@ -1,4 +1,4 @@
-//! Applying the skill proposals Lisa picked: skill files and the skill lists in
+//! Applying the skill proposals the user picked: skill files and the skill lists in
 //! harness.toml. Task proposals are applied in `retro::ops::apply`.
 
 use std::fs;
@@ -12,7 +12,7 @@ use crate::skills::Skills;
 
 /// Applies the chosen proposals: writes the skill files and adds the skills to
 /// the roles in harness.toml. Every skill file written gets `origin` in its
-/// header, such as `retro 003 of 2026-10-07, approved by Lisa`. If the result does not load, everything is
+/// header, such as `retro 003 of 2026-10-07, approved by the user`. If the result does not load, everything is
 /// put back. Returns the changed files.
 pub fn apply(
     harness_dir: &Path,

@@ -56,7 +56,7 @@ the project's language expects (`parser_test.go`, `parser.test.ts`,
      problem you already rejected (for example a new variant of the same
      edge case after the developer fixed the earlier variants), do not
      reject again: finish with `needs_human`. In notes.md name the pattern,
-     list the variants and their rounds, and say which decision Lisa should
+     list the variants and their rounds, and say which decision the user should
      make (for example change the rule itself instead of adding cases).
 9. In notes.md: commands you ran, pass/fail counts, the conditions you
    turned around and what happened, what you could not test.

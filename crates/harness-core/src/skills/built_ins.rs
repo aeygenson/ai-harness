@@ -58,7 +58,7 @@ pub fn agent_note(agent: AgentKind) -> &'static str {
 
 /// The base of a role on `agent`: always in its prompt, never chosen.
 pub fn base_names(role: Role, agent: AgentKind) -> Vec<&'static str> {
-    // Each AI role's base skill has the role's own name; Lisa has none.
+    // Each AI role's base skill has the role's own name; the user has none.
     let own = (role != Role::Human).then(|| role.as_str());
     ["common"]
         .into_iter()

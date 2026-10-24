@@ -3,7 +3,7 @@
 //! `harness run`, in a thread with its own small tokio runtime. What the agent
 //! prints comes back line by line for the live log.
 //!
-//! Lisa's stop buttons reach the run through a [`StopRequest`] the screen and
+//! The user's stop buttons reach the run through a [`StopRequest`] the screen and
 //! the run share (see `harness_core::task::stop_request`): the run loop reads
 //! it before each role, the agent's process while the agent works.
 
@@ -36,15 +36,15 @@ use super::live_log::LiveLog;
 /// Builds the agents of the project: `build_team`, or mock agents in tests.
 pub type Builder = fn(&Config, &Path) -> Result<Team, BuildError>;
 
-/// What Lisa sent.
+/// What the user sent.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Request {
     /// A new task with this description; the architect starts.
     New(String),
-    /// Lisa's decision on a waiting task; then the roles run, unless it is done.
+    /// The user's decision on a waiting task; then the roles run, unless it is done.
     Decide {
         task: String,
-        /// Where the task stood when Lisa decided. The list is read from the
+        /// Where the task stood when the user decided. The list is read from the
         /// branch checked out, which may hold an old copy of a task that has
         /// moved on in its own branch; then the decision is refused.
         seen: Stage,
@@ -62,7 +62,7 @@ pub enum Request {
     Merge(String),
 }
 
-/// The model and level Lisa chose for one role for this launch only;
+/// The model and level the user chose for one role for this launch only;
 /// `harness.toml` stays as it is.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RunChoice {
@@ -153,7 +153,7 @@ struct Job {
     request: Request,
     choice: Option<RunChoice>,
     builder: Builder,
-    /// Lisa's stop buttons, shared with the screen.
+    /// The user's stop buttons, shared with the screen.
     stop: StopRequest,
 }
 
@@ -179,9 +179,9 @@ pub struct Running {
     pub task: Option<String>,
     /// The work checked out the task's branch; reset by whoever reacts.
     pub switched_branch: bool,
-    /// Lisa's stop buttons for this run; `None` when it runs no roles.
+    /// The user's stop buttons for this run; `None` when it runs no roles.
     pub stop: Option<StopRequest>,
-    /// When Lisa started the run: its first role starts then.
+    /// When the user started the run: its first role starts then.
     pub started: SystemTime,
     /// Kept to stop the agents when this is dropped.
     _background: Background,
@@ -254,8 +254,8 @@ fn work(job: Job, events: &Sender<Event>, stop: oneshot::Receiver<()>) -> Result
     let text = |e: &dyn std::fmt::Display| e.to_string();
     let repo = Repo::open(root).map_err(|e| text(&e))?;
     // An existing task's branch first: its settings are the ones to use, and
-    // Lisa's decision and the roles' work are committed there. A merge stays
-    // where Lisa is: it changes the folder only once everything is checked,
+    // the user's decision and the roles' work are committed there. A merge stays
+    // where the user is: it changes the folder only once everything is checked,
     // and then it moves to the main branch.
     if let Request::Decide { task, .. } | Request::Continue(task) | Request::Publish(task) =
         &request
@@ -311,7 +311,7 @@ fn work(job: Job, events: &Sender<Event>, stop: oneshot::Receiver<()>) -> Result
         }
         Request::Continue(task) => {
             let (store, mut state) = TaskStore::open(&runs, &task).map_err(|e| text(&e))?;
-            // A task Lisa stopped goes on with the role she stopped.
+            // A task the user stopped goes on with the role they stopped.
             orchestrator::continue_stopped(&repo, &store, &mut state).map_err(|e| text(&e))?;
             (store, state)
         }
@@ -367,7 +367,7 @@ fn merge_waiting(merging: bool, mut stop: oneshot::Receiver<()>) -> Option<Waiti
     })
 }
 
-/// `harness.toml` with the model and level Lisa chose for this launch.
+/// `harness.toml` with the model and level the user chose for this launch.
 fn load_config(harness_dir: &Path, choice: Option<RunChoice>) -> Result<Config, String> {
     let mut config = Config::load(harness_dir).map_err(|e| e.to_string())?;
     if let Some(choice) = choice {

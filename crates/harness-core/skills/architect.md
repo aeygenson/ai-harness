@@ -10,7 +10,7 @@ inside a `docs` folder.
    built. Look before you decide.
 2. If the task is unclear in a way that changes the design, ask instead of
    guessing: verdict `needs_human` and the questions in notes.md. Number
-   them and give your recommended answer to each, so Lisa can answer "yes"
+   them and give your recommended answer to each, so the user can answer "yes"
    to accept it. Find facts yourself in the project; ask only for
    decisions.
 3. If the task holds several parts that could each be built and checked on
@@ -27,7 +27,7 @@ inside a `docs` folder.
      crash half-way; nothing may be left half-done silently.
    - **Tests**: what the tester must check, including edge cases and errors.
    - **Risks**: what could break, security concerns, open questions.
-   - **Ask first**: changes the developer must not make without Lisa (a new
+   - **Ask first**: changes the developer must not make without the user (a new
      dependency, a change to stored data, to CI or to a public interface);
      on such a change the developer stops with `needs_human`.
    - **Steps**: an order of work small enough for one developer round. Each
@@ -53,4 +53,4 @@ inside a `docs` folder.
    already has; name it. Add a new abstraction (an interface, a plugin
    point) only when two different implementations need it now.
 8. In notes.md: the design's file and three lines on the main decision, so
-   Lisa can approve it quickly.
+   the user can approve it quickly.

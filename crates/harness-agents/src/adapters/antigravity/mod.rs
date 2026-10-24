@@ -1,4 +1,4 @@
-//! Runs a role with Google Antigravity CLI (`agy -p`), isolated from Lisa's own setup.
+//! Runs a role with Google Antigravity CLI (`agy -p`), isolated from the user's own setup.
 //!
 //! Isolation (docs/design.md, section 5.4):
 //! - an empty environment plus a short whitelist (see `process`), so no
@@ -7,7 +7,7 @@
 //!   temporary folder outside the project, deleted after the role. It holds a
 //!   copy of the login saved by the Agents tab («Sign in») and our
 //!   `settings.json` and `mcp_config.json`, and nothing else: no MCP servers,
-//!   plugins or skills of Lisa's (only the role's own MCP servers from
+//!   plugins or skills of the user's (only the role's own MCP servers from
 //!   harness.toml), and no history of earlier runs;
 //! - the login is not one file but a few of `agy`'s own files, so the whole
 //!   saved folder is copied, without logs and old conversations. A run does
@@ -59,7 +59,7 @@ const NOT_COPIED: &[&str] = &[
 #[derive(Debug, Clone)]
 pub struct Antigravity {
     program: PathBuf,
-    /// `~/.harness/credentials/antigravity`: the `HOME` Lisa logged in with.
+    /// `~/.harness/credentials/antigravity`: the `HOME` the user logged in with.
     auth_dir: PathBuf,
     /// Model, effort, MCP servers and time limit of each role (plugins are not used).
     settings: RoleSettings,
@@ -124,7 +124,7 @@ impl Antigravity {
             settings(role),
         )?;
         // Always written, so a server from the saved login never gets through.
-        // The temporary HOME is readable only by Lisa, so secrets may be here.
+        // The temporary HOME is readable only by the user, so secrets may be here.
         let mcp_config = home.path().join(MCP_CONFIG);
         if let Some(dir) = mcp_config.parent() {
             fs::create_dir_all(dir)?;
@@ -321,7 +321,7 @@ mod tests {
         assert_eq!(deny(Role::Developer), commands(&for_all));
         assert_eq!(deny(Role::Tester), commands(&for_all));
         assert_eq!(deny(Role::Security), commands(&readers));
-        // Lisa is never run as an agent; if she were, she would be a reader.
+        // The user is never run as an agent; if they were, they would be a reader.
         assert_eq!(deny(Role::Human), commands(&readers));
     }
 
@@ -427,7 +427,7 @@ mod tests {
 
         let saved = tempfile::tempdir().unwrap();
         fs::create_dir_all(saved.path().join(SETTINGS_DIR)).unwrap();
-        // A server Lisa added to her own login must not reach any role.
+        // A server the user added to their own login must not reach any role.
         fs::create_dir_all(saved.path().join(".gemini/config")).unwrap();
         fs::write(
             saved.path().join(MCP_CONFIG),

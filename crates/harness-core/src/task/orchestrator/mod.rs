@@ -18,7 +18,7 @@
 //! 3. If the role's work is accepted, everything is committed:
 //!    `task-001 round 2: tester (rejected) - ...`. A failed attempt is thrown away.
 //!
-//! Lisa can stop a run (see [`manual`]): after the running role's step, or at
+//! The user can stop a run (see [`manual`]): after the running role's step, or at
 //! once, keeping the role's unfinished changes like a time limit does.
 
 mod accept;
@@ -61,7 +61,7 @@ use changes::{after_failure, check_changes, stop_at_limit, AfterFailure, RoleAt}
 use guard::Before;
 use job::prepare_job;
 
-/// How many times one role may try before the harness gives up and asks Lisa.
+/// How many times one role may try before the harness gives up and asks the user.
 pub const ATTEMPTS_PER_ROLE: u32 = 2;
 
 /// A role's change bigger than this (one file, or the new files of one folder)
@@ -106,7 +106,7 @@ pub struct Project<'a> {
     pub skills: &'a Skills,
     /// What each agent's `--version` said, for the steps' manifests.
     pub agent_versions: &'a BTreeMap<AgentKind, String>,
-    /// Lisa's stop buttons (see [`manual`]); a new [`StopRequest`] when
+    /// The user's stop buttons (see [`manual`]); a new [`StopRequest`] when
     /// nobody can press them.
     pub stop: &'a StopRequest,
 }
@@ -142,7 +142,7 @@ pub struct RunSetup<'a> {
     pub watched: &'a Watched,
     /// The settings and versions the steps' manifests record.
     pub agents: AgentFacts<'a>,
-    /// Lisa's stop buttons (see [`manual`]).
+    /// The user's stop buttons (see [`manual`]).
     pub stop: &'a StopRequest,
 }
 
@@ -172,7 +172,7 @@ pub async fn run_watching<A: AgentRunner>(
         // Code left in `info/exclude` would hide files from it.
         agent_stubs::clear_stub_block(repo)?;
         // Claude Code's empty stub files an earlier role left (for example
-        // after a stop by the tripwire) are not Lisa's changes. Files of
+        // after a stop by the tripwire) are not the user's changes. Files of
         // recorded unfinished work stay: an empty one there is the role's.
         agent_stubs::remove_leftover_stubs(repo, &changes::recorded_files(store))?;
         // A limit stopped this role's last run in this round: its unfinished
@@ -205,13 +205,13 @@ pub async fn run_watching<A: AgentRunner>(
             }
             match &outcome.end {
                 RunEnd::Succeeded => {}
-                RunEnd::UsageLimit | RunEnd::TimedOut(_) | RunEnd::StoppedByLisa => {
+                RunEnd::UsageLimit | RunEnd::TimedOut(_) | RunEnd::StoppedByUser => {
                     failure_logs.push(manual::save_stop_log(store, state, role, &outcome)?);
                     let at = RoleAt::new(repo, store, state, role);
                     let stop = stop_at_limit(at, &outcome.end, &failure_logs)?;
-                    // «Stop now»: the kept work is recorded; the task waits for Lisa.
-                    if stop == StopReason::WaitingForHuman(WaitReason::StoppedByLisa(role)) {
-                        return manual::wait_for_lisa(repo, store, state, role);
+                    // «Stop now»: the kept work is recorded; the task waits for the user.
+                    if stop == StopReason::WaitingForHuman(WaitReason::StoppedByUser(role)) {
+                        return manual::wait_for_user(repo, store, state, role);
                     }
                     return Ok(stop);
                 }

@@ -1,5 +1,5 @@
 //! What every console agent adapter shares: a clean environment, starting the
-//! program with the prompt on standard input, the time-out, Lisa's «Stop
+//! program with the prompt on standard input, the time-out, the user's «Stop
 //! now», and the log.
 
 use std::io::ErrorKind;
@@ -61,23 +61,23 @@ pub struct Finished {
 /// [`failed`] reads it to report [`RunEnd::TimedOut`].
 const TIMED_OUT: &str = "timed out after";
 
-/// How [`run`] starts its message when Lisa pressed «Stop now»; [`failed`]
-/// reads it to report [`RunEnd::StoppedByLisa`].
-const STOPPED_BY_LISA: &str = "stopped by Lisa";
+/// How [`run`] starts its message when the user pressed «Stop now»; [`failed`]
+/// reads it to report [`RunEnd::StoppedByUser`].
+const STOPPED_BY_USER: &str = "stopped by the user";
 
-/// How often [`run`] looks whether Lisa pressed «Stop now». The button is
+/// How often [`run`] looks whether the user pressed «Stop now». The button is
 /// pressed in another thread; looking five times a second is quick enough
 /// for a person and costs nothing next to an agent's work.
 const STOP_CHECK_PAUSE: Duration = Duration::from_millis(200);
 
 /// Starts the command, writes `prompt` to its standard input and waits at most
-/// `timeout`, or until Lisa presses «Stop now» (`stop`). Each line the agent
+/// `timeout`, or until the user presses «Stop now» (`stop`). Each line the agent
 /// prints also goes to the live log (see [`set_live_log`]), with `secrets`
-/// hidden. `Err` holds a short explanation for Lisa.
+/// hidden. `Err` holds a short explanation for the user.
 ///
 /// The agent runs in its own process group and with a mark in its
 /// environment (`harness_platform::run_mark`). When it ends, times out, is
-/// stopped by Lisa, or the harness stops waiting (Ctrl+C), everything it
+/// stopped by the user, or the harness stops waiting (Ctrl+C), everything it
 /// started is stopped too: a test run, a build or a server it left in the
 /// background, even in another process group. Windows finds only what is
 /// still linked to the agent.
@@ -91,7 +91,7 @@ pub async fn run(
     let program = command.get_program().to_string_lossy().into_owned();
     // Pressed before the agent started (between two attempts): no need to start it.
     if stop.now() {
-        return Err(format!("{STOPPED_BY_LISA} before the agent started"));
+        return Err(format!("{STOPPED_BY_USER} before the agent started"));
     }
     harness_platform::process::own_group(&mut command);
     // Some agents (Codex) move their commands to process groups of their
@@ -144,7 +144,7 @@ pub async fn run(
     let waited = tokio::select! {
         waited = tokio::time::timeout(timeout, work) => waited,
         () = stop_now_pressed(stop) => {
-            return Err(format!("{STOPPED_BY_LISA}; the agent was stopped"));
+            return Err(format!("{STOPPED_BY_USER}; the agent was stopped"));
         }
     };
     match waited {
@@ -161,7 +161,7 @@ pub async fn run(
     }
 }
 
-/// Ends once Lisa has pressed «Stop now». The request is a plain shared
+/// Ends once the user has pressed «Stop now». The request is a plain shared
 /// value (it lives in `harness-core`, which has no `tokio`), so it is looked
 /// at again every [`STOP_CHECK_PAUSE`].
 async fn stop_now_pressed(stop: &StopRequest) {
@@ -262,12 +262,12 @@ pub fn hide_secrets<'a>(
 pub fn failed(mut log: String, message: String) -> AgentOutcome {
     log.push_str(&message);
     log.push('\n');
-    // [`run`] reports its time limit and Lisa's «Stop now» as text, like
+    // [`run`] reports its time limit and the user's «Stop now» as text, like
     // every other error; the words it starts with tell them apart.
     let end = if message.starts_with(TIMED_OUT) {
         RunEnd::TimedOut(message)
-    } else if message.starts_with(STOPPED_BY_LISA) {
-        RunEnd::StoppedByLisa
+    } else if message.starts_with(STOPPED_BY_USER) {
+        RunEnd::StoppedByUser
     } else {
         RunEnd::Failed(message)
     };
@@ -288,7 +288,7 @@ pub fn run_end(done: bool, message: String, stderr: &str) -> RunEnd {
 }
 
 /// Agents report a used-up subscription only as text, so we look for the usual
-/// phrases. Pausing by mistake is harmless: Lisa just runs again.
+/// phrases. Pausing by mistake is harmless: the user just runs again.
 pub fn looks_like_usage_limit(text: &str) -> bool {
     let text = text.to_lowercase();
     [
@@ -320,12 +320,12 @@ mod tests {
         );
         let stopped = failed(
             String::new(),
-            format!("{STOPPED_BY_LISA}; the agent was stopped"),
+            format!("{STOPPED_BY_USER}; the agent was stopped"),
         );
 
         assert!(matches!(timed_out.end, RunEnd::TimedOut(_)));
         assert!(matches!(crashed.end, RunEnd::Failed(_)));
-        assert_eq!(stopped.end, RunEnd::StoppedByLisa);
+        assert_eq!(stopped.end, RunEnd::StoppedByUser);
         assert!(stopped.log.contains("the agent was stopped"));
         assert!(timed_out.log.contains("60 s"));
     }
@@ -520,7 +520,7 @@ mod tests {
         let stop = StopRequest::new();
         let button = stop.clone();
         let watched = pid_file.clone();
-        // Lisa presses «Stop now» from another thread, like the TUI does,
+        // The user presses «Stop now» from another thread, like the TUI does,
         // once the helper runs.
         let lisa = std::thread::spawn(move || {
             while std::fs::read_to_string(&watched).map_or(true, |pid| pid.trim().is_empty()) {
@@ -535,8 +535,8 @@ mod tests {
             .unwrap_err();
         lisa.join().unwrap();
 
-        assert!(error.starts_with(STOPPED_BY_LISA), "{error}");
-        assert_eq!(failed(String::new(), error).end, RunEnd::StoppedByLisa);
+        assert!(error.starts_with(STOPPED_BY_USER), "{error}");
+        assert_eq!(failed(String::new(), error).end, RunEnd::StoppedByUser);
         assert!(start.elapsed() < Duration::from_secs(20));
         assert!(!still_running(&pid_file));
     }
@@ -559,7 +559,7 @@ mod tests {
         .await
         .unwrap_err();
 
-        assert!(error.starts_with(STOPPED_BY_LISA), "{error}");
+        assert!(error.starts_with(STOPPED_BY_USER), "{error}");
         assert!(!started.exists());
     }
 

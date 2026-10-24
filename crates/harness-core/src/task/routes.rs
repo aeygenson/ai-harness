@@ -19,7 +19,7 @@ pub fn is_allowed(workflow: Workflow, role: Role, verdict: Verdict, next: NextSt
     allowed_next(workflow, role, verdict).contains(&next)
 }
 
-/// The routes of [`Workflow::Task`]: architect, Lisa, developer, tester, security.
+/// The routes of [`Workflow::Task`]: architect, the user, developer, tester, security.
 #[expect(
     clippy::match_same_arms,
     reason = "a routing table: one arm per role and verdict is easier to check than merged arms"
@@ -28,7 +28,7 @@ fn task_routes(role: Role, verdict: Verdict) -> &'static [NextStep] {
     use NextStep as N;
 
     match (role, verdict) {
-        // Any AI role may stop and ask Lisa.
+        // Any AI role may stop and ask the user.
         (
             Role::Architect | Role::Developer | Role::Tester | Role::Security,
             Verdict::NeedsHuman,
@@ -46,7 +46,7 @@ fn task_routes(role: Role, verdict: Verdict) -> &'static [NextStep] {
         (Role::Security, Verdict::Approved) => &[N::Done],
         (Role::Security, Verdict::Rejected) => &[N::To(Role::Developer), N::To(Role::Architect)],
 
-        // Lisa is the boss: she can send the work to any role, or finish it.
+        // The user is the boss: they can send the work to any role, or finish it.
         (Role::Human, Verdict::Approved) => &[
             N::To(Role::Architect),
             N::To(Role::Developer),
@@ -89,7 +89,7 @@ mod tests {
     }
 
     #[test]
-    fn architect_always_goes_to_lisa() {
+    fn architect_always_goes_to_the_user() {
         assert_eq!(
             allowed_next(Workflow::Task, Role::Architect, Verdict::Approved),
             &[NextStep::To(Role::Human)]

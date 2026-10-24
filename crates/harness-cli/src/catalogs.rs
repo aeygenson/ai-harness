@@ -1,7 +1,7 @@
 //! `harness marketplace ...` and `harness plugin ...`: plugin catalogs and
 //! copying plugins from them into the project.
 //!
-//! Catalogs are Lisa's, for all projects: the list is in
+//! Catalogs are the user's, for all projects: the list is in
 //! `~/.harness/marketplaces.toml`, the copies in `~/.harness/marketplaces/`.
 //! A plugin is always copied into the project (`.harness/plugins/<name>/`) and
 //! committed, so the agents only ever see what is in the project's git.

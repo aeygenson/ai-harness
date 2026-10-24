@@ -69,8 +69,8 @@ pub(crate) async fn until_stopped(
 }
 
 /// `harness run`: runs the roles one after another until the task is done
-/// or waits for Lisa, then says what to do next. A task Lisa stopped in the
-/// TUI continues with the role she stopped (or the one that was next).
+/// or waits for the user, then says what to do next. A task the user stopped in the
+/// TUI continues with the role they stopped (or the one that was next).
 pub(crate) async fn run(project: &Path, task_id: &str) -> Result<()> {
     let repo = open_repo(project)?;
     // First the task's branch: its settings and skills are the ones to use.
@@ -123,7 +123,7 @@ fn enter_branch(repo: &Repo, task_id: &str) -> Result<()> {
     Ok(())
 }
 
-/// Whom the role that asked for help suggests for Lisa's answer (its
+/// Whom the role that asked for help suggests for the user's answer (its
 /// handoff's `answer_to`); `None` when the run stopped for another reason.
 ///
 /// It is only a hint: if the history cannot be read, the stop message is
@@ -164,7 +164,7 @@ fn help_request_text(role: Role, task_id: &str, suggested: Option<&AnswerTo>) ->
     )
 }
 
-/// The message telling Lisa why the run stopped and which command comes next;
+/// The message telling the user why the run stopped and which command comes next;
 /// `suggested` is whom a role that asked for help suggests for the answer.
 fn explain(stop: &StopReason, task_id: &str, suggested: Option<&AnswerTo>) -> String {
     match stop {
@@ -180,8 +180,8 @@ fn explain(stop: &StopReason, task_id: &str, suggested: Option<&AnswerTo>) -> St
             "The round limit is reached. Decide who continues:\n  \
              harness approve {task_id} --to <role|done> --notes \"...\""
         ),
-        StopReason::WaitingForHuman(WaitReason::StoppedByLisa(role)) => {
-            stopped_by_lisa_text(*role, task_id)
+        StopReason::WaitingForHuman(WaitReason::StoppedByUser(role)) => {
+            stopped_by_user_text(*role, task_id)
         }
         StopReason::UsageLimitReached(role) => format!(
             "The subscription limit stopped the {role:?}. Its unfinished work is kept and comes \
@@ -243,8 +243,8 @@ fn explain(stop: &StopReason, task_id: &str, suggested: Option<&AnswerTo>) -> St
     }
 }
 
-/// What to say about a task Lisa stopped, with `role` the one that continues.
-fn stopped_by_lisa_text(role: Role, task_id: &str) -> String {
+/// What to say about a task the user stopped, with `role` the one that continues.
+fn stopped_by_user_text(role: Role, task_id: &str) -> String {
     format!(
         "You stopped {task_id}; the {role} continues next. Its unfinished changes, if any, \
          stay in the folder for it. Continue with:\n  harness run {task_id}\n\
@@ -254,7 +254,7 @@ fn stopped_by_lisa_text(role: Role, task_id: &str) -> String {
 }
 
 /// What `StopReason::HiddenChanges` says: git's files that were put back,
-/// and files outside the project Lisa should look at herself.
+/// and files outside the project the user should look at themselves.
 fn hidden_changes_text(role: Role, put_back: &[PathBuf], reported: &[PathBuf]) -> String {
     let list = |files: &[PathBuf]| -> String {
         let lines: Vec<String> = files.iter().map(|f| f.display().to_string()).collect();
@@ -279,7 +279,7 @@ fn hidden_changes_text(role: Role, put_back: &[PathBuf], reported: &[PathBuf]) -
     text
 }
 
-/// `harness approve` / `harness reject`: writes Lisa's decision as a handoff
+/// `harness approve` / `harness reject`: writes the user's decision as a handoff
 /// from the role `human`. Without `--to`, approved work goes where the task's
 /// workflow says (a design goes to the developer) and a role that asked for
 /// help gets the task back.
@@ -291,7 +291,7 @@ pub(crate) fn decide(
     notes: &str,
 ) -> Result<()> {
     let repo = open_repo(project)?;
-    // Lisa's decision is a commit too: it goes on the task's branch.
+    // The user's decision is a commit too: it goes on the task's branch.
     enter_branch(&repo, task_id)?;
     let (store, mut state) = open_task(&repo, task_id)?;
     // Rejecting starts a new round, and recorded unfinished work belongs to
@@ -309,7 +309,7 @@ pub(crate) fn decide(
                 NextStep::To(state.workflow.after_approval())
             }
             Stage::WaitingForHuman(
-                WaitReason::RoleAskedForHelp(role) | WaitReason::StoppedByLisa(role),
+                WaitReason::RoleAskedForHelp(role) | WaitReason::StoppedByUser(role),
             ) => NextStep::To(role),
             _ => bail!("say who continues with --to <role|done>"),
         },
@@ -327,8 +327,8 @@ pub(crate) fn status(project: &Path, task_id: &str) -> Result<()> {
         "{task_id}: round {} of {}, {:?}",
         state.round, state.max_rounds, state.stage
     );
-    if let Stage::WaitingForHuman(WaitReason::StoppedByLisa(role)) = state.stage {
-        println!("  stopped by Lisa; `harness run {task_id}` continues the {role}");
+    if let Stage::WaitingForHuman(WaitReason::StoppedByUser(role)) = state.stage {
+        println!("  stopped by the user; `harness run {task_id}` continues the {role}");
     }
     if let Some(page) = state.pull_request.as_ref().and_then(|p| p.page()) {
         println!("  pull request: {page}");
@@ -352,7 +352,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_decision_lands_on_the_task_branch_after_lisa_switched_away() {
+    fn a_decision_lands_on_the_task_branch_after_the_user_switched_away() {
         let dir = tempfile::tempdir().unwrap();
         let project = dir.path();
         projects::init(project).unwrap();
@@ -363,7 +363,7 @@ mod tests {
         repo.commit_all("on GitHub").unwrap();
         let base = repo.current_branch().unwrap().unwrap();
         new_task(project, "task-001", "Add a parser", false).unwrap();
-        // The architect is done and the design waits for Lisa.
+        // The architect is done and the design waits for the user.
         let (store, mut state) = open_task(&repo, "task-001").unwrap();
         state.stage = Stage::WaitingForHuman(WaitReason::ApproveDesign);
         let json = serde_json::to_string(&state).unwrap();
@@ -386,7 +386,7 @@ mod tests {
     }
 
     #[test]
-    fn hidden_changes_say_what_was_put_back_and_what_lisa_must_check() {
+    fn hidden_changes_say_what_was_put_back_and_what_the_user_must_check() {
         let text = hidden_changes_text(
             Role::Developer,
             &[PathBuf::from("/p/.git/hooks/pre-commit")],
@@ -402,7 +402,7 @@ mod tests {
 
     #[test]
     fn git_stops_say_what_changed_without_blaming_the_role() {
-        // Another program or Lisa's own git command can make these changes
+        // Another program or the user's own git command can make these changes
         // while a role runs, so the message must not say the role did it.
         let stops = [
             StopReason::GitConfigChanged(Role::Architect),
@@ -505,7 +505,7 @@ mod tests {
 
     #[test]
     fn a_stopped_task_says_how_to_continue_or_give_a_note() {
-        let stop = StopReason::WaitingForHuman(WaitReason::StoppedByLisa(Role::Developer));
+        let stop = StopReason::WaitingForHuman(WaitReason::StoppedByUser(Role::Developer));
 
         let text = explain(&stop, "task-001", None);
 
@@ -522,7 +522,7 @@ mod tests {
         new_task(project, "task-001", "Add a parser", false).unwrap();
         let repo = open_repo(project).unwrap();
         let (store, mut state) = open_task(&repo, "task-001").unwrap();
-        state.stage = Stage::WaitingForHuman(WaitReason::StoppedByLisa(Role::Developer));
+        state.stage = Stage::WaitingForHuman(WaitReason::StoppedByUser(Role::Developer));
         fs::write(store.state_file(), serde_json::to_string(&state).unwrap()).unwrap();
         // «Stop now» left the developer's half-done file, recorded.
         let record = r#"{"round":1,"role":"developer","files":[["half.rs",null]]}"#;

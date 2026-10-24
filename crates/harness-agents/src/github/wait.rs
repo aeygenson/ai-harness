@@ -1,7 +1,7 @@
 //! Waiting for GitHub before a merge: right after the last commits are sent,
 //! GitHub needs a while to start the checks (CI), run them and work out
 //! conflicts. «Merge pull request» asks again from time to time and merges
-//! once everything has passed, instead of making Lisa come back and choose
+//! once everything has passed, instead of making the user come back and choose
 //! it again.
 
 use std::fmt;

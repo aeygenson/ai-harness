@@ -25,7 +25,7 @@ impl RoleRules {
     pub(super) fn for_job(job: &RoleJob, servers: &[McpServer], plugins: &[Plugin]) -> Self {
         let read = ["Read(./**)", "Glob", "Grep"].map(String::from);
         let (mut tools, allowed) = if job.role == Role::Human {
-            // Lisa is never run as an agent.
+            // The user is never run as an agent.
             (vec![], vec![])
         } else {
             let inbox = format!("Edit({}/**)", rule_path(&job.project_dir, &job.output_dir));
@@ -55,7 +55,7 @@ impl RoleRules {
             denied: [
                 "Bash(git commit:*)",
                 "Bash(git push:*)",
-                // The GitHub CLI pushes and opens pull requests with Lisa's
+                // The GitHub CLI pushes and opens pull requests with the user's
                 // login; only the harness does that, after all checks.
                 "Bash(gh:*)",
                 "Edit(./.git/**)",

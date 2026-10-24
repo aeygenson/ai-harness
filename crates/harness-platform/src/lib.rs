@@ -3,7 +3,7 @@
 //!
 //! - [`home`]: the home folder and `~/.harness`;
 //! - [`env`]: the variables an agent inherits, and the ones a server may not set;
-//! - [`private`]: files and folders only Lisa can read;
+//! - [`private`]: files and folders only the user can read;
 //! - [`process`]: stopping a program with everything it started, or becoming it;
 //! - [`lock`]: a lock file only one running program holds (one TUI window);
 //! - [`run_mark`]: finding the processes an agent run started that left its group;

@@ -55,7 +55,7 @@ const MAX_TITLE_CHARS: usize = 120;
 /// leaves room for the task, the last lines and the note that steps were left out.
 const MAX_BODY_CHARS: usize = 55_000;
 
-/// The task's description is Lisa's own text, but may be long: at most this
+/// The task's description is the user's own text, but may be long: at most this
 /// much of it goes into the pull request.
 const MAX_TASK_CHARS: usize = 5_000;
 

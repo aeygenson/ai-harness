@@ -86,7 +86,7 @@ impl Before {
                 // No git here: something was changed that should not have
                 // been, and `git status` would run with whatever else the
                 // agent planted. A file that cannot be removed is shown to
-                // Lisa by the next run; the stop reason matters more.
+                // the user by the next run; the stop reason matters more.
                 Some(_) => self.stubs.remove_empty_without_git(),
                 // Only now, with nothing left that could make git run the
                 // agent's command (`git status` reads `~/.gitconfig` and its

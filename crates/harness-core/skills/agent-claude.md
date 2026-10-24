@@ -9,6 +9,6 @@ description: Working notes for Claude Code.
   (not the architect), use it for builds, tests and git, not for reading
   files.
 - Change files with Edit (small, exact edits); use Write only for new files.
-- You cannot ask questions while you work: when you need Lisa, finish with
+- You cannot ask questions while you work: when you need the user, finish with
   verdict `needs_human` and put the question in notes.md.
 - Tools the role may not use are switched off; do not try to get around that.

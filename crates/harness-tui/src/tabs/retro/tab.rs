@@ -15,7 +15,7 @@
 //! background: the statistics of every task, then the `[retro]` agent reads
 //! the whole history (every handoff, note and agent log) and writes its
 //! lessons and its proposals for the skills. The text opens in the editor for
-//! editing. Proposals Lisa chooses are applied after a confirmation.
+//! editing. Proposals the user chooses are applied after a confirmation.
 
 use std::collections::{BTreeSet, VecDeque};
 use std::path::{Path, PathBuf};

@@ -31,7 +31,7 @@
 //! - optional ones (`filesystem-attacks`, ...) are chosen like any skill.
 //!
 //! A project file with the same name replaces a built-in skill: that is how
-//! Lisa changes one. Its header remembers which built-in text it was copied
+//! the user changes one. Its header remembers which built-in text it was copied
 //! from (`builtin: <hash>`), so a newer built-in text can be pointed out.
 
 mod built_ins;
@@ -333,10 +333,10 @@ mod tests {
     }
 
     #[test]
-    fn every_role_says_whom_lisas_answer_goes_to() {
+    fn every_role_says_whom_the_users_answer_goes_to() {
         let common = built_ins::built_in("common").unwrap();
 
-        assert!(common.contains("## Whom Lisa's answer goes to"));
+        assert!(common.contains("## Whom the user's answer goes to"));
         assert!(common.contains("finish with `needs_human`, fill `answer_to`"));
         assert!(common.contains("change in the code: `developer`"));
         assert!(common.contains("the design or the scope: `architect`"));
@@ -360,7 +360,7 @@ mod tests {
         assert!(developer.contains("does not depend on an answer"));
         assert!(developer.contains("general rule or standing authority"));
         assert!(developer.contains("how you applied the rule"));
-        // The old limit stays: what nothing covers still goes to Lisa.
+        // The old limit stays: what nothing covers still goes to the user.
         assert!(developer.contains("nor such a rule covers still needs `needs_human`"));
     }
 

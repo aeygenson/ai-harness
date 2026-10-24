@@ -1,4 +1,4 @@
-//! Paths shown to Lisa and compared with git's always use `/`, as git does,
+//! Paths shown to the user and compared with git's always use `/`, as git does,
 //! so a path reads and compares the same on every system.
 
 use std::path::Path;

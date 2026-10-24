@@ -102,7 +102,7 @@ fn a_new_task_runs_the_architect_then_the_answer_goes_to_the_developer() {
     let (message, problem) = shown(&app);
     assert!(message.contains("the design is ready"), "{message}");
     assert!(!problem);
-    // The answer goes to the developer unless Lisa chooses otherwise.
+    // The answer goes to the developer unless the user chooses otherwise.
     let text = screen(&mut app);
     assert!(text.contains(" To: developer ▾ "), "{text}");
     assert!(text.contains(" Agent log "), "{text}");
@@ -652,7 +652,7 @@ fn a_decision_on_an_old_copy_of_a_task_on_another_branch_is_refused() {
         repo.current_branch().unwrap().as_deref(),
         Some("harness/task-001")
     );
-    // Nothing was decided twice: the last step is still Lisa's first answer.
+    // Nothing was decided twice: the last step is still the user's first answer.
     let steps = store.steps().unwrap();
     assert_eq!(steps.last().unwrap().handoff.summary, "go");
 }
@@ -823,7 +823,7 @@ fn a_question_from_security_without_issues_goes_back_to_security() {
     assert!(screen(&mut app).contains(" To: security ▾ "));
 }
 
-/// A task whose architect asked Lisa for help; `design` says whether its
+/// A task whose architect asked the user for help; `design` says whether its
 /// handoff lists a design it wrote.
 fn architect_asked(env: &Env, design: bool) -> (PathBuf, App) {
     let (root, mut app) = empty_project(env);
@@ -908,8 +908,8 @@ fn no_questions_link_while_a_role_works() {
     assert!(!screen(&mut app).contains("Questions:"));
 }
 
-/// A task whose tester asked Lisa for help, suggesting `answer_to` (role and
-/// reason) for her answer, or nothing.
+/// A task whose tester asked the user for help, suggesting `answer_to` (role and
+/// reason) for their answer, or nothing.
 fn tester_asked(env: &Env, answer_to: Option<(Role, &str)>) -> App {
     let (root, mut app) = empty_project(env);
     let repo = Repo::open(&root).unwrap();
@@ -1017,7 +1017,7 @@ fn developer_until_any_stop(
 }
 
 /// A developer that half-writes `src/half.rs` and works until «Stop now»;
-/// once that file is there, it finishes and asks Lisa.
+/// once that file is there, it finishes and asks the user.
 #[expect(
     clippy::unnecessary_wraps,
     reason = "a fake must match the `Builder` function type"
@@ -1061,7 +1061,7 @@ fn developer_next(env: &Env, builder: tabs::tasks::runner::Builder) -> (PathBuf,
 }
 
 #[test]
-fn stop_after_this_step_lets_the_role_finish_then_waits_for_lisa() {
+fn stop_after_this_step_lets_the_role_finish_then_waits_for_the_user() {
     use harness_core::task::{Stage, WaitReason};
     let env = Env::new();
     let (_root, mut app) = developer_next(&env, developer_until_any_stop);
@@ -1084,7 +1084,7 @@ fn stop_after_this_step_lets_the_role_finish_then_waits_for_lisa() {
     // The developer's step is done; the tester did not start.
     assert_eq!(
         stage(&app),
-        Stage::WaitingForHuman(WaitReason::StoppedByLisa(Role::Tester))
+        Stage::WaitingForHuman(WaitReason::StoppedByUser(Role::Tester))
     );
     let (message, problem) = shown(&app);
     assert!(
@@ -1146,7 +1146,7 @@ fn stop_now_asks_first_keeps_the_work_and_takes_a_note() {
 
     assert_eq!(
         stage(&app),
-        Stage::WaitingForHuman(WaitReason::StoppedByLisa(Role::Developer))
+        Stage::WaitingForHuman(WaitReason::StoppedByUser(Role::Developer))
     );
     assert!(shown(&app).0.contains("the developer is next"));
     let store_dir = root.join(".harness/runs/task-001");
@@ -1366,7 +1366,7 @@ fn each_step_shows_how_long_it_took_from_its_commits() {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_secs();
-    // Created two hours ago; the architect took 10 min, Lisa answered after
+    // Created two hours ago; the architect took 10 min, the user answered after
     // 30 s, the developer took 1 h 02 min 05 s.
     let created = now - 2 * 3_600;
     fs::create_dir_all(root.join(".harness/runs")).unwrap();
@@ -1402,7 +1402,7 @@ fn each_step_shows_how_long_it_took_from_its_commits() {
         text.contains("r1 developer  approved → tester     1 h 02 min done"),
         "{text}"
     );
-    // Lisa's own step has no time: only how long the task waited for her.
+    // The user's own step has no time: only how long the task waited for them.
     assert!(
         text.contains("r1 human      approved → developer             done"),
         "{text}"

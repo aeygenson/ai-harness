@@ -9,5 +9,5 @@ description: Working notes for Antigravity CLI (Gemini models).
 - Some commands and paths are blocked for this role; when one is refused,
   do not look for another way to run it: note it in notes.md.
 - Do not start servers or long-running processes; every command must finish.
-- You cannot ask questions while you work: when you need Lisa, finish with
+- You cannot ask questions while you work: when you need the user, finish with
   verdict `needs_human` and put the question in notes.md.

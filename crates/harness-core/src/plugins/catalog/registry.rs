@@ -1,4 +1,4 @@
-//! `~/.harness/marketplaces.toml`: the list of catalogs Lisa added.
+//! `~/.harness/marketplaces.toml`: the list of catalogs the user added.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -19,7 +19,7 @@ pub struct CatalogConfig {
     pub local: bool,
 }
 
-/// `~/.harness/marketplaces.toml`: the catalogs Lisa added, by name.
+/// `~/.harness/marketplaces.toml`: the catalogs the user added, by name.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Registry {
     /// The `[marketplaces.<name>]` tables: each catalog's name and how it was added.

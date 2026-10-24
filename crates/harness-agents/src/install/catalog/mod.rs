@@ -5,7 +5,7 @@
 //! start it ([`harness_platform::program::find`]). Its version is what
 //! `<program> --version` prints; it is too old when it is below the version
 //! the harness was checked with. The install and update commands are the
-//! makers' own; [`run_command`] runs one after Lisa has seen and confirmed it.
+//! makers' own; [`run_command`] runs one after the user has seen and confirmed it.
 
 mod entries;
 mod install;

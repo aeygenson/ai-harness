@@ -162,7 +162,7 @@ pub(super) fn view(gh: &Path, repo: &str, number: u64) -> Result<View, String> {
 }
 
 /// Merges pull request `number` of `repo` with a merge commit, so every
-/// role's commit stays in the history. `head` is the commit Lisa decided
+/// role's commit stays in the history. `head` is the commit the user decided
 /// on: GitHub refuses when the branch has moved on since.
 pub(super) fn merge(gh: &Path, repo: &str, number: u64, head: &str) -> Result<(), String> {
     let mut command = quiet_command(gh);

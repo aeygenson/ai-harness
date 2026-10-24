@@ -1,11 +1,11 @@
 //! What happens to a role's changes after an attempt that was not accepted:
 //! checked, kept in the folder for the next run, or thrown away.
 //!
-//! When a limit (time or usage) or Lisa's «Stop now» stops a role, its
+//! When a limit (time or usage) or the user's «Stop now» stops a role, its
 //! changes stay in the project folder, uncommitted, and `unfinished.json` in
 //! the task's folder records which files they are and a hash of each. The
 //! next run of the same role in the same round accepts exactly that dirty
-//! folder and tells the agent to continue; anything else (Lisa edited a file,
+//! folder and tells the agent to continue; anything else (the user edited a file,
 //! also under `.harness/` without committing it, or committed a change to the
 //! project) stops the run as before. No commit is made for the unfinished
 //! work: every step stays one commit, which the facts and the weakened-checks
@@ -123,7 +123,7 @@ pub(super) fn resumable(at: RoleAt) -> Result<Option<Vec<String>>, GitError> {
         return Ok(None);
     }
     // The record is committed when the role stops. A later commit may only
-    // touch `.harness/` (Lisa raised the time limit in `harness.toml`); one
+    // touch `.harness/` (the user raised the time limit in `harness.toml`); one
     // that changes the project means someone worked on the branch since.
     let Some(committed_since) = at.repo.changed_since_last_change(&record_in_repo(at)) else {
         return Ok(None);
@@ -174,7 +174,7 @@ fn read_record(path: &Path) -> Option<Unfinished> {
 }
 
 /// The changes the agent made that may not be committed or kept: files its
-/// role may not touch, or files too large. They are left in place for Lisa.
+/// role may not touch, or files too large. They are left in place for the user.
 pub(super) fn check_changes(
     repo: &Repo,
     role: Role,
@@ -202,7 +202,7 @@ pub(super) fn check_changes(
     Ok(None)
 }
 
-/// Stops the run after a limit (time or usage) or Lisa's «Stop now»: the
+/// Stops the run after a limit (time or usage) or the user's «Stop now»: the
 /// role's work stays in the folder for the next run of this role, after the
 /// same checks as accepted work; only the harness's records are committed.
 /// Running again at once would hit the same limit, and throwing the work away
@@ -218,10 +218,10 @@ pub(super) fn stop_at_limit(
             "paused by usage limit",
             StopReason::UsageLimitReached(at.role),
         ),
-        // The caller then moves the task to waiting for Lisa.
-        RunEnd::StoppedByLisa => (
-            "stopped by Lisa",
-            StopReason::WaitingForHuman(WaitReason::StoppedByLisa(at.role)),
+        // The caller then moves the task to waiting for the user.
+        RunEnd::StoppedByUser => (
+            "stopped by the user",
+            StopReason::WaitingForHuman(WaitReason::StoppedByUser(at.role)),
         ),
         // Only the limits come here; a finished or failed run never does.
         RunEnd::TimedOut(_) | RunEnd::Succeeded | RunEnd::Failed(_) => {
@@ -230,7 +230,7 @@ pub(super) fn stop_at_limit(
     };
     let mut stop = limit;
     if let Some(refused) = check_changes(at.repo, at.role, failure_logs)? {
-        // Changes the checks refuse are not unfinished work: Lisa decides.
+        // Changes the checks refuse are not unfinished work: the user decides.
         remove_record(at.store)?;
         let path = unfinished_path(at.store);
         if at.repo.is_tracked(&path) {
@@ -351,11 +351,11 @@ mod tests {
         };
         keep(at);
 
-        // Lisa's own file under `.harness/`, outside the fingerprint.
+        // The user's own file under `.harness/`, outside the fingerprint.
         fs::write(dir.path().join(".harness/note.md"), "mine\n").unwrap();
         assert_eq!(resumable(at).unwrap(), None);
         fs::remove_file(dir.path().join(".harness/note.md")).unwrap();
-        // A new file of hers next to the agent's.
+        // A new file of theirs next to the agent's.
         fs::write(dir.path().join("b.txt"), "mine\n").unwrap();
         assert_eq!(resumable(at).unwrap(), None);
         fs::remove_file(dir.path().join("b.txt")).unwrap();

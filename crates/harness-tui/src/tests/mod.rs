@@ -123,7 +123,7 @@ impl Env {
         app.tool_checker = fake_tools;
         // The real ones ask GitHub and replace the harness's own file.
         app.release_checker = || Ok(None);
-        // The real one opens Lisa's browser.
+        // The real one opens the user's browser.
         app.url_opener = |_| Err("no browser in tests".into());
         // The real one makes a repository on GitHub and pushes to it.
         app.github_connector = |_, name, private| {

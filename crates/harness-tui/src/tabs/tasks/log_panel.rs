@@ -3,8 +3,8 @@
 //!
 //! The wheel over the panel scrolls it; a click gives it the focus, and then
 //! ↑↓ (or k j) and PageUp/PageDown scroll it. Home and End go to the oldest
-//! and the newest line from anywhere outside the message box. While Lisa is
-//! scrolled up, new lines do not move her view and the title says how to get
+//! and the newest line from anywhere outside the message box. While the user is
+//! scrolled up, new lines do not move their view and the title says how to get
 //! back to the newest one.
 
 use std::time::{Duration, SystemTime};
@@ -34,7 +34,7 @@ impl TasksTab {
         self.running.is_some() || !self.log.is_empty()
     }
 
-    /// What the agent prints, the newest lines at the bottom unless Lisa
+    /// What the agent prints, the newest lines at the bottom unless the user
     /// scrolled up. The whole panel takes the wheel and clicks.
     pub(super) fn draw_log(&self, frame: &mut Frame, area: Rect, hits: &mut Hits, tr: &I18n) {
         if area.height == 0 {

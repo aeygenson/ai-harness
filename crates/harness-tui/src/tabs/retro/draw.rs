@@ -229,7 +229,7 @@ impl RetroTab {
     }
 }
 
-/// What `retro` looked at, in Lisa's language: «all tasks» or the task id.
+/// What `retro` looked at, in the user's language: «all tasks» or the task id.
 fn scope_text(retro: &RetroInfo, tr: &I18n) -> String {
     match &retro.scope {
         Some(Scope::All) => tr.t("retro.all").to_string(),

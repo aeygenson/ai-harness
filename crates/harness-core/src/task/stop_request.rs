@@ -1,8 +1,8 @@
-//! Lisa's request to stop a running task: «Stop after this step» or «Stop now».
+//! The user's request to stop a running task: «Stop after this step» or «Stop now».
 //!
 //! The screen (the TUI's thread) and the run (another thread, see
 //! `harness-tui`'s runner) share one [`StopRequest`]. The screen writes it
-//! when Lisa presses a button; the run reads it:
+//! when the user presses a button; the run reads it:
 //!
 //! - the run loop (`orchestrator`) before it starts the next role;
 //! - the agent's process (`harness_agents::process::run`) every fraction of a
@@ -12,7 +12,7 @@
 
 use std::sync::{Arc, Mutex, PoisonError};
 
-/// When Lisa wants the task to stop.
+/// When the user wants the task to stop.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StopWhen {
     /// When the running role has finished: its outcome is handled as

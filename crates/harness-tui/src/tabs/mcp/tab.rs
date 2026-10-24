@@ -223,7 +223,7 @@ pub(super) fn short_name(name: &str) -> String {
     name.rsplit('/').next().unwrap_or(name).to_string()
 }
 
-/// A web server Lisa signs in to in the browser.
+/// A web server the user signs in to in the browser.
 pub(super) fn is_oauth(server: &McpConfig) -> bool {
     server.url.is_some() && server.auth == Some(McpAuth::OAuth)
 }

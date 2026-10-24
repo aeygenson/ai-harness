@@ -13,30 +13,30 @@ use crate::task::WaitReason;
 pub enum StopReason {
     /// The task is finished.
     Done,
-    /// The task waits for Lisa, for the reason given.
+    /// The task waits for the user, for the reason given.
     WaitingForHuman(WaitReason),
     /// The subscription's usage limit stopped this role; run again later.
     /// Its unfinished changes stay in the folder for the next run.
     UsageLimitReached(Role),
     /// The time limit (`agent_timeout_minutes`) stopped this role. Its
-    /// unfinished changes stay in the folder for the next run; Lisa can raise
+    /// unfinished changes stay in the folder for the next run; the user can raise
     /// the limit first.
     TimedOut(Role),
     /// The role did not produce an acceptable handoff after every attempt.
     RoleFailed {
         /// The role that failed.
         role: Role,
-        /// Why the last attempt failed, ready to show to Lisa.
+        /// Why the last attempt failed, ready to show to the user.
         problem: String,
     },
     /// [`MAX_STEPS_PER_RUN`](super::MAX_STEPS_PER_RUN) roles ran in this call;
     /// run again to continue.
     StepLimitReached,
-    /// The project had uncommitted changes before a role started. Lisa commits
+    /// The project had uncommitted changes before a role started. The user commits
     /// or removes them, then runs again.
     DirtyWorkingTree(Vec<String>),
     /// The role changed files it may not touch. The changes are left in place,
-    /// uncommitted, so Lisa can look at them.
+    /// uncommitted, so the user can look at them.
     ForbiddenChanges {
         /// The role that made the changes.
         role: Role,
@@ -45,7 +45,7 @@ pub enum StopReason {
     },
     /// The role's change is too big to commit (see [`MAX_CHANGE_BYTES`](super::MAX_CHANGE_BYTES)):
     /// each entry is a file or folder and its size in bytes, `.` meaning the
-    /// change as a whole. Everything is left in place, uncommitted, so Lisa
+    /// change as a whole. Everything is left in place, uncommitted, so the user
     /// can add it to `.gitignore` or delete it.
     TooLarge {
         /// The role that made the change.
@@ -56,13 +56,13 @@ pub enum StopReason {
     /// While the role was running, a git commit was made, the branch was
     /// switched, or a branch was made, moved or deleted. Agents must never do
     /// this, but the harness cannot tell who did it: the role, or someone else
-    /// working in the same repository (Lisa's own git command, another program).
+    /// working in the same repository (the user's own git command, another program).
     AgentCommitted(Role),
     /// The agent changed files no role may change: agent instructions and
     /// settings (`CLAUDE.md`, `.claude/`, ...) or the harness's own files
     /// (`.harness/`). They are put back at once, so they never reach the next
     /// role; what the agent wrote is in `log`. Its other changes are left
-    /// uncommitted for Lisa to look at.
+    /// uncommitted for the user to look at.
     ProtectedFilesChanged {
         /// The role that made the changes.
         role: Role,
@@ -74,7 +74,7 @@ pub enum StopReason {
     /// While the role was running, files `git status` does not show changed
     /// (see [`crate::task::tripwire`]): git's hooks or `info/` (put back at
     /// once) or files outside the project such as shell start-up files or the
-    /// global git settings (left for Lisa to check, not put back). The role
+    /// global git settings (left for the user to check, not put back). The role
     /// or someone else working in the repository or on the computer did it.
     HiddenChanges {
         /// The role that was running when the files changed.
@@ -88,7 +88,7 @@ pub enum StopReason {
     /// changed, where a setting can make git run any command. The role or
     /// someone else working in the repository (for example `git push -u`) did
     /// it. The old settings are put back; the project's changes are left
-    /// uncommitted for Lisa to look at.
+    /// uncommitted for the user to look at.
     GitConfigChanged(Role),
 }
 
@@ -107,7 +107,7 @@ pub enum RunError {
     /// Reading or putting back git's hooks or `info/` failed.
     #[error("cannot check git's hooks: {0}")]
     Tripwire(#[from] std::io::Error),
-    /// Lisa wanted to finish the task while a role's unfinished work is still
+    /// The user wanted to finish the task while a role's unfinished work is still
     /// uncommitted in the folder; the task is not finished.
     #[error(
         "unfinished work of a stopped role is still in the folder ({}); continue that role, \
@@ -125,7 +125,7 @@ pub enum RunError {
     SameTask {
         /// The id of the unfinished task, for example `task-001`.
         task: String,
-        /// Where that task is now, as text for Lisa.
+        /// Where that task is now, as text for the user.
         stage: String,
     },
 }

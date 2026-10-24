@@ -11,7 +11,7 @@ use std::fmt;
 use harness_core::config::AgentKind;
 use serde_json::{json, Value};
 
-/// The variable in Lisa's shell that may hold the NVIDIA API key; it wins
+/// The variable in the user's shell that may hold the NVIDIA API key; it wins
 /// over the saved one. dsh's name for the key too.
 const NVIDIA_KEY_ENV: &str = "NVIDIA_API_KEY";
 /// The model NVIDIA roles use when harness.toml names none: a strong coding
@@ -27,7 +27,7 @@ pub enum Provider {
     Nvidia,
 }
 
-/// The company whose key it is, as Lisa knows it: `DeepSeek` or `NVIDIA`.
+/// The company whose key it is, as the user knows it: `DeepSeek` or `NVIDIA`.
 impl fmt::Display for Provider {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match self {
@@ -46,7 +46,7 @@ impl Provider {
         }
     }
 
-    /// The key's name: in Lisa's shell, and in dsh's `.credentials.yaml`.
+    /// The key's name: in the user's shell, and in dsh's `.credentials.yaml`.
     pub fn key_env(self) -> &'static str {
         match self {
             Provider::DeepSeek => super::KEY_ENV,

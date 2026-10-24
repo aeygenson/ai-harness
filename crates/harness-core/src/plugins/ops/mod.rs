@@ -2,7 +2,7 @@
 //! make. A plugin change edits harness.toml and the plugin folder together
 //! and commits them; a catalog change touches only `~/.harness`.
 //!
-//! Catalogs are Lisa's, for all projects: the list is in
+//! Catalogs are the user's, for all projects: the list is in
 //! `~/.harness/marketplaces.toml`, the copies in `~/.harness/marketplaces/`.
 //! A plugin is always copied into the project (`.harness/plugins/<name>/`) and
 //! committed, so the agents only ever see what is in the project's git.
@@ -325,7 +325,7 @@ fn staging(target: &Path) -> PathBuf {
 
 /// Removes `[plugins.<name>]`, the name from every role, and the plugin's
 /// folder if it is in `.harness/plugins/`; a folder elsewhere in the
-/// project is Lisa's own and stays. Commits `harness: remove plugin <name>`.
+/// project is the user's own and stays. Commits `harness: remove plugin <name>`.
 pub fn remove(repo: &Repo, name: &str) -> Result<(), OpsError> {
     let config_path = repo.root().join(HARNESS_DIR).join(CONFIG_FILE);
     let text = fs::read_to_string(&config_path).map_err(io(&config_path))?;

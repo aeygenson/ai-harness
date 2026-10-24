@@ -1,4 +1,4 @@
-//! Runs a role with `OpenAI` Codex CLI (`codex exec`), isolated from Lisa's own setup.
+//! Runs a role with `OpenAI` Codex CLI (`codex exec`), isolated from the user's own setup.
 //!
 //! Isolation (docs/design.md, section 5.1):
 //! - an empty environment plus a short whitelist (see `process`);

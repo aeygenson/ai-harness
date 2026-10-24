@@ -1,4 +1,4 @@
-//! Files and folders only Lisa can read: logins, secrets, MCP sign-ins.
+//! Files and folders only the user can read: logins, secrets, MCP sign-ins.
 //!
 //! On Linux and macOS that is mode 600 for a file and 700 for a folder. On
 //! Windows the harness keeps these under the user's own profile
@@ -10,7 +10,7 @@ use std::fs;
 use std::io::{self, Write};
 use std::path::Path;
 
-/// Writes `bytes` into `path`, readable only by Lisa. On Linux and macOS the
+/// Writes `bytes` into `path`, readable only by the user. On Linux and macOS the
 /// file is created with mode 600 before anything is written into it.
 pub fn write(path: &Path, bytes: &[u8]) -> io::Result<()> {
     let mut options = fs::OpenOptions::new();
@@ -26,12 +26,12 @@ pub fn write(path: &Path, bytes: &[u8]) -> io::Result<()> {
     file.write_all(bytes)
 }
 
-/// Makes an existing file readable only by Lisa.
+/// Makes an existing file readable only by the user.
 pub fn restrict_file(path: &Path) -> io::Result<()> {
     set_mode(path, 0o600)
 }
 
-/// Makes an existing folder usable only by Lisa.
+/// Makes an existing folder usable only by the user.
 pub fn restrict_dir(path: &Path) -> io::Result<()> {
     set_mode(path, 0o700)
 }
@@ -51,7 +51,7 @@ fn set_mode(_path: &Path, _mode: u32) -> io::Result<()> {
     Ok(())
 }
 
-/// Is `path` readable only by Lisa? Always true where there are no Unix modes.
+/// Is `path` readable only by the user? Always true where there are no Unix modes.
 pub fn is_private(path: &Path) -> io::Result<bool> {
     #[cfg(unix)]
     {

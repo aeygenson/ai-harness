@@ -24,7 +24,7 @@ pub const MAX_NAME_CHARS: usize = 500;
 /// next to the «To» menu, so it must stay short.
 pub const MAX_REASON_CHARS: usize = 300;
 
-/// Who wrote a handoff: one of the four AI roles, or Lisa's own decision.
+/// Who wrote a handoff: one of the four AI roles, or the user's own decision.
 ///
 /// What each role may do is [`Role::spec`] (in `task::permissions`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
@@ -38,7 +38,7 @@ pub enum Role {
     Tester,
     /// Reviews the work for security problems; changes no files.
     Security,
-    /// Lisa herself, deciding when a role asks for help or a design needs approval.
+    /// The user, deciding when a role asks for help or a design needs approval.
     Human,
 }
 
@@ -92,11 +92,11 @@ pub enum Verdict {
     Approved,
     /// The role sent the work back; the handoff must list the issues.
     Rejected,
-    /// The role cannot decide and asks Lisa.
+    /// The role cannot decide and asks the user.
     NeedsHuman,
 }
 
-/// Where the work should go next: to a role (including Lisa), or finished.
+/// Where the work should go next: to a role (including the user), or finished.
 ///
 /// In JSON it is a plain string: `"developer"`, `"human"`, ... or `"done"`.
 /// Because `Done` is not a `Role`, a handoff can never claim to be written by "done".
@@ -178,7 +178,7 @@ pub struct Issue {
     pub description: String,
 }
 
-/// Who should get Lisa's answer, as suggested by a role that asks for help.
+/// Who should get the user's answer, as suggested by a role that asks for help.
 ///
 /// Written as `"answer_to": {"role": "developer", "reason": "..."}`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -217,7 +217,7 @@ pub struct Handoff {
     /// The problems found; must not be empty when the verdict is `rejected`.
     #[serde(default)]
     pub issues: Vec<Issue>,
-    /// Who should get Lisa's answer; used only with the verdict `needs_human`
+    /// Who should get the user's answer; used only with the verdict `needs_human`
     /// (see [`Handoff::suggested_answer`]). Older handoffs do not have it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub answer_to: Option<AnswerTo>,
@@ -254,7 +254,7 @@ impl Handoff {
         }
     }
 
-    /// The suggested receiver of Lisa's answer: `answer_to` when the verdict
+    /// The suggested receiver of the user's answer: `answer_to` when the verdict
     /// is `needs_human` and its role works in `scenario`, otherwise `None`.
     ///
     /// With another verdict a well-formed field is ignored rather than refused
@@ -430,7 +430,7 @@ mod tests {
         assert_eq!(handoff.too_long_field(), Some(("summary", MAX_TEXT_CHARS)));
     }
 
-    /// The tester example as a question to Lisa, suggesting `role` for the answer.
+    /// The tester example as a question to the user, suggesting `role` for the answer.
     fn asking_tester(role: &str) -> String {
         TESTER_EXAMPLE
             .replace("\"rejected\"", "\"needs_human\"")

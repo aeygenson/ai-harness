@@ -4,7 +4,7 @@
 //!
 //! Before anything is sent, the branch on GitHub is compared with the local
 //! one: commits there that the harness does not have were made by someone
-//! else (maybe an agent), and the task stops so Lisa can look.
+//! else (maybe an agent), and the task stops so the user can look.
 
 use std::path::PathBuf;
 

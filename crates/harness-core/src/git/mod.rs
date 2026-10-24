@@ -1,7 +1,7 @@
 //! The few git operations the harness needs, done by running the `git` program.
 //!
-//! Why the `git` program and not a Rust git library? It is the same git Lisa uses
-//! in the terminal and in `RustRover`, so the harness sees exactly what she sees,
+//! Why the `git` program and not a Rust git library? It is the same git the user uses
+//! in the terminal and in `RustRover`, so the harness sees exactly what they see,
 //! and there is no extra dependency to learn.
 
 mod branch;
@@ -27,7 +27,7 @@ pub const HARNESS_DIR: &str = ".harness";
 /// settings (which may hold a login token) never go into git.
 const HARNESS_IGNORES: &str = "runs/*/inbox/\nretros/*/inbox/\nagents/\n";
 
-/// Every commit is made by this name, so Lisa can see which commits the harness made.
+/// Every commit is made by this name, so the user can see which commits the harness made.
 const AUTHOR_NAME: &str = "AI Harness";
 const AUTHOR_EMAIL: &str = "harness@localhost";
 
@@ -84,7 +84,7 @@ impl Repo {
             root: root.to_path_buf(),
         };
         repo.git(&["init", "-q"])?;
-        // Lisa's own git in this folder keeps the files as they are too.
+        // The user's own git in this folder keeps the files as they are too.
         repo.git(&["config", "core.autocrlf", "false"])?;
         Ok(repo)
     }

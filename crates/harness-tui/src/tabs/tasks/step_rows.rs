@@ -15,8 +15,8 @@ use crate::ui::theme;
 
 impl TasksTab {
     /// The rows of the steps list: each role's step with how long it took,
-    /// when the commits tell. Lisa's own steps get no time: it would only be
-    /// how long the task waited for her.
+    /// when the commits tell. The user's own steps get no time: it would only be
+    /// how long the task waited for them.
     pub(super) fn step_items(&self, task: &TaskView, tr: &I18n) -> Vec<ListItem<'static>> {
         let times = self.times_of(&task.id);
         let took: Vec<Option<String>> = task

@@ -137,7 +137,7 @@ fn sign_line(sign: &Sign) -> String {
 /// Empty when there is no such step yet.
 pub fn text(repo: &Repo, steps: &[Step]) -> String {
     let mut text = String::new();
-    // Lisa's decisions change no project files, so they are left out.
+    // The user's decisions change no project files, so they are left out.
     for step in steps.iter().filter(|step| step.handoff.role != Role::Human) {
         let handoff = &step.handoff;
         let _ = write!(text, "- round {}, {}: ", handoff.round, handoff.role);

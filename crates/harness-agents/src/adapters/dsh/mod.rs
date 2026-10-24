@@ -1,5 +1,5 @@
 //! Runs a role with `DeepSeek` Harness (`dsh --profile headless`), `DeepSeek`'s
-//! own console agent, isolated from Lisa's own setup. The model runs on
+//! own console agent, isolated from the user's own setup. The model runs on
 //! `DeepSeek`'s API or on NVIDIA's free one (see `provider`).
 //!
 //! Isolation:
@@ -8,7 +8,7 @@
 //! - `DSH_HOME` (dsh's settings, sessions and keys) is a fresh temporary
 //!   folder outside the project, deleted after the role. It holds only the
 //!   provider's key, in dsh's own `.credentials.yaml`, which dsh never puts into the
-//!   environment, and our patch file. So Lisa's own dsh settings, providers,
+//!   environment, and our patch file. So the user's own dsh settings, providers,
 //!   skills and MCP servers never reach a role, and no history is kept;
 //! - the patch (`--patch`, dsh's settings overlay) sets the model and effort,
 //!   gives the role its own MCP servers from harness.toml and turns off what
@@ -37,7 +37,7 @@ use crate::role_settings::RoleSettings;
 
 pub use provider::{Provider, NVIDIA_DEFAULT_MODEL};
 
-/// The variable in Lisa's shell that may hold the `DeepSeek` API key; it wins
+/// The variable in the user's shell that may hold the `DeepSeek` API key; it wins
 /// over the saved one. dsh's own name for the key too.
 pub const KEY_ENV: &str = "DEEPSEEK_API_KEY";
 /// The model dsh uses when harness.toml names none.
@@ -140,7 +140,7 @@ impl Dsh {
             // On by default: every session log goes to DeepSeek with the requests.
             json!({ "id": "session-log-deepseek", "disabled": true }),
             json!({ "id": "session-telemetry-otel", "config": { "mode": "DISABLED" } }),
-            // Skills come in the prompt; none from the project or Lisa's folders.
+            // Skills come in the prompt; none from the project or the user's folders.
             json!({ "id": "skill-filesystem", "config": { "includeDefaultRoots": false } }),
             // Long command output is kept in files; by default in a new
             // `/tmp/dsh-spill-*` folder that stays after the run.

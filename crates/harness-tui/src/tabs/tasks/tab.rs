@@ -18,7 +18,7 @@
 //! only; they start from what `harness.toml` says and `harness.toml` is not
 //! changed.
 //!
-//! «To» lists a new task (its workflow's first role starts it), Lisa's answer to one of
+//! «To» lists a new task (its workflow's first role starts it), the user's answer to one of
 //! the roles and approving and finishing the task; what the selected task
 //! cannot take now is grey. The roles then run in the background (see
 //! `runner`) and the live log shows what the agent prints. What is saved in

@@ -9,7 +9,7 @@
 //! - which skills the roles used, and which were configured but never used;
 //! - how many tokens each role used and what it cost (see `usage`).
 //!
-//! The result is saved in `.harness/retros/<NNN>/` as `stats.md` (for Lisa)
+//! The result is saved in `.harness/retros/<NNN>/` as `stats.md` (for the user)
 //! and `stats.json` (for programs, and later for the Retrospective role).
 //!
 //! The folder also holds `ops` (saving and applying retrospectives),
@@ -178,13 +178,13 @@ pub struct TaskSummary {
     pub task_id: String,
     /// The round the task reached, starting at 1.
     pub rounds: u32,
-    /// The round limit of the task; past it the task waits for Lisa.
+    /// The round limit of the task; past it the task waits for the user.
     pub max_rounds: u32,
     /// Where the task is now, e.g. `done` or `waiting: approve design`.
     pub stage: String,
-    /// Saved handoffs, Lisa's decisions included.
+    /// Saved handoffs, the user's decisions included.
     pub steps: usize,
-    /// How many of those handoffs are Lisa's own decisions.
+    /// How many of those handoffs are the user's own decisions.
     pub human_decisions: usize,
     /// How many times a role's run failed in this task.
     pub failed_attempts: usize,
@@ -199,7 +199,7 @@ pub struct RoleStats {
     pub approved: usize,
     /// Handoffs with the verdict `rejected`.
     pub rejected: usize,
-    /// Handoffs with the verdict `needs_human`: the role asked Lisa to decide.
+    /// Handoffs with the verdict `needs_human`: the role asked the user to decide.
     pub needs_human: usize,
     /// How many times the role's run failed.
     pub failed_attempts: usize,
@@ -337,8 +337,8 @@ pub fn stage_text(stage: Stage) -> String {
         Stage::WaitingForHuman(WaitReason::RoundLimitReached) => {
             "waiting: round limit reached".into()
         }
-        Stage::WaitingForHuman(WaitReason::StoppedByLisa(role)) => {
-            format!("waiting: stopped by Lisa, {} next", role.as_str())
+        Stage::WaitingForHuman(WaitReason::StoppedByUser(role)) => {
+            format!("waiting: stopped by the user, {} next", role.as_str())
         }
         Stage::Done => "done".into(),
     }
@@ -399,7 +399,7 @@ mod tests {
         }
     }
 
-    /// Architect -> Lisa -> developer -> tester rejects twice -> done.
+    /// Architect -> the user -> developer -> tester rejects twice -> done.
     fn history() -> Vec<TaskHistory> {
         let mut architect = handoff(
             Role::Architect,
@@ -455,9 +455,12 @@ mod tests {
     }
 
     #[test]
-    fn a_task_stopped_by_lisa_says_who_continues() {
-        let stage = Stage::WaitingForHuman(WaitReason::StoppedByLisa(Role::Tester));
-        assert_eq!(stage_text(stage), "waiting: stopped by Lisa, tester next");
+    fn a_task_stopped_by_the_user_says_who_continues() {
+        let stage = Stage::WaitingForHuman(WaitReason::StoppedByUser(Role::Tester));
+        assert_eq!(
+            stage_text(stage),
+            "waiting: stopped by the user, tester next"
+        );
     }
 
     fn config() -> Config {

@@ -18,7 +18,7 @@ pub enum FormProblem {
 }
 
 impl FormProblem {
-    /// The problem in Lisa's language.
+    /// The problem in the user's language.
     pub fn text(&self, tr: &I18n) -> String {
         match self {
             FormProblem::OpenQuote => tr.t("mcp.form_open_quote").to_string(),

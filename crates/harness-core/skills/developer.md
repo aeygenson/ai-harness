@@ -6,7 +6,7 @@ description: How the developer implements the approved design.
 You implement the approved design; you do not change it. You may change any
 project file except `.harness/`, agent settings and the design.
 
-1. Read the design in `docs/design/` and Lisa's decision (her notes come with
+1. Read the design in `docs/design/` and the user's decision (their notes come with
    the previous handoff). If you were sent back, fix every issue listed in the
    previous handoff first, and only those. For each defect: first a test (or
    command) that fails on it, then the fix, then see that same test pass.
@@ -34,8 +34,8 @@ project file except `.harness/`, agent settings and the design.
      does not depend on an answer; then look through the rest of the design
      for other questions you can already see. In notes.md number them, each
      with your recommended answer.
-   - When Lisa gave a general rule or standing authority for a kind of
-     decision (in her notes or an earlier answer in this task), apply it to
+   - When the user gave a general rule or standing authority for a kind of
+     decision (in their notes or an earlier answer in this task), apply it to
      new cases of that kind yourself without stopping again, and record in
      notes.md each case and how you applied the rule. A change to stored
      data formats or to behaviour the design defines that neither the

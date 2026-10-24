@@ -1,6 +1,6 @@
-//! Lisa's stop buttons on the message box while roles work: «Stop after this
+//! The user's stop buttons on the message box while roles work: «Stop after this
 //! step» (s; pressed again, it is taken back) and «Stop now» (x, after a
-//! confirmation the app asks for). Both end with the task waiting for her.
+//! confirmation the app asks for). Both end with the task waiting for them.
 
 use harness_core::task::stop_request::{StopRequest, StopWhen};
 
@@ -14,13 +14,13 @@ impl TasksTab {
         self.running.as_ref().and_then(|r| r.stop.as_ref())
     }
 
-    /// Can Lisa stop the work now? Only while roles work, and not again
+    /// Can the user stop the work now? Only while roles work, and not again
     /// once «Stop now» is asked.
     pub fn can_stop(&self) -> bool {
         self.stop_request().is_some_and(|stop| !stop.now())
     }
 
-    /// What Lisa has asked for, if anything.
+    /// What the user has asked for, if anything.
     pub fn stop_asked(&self) -> Option<StopWhen> {
         self.stop_request().and_then(StopRequest::asked)
     }
@@ -42,7 +42,7 @@ impl TasksTab {
         Some(text)
     }
 
-    /// «Stop now», once Lisa has confirmed it. The message for the bottom
+    /// «Stop now», once the user has confirmed it. The message for the bottom
     /// line; `None` when no role works any more.
     pub fn stop_now(&mut self, tr: &I18n) -> Option<String> {
         if !self.can_stop() {

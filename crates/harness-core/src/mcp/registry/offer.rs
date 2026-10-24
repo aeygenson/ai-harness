@@ -174,7 +174,7 @@ pub(super) fn offer(registry_name: &str, package: &Value) -> Option<Offer> {
 
 /// Arguments as the registry lists them: a positional one is its value, a
 /// named one `--name value`. A value the registry leaves open is `<name>`,
-/// for Lisa to fill in the form.
+/// for the user to fill in the form.
 pub(super) fn arguments(list: &Value) -> Vec<String> {
     let mut args = Vec::new();
     for argument in list.as_array().into_iter().flatten() {

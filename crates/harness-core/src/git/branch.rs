@@ -71,7 +71,7 @@ impl Repo {
     /// change would be lost; callers check for changes first.
     pub fn switch_branch(&self, name: &str) -> Result<(), GitError> {
         // By default git overwrites an ignored file (such as a `.env` with
-        // Lisa's own values) when the other branch has a file of that name.
+        // the user's own values) when the other branch has a file of that name.
         self.git(&["switch", "-q", "--no-overwrite-ignore", name])?;
         Ok(())
     }
