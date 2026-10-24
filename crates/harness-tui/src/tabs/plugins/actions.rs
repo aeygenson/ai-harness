@@ -207,7 +207,7 @@ impl App {
             let result = Repo::open(&root)
                 .map_err(|e| e.to_string())
                 .and_then(|repo| {
-                    plugins::ops::add(&repo, &home, &entry, None, false, false)
+                    plugins::ops::add(&repo, &home, &entry, plugins::ops::PluginChoice::default())
                         .map_err(|e| e.to_string())
                 });
             PluginJob::Added { name, give, result }

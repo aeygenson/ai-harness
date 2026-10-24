@@ -1,6 +1,6 @@
 //! Drawing the message box at the bottom of the Tasks tab and its open list.
 
-use ratatui::layout::Rect;
+use ratatui::layout::{Position, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::Line;
 use ratatui::widgets::{ListItem, Paragraph};
@@ -13,7 +13,7 @@ use super::choice::{Choice, Menu, MORE_ROUNDS};
 use super::tab::{Focus, TasksTab};
 use crate::ui::i18n::I18n;
 use crate::ui::theme;
-use crate::ui::{buttons, draw_list, panel, ButtonId, Hits, ListId, Target};
+use crate::ui::{buttons, draw_list, panel, ButtonId, Hits, ListId, ListView, Target};
 
 impl TasksTab {
     /// The label of an option of «To».
@@ -130,7 +130,7 @@ impl TasksTab {
             }
             x += crate::ui::button_width(label) + 1;
         }
-        self.draw_menu(frame, hits, menu, x, area.y, tr);
+        self.draw_menu(frame, hits, menu, Position::new(x, area.y), tr);
     }
 
     /// The link to the notes the user answers, on the box's top border after its
@@ -171,15 +171,9 @@ impl TasksTab {
     }
 
     /// The open list, above the box; what cannot be chosen now is grey.
-    fn draw_menu(
-        &self,
-        frame: &mut Frame,
-        hits: &mut Hits,
-        menu: Menu,
-        x: u16,
-        top: u16,
-        tr: &I18n,
-    ) {
+    /// `at` is its button: the list starts at its column and ends above it.
+    fn draw_menu(&self, frame: &mut Frame, hits: &mut Hits, menu: Menu, at: Position, tr: &I18n) {
+        let Position { x, y: top } = at;
         let default = || tr.t("tasks.default").to_string();
         let (title, items, current): (&str, Vec<(String, bool)>, usize) = match menu {
             Menu::To => {
@@ -236,11 +230,13 @@ impl TasksTab {
             frame,
             hits,
             area,
-            ListId::Choices,
-            title,
-            list,
-            current,
-            true,
+            ListView {
+                id: ListId::Choices,
+                title,
+                items: list,
+                selected_row: current,
+                focused: true,
+            },
         );
     }
 }

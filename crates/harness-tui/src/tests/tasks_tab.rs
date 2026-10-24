@@ -590,7 +590,7 @@ fn the_task_and_each_step_show_what_the_agents_spent() {
 #[test]
 fn a_decision_on_an_old_copy_of_a_task_on_another_branch_is_refused() {
     use harness_core::git::Repo;
-    use harness_core::task::orchestrator::{self, SameText};
+    use harness_core::task::orchestrator::{self, HumanDecision, SameText};
     use harness_core::task::{Stage, WaitReason};
     let env = Env::new();
     let (root, mut app) = empty_project(&env);
@@ -627,9 +627,11 @@ fn a_decision_on_an_old_copy_of_a_task_on_another_branch_is_refused() {
         &repo,
         &store,
         &mut state,
-        Verdict::Approved,
-        NextStep::To(Role::Developer),
-        "go",
+        HumanDecision {
+            verdict: Verdict::Approved,
+            next: NextStep::To(Role::Developer),
+            notes: "go",
+        },
     )
     .unwrap();
     repo.switch_branch("harness/task-002").unwrap();

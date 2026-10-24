@@ -8,6 +8,17 @@ use crate::task::handoff::{Handoff, NextStep, Role, Verdict};
 use crate::task::store::TaskStore;
 use crate::task::TaskState;
 
+/// What the user decided on a waiting task.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HumanDecision<'a> {
+    /// Approve, send back or answer.
+    pub verdict: Verdict,
+    /// Who continues, or `Done`.
+    pub next: NextStep,
+    /// The user's notes for the next role; the first line is the summary.
+    pub notes: &'a str,
+}
+
 /// The user's decision (approve the design, send work back, answer a question),
 /// saved like any other handoff with role `human`.
 ///
@@ -18,10 +29,13 @@ pub fn record_human_decision(
     repo: &Repo,
     store: &TaskStore,
     state: &mut TaskState,
-    verdict: Verdict,
-    next: NextStep,
-    notes: &str,
+    decision: HumanDecision<'_>,
 ) -> Result<PathBuf, RunError> {
+    let HumanDecision {
+        verdict,
+        next,
+        notes,
+    } = decision;
     if next == NextStep::Done {
         let files = super::changes::unfinished_left(repo, store)?;
         if !files.is_empty() {

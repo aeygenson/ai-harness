@@ -14,7 +14,7 @@ use harness_core::retro::Scope;
 use super::tab::{Focus, RetroButton, RetroTab};
 use crate::ui::i18n::I18n;
 use crate::ui::theme;
-use crate::ui::{buttons, draw_list, panel, ButtonId, Hits, ListId};
+use crate::ui::{buttons, draw_list, panel, ButtonId, Hits, ListId, ListView};
 
 impl RetroTab {
     pub fn draw(&self, frame: &mut Frame, area: Rect, hits: &mut Hits, tr: &I18n) {
@@ -51,11 +51,13 @@ impl RetroTab {
             frame,
             hits,
             retros_area,
-            ListId::Retros,
-            &tr.f("retro.list", &[("name", &name_of(&self.root))]),
-            items,
-            self.row,
-            self.focus == Focus::Retros,
+            ListView {
+                id: ListId::Retros,
+                title: &tr.f("retro.list", &[("name", &name_of(&self.root))]),
+                items,
+                selected_row: self.row,
+                focused: self.focus == Focus::Retros,
+            },
         );
 
         self.draw_proposals(frame, proposals_area, hits, tr);
@@ -98,11 +100,13 @@ impl RetroTab {
             frame,
             hits,
             area,
-            ListId::RetroProposals,
-            tr.t("retro.proposals"),
-            items,
-            self.proposal,
-            self.focus == Focus::Proposals,
+            ListView {
+                id: ListId::RetroProposals,
+                title: tr.t("retro.proposals"),
+                items,
+                selected_row: self.proposal,
+                focused: self.focus == Focus::Proposals,
+            },
         );
         if empty {
             let note = match self.current().and_then(|r| r.proposals.as_ref()) {

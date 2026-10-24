@@ -11,7 +11,7 @@ mod list;
 mod notes;
 
 pub(crate) use form::{wrapped_lines, Form};
-pub(crate) use list::{draw_list, LIST_MARK_WIDTH};
+pub(crate) use list::{draw_list, ListView, LIST_MARK_WIDTH};
 pub(crate) use notes::{agent_note, unsaved_note};
 
 use ratatui::layout::Rect;
@@ -251,17 +251,28 @@ pub fn buttons(frame: &mut Frame, area: Rect, hits: &mut Hits, items: &[(&str, B
     }
 }
 
+/// What a selector row offers: a label and the names to choose from.
+#[derive(Debug, Clone, Copy)]
+pub struct Selector<'a> {
+    /// The text before the names.
+    pub label: &'a str,
+    /// The names, one button each.
+    pub names: &'a [&'a str],
+    /// The index of the chosen name; it is filled.
+    pub chosen: usize,
+    /// The button of the name at an index.
+    pub id: fn(usize) -> ButtonId,
+}
+
 /// `Label: [ a ] [ b ] …` on one row; the chosen one is filled. Each one is
 /// a button `id(index)`.
-pub fn selector(
-    frame: &mut Frame,
-    area: Rect,
-    hits: &mut Hits,
-    label: &str,
-    names: &[&str],
-    chosen: usize,
-    id: fn(usize) -> ButtonId,
-) {
+pub fn selector(frame: &mut Frame, area: Rect, hits: &mut Hits, row: Selector<'_>) {
+    let Selector {
+        label,
+        names,
+        chosen,
+        id,
+    } = row;
     let label = format!(" {label} ");
     let width = u16::try_from(label.chars().count()).unwrap_or(0);
     frame.render_widget(Span::raw(label), area);

@@ -12,7 +12,9 @@ use super::tab::{Row, SkillButton, SkillsTab, AGENT_NOTE};
 use crate::tabs::roles::RolesTab;
 use crate::ui::i18n::I18n;
 use crate::ui::theme;
-use crate::ui::{buttons, panel, selected, selector, unsaved_note, ButtonId, Hits, ListId, Target};
+use crate::ui::{
+    buttons, panel, selected, selector, unsaved_note, ButtonId, Hits, ListId, Selector, Target,
+};
 
 impl SkillsTab {
     fn status(skill: &LibrarySkill, tr: &I18n) -> (String, Style) {
@@ -58,10 +60,12 @@ impl SkillsTab {
             frame,
             top,
             hits,
-            tr.t("skills.role"),
-            &names,
-            self.role,
-            |index| ButtonId::Skill(SkillButton::Role(index)),
+            Selector {
+                label: tr.t("skills.role"),
+                names: &names,
+                chosen: self.role,
+                id: |index| ButtonId::Skill(SkillButton::Role(index)),
+            },
         );
 
         let [left, right] =

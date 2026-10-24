@@ -6,14 +6,14 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{ListItem, Paragraph, Wrap};
 use ratatui::Frame;
 
-use super::catalog_draw::draw_catalog;
-use super::catalogs_draw::draw_catalogs;
+use super::catalog_draw::CatalogContext;
 use super::tab::{PluginButton, PluginsTab};
 use crate::tabs::roles::RolesTab;
 use crate::ui::i18n::I18n;
 use crate::ui::theme;
 use crate::ui::{
     agent_note, buttons, draw_list, panel, selector, unsaved_note, ButtonId, Hits, ListId,
+    ListView, Selector,
 };
 
 impl PluginsTab {
@@ -28,11 +28,21 @@ impl PluginsTab {
         let busy = self.busy.as_deref();
         let role_label = self.role(roles).as_str();
         if let Some(view) = &self.catalogs {
-            draw_catalogs(view, frame, area, hits, tr, busy);
+            view.draw(frame, area, hits, tr, busy);
             return;
         }
         if let Some(view) = &self.catalog {
-            draw_catalog(view, frame, area, hits, tr, roles, role_label, busy);
+            view.draw(
+                frame,
+                area,
+                hits,
+                tr,
+                CatalogContext {
+                    roles,
+                    role: role_label,
+                    busy,
+                },
+            );
             return;
         }
         let [top, main, bottom, plugins_row] = Layout::vertical([
@@ -86,10 +96,12 @@ impl PluginsTab {
             frame,
             top,
             hits,
-            tr.t("skills.role"),
-            &names,
-            self.role,
-            |index| ButtonId::Plugin(PluginButton::Role(index)),
+            Selector {
+                label: tr.t("skills.role"),
+                names: &names,
+                chosen: self.role,
+                id: |index| ButtonId::Plugin(PluginButton::Role(index)),
+            },
         );
         if let Some(settings) = roles.settings(role) {
             let text = format!("{} · {} ", role.as_str(), settings.agent);
@@ -143,11 +155,13 @@ impl PluginsTab {
             frame,
             hits,
             left,
-            ListId::Plugins,
-            &title,
-            items,
-            self.at(roles),
-            true,
+            ListView {
+                id: ListId::Plugins,
+                title: &title,
+                items,
+                selected_row: self.at(roles),
+                focused: true,
+            },
         );
     }
 

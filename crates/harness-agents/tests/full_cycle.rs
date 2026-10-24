@@ -12,8 +12,8 @@ use harness_core::skills::Skills;
 use harness_core::task::handoff::{Handoff, NextStep, Role, Verdict};
 use harness_core::task::manifest::AgentFacts;
 use harness_core::task::orchestrator::{
-    self, create_task, record_human_decision, RunSetup, StopReason, ATTEMPTS_PER_ROLE,
-    MAX_CHANGE_BYTES,
+    self, create_task, record_human_decision, HumanDecision, RunSetup, StopReason,
+    ATTEMPTS_PER_ROLE, MAX_CHANGE_BYTES,
 };
 use harness_core::task::scenario::Workflow;
 use harness_core::task::stop_request::StopRequest;
@@ -83,9 +83,11 @@ async fn happy_path_with_the_user_approving_the_design() {
         &repo,
         &store,
         &mut state,
-        Verdict::Approved,
-        NextStep::To(Role::Developer),
-        "Looks good.",
+        HumanDecision {
+            verdict: Verdict::Approved,
+            next: NextStep::To(Role::Developer),
+            notes: "Looks good.",
+        },
     )
     .unwrap();
 
@@ -449,9 +451,11 @@ async fn continues_after_a_restart() {
         &repo,
         &store,
         &mut state,
-        Verdict::Approved,
-        NextStep::To(Role::Developer),
-        "",
+        HumanDecision {
+            verdict: Verdict::Approved,
+            next: NextStep::To(Role::Developer),
+            notes: "",
+        },
     )
     .unwrap();
     let agent = MockAgent::new().then(

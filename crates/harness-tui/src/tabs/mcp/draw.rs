@@ -13,6 +13,7 @@ use crate::ui::i18n::I18n;
 use crate::ui::theme;
 use crate::ui::{
     agent_note, buttons, draw_list, panel, selector, unsaved_note, ButtonId, Hits, ListId,
+    ListView, Selector,
 };
 
 impl McpTab {
@@ -79,10 +80,12 @@ impl McpTab {
             frame,
             top,
             hits,
-            tr.t("skills.role"),
-            &names,
-            self.role,
-            |index| ButtonId::Mcp(McpButton::Role(index)),
+            Selector {
+                label: tr.t("skills.role"),
+                names: &names,
+                chosen: self.role,
+                id: |index| ButtonId::Mcp(McpButton::Role(index)),
+            },
         );
         // The role's agent, on the right of the selector.
         if let Some(settings) = roles.settings(role) {
@@ -136,11 +139,13 @@ impl McpTab {
             frame,
             hits,
             left,
-            ListId::Mcp,
-            &title,
-            items,
-            self.at(roles),
-            true,
+            ListView {
+                id: ListId::Mcp,
+                title: &title,
+                items,
+                selected_row: self.at(roles),
+                focused: true,
+            },
         );
     }
 

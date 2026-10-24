@@ -12,7 +12,7 @@ use super::computer::{computer_height, tool_details};
 use super::tab::{AgentsTab, Job};
 use crate::ui::i18n::I18n;
 use crate::ui::theme;
-use crate::ui::{buttons, draw_list, panel, ButtonId, Hits, ListId};
+use crate::ui::{buttons, draw_list, panel, ButtonId, Hits, ListId, ListView};
 
 impl AgentsTab {
     /// The mark before an agent: installed, too old, not installed, not known yet.
@@ -94,11 +94,13 @@ impl AgentsTab {
             frame,
             hits,
             left,
-            ListId::Agents,
-            tr.t("agents.title"),
-            items,
-            self.selected,
-            self.tool.is_none(),
+            ListView {
+                id: ListId::Agents,
+                title: tr.t("agents.title"),
+                items,
+                selected_row: self.selected,
+                focused: self.tool.is_none(),
+            },
         );
 
         let (right, log) = match &self.job {

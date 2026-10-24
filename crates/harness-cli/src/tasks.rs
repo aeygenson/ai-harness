@@ -10,7 +10,7 @@ use harness_core::git::{Repo, HARNESS_DIR};
 use harness_core::skills::Skills;
 use harness_core::task::branch;
 use harness_core::task::handoff::{AnswerTo, NextStep, Role, Verdict, MAX_REASON_CHARS};
-use harness_core::task::orchestrator::{self, Project, SameText, StopReason};
+use harness_core::task::orchestrator::{self, HumanDecision, Project, SameText, StopReason};
 use harness_core::task::stop_request::StopRequest;
 use harness_core::task::store::TaskStore;
 use harness_core::task::{Stage, TaskState, WaitReason};
@@ -184,17 +184,17 @@ fn explain(stop: &StopReason, task_id: &str, suggested: Option<&AnswerTo>) -> St
             stopped_by_user_text(*role, task_id)
         }
         StopReason::UsageLimitReached(role) => format!(
-            "The subscription limit stopped the {role:?}. Its unfinished work is kept and comes \
+            "The subscription limit stopped the {role}. Its unfinished work is kept and comes \
              back when you run again later:\n  harness run {task_id}"
         ),
         StopReason::TimedOut(role) => format!(
-            "The time limit (agent_timeout_minutes in harness.toml) stopped the {role:?}. Its \
+            "The time limit (agent_timeout_minutes in harness.toml) stopped the {role}. Its \
              unfinished work stays in the folder for the next run. If the step needs more time, raise \
              the limit and commit harness.toml (any other uncommitted change stops the run), \
              then:\n  harness run {task_id}"
         ),
         StopReason::RoleFailed { role, problem } => {
-            format!("The {role:?} failed twice. Last problem:\n{problem}")
+            format!("The {role} failed twice. Last problem:\n{problem}")
         }
         StopReason::StepLimitReached => "Stopped after too many steps in one run.".into(),
         StopReason::DirtyWorkingTree(files) => format!(
@@ -202,11 +202,11 @@ fn explain(stop: &StopReason, task_id: &str, suggested: Option<&AnswerTo>) -> St
             files.join("\n  ")
         ),
         StopReason::ForbiddenChanges { role, files } => format!(
-            "The {role:?} changed files it may not touch (left uncommitted for you to check):\n  {}",
+            "The {role} changed files it may not touch (left uncommitted for you to check):\n  {}",
             files.join("\n  ")
         ),
         StopReason::TooLarge { role, files } => format!(
-            "The {role:?} made files too big to commit (left uncommitted). Usually this is build \
+            "The {role} made files too big to commit (left uncommitted). Usually this is build \
              output: add it to .gitignore or delete it, commit or remove the rest, then run again:\n  {}",
             files
                 .iter()
@@ -215,14 +215,14 @@ fn explain(stop: &StopReason, task_id: &str, suggested: Option<&AnswerTo>) -> St
                 .join("\n  ")
         ),
         StopReason::AgentCommitted(role) => format!(
-            "While the {role:?} was working, a new git commit appeared or the git branches \
+            "While the {role} was working, a new git commit appeared or the git branches \
              changed. The role may have done it, or someone else working in this repository \
              (you, another program, a git command). Before running again, check with \
              `git log`, `git branch` and `git status` that the commits and branches are the \
              ones you expect and that the task's branch is checked out."
         ),
         StopReason::ProtectedFilesChanged { role, files, log } => format!(
-            "The {role:?} changed files no role may change (agent instructions and settings, \
+            "The {role} changed files no role may change (agent instructions and settings, \
              the harness's own files). They are put back; what it wrote is in {}. Its other \
              changes are left uncommitted for you to check:\n  {}",
             log.display(),
@@ -234,7 +234,7 @@ fn explain(stop: &StopReason, task_id: &str, suggested: Option<&AnswerTo>) -> St
             reported,
         } => hidden_changes_text(*role, put_back, reported),
         StopReason::GitConfigChanged(role) => format!(
-            "While the {role:?} was working, the project's git settings (.git/config) \
+            "While the {role} was working, the project's git settings (.git/config) \
              changed. The role may have done it, or someone else working in this repository \
              (you, another program, a git command such as `git push -u`). The old settings \
              are back: if the change was yours, make it again after the role. Before running \
@@ -261,7 +261,7 @@ fn hidden_changes_text(role: Role, put_back: &[PathBuf], reported: &[PathBuf]) -
         format!("\n  {}", lines.join("\n  "))
     };
     let mut text = format!(
-        "While the {role:?} was working, files that git does not show changed. The role \
+        "While the {role} was working, files that git does not show changed. The role \
          may have done it, or someone else working in this repository or on this computer."
     );
     if !put_back.is_empty() {
@@ -311,10 +311,21 @@ pub(crate) fn decide(
             Stage::WaitingForHuman(
                 WaitReason::RoleAskedForHelp(role) | WaitReason::StoppedByUser(role),
             ) => NextStep::To(role),
-            _ => bail!("say who continues with --to <role|done>"),
+            Stage::WaitingForHuman(WaitReason::RoundLimitReached)
+            | Stage::Working(_)
+            | Stage::Done => bail!("say who continues with --to <role|done>"),
         },
     };
-    orchestrator::record_human_decision(&repo, &store, &mut state, verdict, next, notes)?;
+    orchestrator::record_human_decision(
+        &repo,
+        &store,
+        &mut state,
+        HumanDecision {
+            verdict,
+            next,
+            notes,
+        },
+    )?;
     println!("Saved. Next: harness run {task_id}");
     Ok(())
 }
@@ -417,11 +428,11 @@ mod tests {
         for stop in &stops {
             let text = explain(stop, "task-001", None);
             assert!(
-                text.starts_with("While the Architect was working"),
+                text.starts_with("While the architect was working"),
                 "{text}"
             );
-            assert!(!text.contains("The Architect changed"), "{text}");
-            assert!(!text.contains("The Architect made"), "{text}");
+            assert!(!text.contains("The architect changed"), "{text}");
+            assert!(!text.contains("The architect made"), "{text}");
             assert!(
                 text.contains("or someone else working in this repository"),
                 "{text}"

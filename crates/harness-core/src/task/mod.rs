@@ -289,7 +289,7 @@ impl TaskState {
             NextStep::Done => Stage::Done,
             NextStep::To(Role::Human) => Stage::WaitingForHuman(match handoff.verdict {
                 Verdict::NeedsHuman => WaitReason::RoleAskedForHelp(handoff.role),
-                _ => WaitReason::ApproveDesign,
+                Verdict::Approved | Verdict::Rejected => WaitReason::ApproveDesign,
             }),
             // The user may always continue past the limit; AI roles may not.
             NextStep::To(_) if self.round > self.max_rounds && handoff.role != Role::Human => {

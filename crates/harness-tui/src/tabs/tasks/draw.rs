@@ -18,7 +18,9 @@ use super::times::duration_label;
 use crate::tabs::tasks::labels::{short_stage, stage_label};
 use crate::ui::i18n::I18n;
 use crate::ui::theme;
-use crate::ui::{draw_list, panel, selected, ButtonId, Hits, ListId, Target, LIST_MARK_WIDTH};
+use crate::ui::{
+    draw_list, panel, selected, ButtonId, Hits, ListId, ListView, Target, LIST_MARK_WIDTH,
+};
 
 impl TasksTab {
     pub fn draw(&self, frame: &mut Frame, area: Rect, hits: &mut Hits, tr: &I18n) {
@@ -105,11 +107,13 @@ impl TasksTab {
             frame,
             hits,
             steps_area,
-            ListId::Steps,
-            &title,
-            items,
-            self.step,
-            self.focus == Focus::Steps,
+            ListView {
+                id: ListId::Steps,
+                title: &title,
+                items,
+                selected_row: self.step,
+                focused: self.focus == Focus::Steps,
+            },
         );
 
         self.draw_step(frame, task, detail_area, hits, tr);
@@ -151,11 +155,13 @@ impl TasksTab {
             frame,
             hits,
             area,
-            ListId::Tasks,
-            &title,
-            items,
-            self.task,
-            self.focus == Focus::Tasks,
+            ListView {
+                id: ListId::Tasks,
+                title: &title,
+                items,
+                selected_row: self.task,
+                focused: self.focus == Focus::Tasks,
+            },
         );
         self.pull_request_hits(&lines, first, area, hits);
     }
