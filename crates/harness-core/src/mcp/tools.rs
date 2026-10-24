@@ -8,7 +8,7 @@
 //!
 //! A server with the same settings can still answer differently later: a
 //! package without a fixed version updates itself, and a server on the web
-//! changes when its owner wants. A tool whose description changed after Lisa
+//! changes when its owner wants. A tool whose description changed after the user
 //! looked at it is how a server can slip new instructions to an agent, so a
 //! new check is compared with the last one ([`changes`]).
 

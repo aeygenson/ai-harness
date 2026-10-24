@@ -70,9 +70,9 @@ impl Repo {
     /// Moves the branch checked out now forward to `commit`, only when that
     /// needs no merge commit (a "fast forward"); git refuses otherwise.
     pub fn fast_forward_to(&self, commit: &str) -> Result<(), GitError> {
-        // `merge` instead of `pull`: `pull` follows Lisa's `pull.rebase`
-        // setting and could rewrite her commits. `--no-overwrite-ignore`
-        // keeps an ignored file of hers (such as `.env`) that the new
+        // `merge` instead of `pull`: `pull` follows the user's `pull.rebase`
+        // setting and could rewrite their commits. `--no-overwrite-ignore`
+        // keeps an ignored file of theirs (such as `.env`) that the new
         // commits would replace: git stops instead.
         self.git(&[
             "merge",
@@ -306,7 +306,7 @@ mod tests {
     }
 
     #[test]
-    fn a_fast_forward_keeps_an_ignored_file_of_lisa() {
+    fn a_fast_forward_keeps_an_ignored_file_of_the_user() {
         let (dir, repo, url) = project_and_remote();
         fs::write(repo.root().join(".gitignore"), "secret.env\n").unwrap();
         repo.commit_all("ignore").unwrap();

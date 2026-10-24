@@ -21,7 +21,7 @@ pub(crate) fn read_hidden(prompt: &str) -> Result<Secret> {
 }
 
 /// Saves a secret for MCP servers in `~/.harness/credentials/secrets/<name>`,
-/// readable only by Lisa, typed without showing it on the screen.
+/// readable only by the user, typed without showing it on the screen.
 pub(crate) fn set_secret(name: &str) -> Result<()> {
     if !mcp::is_simple_name(name) {
         bail!("use lowercase letters, digits, '-' and '_' for the name, for example `context7`");

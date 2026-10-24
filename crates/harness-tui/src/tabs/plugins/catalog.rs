@@ -138,7 +138,7 @@ pub enum Unusable {
 }
 
 impl Unusable {
-    /// What is not supported, in Lisa's language.
+    /// What is not supported, in the user's language.
     pub fn text(&self, tr: &I18n) -> String {
         match self {
             Unusable::Source(kind) => tr.f("plugins.unusable_source", &[("kind", kind)]),

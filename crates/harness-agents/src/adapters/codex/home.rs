@@ -78,12 +78,12 @@ impl Codex {
 /// Codex refreshes an expired login by itself, and the server accepts each
 /// refresh token only once. So a refreshed copy must be kept: throwing it
 /// away leaves `saved` with a used token, and the next run fails with
-/// "refresh token already used" until Lisa signs in again.
+/// "refresh token already used" until the user signs in again.
 ///
 /// Nothing is written when the copy is unchanged, is not a login (cut off,
 /// broken, a link, too big, or without a refresh token or API key), or when
 /// `saved` no longer holds `given`: then someone else changed it meanwhile
-/// (another run refreshed it, or Lisa signed in again) and theirs is newer.
+/// (another run refreshed it, or the user signed in again) and theirs is newer.
 /// The new login goes into a private file next to `saved` that is then
 /// renamed over it, so a crash never leaves `saved` half written.
 ///

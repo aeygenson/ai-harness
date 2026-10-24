@@ -39,7 +39,7 @@ task. If the same disagreement (the same issue at the same place) has
 already gone back and forth twice, do not send it back a third time and do
 not try a third fix: finish with `needs_human`. In notes.md put both sides
 next to each other (what each role said, `file:line`, the round numbers) and
-your recommended answer, so Lisa decides once.
+your recommended answer, so the user decides once.
 
 ## When you are stuck
 If the design is contradictory or impossible, or you need a decision, stop and
@@ -47,9 +47,9 @@ finish with verdict `needs_human`; explain the question in notes.md, unless
 your role's own skill says how to settle that case. Do not guess on things
 that change what the user gets.
 
-## Whom Lisa's answer goes to
+## Whom the user's answer goes to
 When you finish with `needs_human`, fill `answer_to` in handoff.json: the role
-that should act on Lisa's answer and a one-sentence reason.
+that should act on the user's answer and a one-sentence reason.
 - The answer leads to a change in the code: `developer`.
 - It changes the design or the scope: `architect`.
 - It is only a decision, a check to run, or an answer you can act on

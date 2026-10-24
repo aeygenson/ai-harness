@@ -41,7 +41,7 @@ mod tests {
 
     #[test]
     fn the_harness_folder_is_inside_the_home_folder() {
-        // CI machines and Lisa's computers all have a home folder.
+        // CI machines and the user's computers all have a home folder.
         let home = home_dir().unwrap();
         assert_eq!(harness_dir().unwrap(), home.join(".harness"));
     }

@@ -6,7 +6,7 @@
 //! `draw.rs` and `message_box.rs` (drawing), `steps.rs` (a step's text and
 //! files), `step_rows.rs` (the rows of the steps list), `github.rs`
 //! (sending a done task and merging its pull request),
-//! `stop.rs` (Lisa's stop buttons while roles work), `live_log.rs` and
+//! `stop.rs` (the user's stop buttons while roles work), `live_log.rs` and
 //! `log_panel.rs` (the scrollable live log), `times.rs` (how long a task
 //! and its steps took).
 //! `runner.rs` runs the roles in the background while the tab keeps

@@ -1,5 +1,5 @@
 //! `harness retro ...`: statistics of finished tasks, the retro agent's
-//! proposals, and applying the ones Lisa picks.
+//! proposals, and applying the ones the user picks.
 
 use std::fmt::Write as _;
 use std::io::{self, Write};

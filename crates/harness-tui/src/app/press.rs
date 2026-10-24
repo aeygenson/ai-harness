@@ -144,7 +144,7 @@ impl App {
         }
     }
 
-    /// «Stop now» (x): first asks Lisa, since the agent's work is cut off.
+    /// «Stop now» (x): first asks the user, since the agent's work is cut off.
     fn ask_to_stop_now(&mut self) {
         if !self.tasks.as_ref().is_some_and(TasksTab::can_stop) {
             return;
@@ -160,7 +160,7 @@ impl App {
         ));
     }
 
-    /// Lisa confirmed «Stop now». The roles may have finished meanwhile:
+    /// The user confirmed «Stop now». The roles may have finished meanwhile:
     /// then there is nothing left to stop.
     pub(crate) fn confirm_stop_now(&mut self) {
         let tr = &self.tr;

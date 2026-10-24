@@ -14,7 +14,7 @@
 //! other change to `info/exclude` still stops the task. When the role is
 //! stopped for another reason (not a commit), the new empty stub files are
 //! removed too, without running git, so the next run does not stop on them.
-//! A block left by a run the harness did not watch (Lisa's own Claude Code,
+//! A block left by a run the harness did not watch (the user's own Claude Code,
 //! the retrospective) is removed before git status is trusted again, so it
 //! cannot hide files. Before every role the harness also removes empty,
 //! untracked stub files that are still there (except those of unfinished
@@ -137,7 +137,7 @@ fn strip_stub_blocks(text: &[u8]) -> Option<Vec<u8>> {
 
 /// Removes what an earlier unwatched run of Claude Code left: its block in
 /// `info/exclude`, then the stub files that are now visible to git and empty.
-/// A stub with content stays, so git status shows it and Lisa checks it.
+/// A stub with content stays, so git status shows it and the user checks it.
 /// Without a block nothing is removed: then an empty stub-named file is the
 /// work of whatever made it (see [`remove_leftover_stubs`] for the run loop).
 ///
@@ -155,7 +155,7 @@ pub fn clear_leftovers(repo: &Repo) -> Result<(), GitError> {
 }
 
 /// Removes Claude Code's block from `info/exclude`, left by a run the
-/// harness did not watch (Lisa's own Claude Code, a harness that was killed),
+/// harness did not watch (the user's own Claude Code, a harness that was killed),
 /// so it hides no files from `git status`. Returns whether there was one.
 ///
 /// # Errors
@@ -192,7 +192,7 @@ pub(crate) fn clear_stub_block(repo: &Repo) -> Result<bool, GitError> {
 /// `keep` holds the files of unfinished work a limit left: an empty file
 /// there is the role's work. Best effort: a file that cannot be removed (on
 /// Windows, one another program holds open) stays, and the check for
-/// uncommitted changes shows it to Lisa.
+/// uncommitted changes shows it to the user.
 ///
 /// # Errors
 /// Git failed.
@@ -216,7 +216,7 @@ pub(crate) fn remove_leftover_stubs(repo: &Repo, keep: &[String]) -> Result<(), 
 }
 
 /// Removes those of `paths` that git shows as new (not tracked, not ignored)
-/// and that are empty plain files. A tracked or ignored file is Lisa's.
+/// and that are empty plain files. A tracked or ignored file is the user's.
 fn remove_visible_empty(repo: &Repo, paths: &[PathBuf]) -> Result<(), GitError> {
     let changed = repo.changed_files()?;
     for path in paths {
@@ -274,10 +274,10 @@ impl MissingStubs {
 
     /// Removes the noted files that are now empty plain files, without
     /// asking git. For a role that is stopped anyway: git must not run then.
-    /// The files were missing before the role, so none of them is Lisa's;
-    /// unlike [`Self::remove_new_empty`] this also removes one that Lisa's
+    /// The files were missing before the role, so none of them is the user's;
+    /// unlike [`Self::remove_new_empty`] this also removes one that the user's
     /// `.gitignore` hides. Best effort: a file that cannot be removed stays
-    /// for Lisa to see.
+    /// for the user to see.
     pub(crate) fn remove_empty_without_git(&self) {
         for path in &self.paths {
             if is_empty_file(path) {
@@ -339,7 +339,7 @@ mod tests {
     }
 
     #[test]
-    fn stripping_keeps_lisas_lines_and_drops_unknown_block_lines() {
+    fn stripping_keeps_the_users_lines_and_drops_unknown_block_lines() {
         let text = format!(
             "# excludes\r\n/build\r\n\r\n\n{}\n/.env\n/deno.json\nnotes\n",
             header()
@@ -377,7 +377,7 @@ mod tests {
         assert!(root.join(".gitmodules").exists(), "it is tracked");
         assert!(
             root.join(".env.local").exists(),
-            "Lisa's .gitignore hides it"
+            "The user's .gitignore hides it"
         );
         assert_eq!(repo.changed_files().unwrap(), [".npmrc"]);
     }
@@ -411,7 +411,7 @@ mod tests {
         assert!(root.join(".gitmodules").exists(), "it is tracked");
         assert!(
             root.join(".env.local").exists(),
-            "Lisa's .gitignore hides it"
+            "The user's .gitignore hides it"
         );
         assert!(root.join("notes.txt").exists(), "not a stub name");
         assert_eq!(repo.changed_files().unwrap(), [".npmrc", "notes.txt"]);
@@ -444,7 +444,7 @@ mod tests {
     fn without_git_only_noted_empty_files_are_removed() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
-        fs::write(root.join(".env"), "KEY=lisas\n").unwrap();
+        fs::write(root.join(".env"), "KEY=the_users\n").unwrap();
         let missing = MissingStubs::note(root);
         fs::write(root.join("package.json"), "").unwrap();
         fs::write(root.join(".npmrc"), "registry=https://example.com/\n").unwrap();

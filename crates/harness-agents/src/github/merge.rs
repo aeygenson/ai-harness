@@ -2,7 +2,7 @@
 //! work into the project's main branch (`base`), so the next task starts
 //! from it.
 //!
-//! Lisa decides to merge; the harness only does the clicks. Before merging
+//! The user decides to merge; the harness only does the clicks. Before merging
 //! it checks what GitHub says: the pull request must still be at the commit
 //! the harness sent (no commits someone else pushed), without conflicts and
 //! with its checks (CI) passed.

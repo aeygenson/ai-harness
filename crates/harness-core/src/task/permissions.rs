@@ -123,7 +123,7 @@ impl Role {
                 commands: Commands::Checks,
                 network: true,
             },
-            // Lisa's decisions are written by the harness itself, never by an agent.
+            // The user's decisions are written by the harness itself, never by an agent.
             Role::Human => RoleSpec {
                 writes: WriteRule::Nothing,
                 commands: Commands::Nothing,

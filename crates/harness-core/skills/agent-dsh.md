@@ -11,5 +11,5 @@ description: Working notes for DeepSeek Harness (DeepSeek or NVIDIA models).
 - Run the build and the tests with the shell before you finish; quote the
   result in notes.md.
 - Do not start servers or long-running processes; every command must finish.
-- You cannot ask questions while you work: when you need Lisa, finish with
+- You cannot ask questions while you work: when you need the user, finish with
   verdict `needs_human` and put the question in notes.md.

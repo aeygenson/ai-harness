@@ -6,7 +6,7 @@ use serde_json::Value;
 
 use crate::adapters::dsh::Provider;
 
-/// The longest error reason from an API shown to Lisa: one line is enough.
+/// The longest error reason from an API shown to the user: one line is enough.
 const MAX_REASON_CHARS: usize = 300;
 
 /// Claude Code's answer to `initialize`: `response.models`. The entry

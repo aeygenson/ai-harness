@@ -17,7 +17,7 @@
 //!
 //! The folder also holds `edit` (changing `harness.toml` without losing
 //! comments), `save` (checking and committing a changed file) and `projects`
-//! (the list of Lisa's projects).
+//! (the list of the user's projects).
 
 mod agent_kind;
 pub mod edit;
@@ -125,7 +125,7 @@ pub struct Config {
     /// `scenario`: the kind of project; `software` when the line is missing.
     #[serde(default)]
     pub scenario: Scenario,
-    /// `max_rounds`: how many rounds of sent-back work AI roles may do before Lisa decides.
+    /// `max_rounds`: how many rounds of sent-back work AI roles may do before the user decides.
     #[serde(default = "default_max_rounds")]
     pub max_rounds: u32,
     /// `agent_timeout_minutes`: how long one agent run may take, in minutes, before it is stopped.
@@ -144,7 +144,7 @@ pub struct Config {
     #[serde(default)]
     pub retro: Option<RetroConfig>,
     /// The project's repository on GitHub; `None` keeps every task on the
-    /// branch Lisa has checked out.
+    /// branch the user has checked out.
     #[serde(default)]
     pub github: Option<GitHubConfig>,
 }
@@ -234,13 +234,13 @@ pub struct McpConfig {
     /// `Authorization = "Bearer secret:<name>"`.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub headers: BTreeMap<String, String>,
-    /// How Lisa signs in to a web server; `None`: it needs no sign-in, or
+    /// How the user signs in to a web server; `None`: it needs no sign-in, or
     /// its headers carry the key.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub auth: Option<McpAuth>,
 }
 
-/// How Lisa signs in to an MCP server on the web.
+/// How the user signs in to an MCP server on the web.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum McpAuth {
     /// `auth = "oauth"`: a sign-in in the browser, once

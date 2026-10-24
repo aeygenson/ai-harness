@@ -1,4 +1,4 @@
-//! Lisa's decisions, saved as a handoff with role `human`.
+//! The user's decisions, saved as a handoff with role `human`.
 
 use std::path::PathBuf;
 
@@ -8,7 +8,7 @@ use crate::task::handoff::{Handoff, NextStep, Role, Verdict};
 use crate::task::store::TaskStore;
 use crate::task::TaskState;
 
-/// Lisa's decision (approve the design, send work back, answer a question),
+/// The user's decision (approve the design, send work back, answer a question),
 /// saved like any other handoff with role `human`.
 ///
 /// Finishing the task is refused ([`RunError::UnfinishedWork`]) while the
@@ -32,7 +32,7 @@ pub fn record_human_decision(
         .lines()
         .next()
         .filter(|line| !line.trim().is_empty())
-        .unwrap_or("Lisa's decision")
+        .unwrap_or("The user's decision")
         .to_string();
     let issues = if verdict == Verdict::Rejected {
         vec![crate::task::handoff::Issue {
@@ -57,7 +57,7 @@ pub fn record_human_decision(
         answer_to: None,
     };
     let step_dir = store.record(state, &handoff, notes)?;
-    // Commit only the task folder: code Lisa changed herself is hers to commit.
+    // Commit only the task folder: code the user changed themselves is theirs to commit.
     repo.commit_paths(&[store.dir()], &commit_message(&handoff))?;
     Ok(step_dir)
 }

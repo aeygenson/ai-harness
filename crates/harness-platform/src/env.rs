@@ -1,5 +1,5 @@
 //! Agents start with an empty environment plus a short list of variables
-//! from Lisa's terminal: none of them holds a secret, so no `*_API_KEY`
+//! from the user's terminal: none of them holds a secret, so no `*_API_KEY`
 //! reaches an agent by accident. Windows needs a few more of its own:
 //! without `SystemRoot`, for example, programs cannot use the network.
 

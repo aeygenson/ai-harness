@@ -34,10 +34,10 @@ pub enum MockStep {
     /// Make a git commit itself, which agents must never do.
     GitCommit,
     /// Check out a new branch at the same commit, then finish with an
-    /// approval for Lisa, as if the work were done.
+    /// approval for the user, as if the work were done.
     SwitchBranch,
     /// Make a branch without checking it out, then finish with an approval
-    /// for Lisa: a branch the harness might check out later.
+    /// for the user: a branch the harness might check out later.
     MakeBranch,
     /// Add a setting to `.git/config`, which agents must never change.
     ChangeGitConfig,
@@ -51,9 +51,9 @@ pub enum MockStep {
     UsageLimitAfterWriting(Vec<(String, String)>),
     /// Write these files into the output folder only, like the retrospective.
     WriteOutput(Vec<(String, String)>),
-    /// Change project files, then stop as if Lisa pressed «Stop now».
+    /// Change project files, then stop as if the user pressed «Stop now».
     StopNow(Vec<(String, String)>),
-    /// Change project files, then keep working until Lisa presses a stop
+    /// Change project files, then keep working until the user presses a stop
     /// button (`RoleJob::stop`): «Stop now» stops it as a real agent is
     /// stopped; «Stop after this step» lets it finish with an approval that
     /// sends the work to `next`. Gives up after `MOCK_WORK_LIMIT`.
@@ -176,7 +176,7 @@ impl MockAgent {
             MockStep::UsageLimitAfterWriting(files) => {
                 stop_after_writing(job, &files, RunEnd::UsageLimit, log)
             }
-            MockStep::StopNow(files) => stop_after_writing(job, &files, RunEnd::StoppedByLisa, log),
+            MockStep::StopNow(files) => stop_after_writing(job, &files, RunEnd::StoppedByUser, log),
             // `run` handles it: it waits.
             MockStep::WorkUntilStopped { .. } => AgentOutcome {
                 end: RunEnd::Failed("the mock agent's step did not work".into()),
@@ -301,7 +301,7 @@ async fn work_until_stopped(
         match (job.stop.asked(), next) {
             (Some(StopWhen::Now), _) => {
                 return AgentOutcome {
-                    end: RunEnd::StoppedByLisa,
+                    end: RunEnd::StoppedByUser,
                     log,
                 }
             }

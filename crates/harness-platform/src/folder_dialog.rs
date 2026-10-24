@@ -8,9 +8,9 @@ use std::process::Command;
 /// What the system dialog answered.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Native {
-    /// Lisa chose this folder.
+    /// The user chose this folder.
     Chosen(PathBuf),
-    /// Lisa closed the dialog without choosing a folder.
+    /// The user closed the dialog without choosing a folder.
     Cancelled,
     /// There is no dialog program or no desktop: use the browser.
     Unavailable,

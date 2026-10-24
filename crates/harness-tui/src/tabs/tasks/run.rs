@@ -146,7 +146,7 @@ impl TasksTab {
     }
 }
 
-/// The message after the work: what happened and what Lisa does next.
+/// The message after the work: what happened and what the user does next.
 fn outcome_text(outcome: &Outcome, tr: &I18n) -> Message {
     let task = &outcome.task;
     let role = |role: &Role| role.as_str();
@@ -167,8 +167,8 @@ fn outcome_text(outcome: &Outcome, tr: &I18n) -> Message {
         StopReason::WaitingForHuman(WaitReason::RoundLimitReached) => {
             Message::error(tr.f("tasks.stop_rounds", &[("task", task)]))
         }
-        StopReason::WaitingForHuman(WaitReason::StoppedByLisa(r)) => {
-            Message::info(tr.f("tasks.stop_by_lisa", &[("task", task), ("role", &role(r))]))
+        StopReason::WaitingForHuman(WaitReason::StoppedByUser(r)) => {
+            Message::info(tr.f("tasks.stop_by_user", &[("task", task), ("role", &role(r))]))
         }
         StopReason::UsageLimitReached(r) => {
             Message::error(tr.f("tasks.stop_usage", &[("task", task), ("role", &role(r))]))

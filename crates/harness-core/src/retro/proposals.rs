@@ -34,7 +34,7 @@
 //!
 //! `content` is the whole new text of `.harness/skills/<skill>.md`; without it
 //! the file stays as it is. A proposal has either `skill` or `task`, never both.
-//! Nothing changes until Lisa runs `harness retro apply`.
+//! Nothing changes until the user runs `harness retro apply`.
 
 use std::collections::BTreeSet;
 use std::fmt::Write as _;
@@ -66,7 +66,7 @@ pub struct ProposalsFile {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Proposal {
-    /// The number Lisa picks it by; unique within the file.
+    /// The number the user picks it by; unique within the file.
     pub id: u32,
     /// One line: what changes.
     pub summary: String,
@@ -120,7 +120,7 @@ pub enum ProposalError {
     Invalid {
         /// The id of the refused proposal.
         id: u32,
-        /// What is wrong, in words for Lisa.
+        /// What is wrong, in words for the user.
         problem: String,
     },
 }
@@ -140,7 +140,7 @@ pub enum FileChange {
 }
 
 impl ProposalsFile {
-    /// Removes terminal control characters from the texts shown to Lisa (see
+    /// Removes terminal control characters from the texts shown to the user (see
     /// [`crate::text::safe`]). The skill file `content` stays as written: it is
     /// saved to a file, not printed.
     pub fn make_text_safe(&mut self) {
@@ -414,13 +414,13 @@ mod tests {
 
     #[test]
     fn the_harness_writes_where_a_skill_came_from_and_the_agent_cannot() {
-        let text = "---\ndescription: Check empty input.\norigin: Lisa wrote it\n---\nBody.\n";
+        let text = "---\ndescription: Check empty input.\norigin: the user wrote it\n---\nBody.\n";
 
-        let written = with_origin(text, "retro 003 of 2026-10-07, approved by Lisa");
+        let written = with_origin(text, "retro 003 of 2026-10-07, approved by the user");
 
         assert_eq!(
             written,
-            "---\norigin: retro 003 of 2026-10-07, approved by Lisa\n\
+            "---\norigin: retro 003 of 2026-10-07, approved by the user\n\
              description: Check empty input.\n---\nBody.\n"
         );
         assert_eq!(

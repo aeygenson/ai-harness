@@ -1,4 +1,4 @@
-//! Opening an address in Lisa's browser: `open` on macOS, `xdg-open` on
+//! Opening an address in the user's browser: `open` on macOS, `xdg-open` on
 //! Linux, and on Windows the system's own handler for addresses (the same
 //! one a double-click on a link uses). None of them goes through a shell, so
 //! `&` and other special characters in the address are safe.

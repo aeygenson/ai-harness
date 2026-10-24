@@ -1,11 +1,11 @@
 //! `harness mcp-serve`: the harness as an MCP server that only reads.
 //!
-//! An AI agent on Lisa's computer (Claude Code, Codex, Gemini, ...) starts it
+//! An AI agent on the user's computer (Claude Code, Codex, Gemini, ...) starts it
 //! like any MCP server and talks to it on standard input and output, one JSON
 //! message per line. Through it the agent sees the project's tasks, their
 //! steps, logs, statistics and settings, and can explain what happened or
 //! propose a change to the harness. It cannot change anything: the process
-//! runs on its own and the decisions are Lisa's, made in the TUI.
+//! runs on its own and the decisions are the user's, made in the TUI.
 //! Design: `docs/design.md`, section 5.8.
 
 mod read;

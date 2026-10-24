@@ -193,7 +193,7 @@ pub fn current() -> &'static Theme {
     &THEMES[CURRENT.with(Cell::get).min(THEMES.len() - 1)]
 }
 
-/// The theme before Lisa picks one: «Night», except in macOS's own
+/// The theme before the user picks one: «Night», except in macOS's own
 /// Terminal, which cannot show 24-bit colours (the RGB themes would come out
 /// wrong there), so it starts with the terminal's own palette.
 pub fn default_code() -> &'static str {

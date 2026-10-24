@@ -9,7 +9,7 @@
 //! (the pull request a finished task becomes on GitHub), `tripwire` (what
 //! `git status` does not show), `agent_stubs` (the empty files Claude Code
 //! makes when it starts, which are not a reason to stop) and `stop_request`
-//! (Lisa's «Stop after this step» and «Stop now»).
+//! (the user's «Stop after this step» and «Stop now»).
 
 pub mod agent;
 pub mod agent_stubs;
@@ -36,33 +36,35 @@ use crate::task::handoff::{Handoff, NextStep, Role, Verdict, SCHEMA_VERSION};
 use crate::task::pull_request::PullRequest;
 use crate::task::scenario::Workflow;
 
-/// Default limit on how many rounds a task may take before Lisa must step in.
+/// Default limit on how many rounds a task may take before the user must step in.
 pub const DEFAULT_MAX_ROUNDS: u32 = 5;
 
-/// Why the task is waiting for Lisa.
+/// Why the task is waiting for the user.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum WaitReason {
-    /// The architect finished a design and it needs Lisa's approval.
+    /// The architect finished a design and it needs the user's approval.
     ApproveDesign,
     /// A role said `needs_human`.
     RoleAskedForHelp(Role),
     /// Work was sent back too many times.
     RoundLimitReached,
-    /// Lisa stopped the run («Stop now» or «Stop after this step»). The
-    /// role is the one that continues when she chooses «Continue»: the
+    /// The user stopped the run («Stop now» or «Stop after this step»). The
+    /// role is the one that continues when they choose «Continue»: the
     /// stopped one, or the one that would have run next. In `state.json`:
-    /// `{"waiting_for_human":{"stopped_by_lisa":"developer"}}`.
-    StoppedByLisa(Role),
+    /// `{"waiting_for_human":{"stopped_by_lisa":"developer"}}`; the old name
+    /// stays in the file, so tasks saved before the rename still load.
+    #[serde(rename = "stopped_by_lisa")]
+    StoppedByUser(Role),
 }
 
 /// Where the task is right now.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Stage {
-    /// An AI role is working (never `Role::Human`; Lisa's turn is `WaitingForHuman`).
+    /// An AI role is working (never `Role::Human`; the user's turn is `WaitingForHuman`).
     Working(Role),
-    /// The task waits for Lisa, for the reason given.
+    /// The task waits for the user, for the reason given.
     WaitingForHuman(WaitReason),
     /// The task is finished.
     Done,
@@ -79,7 +81,7 @@ pub struct TaskState {
     pub workflow: Workflow,
     /// The current round, starting at 1; each rejected handoff adds one.
     pub round: u32,
-    /// After this many rounds the task stops and waits for Lisa.
+    /// After this many rounds the task stops and waits for the user.
     pub max_rounds: u32,
     /// Who works now, or why the task waits, or that it is done.
     pub stage: Stage,
@@ -126,8 +128,8 @@ pub enum TransitionError {
     },
     /// The work was rejected, but the handoff lists no issues.
     RejectedWithoutIssues,
-    /// A question to Lisa suggests that a role outside the task's scenario
-    /// (or Lisa herself) gets her answer (`answer_to.role`).
+    /// A question to the user suggests that a role outside the task's scenario
+    /// (or the user) gets their answer (`answer_to.role`).
     AnswerToNotARole {
         /// The role named in `answer_to`.
         role: Role,
@@ -177,7 +179,7 @@ impl fmt::Display for TransitionError {
                 let names: Vec<&str> = allowed.iter().map(|r| r.as_str()).collect();
                 write!(
                     f,
-                    "answer_to.role is {role}, but Lisa's answer can go only to a role of this \
+                    "answer_to.role is {role}, but the user's answer can go only to a role of this \
                      task: {}",
                     names.join(", ")
                 )
@@ -214,7 +216,7 @@ impl TaskState {
     /// Gives the task `extra` more rounds than it has used so far.
     ///
     /// Counting from the rounds already used, not from the old limit, means a
-    /// task that went past its limit with Lisa's help still gets all `extra`
+    /// task that went past its limit with the user's help still gets all `extra`
     /// rounds. Only the limit changes; the stage stays as it is.
     pub fn add_rounds(&mut self, extra: u32) {
         let used = self.round.saturating_sub(1);
@@ -289,7 +291,7 @@ impl TaskState {
                 Verdict::NeedsHuman => WaitReason::RoleAskedForHelp(handoff.role),
                 _ => WaitReason::ApproveDesign,
             }),
-            // Lisa may always continue past the limit; AI roles may not.
+            // The user may always continue past the limit; AI roles may not.
             NextStep::To(_) if self.round > self.max_rounds && handoff.role != Role::Human => {
                 Stage::WaitingForHuman(WaitReason::RoundLimitReached)
             }
@@ -298,7 +300,7 @@ impl TaskState {
         Ok(())
     }
 
-    /// A question to Lisa may suggest who gets her answer, but only a role of
+    /// A question to the user may suggest who gets their answer, but only a role of
     /// the task's scenario. With another verdict `answer_to` is ignored
     /// (see [`Handoff::suggested_answer`]).
     fn check_answer_to(&self, handoff: &Handoff) -> Result<(), TransitionError> {
@@ -509,7 +511,7 @@ mod tests {
         );
     }
 
-    /// A tester's handoff with `verdict`, suggesting `role` for Lisa's answer.
+    /// A tester's handoff with `verdict`, suggesting `role` for the user's answer.
     fn tester_suggesting(verdict: Verdict, next: NextStep, role: Role) -> Handoff {
         let mut asked = handoff(Role::Tester, 1, verdict, next);
         asked.answer_to = Some(AnswerTo {
@@ -534,7 +536,7 @@ mod tests {
     }
 
     #[test]
-    fn a_question_may_not_suggest_lisa_herself() {
+    fn a_question_may_not_suggest_the_user_herself() {
         let mut task = new_task();
         task.stage = Stage::Working(Role::Tester);
         let before = task.clone();
@@ -566,7 +568,7 @@ mod tests {
     }
 
     #[test]
-    fn too_many_rounds_stops_for_lisa() {
+    fn too_many_rounds_stops_for_the_user() {
         let mut task = new_task();
         task.round = DEFAULT_MAX_ROUNDS;
         task.stage = Stage::Working(Role::Tester);
@@ -582,7 +584,7 @@ mod tests {
             Stage::WaitingForHuman(WaitReason::RoundLimitReached)
         );
 
-        // Lisa decides to give the developer one more try.
+        // The user decides to give the developer one more try.
         let round = task.round;
         task.apply(&handoff(
             Role::Human,
@@ -612,7 +614,7 @@ mod tests {
             Stage::WaitingForHuman(WaitReason::RoundLimitReached)
         );
 
-        // Act: Lisa adds rounds and sends the work back to the developer.
+        // Act: the user adds rounds and sends the work back to the developer.
         task.add_rounds(5);
         let round = task.round;
         task.apply(&handoff(
@@ -637,7 +639,7 @@ mod tests {
 
     #[test]
     fn more_rounds_count_from_the_rounds_already_used() {
-        // A task Lisa pushed well past its limit still gets all the new rounds.
+        // A task the user pushed well past its limit still gets all the new rounds.
         let mut task = new_task();
         task.round = 9;
         task.add_rounds(5);
@@ -674,9 +676,9 @@ mod tests {
     }
 
     #[test]
-    fn a_task_stopped_by_lisa_survives_a_round_trip_through_json() {
+    fn a_task_stopped_by_the_user_survives_a_round_trip_through_json() {
         let mut task = new_task();
-        task.stage = Stage::WaitingForHuman(WaitReason::StoppedByLisa(Role::Developer));
+        task.stage = Stage::WaitingForHuman(WaitReason::StoppedByUser(Role::Developer));
 
         let json = serde_json::to_string(&task).unwrap();
         let again: TaskState = serde_json::from_str(&json).unwrap();
@@ -703,9 +705,9 @@ mod tests {
     }
 
     #[test]
-    fn lisa_may_send_a_stopped_task_to_any_role() {
+    fn the_user_may_send_a_stopped_task_to_any_role() {
         let mut task = new_task();
-        task.stage = Stage::WaitingForHuman(WaitReason::StoppedByLisa(Role::Developer));
+        task.stage = Stage::WaitingForHuman(WaitReason::StoppedByUser(Role::Developer));
         task.apply(&handoff(
             Role::Human,
             1,

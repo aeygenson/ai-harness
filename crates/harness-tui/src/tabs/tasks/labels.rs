@@ -1,5 +1,5 @@
 //! The words the Tasks tab shows for a stage, a verdict, a severity and the
-//! next step, in Lisa's language.
+//! next step, in the user's language.
 
 use harness_core::retro::usage::Usage;
 use harness_core::task::handoff::{NextStep, Severity, Verdict};
@@ -19,7 +19,7 @@ pub fn stage_label(stage: Stage, tr: &I18n) -> String {
             tr.f("stage.asked_for_help", &[("role", &role.as_str())])
         }
         Stage::WaitingForHuman(WaitReason::RoundLimitReached) => tr.t("stage.round_limit").into(),
-        Stage::WaitingForHuman(WaitReason::StoppedByLisa(role)) => {
+        Stage::WaitingForHuman(WaitReason::StoppedByUser(role)) => {
             tr.f("stage.stopped", &[("role", &role.as_str())])
         }
         Stage::Done => tr.t("stage.done").into(),

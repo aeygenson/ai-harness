@@ -134,8 +134,8 @@ impl TasksTab {
         self.draw_menu(frame, hits, menu, x, area.y, tr);
     }
 
-    /// The link to the notes Lisa answers, on the box's top border after its
-    /// title, so it is right where she writes; then whom the asking role
+    /// The link to the notes the user answers, on the box's top border after its
+    /// title, so it is right where they write; then whom the asking role
     /// suggests for the answer. Nothing when there is neither.
     fn draw_questions(
         &self,

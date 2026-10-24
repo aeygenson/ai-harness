@@ -14,11 +14,11 @@
 //!     01-developer/
 //!   inbox/               scratch folder where an agent writes its result
 //!   failures/            logs of failed attempts
-//!   stopped/             logs of runs Lisa stopped («Stop now»)
+//!   stopped/             logs of runs the user stopped («Stop now»)
 //! ```
 //!
 //! Step folders are numbered because the same role can work twice in one round
-//! (for example the tester asks Lisa for help and then continues).
+//! (for example the tester asks the user for help and then continues).
 //! Nothing is ever overwritten.
 
 mod files;
@@ -82,12 +82,12 @@ pub enum StoreError {
     Refused(#[from] TransitionError),
 }
 
-/// One saved step: a role's (or Lisa's) handoff with its notes.
+/// One saved step: a role's (or the user's) handoff with its notes.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Step {
     /// For example `runs/task-001/round-02/03-tester`.
     pub dir: PathBuf,
-    /// The handoff the role (or Lisa) wrote, read from `handoff.json`.
+    /// The handoff the role (or the user) wrote, read from `handoff.json`.
     pub handoff: Handoff,
     /// The text of `notes.md`; empty if the file is missing.
     pub notes: String,
@@ -95,7 +95,7 @@ pub struct Step {
 
 impl Step {
     /// What the agent printed in this step (`agent.log`); `None` if there is
-    /// no log, as for Lisa's decisions.
+    /// no log, as for the user's decisions.
     pub fn agent_log(&self) -> Option<String> {
         fs::read_to_string(self.dir.join(LOG_FILE)).ok()
     }
@@ -185,7 +185,7 @@ impl TaskStore {
     }
 
     /// Saves the log of a failed attempt as `failures/round-01-architect-1.log`,
-    /// so Lisa can see what went wrong. Returns the file's path.
+    /// so the user can see what went wrong. Returns the file's path.
     pub fn save_failure_log(
         &self,
         round: u32,
@@ -195,7 +195,7 @@ impl TaskStore {
         self.save_numbered_log(FAILURES_DIR, round, role, log)
     }
 
-    /// Saves the log of a run Lisa stopped («Stop now») as
+    /// Saves the log of a run the user stopped («Stop now») as
     /// `stopped/round-01-developer-1.log`. Not in `failures/`: the agent did
     /// not fail, so it is not counted as a failed attempt. Returns the path.
     pub fn save_stopped_log(
@@ -231,7 +231,7 @@ impl TaskStore {
         }
     }
 
-    /// The task description written by Lisa (`task.md`).
+    /// The task description written by the user (`task.md`).
     pub fn description(&self) -> Result<String, StoreError> {
         let path = self.dir.join(TASK_FILE);
         fs::read_to_string(&path).map_err(|e| io_error(&path, e))
@@ -316,7 +316,7 @@ impl TaskStore {
     }
 
     /// Moves the task to `stage` without a handoff and saves it in
-    /// `state.json`. Only for the harness's own moves: Lisa's stop buttons
+    /// `state.json`. Only for the harness's own moves: the user's stop buttons
     /// and «Continue» after them (see `orchestrator::manual`).
     pub fn save_stage(&self, state: &mut TaskState, new_stage: Stage) -> Result<(), StoreError> {
         let mut next = state.clone();

@@ -50,7 +50,7 @@ pub(super) fn for_npm(command: &str, prefix: Option<&str>) -> String {
 pub struct Entry {
     /// The name in `harness.toml` (`agent = "codex"`), or the catalog's own.
     pub id: &'static str,
-    /// The name shown to Lisa, such as `Claude Code`.
+    /// The name shown to the user, such as `Claude Code`.
     pub name: &'static str,
     /// The company that makes the agent, such as `Anthropic`.
     pub vendor: &'static str,

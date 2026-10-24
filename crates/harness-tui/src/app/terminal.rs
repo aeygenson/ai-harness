@@ -106,7 +106,7 @@ pub(crate) fn watch_stop_signals() -> io::Result<Arc<AtomicBool>> {
     Ok(stop)
 }
 
-/// Draws the app and hands it every key, click and paste until Lisa quits,
+/// Draws the app and hands it every key, click and paste until the user quits,
 /// `stop` is set (see [`watch_stop_signals`]) or the terminal is closed.
 pub(crate) fn event_loop(
     terminal: &mut DefaultTerminal,
@@ -184,7 +184,7 @@ fn edit_outside(terminal: &mut DefaultTerminal, file: &Path, tr: &I18n) -> Resul
 }
 
 /// Gives the terminal to `harness login` (it asks for a token or opens the
-/// browser) and takes it back once Lisa presses Enter.
+/// browser) and takes it back once the user presses Enter.
 fn sign_in_outside(
     terminal: &mut DefaultTerminal,
     login: &str,
@@ -204,7 +204,7 @@ fn sign_in_outside(
 }
 
 /// Gives the terminal to the command that installs a program (it may ask
-/// for a password) and takes it back once Lisa presses Enter.
+/// for a password) and takes it back once the user presses Enter.
 fn install_outside(
     terminal: &mut DefaultTerminal,
     name: &str,
@@ -223,7 +223,7 @@ fn install_outside(
 
 /// Leaves the full screen, prints `heading`, runs `commands` one after
 /// another in the plain terminal (they read the keyboard themselves) and
-/// takes the terminal back once Lisa has read the output and pressed Enter.
+/// takes the terminal back once the user has read the output and pressed Enter.
 /// A command that fails stops the ones after it.
 fn run_outside(
     terminal: &mut DefaultTerminal,
@@ -248,7 +248,7 @@ fn run_outside(
     result
 }
 
-/// Prints a line for Lisa in the plain terminal. Unlike `println!`, which
+/// Prints a line for the user in the plain terminal. Unlike `println!`, which
 /// panics when it cannot write, this ignores a closed window: the loop then
 /// notices the closed terminal and ends normally.
 fn say(text: &str) {

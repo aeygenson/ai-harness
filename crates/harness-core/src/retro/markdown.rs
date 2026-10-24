@@ -23,7 +23,7 @@ impl Stats {
     /// The «Tasks» table: one row per task.
     fn tasks_markdown(&self, md: &mut String) {
         md.push_str("## Tasks\n\n");
-        md.push_str("| Task | Rounds | Stage | Steps | Lisa's decisions | Failed attempts |\n");
+        md.push_str("| Task | Rounds | Stage | Steps | the user's decisions | Failed attempts |\n");
         md.push_str("|---|---|---|---|---|---|\n");
         for t in &self.tasks {
             let _ = writeln!(

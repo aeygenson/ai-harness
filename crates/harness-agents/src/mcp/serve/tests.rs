@@ -9,7 +9,7 @@ use harness_core::task::store::TaskStore;
 
 use super::*;
 
-/// A project with `task-001`: the architect finished and the design waits for Lisa.
+/// A project with `task-001`: the architect finished and the design waits for the user.
 fn project() -> tempfile::TempDir {
     let root = tempfile::tempdir().unwrap();
     let harness_dir = root.path().join(HARNESS_DIR);
@@ -245,7 +245,7 @@ fn wait_for_change_returns_when_the_state_changes() {
     let mut observer = Observer::new(root.path());
     observer.poll = Duration::from_millis(10);
     let runs = root.path().join(HARNESS_DIR).join("runs");
-    // Another thread plays Lisa giving more rounds while the agent waits.
+    // Another thread plays the user giving more rounds while the agent waits.
     let lisa = std::thread::spawn(move || {
         std::thread::sleep(Duration::from_millis(200));
         let (store, mut state) = TaskStore::open(&runs, "task-001").unwrap();

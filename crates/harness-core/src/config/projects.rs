@@ -1,4 +1,4 @@
-//! The projects Lisa works on, so the TUI can list them and switch between them.
+//! The projects the user works on, so the TUI can list them and switch between them.
 //!
 //! The list lives outside every project, in `~/.harness/projects.toml`:
 //!
@@ -56,7 +56,7 @@ pub enum ProjectError {
     NotAFolder(PathBuf),
 }
 
-/// The list of Lisa's projects, as stored in `~/.harness/projects.toml`.
+/// The list of the user's projects, as stored in `~/.harness/projects.toml`.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Projects {

@@ -32,7 +32,7 @@ impl Scenario {
 
     /// The AI roles of this scenario, in the order of the flow.
     ///
-    /// Lisa (`Role::Human`) takes part in every scenario and is not listed.
+    /// The user (`Role::Human`) takes part in every scenario and is not listed.
     pub fn roles(self) -> &'static [Role] {
         match self {
             Scenario::Software => &[
@@ -72,7 +72,7 @@ impl fmt::Display for Scenario {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum Workflow {
-    /// Software: architect, then Lisa approves the design, then developer,
+    /// Software: architect, then the user approves the design, then developer,
     /// tester and security.
     #[default]
     Task,
@@ -93,7 +93,7 @@ impl Workflow {
         }
     }
 
-    /// Who gets the work when Lisa approves what waits for her approval and
+    /// Who gets the work when the user approves what waits for their approval and
     /// does not say who continues.
     pub fn after_approval(self) -> Role {
         match self {
@@ -148,7 +148,7 @@ mod tests {
     }
 
     #[test]
-    fn the_names_in_files_are_the_ones_lisa_writes() {
+    fn the_names_in_files_are_the_ones_the_user_writes() {
         assert_eq!(Scenario::default(), Scenario::Software);
         assert_eq!(Scenario::Software.to_string(), "software");
         assert_eq!(serde_json::to_string(&Workflow::Task).unwrap(), "\"task\"");

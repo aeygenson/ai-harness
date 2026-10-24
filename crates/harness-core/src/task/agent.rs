@@ -22,8 +22,8 @@ pub struct RoleJob {
     pub prompt: String,
     /// Where the agent must write `handoff.json` and `notes.md`.
     pub output_dir: PathBuf,
-    /// Lisa's «Stop now» while the agent works: the adapter stops the agent
-    /// at once and reports [`RunEnd::StoppedByLisa`].
+    /// The user's «Stop now» while the agent works: the adapter stops the agent
+    /// at once and reports [`RunEnd::StoppedByUser`].
     pub stop: StopRequest,
 }
 
@@ -41,16 +41,16 @@ pub struct AgentOutcome {
 pub enum RunEnd {
     /// The agent finished its work (the handoff is checked separately).
     Succeeded,
-    /// The agent crashed or exited with an error: one short line for Lisa.
+    /// The agent crashed or exited with an error: one short line for the user.
     Failed(String),
     /// The time limit (`agent_timeout_minutes`) stopped the agent: one short
-    /// line for Lisa. Its unfinished changes stay in the folder, not thrown away.
+    /// line for the user. Its unfinished changes stay in the folder, not thrown away.
     TimedOut(String),
     /// The subscription's usage limit stopped the agent.
     UsageLimit,
-    /// Lisa pressed «Stop now»: the agent was stopped with everything it
+    /// The user pressed «Stop now»: the agent was stopped with everything it
     /// started. Its unfinished changes stay in the folder, as after a time limit.
-    StoppedByLisa,
+    StoppedByUser,
 }
 
 /// Runs one role with some agent.

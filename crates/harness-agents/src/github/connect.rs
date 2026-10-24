@@ -18,7 +18,7 @@ use crate::install::models::run_for;
 /// How long one `gh` call may take: it talks to GitHub.
 const GH_LIMIT: Duration = Duration::from_mins(1);
 
-/// What `gh repo view` says when there is no such repository (or Lisa may
+/// What `gh repo view` says when there is no such repository (or the user may
 /// not see it); any other failure is a real error, not "make a new one".
 const NOT_FOUND: &str = "Could not resolve to a Repository";
 
@@ -27,9 +27,9 @@ const NOT_FOUND: &str = "Could not resolve to a Repository";
 pub struct Connection<'a> {
     /// The `gh` program, signed in.
     pub gh: &'a Path,
-    /// The repository: `name` (in Lisa's own account) or `owner/name`.
+    /// The repository: `name` (in the user's own account) or `owner/name`.
     pub name: &'a str,
-    /// The repository must be private (only Lisa sees it): a new one is made
+    /// The repository must be private (only the user sees it): a new one is made
     /// private, and a public one that is already there is refused.
     pub private: bool,
     /// The start of the address git pushes to; the repository and `.git`
@@ -214,7 +214,7 @@ fn check_remote(repo: &Repo, url: &str, full: &str) -> Result<(), String> {
 /// The text `harness.toml` must have once `[github]` is in: the last
 /// committed text with `github` added (when it is not there yet). The file
 /// on disk may be that committed text, or already the new one (an earlier
-/// try stopped before its commit); anything else is an edit of Lisa's that
+/// try stopped before its commit); anything else is an edit of the user's that
 /// is not committed, and it must not go to GitHub with this commit.
 fn settings_to_commit(repo: &Repo, github: &GitHubConfig) -> Result<String, String> {
     let path = repo.root().join(HARNESS_DIR).join(CONFIG_FILE);
@@ -241,7 +241,7 @@ fn settings_to_commit(repo: &Repo, github: &GitHubConfig) -> Result<String, Stri
 }
 
 /// Writes and commits `harness.toml` with `[github]`. Everything is checked
-/// again here, not only at the start: Lisa may have saved other settings,
+/// again here, not only at the start: the user may have saved other settings,
 /// or started a task on another branch, while GitHub was asked.
 fn write_github(repo: &Repo, github: &GitHubConfig) -> Result<(), String> {
     main_branch(repo, Some(github))?;

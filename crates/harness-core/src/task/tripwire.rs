@@ -1,6 +1,6 @@
 //! A tripwire for what `git status` cannot see: git's own hooks and
 //! settings files, and a few files outside the project that would let an
-//! agent's code run later with Lisa's rights (shell start-up files, the
+//! agent's code run later with the user's rights (shell start-up files, the
 //! global git settings, SSH keys, the `harness` program itself).
 //!
 //! The harness takes a [`Snapshot`] before a role and compares it after.
@@ -106,7 +106,7 @@ impl Watched {
             files.remove(file);
         }
         for file in &self.reported_files {
-            // A file Lisa keeps private from the harness must not stop every role.
+            // A file the user keeps private from the harness must not stop every role.
             let content = read(file).unwrap_or_else(|e| Some(Content::Unreadable(e.kind())));
             files.insert(file.clone(), content);
         }
@@ -168,7 +168,7 @@ enum Content {
 pub struct Changes {
     /// Changed files in the restored folders; they are now as before.
     pub put_back: Vec<PathBuf>,
-    /// Changed single files, left as they are for Lisa to check.
+    /// Changed single files, left as they are for the user to check.
     pub reported: Vec<PathBuf>,
     /// `info/exclude` changed and held Claude Code's block of stub lines
     /// (now put back): its new empty stub files must be removed. When the
@@ -457,7 +457,7 @@ mod tests {
                 dir.path().join("home/.gitconfig")
             ]
         );
-        // Reported files are left for Lisa.
+        // Reported files are left for the user.
         assert!(dir.path().join("home/.gitconfig").exists());
         // Everything is back in the folders, so a second check is quiet
         // there; the home files still differ from the first snapshot.

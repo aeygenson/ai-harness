@@ -10,7 +10,7 @@
 //! from the registry or written to the project.
 //!
 //! Everything here comes from strangers: control characters are removed, and
-//! the command is shown in the server form for Lisa to read before saving.
+//! the command is shown in the server form for the user to read before saving.
 
 mod offer;
 

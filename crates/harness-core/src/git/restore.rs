@@ -31,7 +31,7 @@ impl Repo {
     }
 
     /// What changed in each of `paths` since the last commit, as text for
-    /// Lisa: the `git diff` of a known file, or the start of a new one.
+    /// the user: the `git diff` of a known file, or the start of a new one.
     pub fn describe_changes(&self, paths: &[String]) -> Result<String, GitError> {
         let mut text = String::new();
         for path in paths {

@@ -1,5 +1,5 @@
 //! The Retro tab's work: generating a retrospective and applying the proposals
-//! Lisa accepted.
+//! the user accepted.
 
 use std::fmt::Write as _;
 use std::path::Path;
@@ -25,7 +25,7 @@ impl App {
                     self.message = Some(Message::error(self.tr.t("retro.tasks_running")));
                     return;
                 }
-                // Lisa sees which project the retrospective is for.
+                // The user sees which project the retrospective is for.
                 let Some(root) = &self.project else {
                     return;
                 };

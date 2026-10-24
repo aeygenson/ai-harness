@@ -51,11 +51,11 @@ fn login_claude(dir: &Path) -> Result<()> {
 
 /// What an API key looks like, to catch a wrong paste before it is saved.
 struct KeyShape {
-    /// The company, as Lisa knows it.
+    /// The company, as the user knows it.
     vendor: &'static str,
     /// The folder in `~/.harness/credentials/`.
     login: &'static str,
-    /// Where Lisa gets the key.
+    /// Where the user gets the key.
     site: &'static str,
     /// How every key starts.
     prefix: &'static str,
@@ -82,7 +82,7 @@ const NVIDIA: KeyShape = KeyShape {
 };
 
 /// Saves an API key like the Claude token: in
-/// `~/.harness/credentials/<login>/`, readable only by Lisa. The key is typed
+/// `~/.harness/credentials/<login>/`, readable only by the user. The key is typed
 /// without showing it on the screen.
 fn login_api_key(dir: &Path, shape: &KeyShape) -> Result<()> {
     println!(
@@ -161,7 +161,7 @@ fn login_codex(dir: &Path) -> Result<()> {
 
 /// Starts `agy` with `HOME` set to our credentials folder, so the login is
 /// saved there and not in `~/.gemini`. `agy` has no separate login command:
-/// Lisa signs in with Google, then quits with `/quit`. The environment is
+/// The user signs in with Google, then quits with `/quit`. The environment is
 /// empty like for the agents, so the login goes to files, not the keyring.
 fn login_antigravity(dir: &Path) -> Result<()> {
     let home = dir.join("antigravity");

@@ -2,7 +2,7 @@
 //!
 //! A project describes each server once in `harness.toml` and lists it in the
 //! roles that need it. An agent gets only the servers of its role and never the
-//! ones from Lisa's own agent settings:
+//! ones from the user's own agent settings:
 //!
 //! ```toml
 //! [mcp.context7]

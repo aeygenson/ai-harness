@@ -10,5 +10,5 @@ description: Working notes for Codex CLI.
 - Use `rg` to search and `sed -n` to read parts of large files.
 - Run the build and the tests with the shell before you finish; quote the
   result in notes.md.
-- You cannot ask questions while you work: when you need Lisa, finish with
+- You cannot ask questions while you work: when you need the user, finish with
   verdict `needs_human` and put the question in notes.md.

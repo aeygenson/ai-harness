@@ -1,6 +1,6 @@
 //! Changes to harness.toml made by commands such as `harness plugin add`.
 //!
-//! The file is Lisa's: it has her comments and her order of settings. So it is
+//! The file is the user's: it has their comments and their order of settings. So it is
 //! edited with `toml_edit`, which changes only the lines that must change and
 //! keeps everything else as it was. After every change the result is checked
 //! with the normal `Config::parse`.
@@ -290,7 +290,7 @@ mod tests {
     use super::*;
     use crate::config::McpConfig;
 
-    const TOML: &str = "# Lisa's settings\n\
+    const TOML: &str = "# the user's settings\n\
                         max_rounds = 5\n\n\
                         [roles.developer]\n\
                         agent = \"codex\" # fast\n\
@@ -335,7 +335,7 @@ mod tests {
         developer.plugins.clear();
         developer.skills = vec!["rust-errors".into()];
         let text = set_role(TOML, Role::Developer, &developer).unwrap();
-        assert!(text.starts_with("# Lisa's settings\n"), "{text}");
+        assert!(text.starts_with("# the user's settings\n"), "{text}");
         assert!(text.contains("agent = \"codex\" # fast"), "{text}");
         assert!(!text.contains("plugins = "), "{text}");
         let config = Config::parse(&text).unwrap();
@@ -378,13 +378,13 @@ mod tests {
         .unwrap();
         let config = Config::parse(&text).unwrap();
         assert_eq!(config.retro.unwrap().model, None);
-        assert!(text.starts_with("# Lisa's settings\n"));
+        assert!(text.starts_with("# the user's settings\n"));
     }
 
     #[test]
     fn adding_a_plugin_keeps_comments_and_can_give_it_to_a_role() {
         let text = add_plugin(TOML, &plugin("review"), Some(Role::Developer)).unwrap();
-        assert!(text.starts_with("# Lisa's settings\n"), "{text}");
+        assert!(text.starts_with("# the user's settings\n"), "{text}");
         assert!(text.contains("agent = \"codex\" # fast"), "{text}");
         let config = Config::parse(&text).unwrap();
         let review = &config.plugins["review"];

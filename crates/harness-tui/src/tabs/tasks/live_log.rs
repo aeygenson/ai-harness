@@ -1,4 +1,4 @@
-//! The live log of the Tasks tab: what the agent prints, and where Lisa
+//! The live log of the Tasks tab: what the agent prints, and where the user
 //! scrolled to in it.
 //!
 //! The view is kept as the number of lines below it («back»): 0 follows the

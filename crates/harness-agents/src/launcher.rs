@@ -4,7 +4,7 @@
 //! does not keep variables out of them.
 //!
 //! - `harness mcp-exec <file>` starts an MCP server: the file (JSON, readable
-//!   only by Lisa, in a temporary folder outside the project) holds its
+//!   only by the user, in a temporary folder outside the project) holds its
 //!   command, arguments and variables with the secrets.
 
 use std::fs;

@@ -20,7 +20,7 @@ pub fn default_dir() -> Option<PathBuf> {
     harness_platform::home::harness_dir().map(|dir| dir.join("credentials"))
 }
 
-/// Saves the token of `agent` (for example `claude`), readable only by Lisa.
+/// Saves the token of `agent` (for example `claude`), readable only by the user.
 pub fn save_token(dir: &Path, agent: &str, token: &Secret) -> io::Result<PathBuf> {
     let agent_dir = dir.join(agent);
     fs::create_dir_all(&agent_dir)?;
@@ -37,7 +37,7 @@ pub fn load_token(dir: &Path, agent: &str) -> io::Result<Secret> {
 }
 
 /// Is a login for `agent` (as `harness.toml` names it) there? The same
-/// places the agents are started from: for dsh that is also a key in Lisa's
+/// places the agents are started from: for dsh that is also a key in the user's
 /// shell, and its key is read (a blank one does not count); for the others
 /// nothing is read beyond "is it there".
 pub fn has_login(dir: &Path, agent: AgentKind) -> bool {
@@ -50,14 +50,14 @@ pub fn has_login(dir: &Path, agent: AgentKind) -> bool {
     }
 }
 
-/// The API key of a dsh `provider`: one in Lisa's shell wins; otherwise the
+/// The API key of a dsh `provider`: one in the user's shell wins; otherwise the
 /// one «Sign in» saved. Fails when there is neither, or it is blank.
 pub fn load_api_key(dir: &Path, provider: Provider) -> io::Result<Secret> {
     api_key_from(std::env::var(provider.key_env()).ok(), dir, provider)
 }
 
 /// [`load_api_key`] with the shell's value given, so tests do not depend on
-/// Lisa's environment.
+/// the user's environment.
 fn api_key_from(shell: Option<String>, dir: &Path, provider: Provider) -> io::Result<Secret> {
     if let Some(key) = shell_key(shell) {
         return Ok(key);
@@ -83,7 +83,7 @@ pub fn login_name(agent: &str) -> &str {
 /// Where `harness secret set` keeps secrets for MCP servers, one file each.
 const SECRETS_DIR: &str = "secrets";
 
-/// Saves a secret an MCP server needs, for example an API key, readable only by Lisa.
+/// Saves a secret an MCP server needs, for example an API key, readable only by the user.
 pub fn save_secret(dir: &Path, name: &str, value: &Secret) -> io::Result<PathBuf> {
     let secrets = dir.join(SECRETS_DIR);
     fs::create_dir_all(&secrets)?;
@@ -115,7 +115,7 @@ pub fn secret_names(dir: &Path) -> io::Result<Vec<String>> {
     Ok(names)
 }
 
-/// A key from Lisa's shell, cleaned like a saved one; `None` when blank.
+/// A key from the user's shell, cleaned like a saved one; `None` when blank.
 fn shell_key(value: Option<String>) -> Option<Secret> {
     value
         .map(|key| clean(&key))
@@ -125,14 +125,14 @@ fn shell_key(value: Option<String>) -> Option<Secret> {
 
 /// The tokens and API keys the agents use (Claude Code, `DeepSeek`, NVIDIA)
 /// and MCP secrets, to hide them in text that leaves the computer: both the
-/// saved key and one in Lisa's shell, since either may be in use. What cannot
+/// saved key and one in the user's shell, since either may be in use. What cannot
 /// be read is skipped.
 pub fn saved_secrets(dir: &Path) -> Vec<Secret> {
     secrets_with(dir, &|name| std::env::var(name).ok())
 }
 
 /// [`saved_secrets`] with `shell` looking up a variable, so tests do not
-/// depend on Lisa's environment.
+/// depend on the user's environment.
 fn secrets_with(dir: &Path, shell: &dyn Fn(&str) -> Option<String>) -> Vec<Secret> {
     let saved = ["claude", "deepseek", "nvidia"]
         .into_iter()
@@ -154,7 +154,7 @@ fn clean(token: &str) -> String {
     token.chars().filter(|c| !c.is_whitespace()).collect()
 }
 
-/// Writes `text` into `path`, readable only by Lisa (see `harness_platform::private`).
+/// Writes `text` into `path`, readable only by the user (see `harness_platform::private`).
 pub(crate) fn write_private(path: &Path, text: &str) -> io::Result<()> {
     harness_platform::private::write(path, text.as_bytes())
 }
