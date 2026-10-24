@@ -1,7 +1,6 @@
 //! One line of the Roles tab's details each: an agent, a model, a level, a skill,
 //! an MCP server or a plugin.
 
-use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 
 use harness_core::config::{AgentKind, RoleConfig};
@@ -69,7 +68,7 @@ impl RolesTab {
 
     /// The effort levels in one line, the chosen one in brackets.
     pub(super) fn effort_line(&self, effort: Option<&str>, tr: &I18n) -> Line<'static> {
-        let bold = Style::new().add_modifier(Modifier::BOLD);
+        let bold = theme::bold();
         let dim = theme::dim();
         let mut spans = vec![Span::styled(format!("{:<10}", tr.t("roles.effort")), bold)];
         let mut levels: Vec<Option<String>> = vec![None];

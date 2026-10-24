@@ -10,10 +10,9 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::ListItem;
 use ratatui::Frame;
 
-use crate::ui::draw_list;
 use crate::ui::i18n::I18n;
 use crate::ui::theme;
-use crate::ui::{self, buttons, panel, ButtonId, Hits, ListId, Target};
+use crate::ui::{self, buttons, draw_list, panel, ButtonId, Hits, ListId, Target};
 
 /// A button of the folder browser, clicked or chosen with a key.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -1,7 +1,7 @@
 //! Drawing the Skills tab: the skill list, marks and the chosen skill's text.
 
 use ratatui::layout::{Constraint, Layout, Rect};
-use ratatui::style::{Modifier, Style};
+use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{List, ListItem, ListState, Paragraph, Wrap};
 use ratatui::Frame;
@@ -12,7 +12,7 @@ use super::tab::{Row, SkillButton, SkillsTab, AGENT_NOTE};
 use crate::tabs::roles::RolesTab;
 use crate::ui::i18n::I18n;
 use crate::ui::theme;
-use crate::ui::{buttons, panel, selected, selector, ButtonId, Hits, ListId, Target};
+use crate::ui::{buttons, panel, selected, selector, unsaved_note, ButtonId, Hits, ListId, Target};
 
 impl SkillsTab {
     fn status(skill: &LibrarySkill, tr: &I18n) -> (String, Style) {
@@ -124,13 +124,7 @@ impl SkillsTab {
             ],
         );
         if roles.changed() {
-            let note = tr.t("roles.unsaved");
-            let width = u16::try_from(note.chars().count()).unwrap_or(0);
-            let x = bottom.right().saturating_sub(width);
-            frame.render_widget(
-                Span::styled(note.to_string(), theme::warn()),
-                Rect::new(x.max(bottom.x), bottom.y, width.min(bottom.width), 1),
-            );
+            unsaved_note(frame, bottom, tr);
         }
     }
 
@@ -140,10 +134,9 @@ impl SkillsTab {
         self.rows()
             .iter()
             .map(|row| match row {
-                Row::Heading(key) => ListItem::new(Line::styled(
-                    tr.t(key).to_string(),
-                    Style::new().add_modifier(Modifier::BOLD),
-                )),
+                Row::Heading(key) => {
+                    ListItem::new(Line::styled(tr.t(key).to_string(), theme::bold()))
+                }
                 Row::Skill(name) => {
                     let Some(skill) = self.library.iter().find(|s| s.name == *name) else {
                         return ListItem::new(Line::styled(

@@ -10,10 +10,11 @@ use super::catalog_draw::draw_catalog;
 use super::catalogs_draw::draw_catalogs;
 use super::tab::{PluginButton, PluginsTab};
 use crate::tabs::roles::RolesTab;
-use crate::ui::draw_list;
 use crate::ui::i18n::I18n;
 use crate::ui::theme;
-use crate::ui::{buttons, panel, selector, ButtonId, Hits, ListId};
+use crate::ui::{
+    agent_note, buttons, draw_list, panel, selector, unsaved_note, ButtonId, Hits, ListId,
+};
 
 impl PluginsTab {
     pub fn draw(
@@ -92,14 +93,7 @@ impl PluginsTab {
         );
         if let Some(settings) = roles.settings(role) {
             let text = format!("{} · {} ", role.as_str(), settings.agent);
-            let width = u16::try_from(text.chars().count()).unwrap_or(0);
-            let x = top.right().saturating_sub(width);
-            if x > top.x + 60 {
-                frame.render_widget(
-                    Span::styled(text, theme::dim()),
-                    Rect::new(x, top.y, width, 1),
-                );
-            }
+            agent_note(frame, top, text);
         }
     }
 
@@ -187,13 +181,7 @@ impl PluginsTab {
             ],
         );
         if changed {
-            let note = tr.t("roles.unsaved");
-            let width = u16::try_from(note.chars().count()).unwrap_or(0);
-            let x = bottom.right().saturating_sub(width);
-            frame.render_widget(
-                Span::styled(note.to_string(), theme::warn()),
-                Rect::new(x.max(bottom.x), bottom.y, width.min(bottom.width), 1),
-            );
+            unsaved_note(frame, bottom, tr);
         }
     }
 

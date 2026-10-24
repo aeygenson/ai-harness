@@ -1,7 +1,6 @@
 //! Drawing «Catalogs» on the Plugins tab: the added catalogs and the chosen one.
 
 use ratatui::layout::{Constraint, Layout, Rect};
-use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{ListItem, Paragraph, Wrap};
 use ratatui::Frame;
@@ -10,10 +9,9 @@ use harness_core::config::AgentKind;
 
 use super::catalog::CatalogsView;
 use crate::tabs::plugins::PluginCatalogButton;
-use crate::ui::draw_list;
 use crate::ui::i18n::I18n;
 use crate::ui::theme;
-use crate::ui::{buttons, panel, ButtonId, Hits, ListId};
+use crate::ui::{buttons, draw_list, panel, ButtonId, Hits, ListId};
 
 /// «Catalogs»: the added catalogs and what each holds.
 pub fn draw_catalogs(
@@ -31,7 +29,7 @@ pub fn draw_catalogs(
     ])
     .areas(area);
     let dim = theme::dim();
-    let bold = Style::new().add_modifier(Modifier::BOLD);
+    let bold = theme::bold();
     frame.render_widget(
         Line::from(vec![
             Span::styled(format!(" {} ", tr.t("plugins.catalogs_title")), bold),
@@ -113,7 +111,7 @@ pub fn draw_catalogs(
 fn catalogs_details(view: &CatalogsView, tr: &I18n) -> Vec<Line<'static>> {
     let dim = theme::dim();
     let red = theme::bad();
-    let bold = Style::new().add_modifier(Modifier::BOLD);
+    let bold = theme::bold();
     let mut lines = Vec::new();
     match view.current() {
         Some(catalog) => {

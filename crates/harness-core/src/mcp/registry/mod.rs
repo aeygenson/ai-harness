@@ -21,6 +21,11 @@ use crate::mcp::is_simple_name;
 use crate::text::safe_line;
 use offer::{offer, remote_offer};
 
+/// Texts from the registry (names, descriptions, addresses) are cut to this
+/// many characters: more than any real one needs, and a stranger's entry
+/// cannot fill the screen.
+const TEXT_LIMIT: usize = 300;
+
 /// The address of the registry's server list (`GET /v0/servers`).
 pub const REGISTRY_URL: &str = "https://registry.modelcontextprotocol.io/v0/servers";
 
@@ -82,11 +87,11 @@ pub fn parse(answer: &str) -> Result<Vec<Entry>, String> {
 }
 
 fn entry(server: &Value) -> Option<Entry> {
-    let name = safe_line(server["name"].as_str()?, 300);
+    let name = safe_line(server["name"].as_str()?, TEXT_LIMIT);
     let text = |key: &str| {
         server[key]
             .as_str()
-            .map(|t| safe_line(t, 300))
+            .map(|t| safe_line(t, TEXT_LIMIT))
             .filter(|t| !t.is_empty())
     };
     let version = text("version").unwrap_or_default();
@@ -110,7 +115,7 @@ fn entry(server: &Value) -> Option<Entry> {
         version,
         repository: server["repository"]["url"]
             .as_str()
-            .map(|t| safe_line(t, 300)),
+            .map(|t| safe_line(t, TEXT_LIMIT)),
         offer,
         unusable,
         name,

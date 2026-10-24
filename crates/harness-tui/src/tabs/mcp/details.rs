@@ -24,7 +24,7 @@ impl McpTab {
         let dim = theme::dim();
         let red = theme::bad();
         let green = theme::ok();
-        let bold = Style::new().add_modifier(Modifier::BOLD);
+        let bold = theme::bold();
         lines.push(Line::from(vec![
             Span::styled(format!("{} ", tr.t("mcp.address")), bold),
             Span::raw(url.to_string()),
@@ -73,7 +73,7 @@ impl McpTab {
         let dim = theme::dim();
         let red = theme::bad();
         let green = theme::ok();
-        let bold = Style::new().add_modifier(Modifier::BOLD);
+        let bold = theme::bold();
         let mut lines = Vec::new();
         let Some(server) = roles.servers().get(name) else {
             lines.push(Line::styled(
@@ -143,7 +143,7 @@ impl McpTab {
         let dim = theme::dim();
         let red = theme::bad();
         let green = theme::ok();
-        let bold = Style::new().add_modifier(Modifier::BOLD);
+        let bold = theme::bold();
         let command = server
             .command
             .iter()
@@ -193,7 +193,7 @@ impl McpTab {
         lines: &mut Vec<Line<'static>>,
     ) {
         let dim = theme::dim();
-        let bold = Style::new().add_modifier(Modifier::BOLD);
+        let bold = theme::bold();
         lines.push(Line::default());
         let saved = self
             .home

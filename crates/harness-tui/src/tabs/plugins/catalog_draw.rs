@@ -1,7 +1,7 @@
 //! Drawing «From catalog» on the Plugins tab: the plugins found and the chosen one.
 
 use ratatui::layout::{Constraint, Layout, Rect};
-use ratatui::style::{Modifier, Style};
+use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{ListItem, Paragraph, Wrap};
 use ratatui::Frame;
@@ -11,10 +11,9 @@ use harness_core::plugins::catalog::{Entry, Source};
 use super::catalog::{unusable, CatalogView, FILTERS};
 use crate::tabs::plugins::PluginCatalogButton;
 use crate::tabs::roles::RolesTab;
-use crate::ui::draw_list;
 use crate::ui::i18n::I18n;
 use crate::ui::theme;
-use crate::ui::{buttons, panel, selector, ButtonId, Hits, ListId};
+use crate::ui::{buttons, draw_list, panel, selector, ButtonId, Hits, ListId};
 
 /// «From catalog»: the plugins found on the left, the chosen one on the right.
 #[expect(
@@ -38,7 +37,7 @@ pub fn draw_catalog(
     ])
     .areas(area);
     let dim = theme::dim();
-    let bold = Style::new().add_modifier(Modifier::BOLD);
+    let bold = theme::bold();
     let [title_area, filter_area] =
         Layout::horizontal([Constraint::Min(0), Constraint::Length(44)]).areas(top);
     let status = match busy {
@@ -189,7 +188,7 @@ fn catalog_details(
 fn entry_details(entry: &Entry, roles: &RolesTab, tr: &I18n) -> Vec<Line<'static>> {
     let dim = theme::dim();
     let red = theme::bad();
-    let bold = Style::new().add_modifier(Modifier::BOLD);
+    let bold = theme::bold();
     let mut lines = Vec::new();
     if !entry.description.is_empty() {
         lines.push(Line::from(entry.description.clone()));

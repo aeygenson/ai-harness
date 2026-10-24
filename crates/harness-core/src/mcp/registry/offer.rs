@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 
 use serde_json::Value;
 
-use super::{local_name, Offer};
+use super::{local_name, Offer, TEXT_LIMIT};
 use crate::config::McpConfig;
 use crate::mcp::SECRET_PREFIX;
 use crate::text::safe_line;
@@ -15,7 +15,7 @@ pub(super) fn remote_offer(registry_name: &str, remote: &Value) -> Option<Offer>
     if remote["type"].as_str()? != "streamable-http" {
         return None;
     }
-    let url = safe_line(remote["url"].as_str()?, 300);
+    let url = safe_line(remote["url"].as_str()?, TEXT_LIMIT);
     if url.contains('{') || !crate::mcp::is_allowed_url(&url) {
         return None;
     }
@@ -24,17 +24,17 @@ pub(super) fn remote_offer(registry_name: &str, remote: &Value) -> Option<Offer>
     let mut variables = Vec::new();
     let mut secrets = 0;
     for header in remote["headers"].as_array().into_iter().flatten() {
-        let Some(header_name) = header["name"].as_str().map(|t| safe_line(t, 300)) else {
+        let Some(header_name) = header["name"].as_str().map(|t| safe_line(t, TEXT_LIMIT)) else {
             continue;
         };
         let description = header["description"]
             .as_str()
-            .map(|t| safe_line(t, 300))
+            .map(|t| safe_line(t, TEXT_LIMIT))
             .unwrap_or_default();
         let given = header["value"]
             .as_str()
             .or_else(|| header["default"].as_str())
-            .map(|t| safe_line(t, 300));
+            .map(|t| safe_line(t, TEXT_LIMIT));
         let value = if header["isSecret"] == true {
             secrets += 1;
             let secret = if secrets == 1 {
@@ -78,13 +78,13 @@ pub(super) fn offer(registry_name: &str, package: &Value) -> Option<Offer> {
         return None;
     }
     let kind = package["registryType"].as_str()?.to_string();
-    let identifier = safe_line(package["identifier"].as_str()?, 300);
+    let identifier = safe_line(package["identifier"].as_str()?, TEXT_LIMIT);
     if identifier.is_empty() || identifier.starts_with('-') {
         return None;
     }
     let version = package["version"]
         .as_str()
-        .map(|t| safe_line(t, 300))
+        .map(|t| safe_line(t, TEXT_LIMIT))
         .filter(|v| !v.is_empty() && v != "latest");
     let name = local_name(registry_name);
     let runtime = arguments(&package["runtimeArguments"]);
@@ -96,12 +96,12 @@ pub(super) fn offer(registry_name: &str, package: &Value) -> Option<Offer> {
         .into_iter()
         .flatten()
     {
-        let Some(var) = variable["name"].as_str().map(|t| safe_line(t, 300)) else {
+        let Some(var) = variable["name"].as_str().map(|t| safe_line(t, TEXT_LIMIT)) else {
             continue;
         };
         let description = variable["description"]
             .as_str()
-            .map(|t| safe_line(t, 300))
+            .map(|t| safe_line(t, TEXT_LIMIT))
             .unwrap_or_default();
         let value = if variable["isSecret"] == true {
             secrets += 1;
@@ -112,7 +112,7 @@ pub(super) fn offer(registry_name: &str, package: &Value) -> Option<Offer> {
             };
             Some(format!("{SECRET_PREFIX}{secret}"))
         } else if let Some(default) = variable["default"].as_str() {
-            Some(safe_line(default, 300))
+            Some(safe_line(default, TEXT_LIMIT))
         } else if variable["isRequired"] == true {
             Some(String::new())
         } else {
@@ -181,17 +181,17 @@ pub(super) fn arguments(list: &Value) -> Vec<String> {
         let value = argument["value"]
             .as_str()
             .or_else(|| argument["default"].as_str())
-            .map(|t| safe_line(t, 300));
+            .map(|t| safe_line(t, TEXT_LIMIT));
         let hint = || {
             let name = argument["valueHint"]
                 .as_str()
                 .or_else(|| argument["name"].as_str())
                 .unwrap_or("value");
-            format!("<{}>", safe_line(name.trim_start_matches('-'), 300))
+            format!("<{}>", safe_line(name.trim_start_matches('-'), TEXT_LIMIT))
         };
         match argument["type"].as_str() {
             Some("named") => {
-                let Some(name) = argument["name"].as_str().map(|t| safe_line(t, 300)) else {
+                let Some(name) = argument["name"].as_str().map(|t| safe_line(t, TEXT_LIMIT)) else {
                     continue;
                 };
                 if value.is_none() && argument["isRequired"] != true {

@@ -1,8 +1,7 @@
 //! Drawing the Roles tab: the role list and the details of the selected role.
 
 use ratatui::layout::{Constraint, Layout, Rect};
-use ratatui::style::{Modifier, Style};
-use ratatui::text::{Line, Span};
+use ratatui::text::Line;
 use ratatui::widgets::{ListItem, Paragraph};
 use ratatui::Frame;
 
@@ -10,10 +9,11 @@ use harness_core::config::{independence, trifecta, AgentKind};
 use harness_core::task::handoff::Role;
 
 use super::tab::{Focus, RolesTab, Row};
-use crate::ui::draw_list;
 use crate::ui::i18n::I18n;
 use crate::ui::theme;
-use crate::ui::{buttons, panel, selected, ButtonId, Hits, ListId, Target};
+use crate::ui::{
+    buttons, draw_list, panel, selected, unsaved_note, ButtonId, Hits, ListId, Target,
+};
 
 impl RolesTab {
     pub fn draw(&self, frame: &mut Frame, area: Rect, hits: &mut Hits, tr: &I18n) {
@@ -34,13 +34,7 @@ impl RolesTab {
             ],
         );
         if changed {
-            let note = tr.t("roles.unsaved");
-            let width = u16::try_from(note.chars().count()).unwrap_or(0);
-            let x = bar.right().saturating_sub(width);
-            frame.render_widget(
-                Span::styled(note.to_string(), theme::warn()),
-                Rect::new(x.max(bar.x), bar.y, width.min(bar.width), 1),
-            );
+            unsaved_note(frame, bar, tr);
         }
         let [left, right] =
             Layout::horizontal([Constraint::Length(24), Constraint::Min(0)]).areas(main);
@@ -173,7 +167,7 @@ impl RolesTab {
 
     /// The lines of the details; clickable ones carry their row index.
     fn detail_lines(&self, tr: &I18n) -> Vec<(Option<usize>, Line<'static>)> {
-        let bold = Style::new().add_modifier(Modifier::BOLD);
+        let bold = theme::bold();
         let dim = theme::dim();
         let mut lines = Vec::new();
         if self.problem.is_some() {

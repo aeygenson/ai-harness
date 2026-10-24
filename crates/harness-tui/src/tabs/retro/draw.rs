@@ -1,7 +1,7 @@
 //! Drawing the Retro tab: the retrospectives, the chosen one's text and its proposals.
 
 use ratatui::layout::{Constraint, Layout, Rect};
-use ratatui::style::{Modifier, Style};
+use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{ListItem, Paragraph, Wrap};
 use ratatui::Frame;
@@ -12,10 +12,9 @@ use harness_core::retro::ops::RetroInfo;
 use harness_core::retro::Scope;
 
 use super::tab::{Focus, RetroButton, RetroTab};
-use crate::ui::draw_list;
 use crate::ui::i18n::I18n;
 use crate::ui::theme;
-use crate::ui::{buttons, panel, ButtonId, Hits, ListId};
+use crate::ui::{buttons, draw_list, panel, ButtonId, Hits, ListId};
 
 impl RetroTab {
     pub fn draw(&self, frame: &mut Frame, area: Rect, hits: &mut Hits, tr: &I18n) {
@@ -160,7 +159,7 @@ impl RetroTab {
     /// it changes, or the retrospective with its statistics.
     pub(super) fn text(&self, tr: &I18n) -> (String, Vec<Line<'static>>) {
         let dim = theme::dim();
-        let bold = Style::new().add_modifier(Modifier::BOLD);
+        let bold = theme::bold();
         if self.generating.is_some() || (self.list.is_empty() && !self.log.is_empty()) {
             let mut lines = vec![Line::styled(tr.t("retro.generating").to_string(), dim)];
             lines.extend(self.log.iter().map(|l| Line::from(l.clone())));

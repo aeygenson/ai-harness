@@ -221,7 +221,7 @@ pub(super) fn step_text(
     tr: &I18n,
 ) -> (Text<'static>, Vec<usize>) {
     let h = &step.handoff;
-    let bold = Style::new().add_modifier(Modifier::BOLD);
+    let bold = theme::bold();
     let mut lines = vec![
         Line::from(vec![
             Span::raw(tr.t("tasks.verdict").to_string()),

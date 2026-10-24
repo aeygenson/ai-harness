@@ -11,10 +11,9 @@ use harness_core::text;
 
 use super::choice::{Choice, Menu, MORE_ROUNDS};
 use super::tab::{Focus, TasksTab};
-use crate::ui::draw_list;
 use crate::ui::i18n::I18n;
 use crate::ui::theme;
-use crate::ui::{buttons, panel, ButtonId, Hits, ListId, Target};
+use crate::ui::{buttons, draw_list, panel, ButtonId, Hits, ListId, Target};
 
 impl TasksTab {
     /// The label of an option of «To».

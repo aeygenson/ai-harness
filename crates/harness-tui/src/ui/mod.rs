@@ -8,9 +8,11 @@ pub(crate) mod theme;
 
 mod form;
 mod list;
+mod notes;
 
 pub(crate) use form::{wrapped_lines, Form};
 pub(crate) use list::{draw_list, LIST_MARK_WIDTH};
+pub(crate) use notes::{agent_note, unsaved_note};
 
 use ratatui::layout::Rect;
 use ratatui::style::Style;
