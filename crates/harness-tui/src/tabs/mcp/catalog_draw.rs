@@ -1,7 +1,7 @@
 //! Drawing the MCP registry catalog: the servers found and the chosen one in full.
 
 use ratatui::layout::{Constraint, Layout, Rect};
-use ratatui::style::{Modifier, Style};
+use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{ListItem, Paragraph, Wrap};
 use ratatui::Frame;
@@ -12,10 +12,9 @@ use super::catalog::Catalog;
 use super::form::join_words;
 use super::tab::{short_name, McpCatalogButton};
 use crate::tabs::roles::RolesTab;
-use crate::ui::draw_list;
 use crate::ui::i18n::I18n;
 use crate::ui::theme;
-use crate::ui::{buttons, panel, ButtonId, Hits, ListId};
+use crate::ui::{buttons, draw_list, panel, ButtonId, Hits, ListId};
 
 /// The catalog: the servers found on the left, the chosen one on the right.
 pub(super) fn draw_catalog(
@@ -32,7 +31,7 @@ pub(super) fn draw_catalog(
         Constraint::Length(1),
     ])
     .areas(area);
-    let bold = Style::new().add_modifier(Modifier::BOLD);
+    let bold = theme::bold();
     let status = catalog_status(catalog, tr);
     frame.render_widget(
         Line::from(vec![
@@ -159,7 +158,7 @@ fn catalog_items(catalog: &Catalog, roles: &RolesTab, tr: &I18n) -> Vec<ListItem
 fn entry_details(entry: &Entry, tr: &I18n) -> Vec<Line<'static>> {
     let dim = theme::dim();
     let red = theme::bad();
-    let bold = Style::new().add_modifier(Modifier::BOLD);
+    let bold = theme::bold();
     let mut lines = Vec::new();
     if let Some(title) = &entry.title {
         lines.push(Line::styled(title.clone(), bold));

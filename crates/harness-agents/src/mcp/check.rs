@@ -28,6 +28,10 @@ pub const TIME_LIMIT: Duration = Duration::from_mins(2);
 /// The MCP version the harness speaks; servers answer with theirs.
 const PROTOCOL_VERSION: &str = "2025-06-18";
 
+/// What the server says (an error, a tool's name and description) is cut to
+/// this many characters: one readable line in the TUI.
+const SAID_LIMIT: usize = 200;
+
 /// At most this many pages of `tools/list`.
 const MAX_PAGES: usize = 20;
 
@@ -77,7 +81,7 @@ pub fn list_tools_within(
             .lines()
             .map(str::trim)
             .rfind(|l| !l.is_empty())
-            .map(|l| format!(" ({})", safe_line(l, 200)))
+            .map(|l| format!(" ({})", safe_line(l, SAID_LIMIT)))
             .unwrap_or_default();
         hide(format!("{}: {why}{said}", server.name))
     })
@@ -156,7 +160,7 @@ impl Session {
             }
             if let Some(error) = message.get("error") {
                 let text = error["message"].as_str().unwrap_or("an error");
-                return Err(format!("{method} failed: {}", safe_line(text, 200)));
+                return Err(format!("{method} failed: {}", safe_line(text, SAID_LIMIT)));
             }
             return Ok(message["result"].clone());
         }
@@ -198,11 +202,11 @@ pub fn parse_tools(result: &Value) -> Vec<Tool> {
             tools
                 .iter()
                 .filter_map(|tool| {
-                    let name = safe_line(tool["name"].as_str()?, 200);
+                    let name = safe_line(tool["name"].as_str()?, SAID_LIMIT);
                     let description = tool["description"]
                         .as_str()
                         .and_then(|d| d.lines().map(str::trim).find(|l| !l.is_empty()))
-                        .map(|t| safe_line(t, 200));
+                        .map(|t| safe_line(t, SAID_LIMIT));
                     Some(Tool { name, description })
                 })
                 .collect()

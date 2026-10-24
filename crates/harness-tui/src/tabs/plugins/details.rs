@@ -1,6 +1,6 @@
 //! The right side of the Plugins tab: everything about the selected plugin.
 
-use ratatui::style::{Modifier, Style};
+use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 
 use harness_core::config::{AgentKind, PluginConfig};
@@ -16,7 +16,7 @@ impl PluginsTab {
     pub(super) fn details(&self, roles: &RolesTab, name: &str, tr: &I18n) -> Vec<Line<'static>> {
         let dim = theme::dim();
         let red = theme::bad();
-        let bold = Style::new().add_modifier(Modifier::BOLD);
+        let bold = theme::bold();
         let label = |key: &str| Span::styled(format!("{} ", tr.t(key)), bold);
         let mut lines = Vec::new();
         let Some(plugin) = roles.plugins().get(name) else {
@@ -88,7 +88,7 @@ impl PluginsTab {
         let dim = theme::dim();
         let red = theme::bad();
         let green = theme::ok();
-        let bold = Style::new().add_modifier(Modifier::BOLD);
+        let bold = theme::bold();
         let label = |key: &str| Span::styled(format!("{} ", tr.t(key)), bold);
         let mut lines = Vec::new();
         match self.details.get(name) {

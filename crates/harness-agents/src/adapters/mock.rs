@@ -164,64 +164,48 @@ impl MockAgent {
 
     /// Does `step`, a step that does not wait, and reports how it ended.
     fn outcome(job: &RoleJob, step: MockStep, log: String) -> AgentOutcome {
-        match step {
-            MockStep::UsageLimit => AgentOutcome {
-                end: RunEnd::UsageLimit,
-                log,
-            },
+        let dir = &job.project_dir;
+        // Most steps only decide how the run ended; the steps that stop
+        // halfway build their whole outcome and `return` it.
+        let end = match step {
+            MockStep::UsageLimit => RunEnd::UsageLimit,
             MockStep::TimeOut(files) => {
                 let end = RunEnd::TimedOut("timed out after 1 s; the agent was stopped".into());
-                stop_after_writing(job, &files, end, log)
+                return stop_after_writing(job, &files, end, log);
             }
             MockStep::UsageLimitAfterWriting(files) => {
-                stop_after_writing(job, &files, RunEnd::UsageLimit, log)
+                return stop_after_writing(job, &files, RunEnd::UsageLimit, log);
             }
-            MockStep::StopNow(files) => stop_after_writing(job, &files, RunEnd::StoppedByUser, log),
+            MockStep::StopNow(files) => {
+                return stop_after_writing(job, &files, RunEnd::StoppedByUser, log);
+            }
             // `run` handles it: it waits.
-            MockStep::WorkUntilStopped { .. } => AgentOutcome {
-                end: RunEnd::Failed("the mock agent's step did not work".into()),
-                log,
-            },
-            MockStep::WriteNothing => AgentOutcome {
-                end: RunEnd::Succeeded,
-                log,
-            },
+            MockStep::WorkUntilStopped { .. } => {
+                RunEnd::Failed("the mock agent's step did not work".into())
+            }
+            MockStep::WriteNothing => RunEnd::Succeeded,
             MockStep::WriteGarbage => {
-                let written = fs::write(job.output_dir.join("handoff.json"), "{ not json");
-                AgentOutcome {
-                    end: done_if(written.is_ok()),
-                    log,
-                }
+                done_if(fs::write(job.output_dir.join("handoff.json"), "{ not json").is_ok())
             }
-            MockStep::WriteOutput(files) => AgentOutcome {
-                end: done_if(write_files(&job.output_dir, &files).is_ok()),
-                log,
-            },
-            MockStep::WriteFilesOnly(files) => AgentOutcome {
-                end: done_if(write_files(&job.project_dir, &files).is_ok()),
-                log,
-            },
+            MockStep::WriteOutput(files) => done_if(write_files(&job.output_dir, &files).is_ok()),
+            MockStep::WriteFilesOnly(files) => done_if(write_files(dir, &files).is_ok()),
             MockStep::ChangeGitConfig => {
-                let changed = Command::new("git")
-                    .current_dir(&job.project_dir)
-                    .args(["config", "core.fsmonitor", "agent-watcher"])
-                    .status();
-                AgentOutcome {
-                    end: done_if(changed.is_ok_and(|status| status.success())),
-                    log,
-                }
+                done_if(git_ok(dir, &["config", "core.fsmonitor", "agent-watcher"]))
             }
-            MockStep::GitCommit => {
-                let committed = Command::new("git")
-                    .current_dir(&job.project_dir)
-                    .args(["-c", "user.name=agent", "-c", "user.email=agent@localhost"])
-                    .args(["commit", "-q", "--allow-empty", "-m", "sneaky"])
-                    .status();
-                AgentOutcome {
-                    end: done_if(committed.is_ok_and(|status| status.success())),
-                    log,
-                }
-            }
+            MockStep::GitCommit => done_if(git_ok(
+                dir,
+                &[
+                    "-c",
+                    "user.name=agent",
+                    "-c",
+                    "user.email=agent@localhost",
+                    "commit",
+                    "-q",
+                    "--allow-empty",
+                    "-m",
+                    "sneaky",
+                ],
+            )),
             // `step @` names the matched value so the arm can look at it.
             step @ (MockStep::SwitchBranch | MockStep::MakeBranch) => {
                 let args: &[&str] = if matches!(step, MockStep::SwitchBranch) {
@@ -229,12 +213,7 @@ impl MockAgent {
                 } else {
                     &["branch", "harness/task-009"]
                 };
-                let switched = Command::new("git")
-                    .current_dir(&job.project_dir)
-                    .args(args)
-                    .status()
-                    .is_ok_and(|status| status.success());
-                let written = switched
+                let written = git_ok(dir, args)
                     && write_result(
                         job,
                         Verdict::Approved,
@@ -242,25 +221,20 @@ impl MockAgent {
                         "switched",
                     )
                     .is_ok();
-                AgentOutcome {
-                    end: done_if(written),
-                    log,
-                }
+                done_if(written)
             }
             MockStep::Finish {
                 verdict,
                 next,
                 summary,
                 files,
-            } => {
-                let written = write_files(&job.project_dir, &files)
-                    .and_then(|()| write_result(job, verdict, next, &summary));
-                AgentOutcome {
-                    end: done_if(written.is_ok()),
-                    log,
-                }
-            }
-        }
+            } => done_if(
+                write_files(dir, &files)
+                    .and_then(|()| write_result(job, verdict, next, &summary))
+                    .is_ok(),
+            ),
+        };
+        AgentOutcome { end, log }
     }
 }
 
@@ -335,6 +309,15 @@ fn stop_after_writing(
         RunEnd::Failed("the mock agent's step did not work".into())
     };
     AgentOutcome { end, log }
+}
+
+/// Runs `git` with `args` in `project_dir`, as an agent would; `true` when it worked.
+fn git_ok(project_dir: &Path, args: &[&str]) -> bool {
+    Command::new("git")
+        .current_dir(project_dir)
+        .args(args)
+        .status()
+        .is_ok_and(|status| status.success())
 }
 
 /// `Succeeded` when the mock's step worked; a failed step reads like a crash.
