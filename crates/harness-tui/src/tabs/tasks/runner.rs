@@ -7,7 +7,6 @@
 //! the run share (see `harness_core::task::stop_request`): the run loop reads
 //! it before each role, the agent's process while the agent works.
 
-use std::collections::VecDeque;
 use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{channel, Receiver, Sender};
@@ -28,20 +27,14 @@ use harness_core::task::pull_request::PullRequest;
 use harness_core::task::stop_request::StopRequest;
 use harness_core::task::store::TaskStore;
 use harness_core::task::Stage;
-use harness_core::text;
 use tokio::sync::oneshot::{self, error::TryRecvError};
 
+use super::agent_output::readable;
 use super::github::{send_to_github, without_roles};
 use super::live_log::LiveLog;
 
 /// Builds the agents of the project: `build_team`, or mock agents in tests.
 pub type Builder = fn(&Config, &Path) -> Result<Team, BuildError>;
-
-/// The live log keeps this many lines. Lines are at most about 300
-/// characters, so this is well under a megabyte, and drawing looks only at
-/// the lines on the screen: more history to scroll back through costs
-/// almost nothing.
-pub const LOG_LINES: usize = 2000;
 
 /// What Lisa sent.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -249,14 +242,6 @@ impl Running {
     }
 }
 
-/// Adds a line to the live log, dropping the oldest beyond [`LOG_LINES`].
-pub fn push_line(log: &mut VecDeque<String>, line: String) {
-    if log.len() >= LOG_LINES {
-        log.pop_front();
-    }
-    log.push_back(line);
-}
-
 fn work(job: Job, events: &Sender<Event>, stop: oneshot::Receiver<()>) -> Result<Outcome, String> {
     let Job {
         root,
@@ -394,105 +379,9 @@ fn load_config(harness_dir: &Path, choice: Option<RunChoice>) -> Result<Config, 
     Ok(config)
 }
 
-/// A line of the agent's output as the live log shows it. The agents print
-/// JSON events; the texts in them are enough to follow the work. Empty events
-/// (`None`) are left out.
-pub fn readable(line: &str) -> Option<String> {
-    let line = line.trim();
-    if line.is_empty() {
-        return None;
-    }
-    let Ok(value) = serde_json::from_str::<serde_json::Value>(line) else {
-        return Some(shorten(line));
-    };
-    let kind = value
-        .get("type")
-        .and_then(|v| v.as_str())
-        .unwrap_or_default();
-    let mut texts = Vec::new();
-    collect_texts(&value, &mut texts);
-    if texts.is_empty() {
-        return None;
-    }
-    Some(shorten(&format!("{kind:<14} {}", texts.join(" · "))))
-}
-
-/// Keys whose string values say what the agent does.
-const TEXT_KEYS: [&str; 7] = [
-    "text",
-    "command",
-    "name",
-    "tool_name",
-    "result",
-    "content",
-    "message",
-];
-
-fn collect_texts(value: &serde_json::Value, out: &mut Vec<String>) {
-    if out.len() >= 3 {
-        return;
-    }
-    match value {
-        serde_json::Value::Object(map) => {
-            // The object's own texts first (a tool's name), then what is
-            // inside it (the tool's command).
-            for (key, value) in map {
-                if let serde_json::Value::String(text) = value {
-                    if TEXT_KEYS.contains(&key.as_str()) && !text.trim().is_empty() {
-                        out.push(text.split_whitespace().collect::<Vec<_>>().join(" "));
-                    }
-                }
-            }
-            for value in map.values() {
-                if value.is_object() || value.is_array() {
-                    collect_texts(value, out);
-                }
-            }
-        }
-        serde_json::Value::Array(items) => {
-            for item in items {
-                collect_texts(item, out);
-            }
-        }
-        _ => {}
-    }
-}
-
-/// At most 300 characters (the panel cuts at its width anyway), without
-/// terminal control characters, which agents may print.
-fn shorten(text: &str) -> String {
-    let text = text::safe(text);
-    let mut short: String = text.chars().take(300).collect();
-    if short.len() < text.len() {
-        short.push('…');
-    }
-    short
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn agent_events_become_short_readable_lines() {
-        let claude = r#"{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"cargo test"}}]}}"#;
-        assert_eq!(
-            readable(claude).unwrap(),
-            "assistant      Bash · cargo test"
-        );
-        let codex = r#"{"type":"item.completed","item":{"type":"agent_message","text":"All\n tests pass"}}"#;
-        assert_eq!(readable(codex).unwrap(), "item.completed All tests pass");
-        // Events without text are left out; plain text stays.
-        assert_eq!(readable(r#"{"type":"turn.started"}"#), None);
-        assert_eq!(readable("  "), None);
-        assert_eq!(readable("warning: slow").unwrap(), "warning: slow");
-        // Colours and screen commands from the agent do not reach the panel.
-        assert_eq!(readable("\u{1b}[31mred\u{1b}[0m").unwrap(), "red");
-        let event = r#"{"type":"assistant","text":"done\u001b[2J"}"#;
-        assert_eq!(readable(event).unwrap(), "assistant      done");
-        let long = "x".repeat(400);
-        assert_eq!(readable(&long).unwrap().chars().count(), 301);
-    }
 
     #[test]
     fn dropping_a_background_job_stops_its_work_and_waits() {
@@ -531,15 +420,5 @@ mod tests {
         assert!(!runs_roles(&decide(NextStep::Done)));
         assert!(!runs_roles(&Request::Publish("task-001".into())));
         assert!(!runs_roles(&Request::Merge("task-001".into())));
-    }
-
-    #[test]
-    fn the_log_keeps_the_latest_lines() {
-        let mut log = VecDeque::new();
-        for i in 0..LOG_LINES + 5 {
-            push_line(&mut log, i.to_string());
-        }
-        assert_eq!(log.len(), LOG_LINES);
-        assert_eq!(log.front().unwrap(), "5");
     }
 }

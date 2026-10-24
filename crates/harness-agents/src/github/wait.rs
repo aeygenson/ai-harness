@@ -125,7 +125,7 @@ mod tests {
     fn stopping_ends_a_pause_early() {
         let started = Instant::now();
         let mut wait = Waiting {
-            limit: Duration::from_mins(60),
+            limit: Duration::from_hours(1),
             pause: Duration::from_mins(30),
             stopped: Box::new(|| true),
             note: Box::new(|_| {}),

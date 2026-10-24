@@ -7,8 +7,10 @@ pub(crate) mod message;
 pub(crate) mod theme;
 
 mod form;
+mod list;
 
 pub(crate) use form::{wrapped_lines, Form};
+pub(crate) use list::{draw_list, LIST_MARK_WIDTH};
 
 use ratatui::layout::Rect;
 use ratatui::style::Style;

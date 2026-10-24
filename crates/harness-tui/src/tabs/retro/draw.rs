@@ -12,7 +12,7 @@ use harness_core::retro::ops::RetroInfo;
 use harness_core::retro::Scope;
 
 use super::tab::{Focus, RetroButton, RetroTab};
-use crate::tabs::tasks::draw_list;
+use crate::ui::draw_list;
 use crate::ui::i18n::I18n;
 use crate::ui::theme;
 use crate::ui::{buttons, panel, ButtonId, Hits, ListId};
