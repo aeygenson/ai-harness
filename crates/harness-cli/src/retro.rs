@@ -51,7 +51,12 @@ pub(crate) async fn retro(project: &Path, task_id: Option<&str>, suggest: bool) 
         return Ok(());
     };
     println!("\nThe retro agent is reading the history...");
-    let found = suggest::suggest(&repo, &dir, &stats, &config, &agent, suggest::ENGLISH)
+    let input = suggest::RetroInput {
+        stats: &stats,
+        config: &config,
+        language: suggest::ENGLISH,
+    };
+    let found = suggest::suggest(&repo, &dir, input, &agent)
         .await
         .with_context(|| {
             format!(

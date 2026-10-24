@@ -13,116 +13,129 @@ use crate::tabs::plugins::PluginCatalogButton;
 use crate::tabs::roles::RolesTab;
 use crate::ui::i18n::I18n;
 use crate::ui::theme;
-use crate::ui::{buttons, draw_list, panel, selector, ButtonId, Hits, ListId};
+use crate::ui::{buttons, draw_list, panel, selector, ButtonId, Hits, ListId, ListView, Selector};
 
-/// «From catalog»: the plugins found on the left, the chosen one on the right.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "the catalog view draws with the same inputs as the rest of the Plugins tab"
-)]
-pub fn draw_catalog(
-    view: &CatalogView,
-    frame: &mut Frame,
-    area: Rect,
-    hits: &mut Hits,
-    tr: &I18n,
-    roles: &RolesTab,
-    role: &str,
-    busy: Option<&str>,
-) {
-    let [top, main, bottom] = Layout::vertical([
-        Constraint::Length(1),
-        Constraint::Min(0),
-        Constraint::Length(1),
-    ])
-    .areas(area);
-    let dim = theme::dim();
-    let bold = theme::bold();
-    let [title_area, filter_area] =
-        Layout::horizontal([Constraint::Min(0), Constraint::Length(44)]).areas(top);
-    let status = match busy {
-        Some(what) => Span::styled(what.to_string(), dim),
-        None if view.query.is_empty() => Span::raw(""),
-        None => Span::styled(tr.f("plugins.searched", &[("query", &view.query)]), dim),
-    };
-    frame.render_widget(
-        Line::from(vec![
-            Span::styled(format!(" {} ", tr.t("plugins.catalog_title")), bold),
-            status,
-        ]),
-        title_area,
-    );
-    let labels: Vec<&str> = FILTERS
-        .iter()
-        .map(|f| f.map_or(tr.t("plugins.all"), |agent| agent.as_str()))
-        .collect();
-    selector(
-        frame,
-        filter_area,
-        hits,
-        tr.t("plugins.agent"),
-        &labels,
-        view.filter,
-        |index| ButtonId::PluginCatalog(PluginCatalogButton::Filter(index)),
-    );
+/// What the catalog view shows from the rest of the Plugins tab.
+#[derive(Debug, Clone, Copy)]
+pub struct CatalogContext<'a> {
+    /// The roles and their agents, to tell which plugins a role can use.
+    pub roles: &'a RolesTab,
+    /// The selected role, as its label.
+    pub role: &'a str,
+    /// What is running right now, if anything; the buttons wait for it.
+    pub busy: Option<&'a str>,
+}
 
-    let [left, right] =
-        Layout::horizontal([Constraint::Percentage(40), Constraint::Percentage(60)]).areas(main);
-    let shown = view.shown();
-    let items = catalog_items(&shown, roles, tr);
-    draw_list(
-        frame,
-        hits,
-        left,
-        ListId::PluginCatalog,
-        &format!(" {} ", tr.f("plugins.found", &[("count", &shown.len())])),
-        items,
-        view.row,
-        true,
-    );
+impl CatalogView {
+    /// «From catalog»: the plugins found on the left, the chosen one on the right.
+    pub fn draw(
+        &self,
+        frame: &mut Frame,
+        area: Rect,
+        hits: &mut Hits,
+        tr: &I18n,
+        context: CatalogContext<'_>,
+    ) {
+        let CatalogContext { roles, role, busy } = context;
+        let [top, main, bottom] = Layout::vertical([
+            Constraint::Length(1),
+            Constraint::Min(0),
+            Constraint::Length(1),
+        ])
+        .areas(area);
+        let dim = theme::dim();
+        let bold = theme::bold();
+        let [title_area, filter_area] =
+            Layout::horizontal([Constraint::Min(0), Constraint::Length(44)]).areas(top);
+        let status = match busy {
+            Some(what) => Span::styled(what.to_string(), dim),
+            None if self.query.is_empty() => Span::raw(""),
+            None => Span::styled(tr.f("plugins.searched", &[("query", &self.query)]), dim),
+        };
+        frame.render_widget(
+            Line::from(vec![
+                Span::styled(format!(" {} ", tr.t("plugins.catalog_title")), bold),
+                status,
+            ]),
+            title_area,
+        );
+        let labels: Vec<&str> = FILTERS
+            .iter()
+            .map(|f| f.map_or(tr.t("plugins.all"), |agent| agent.as_str()))
+            .collect();
+        selector(
+            frame,
+            filter_area,
+            hits,
+            Selector {
+                label: tr.t("plugins.agent"),
+                names: &labels,
+                chosen: self.filter,
+                id: |index| ButtonId::PluginCatalog(PluginCatalogButton::Filter(index)),
+            },
+        );
 
-    let (title, lines) = catalog_details(view, roles, tr);
-    frame.render_widget(
-        Paragraph::new(lines)
-            .block(panel(&title, false))
-            .wrap(Wrap { trim: false }),
-        right,
-    );
+        let [left, right] =
+            Layout::horizontal([Constraint::Percentage(40), Constraint::Percentage(60)])
+                .areas(main);
+        let shown = self.shown();
+        let items = catalog_items(&shown, roles, tr);
+        draw_list(
+            frame,
+            hits,
+            left,
+            ListView {
+                id: ListId::PluginCatalog,
+                title: &format!(" {} ", tr.f("plugins.found", &[("count", &shown.len())])),
+                items,
+                selected_row: self.row,
+                focused: true,
+            },
+        );
 
-    let can_add = busy.is_none() && view.current().is_some_and(|e| unusable(e).is_none());
-    let give = tr.f("plugins.add_give", &[("role", &role)]);
-    buttons(
-        frame,
-        bottom,
-        hits,
-        &[
-            (
-                tr.t("plugins.search"),
-                ButtonId::PluginCatalog(PluginCatalogButton::Search),
-                true,
-            ),
-            (
-                tr.t("plugins.add"),
-                ButtonId::PluginCatalog(PluginCatalogButton::Add),
-                can_add,
-            ),
-            (
-                &give,
-                ButtonId::PluginCatalog(PluginCatalogButton::AddGive),
-                can_add,
-            ),
-            (
-                tr.t("plugins.catalogs"),
-                ButtonId::PluginCatalog(PluginCatalogButton::OpenCatalogs),
-                true,
-            ),
-            (
-                tr.t("plugins.back"),
-                ButtonId::PluginCatalog(PluginCatalogButton::Back),
-                true,
-            ),
-        ],
-    );
+        let (title, lines) = catalog_details(self, roles, tr);
+        frame.render_widget(
+            Paragraph::new(lines)
+                .block(panel(&title, false))
+                .wrap(Wrap { trim: false }),
+            right,
+        );
+
+        let can_add = busy.is_none() && self.current().is_some_and(|e| unusable(e).is_none());
+        let give = tr.f("plugins.add_give", &[("role", &role)]);
+        buttons(
+            frame,
+            bottom,
+            hits,
+            &[
+                (
+                    tr.t("plugins.search"),
+                    ButtonId::PluginCatalog(PluginCatalogButton::Search),
+                    true,
+                ),
+                (
+                    tr.t("plugins.add"),
+                    ButtonId::PluginCatalog(PluginCatalogButton::Add),
+                    can_add,
+                ),
+                (
+                    &give,
+                    ButtonId::PluginCatalog(PluginCatalogButton::AddGive),
+                    can_add,
+                ),
+                (
+                    tr.t("plugins.catalogs"),
+                    ButtonId::PluginCatalog(PluginCatalogButton::OpenCatalogs),
+                    true,
+                ),
+                (
+                    tr.t("plugins.back"),
+                    ButtonId::PluginCatalog(PluginCatalogButton::Back),
+                    true,
+                ),
+            ],
+        );
+    }
 }
 
 /// The rows of «From catalog»: name, agent, and whether it is added or cannot be.

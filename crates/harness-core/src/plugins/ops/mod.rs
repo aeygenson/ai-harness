@@ -127,18 +127,33 @@ pub struct Added {
     pub contents: Contents,
 }
 
+/// What the user chose for a plugin being added: which role gets it and
+/// what it may run by itself. The default: no role, no hooks, no servers.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct PluginChoice {
+    /// The role that gets the plugin; `None` adds it to the project only.
+    pub role: Option<Role>,
+    /// Allow the plugin's hooks (commands that run by themselves).
+    pub allow_hooks: bool,
+    /// Allow the plugin's own MCP or LSP servers.
+    pub allow_mcp: bool,
+}
+
 /// Copies the catalog's plugin `entry` into `.harness/plugins/<entry name>/`,
-/// describes it in harness.toml (and gives it to `role`), checks it as a run
+/// describes it in harness.toml (and gives it to the chosen role), checks it as a run
 /// would and commits `harness: add plugin ...`. If the check fails, nothing
 /// stays changed.
 pub fn add(
     repo: &Repo,
     home: &Path,
     entry: &Entry,
-    role: Option<Role>,
-    allow_hooks: bool,
-    allow_mcp: bool,
+    choice: PluginChoice,
 ) -> Result<Added, OpsError> {
+    let PluginChoice {
+        role,
+        allow_hooks,
+        allow_mcp,
+    } = choice;
     let name = entry.name.as_str();
     if !is_simple_name(name) {
         return Err(OpsError::BadName(name.to_string()));
@@ -436,24 +451,34 @@ mod tests {
             &repo,
             home.path(),
             &entry("review"),
-            Some(Role::Architect),
-            false,
-            false,
+            PluginChoice {
+                role: Some(Role::Architect),
+                allow_hooks: false,
+                allow_mcp: false,
+            },
         )
         .unwrap_err();
         assert!(err.to_string().contains("hooks"), "{err}");
         assert!(!project.path().join(PLUGINS_DIR).join("review").exists());
         assert_eq!(repo.changed_files().unwrap(), Vec::<String>::new());
         // Without a role it is added, and says what it brings.
-        let added = add(&repo, home.path(), &entry("review"), None, false, false).unwrap();
+        let added = add(
+            &repo,
+            home.path(),
+            &entry("review"),
+            PluginChoice::default(),
+        )
+        .unwrap();
         assert!(added.contents.hooks);
         let added = add(
             &repo,
             home.path(),
             &entry("notes"),
-            Some(Role::Tester),
-            false,
-            false,
+            PluginChoice {
+                role: Some(Role::Tester),
+                allow_hooks: false,
+                allow_mcp: false,
+            },
         )
         .unwrap();
         assert!(!added.contents.hooks);
@@ -465,7 +490,7 @@ mod tests {
         assert_eq!(config.roles[&Role::Tester].plugins, ["notes"]);
         assert_eq!(repo.changed_files().unwrap(), Vec::<String>::new());
         assert!(matches!(
-            add(&repo, home.path(), &entry("notes"), None, false, false),
+            add(&repo, home.path(), &entry("notes"), PluginChoice::default()),
             Err(OpsError::Exists(_))
         ));
 

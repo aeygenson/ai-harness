@@ -11,7 +11,7 @@ use harness_core::skills::Skills;
 use harness_core::task::handoff::{NextStep, Role, Verdict};
 use harness_core::task::manifest::AgentFacts;
 use harness_core::task::orchestrator::{
-    self, continue_stopped, create_task, record_human_decision, RunSetup, StopReason,
+    self, continue_stopped, create_task, record_human_decision, HumanDecision, RunSetup, StopReason,
 };
 use harness_core::task::scenario::Workflow;
 use harness_core::task::stop_request::StopRequest;
@@ -208,9 +208,11 @@ async fn stop_now_keeps_the_unfinished_work_and_waits_for_the_user() {
         &repo,
         &store,
         &mut state,
-        Verdict::Approved,
-        NextStep::To(Role::Developer),
-        "Keep the old API",
+        HumanDecision {
+            verdict: Verdict::Approved,
+            next: NextStep::To(Role::Developer),
+            notes: "Keep the old API",
+        },
     )
     .unwrap();
     let reason = run_with(&repo, &store, &mut state, &agent, &StopRequest::new()).await;
@@ -254,9 +256,11 @@ async fn a_note_to_another_role_stops_on_the_stopped_roles_changes() {
         &repo,
         &store,
         &mut state,
-        Verdict::Approved,
-        NextStep::To(Role::Architect),
-        "Change the design first",
+        HumanDecision {
+            verdict: Verdict::Approved,
+            next: NextStep::To(Role::Architect),
+            notes: "Change the design first",
+        },
     )
     .unwrap();
     let reason = run_with(&repo, &store, &mut state, &agent, &StopRequest::new()).await;
@@ -322,9 +326,11 @@ async fn a_stopped_task_with_unfinished_work_is_not_finished() {
         &repo,
         &store,
         &mut state,
-        Verdict::Approved,
-        NextStep::Done,
-        "Good enough",
+        HumanDecision {
+            verdict: Verdict::Approved,
+            next: NextStep::Done,
+            notes: "Good enough",
+        },
     )
     .unwrap_err();
 
@@ -342,9 +348,11 @@ async fn a_stopped_task_with_unfinished_work_is_not_finished() {
         &repo,
         &store,
         &mut state,
-        Verdict::Approved,
-        NextStep::Done,
-        "Good enough",
+        HumanDecision {
+            verdict: Verdict::Approved,
+            next: NextStep::Done,
+            notes: "Good enough",
+        },
     )
     .unwrap();
     assert_eq!(state.stage, Stage::Done);

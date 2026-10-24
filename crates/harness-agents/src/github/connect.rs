@@ -68,9 +68,8 @@ pub fn connect(root: &Path, name: &str, private: bool) -> Result<String, String>
 /// be private, or it has commits the project does not have (someone else's
 /// work, or pull requests merged there that were not brought in yet).
 pub fn connect_with(root: &Path, connection: &Connection) -> Result<String, String> {
-    let text = |e: &dyn std::fmt::Display| e.to_string();
-    let repo = Repo::open(root).map_err(|e| text(&e))?;
-    let config = Config::load(&root.join(HARNESS_DIR)).map_err(|e| text(&e))?;
+    let repo = Repo::open(root).map_err(|e| e.to_string())?;
+    let config = Config::load(&root.join(HARNESS_DIR)).map_err(|e| e.to_string())?;
     let mut full = full_name(connection)?;
     if let Some(known) = &config.github {
         // GitHub does not care about capitals in names.
@@ -111,7 +110,7 @@ pub fn connect_with(root: &Path, connection: &Connection) -> Result<String, Stri
     push()?;
     write_github(&repo, &github)?;
     push()?;
-    repo.ensure_origin(&url).map_err(|e| text(&e))?;
+    repo.ensure_origin(&url).map_err(|e| e.to_string())?;
     Ok(full)
 }
 

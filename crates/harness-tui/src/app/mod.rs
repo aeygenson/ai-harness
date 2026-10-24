@@ -12,4 +12,5 @@ mod mouse;
 mod press;
 mod setup;
 pub(crate) mod splash;
+mod tab_keys;
 pub(crate) mod terminal;

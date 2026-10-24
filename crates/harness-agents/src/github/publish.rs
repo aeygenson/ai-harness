@@ -77,7 +77,6 @@ pub fn publish_with(
     github: &GitHub,
     secrets: &[&str],
 ) -> Result<PullRequest, String> {
-    let text = |e: &dyn std::fmt::Display| e.to_string();
     let task = state.task_id.clone();
     if state.stage != Stage::Done {
         return Err(format!(
@@ -85,7 +84,7 @@ pub fn publish_with(
         ));
     }
     let branch = task_branch(&task);
-    if repo.current_branch().map_err(|e| text(&e))?.as_deref() != Some(branch.as_str()) {
+    if repo.current_branch().map_err(|e| e.to_string())?.as_deref() != Some(branch.as_str()) {
         return Err(format!(
             "{task} is not on its branch {branch} (a task created before [github] was set has \
              none), so it is not sent to GitHub; push it yourself if you want a pull request"
@@ -112,9 +111,9 @@ pub fn publish_with(
     };
     store
         .save_pull_request(state, pull_request.clone())
-        .map_err(|e| text(&e))?;
+        .map_err(|e| e.to_string())?;
     repo.commit_paths(&[state_file.as_path()], &commit_message(state))
-        .map_err(|e| text(&e))?;
+        .map_err(|e| e.to_string())?;
     push(repo, github, &branch)?;
     Ok(pull_request)
 }
@@ -139,8 +138,7 @@ fn finish_saved_pull_request(
     store: &TaskStore,
     state: &TaskState,
 ) -> Result<(), String> {
-    let text = |e: &dyn std::fmt::Display| e.to_string();
-    let files = repo.changed_files().map_err(|e| text(&e))?;
+    let files = repo.changed_files().map_err(|e| e.to_string())?;
     if files.is_empty() {
         return Ok(());
     }
@@ -151,7 +149,7 @@ fn finish_saved_pull_request(
         .unwrap_or_default();
     if state.pull_request.is_some() && files == [shown] {
         repo.commit_paths(&[state_file.as_path()], &commit_message(state))
-            .map_err(|e| text(&e))?;
+            .map_err(|e| e.to_string())?;
         return Ok(());
     }
     Err(format!(
@@ -185,9 +183,8 @@ fn open(
     branch: &str,
     secrets: &[&str],
 ) -> Result<PullRequest, String> {
-    let text = |e: &dyn std::fmt::Display| e.to_string();
-    let description = store.description().map_err(|e| text(&e))?;
-    let steps = store.steps().map_err(|e| text(&e))?;
+    let description = store.description().map_err(|e| e.to_string())?;
+    let steps = store.steps().map_err(|e| e.to_string())?;
     let title = pull_request::title(&state.task_id, &description, secrets);
     let body = pull_request::body(&state.task_id, &description, &steps, secrets);
     let new = NewPullRequest {

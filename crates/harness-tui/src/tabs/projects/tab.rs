@@ -13,7 +13,7 @@ use ratatui::Frame;
 
 use crate::ui::i18n::I18n;
 use crate::ui::theme;
-use crate::ui::{buttons, draw_list, panel, ButtonId, Hits, ListId};
+use crate::ui::{buttons, draw_list, panel, ButtonId, Hits, ListId, ListView};
 
 #[derive(Debug)]
 pub struct ProjectsTab {
@@ -133,11 +133,13 @@ impl ProjectsTab {
             frame,
             hits,
             left,
-            ListId::Projects,
-            tr.t("projects.title"),
-            items,
-            self.selected,
-            true,
+            ListView {
+                id: ListId::Projects,
+                title: tr.t("projects.title"),
+                items,
+                selected_row: self.selected,
+                focused: true,
+            },
         );
 
         let text: Vec<Line> = match self.current() {

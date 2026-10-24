@@ -5,8 +5,8 @@ use std::fmt::Write as _;
 use std::fs;
 use std::path::Path;
 
-use super::{PastSettings, PROPOSALS_JSON, RETRO_MD};
-use crate::config::{Config, CONFIG_FILE};
+use super::{PastSettings, RetroInput, PROPOSALS_JSON, RETRO_MD};
+use crate::config::CONFIG_FILE;
 use crate::git::{Repo, HARNESS_DIR};
 use crate::retro::Stats;
 use crate::skills::SKILLS_DIR;
@@ -37,14 +37,17 @@ pub fn past_settings(repo: &Repo, stats: &Stats, current: &str) -> Vec<PastSetti
 
 /// The prompt for the Retrospective.
 pub fn prompt(
-    stats: &Stats,
+    input: RetroInput<'_>,
+    past: &[PastSettings],
     runs_dir: &Path,
     harness_dir: &Path,
-    config: &Config,
-    past: &[PastSettings],
     output_dir: &Path,
-    language: &str,
 ) -> String {
+    let RetroInput {
+        stats,
+        config,
+        language,
+    } = input;
     let tasks: Vec<&str> = stats.tasks.iter().map(|t| t.task_id.as_str()).collect();
     let mut text = format!(
         "You are the Retrospective of a team of AI roles: architect, developer, \

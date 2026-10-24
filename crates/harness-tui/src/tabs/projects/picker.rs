@@ -12,7 +12,7 @@ use ratatui::Frame;
 
 use crate::ui::i18n::I18n;
 use crate::ui::theme;
-use crate::ui::{self, buttons, draw_list, panel, ButtonId, Hits, ListId, Target};
+use crate::ui::{self, buttons, draw_list, panel, ButtonId, Hits, ListId, ListView, Target};
 
 /// A button of the folder browser, clicked or chosen with a key.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -223,11 +223,13 @@ impl Browser {
             frame,
             hits,
             list,
-            ListId::Folders,
-            title,
-            items,
-            self.selected,
-            true,
+            ListView {
+                id: ListId::Folders,
+                title,
+                items,
+                selected_row: self.selected,
+                focused: true,
+            },
         );
         match (&self.naming, &self.error) {
             (Some(name), _) => frame.render_widget(

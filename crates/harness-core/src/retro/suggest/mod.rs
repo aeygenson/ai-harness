@@ -141,16 +141,27 @@ pub struct PastSettings {
     pub text: String,
 }
 
+/// What the Retrospective works from: the statistics, the project's settings
+/// and the language it writes in.
+#[derive(Debug, Clone, Copy)]
+pub struct RetroInput<'a> {
+    /// The statistics of the tasks, already saved in the retro folder.
+    pub stats: &'a Stats,
+    /// The project's settings now.
+    pub config: &'a Config,
+    /// The language of the user, such as [`ENGLISH`].
+    pub language: &'a str,
+}
+
 /// Runs the Retrospective for the statistics already saved and committed in
 /// `retro_dir`, then saves and commits what it wrote.
 pub async fn suggest<A: AgentRunner>(
     repo: &Repo,
     retro_dir: &Path,
-    stats: &Stats,
-    config: &Config,
+    input: RetroInput<'_>,
     agent: &A,
-    language: &str,
 ) -> Result<Suggestions, SuggestError> {
+    let RetroInput { stats, config, .. } = input;
     repo.ensure_harness_ignores()?;
     // Stub lines Claude Code left in `info/exclude` would hide files from git.
     agent_stubs::clear_leftovers(repo)?;
@@ -177,15 +188,7 @@ pub async fn suggest<A: AgentRunner>(
         prompt: {
             let current = fs::read_to_string(harness_dir.join(CONFIG_FILE)).unwrap_or_default();
             let past = past_settings(repo, stats, &current);
-            prompt(
-                stats,
-                &repo.runs_dir(),
-                &harness_dir,
-                config,
-                &past,
-                &inbox,
-                language,
-            )
+            prompt(input, &past, &repo.runs_dir(), &harness_dir, &inbox)
         },
         output_dir: inbox.clone(),
         // The retrospective has no stop buttons: nobody asks it to stop.
@@ -350,6 +353,15 @@ mod tests {
     use crate::skills::SKILLS_DIR;
     use crate::task::agent::AgentOutcome;
     use crate::task::scenario::Workflow;
+
+    /// The Retrospective's input in English.
+    fn input<'a>(stats: &'a Stats, config: &'a Config) -> RetroInput<'a> {
+        RetroInput {
+            stats,
+            config,
+            language: ENGLISH,
+        }
+    }
     use std::future::Future;
 
     const TOML: &str = "[roles.developer]\nagent = \"claude\"\nskills = [\"style\"]\n\
@@ -480,13 +492,15 @@ mod tests {
             Vec::<PastSettings>::new()
         );
         let text = prompt(
-            &stats,
+            RetroInput {
+                stats: &stats,
+                config: &config,
+                language: "Russian",
+            },
+            &[],
             &repo.runs_dir(),
             &harness,
-            &config,
-            &[],
             &retro_dir,
-            "Russian",
         );
         assert!(
             text.contains("The tasks ran with these same settings."),
@@ -527,13 +541,15 @@ mod tests {
             }]
         );
         let text = prompt(
-            &stats,
+            RetroInput {
+                stats: &stats,
+                config: &config,
+                language: ENGLISH,
+            },
+            &past,
             &repo.runs_dir(),
             &harness,
-            &config,
-            &past,
             &retro_dir,
-            ENGLISH,
         );
         assert!(
             text.contains("judge each task by the settings it ran with"),
@@ -552,7 +568,7 @@ mod tests {
     fn suggestions_are_checked_saved_and_committed() {
         let (_dir, repo, retro_dir, stats, config) = project();
         let agent = FakeAgent::writing("Went well.", &proposals_json());
-        let found = block_on(suggest(&repo, &retro_dir, &stats, &config, &agent, ENGLISH)).unwrap();
+        let found = block_on(suggest(&repo, &retro_dir, input(&stats, &config), &agent)).unwrap();
         assert_eq!(found.retro, "Went well.");
         assert_eq!(found.proposals.proposals.len(), 2);
         assert!(!retro_dir.join("inbox").exists());
@@ -567,9 +583,8 @@ mod tests {
     #[test]
     fn a_failed_or_wrong_agent_changes_nothing_else() {
         let (_dir, repo, retro_dir, stats, config) = project();
-        let run = |agent: FakeAgent| {
-            block_on(suggest(&repo, &retro_dir, &stats, &config, &agent, ENGLISH))
-        };
+        let run =
+            |agent: FakeAgent| block_on(suggest(&repo, &retro_dir, input(&stats, &config), &agent));
 
         let mut failing = FakeAgent::writing("x", "{\"proposals\": []}");
         failing.end = RunEnd::Failed("timed out".into());
@@ -629,7 +644,7 @@ mod tests {
         let (_dir, repo, retro_dir, stats, config) = project();
         let agent = StubbyAgent(FakeAgent::writing("x", "{\"proposals\": []}"));
 
-        let result = block_on(suggest(&repo, &retro_dir, &stats, &config, &agent, ENGLISH));
+        let result = block_on(suggest(&repo, &retro_dir, input(&stats, &config), &agent));
 
         match result {
             Err(SuggestError::ForbiddenChanges(files)) => assert_eq!(files, [".npmrc"]),
@@ -645,7 +660,7 @@ mod tests {
         let (_dir, repo, retro_dir, stats, config) = project();
         let harness = repo.root().join(".harness");
         let agent = FakeAgent::writing("x", &proposals_json());
-        let found = block_on(suggest(&repo, &retro_dir, &stats, &config, &agent, ENGLISH)).unwrap();
+        let found = block_on(suggest(&repo, &retro_dir, input(&stats, &config), &agent)).unwrap();
 
         assert!(matches!(
             apply(&harness, &found.proposals, &[7], ORIGIN),

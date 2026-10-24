@@ -12,7 +12,7 @@ use super::tab::{Focus, RolesTab, Row};
 use crate::ui::i18n::I18n;
 use crate::ui::theme;
 use crate::ui::{
-    buttons, draw_list, panel, selected, unsaved_note, ButtonId, Hits, ListId, Target,
+    buttons, draw_list, panel, selected, unsaved_note, ButtonId, Hits, ListId, ListView, Target,
 };
 
 impl RolesTab {
@@ -62,11 +62,13 @@ impl RolesTab {
             frame,
             hits,
             left,
-            ListId::Roles,
-            tr.t("roles.title"),
-            items,
-            self.selected,
-            self.focus == Focus::List,
+            ListView {
+                id: ListId::Roles,
+                title: tr.t("roles.title"),
+                items,
+                selected_row: self.selected,
+                focused: self.focus == Focus::List,
+            },
         );
 
         let name = self.who().map_or("retro", Role::as_str);

@@ -11,100 +11,105 @@ use super::catalog::CatalogsView;
 use crate::tabs::plugins::PluginCatalogButton;
 use crate::ui::i18n::I18n;
 use crate::ui::theme;
-use crate::ui::{buttons, draw_list, panel, ButtonId, Hits, ListId};
+use crate::ui::{buttons, draw_list, panel, ButtonId, Hits, ListId, ListView};
 
-/// «Catalogs»: the added catalogs and what each holds.
-pub fn draw_catalogs(
-    view: &CatalogsView,
-    frame: &mut Frame,
-    area: Rect,
-    hits: &mut Hits,
-    tr: &I18n,
-    busy: Option<&str>,
-) {
-    let [top, main, bottom] = Layout::vertical([
-        Constraint::Length(1),
-        Constraint::Min(0),
-        Constraint::Length(1),
-    ])
-    .areas(area);
-    let dim = theme::dim();
-    let bold = theme::bold();
-    frame.render_widget(
-        Line::from(vec![
-            Span::styled(format!(" {} ", tr.t("plugins.catalogs_title")), bold),
-            Span::styled(busy.unwrap_or_default().to_string(), dim),
-        ]),
-        top,
-    );
-    let [left, right] =
-        Layout::horizontal([Constraint::Percentage(40), Constraint::Percentage(60)]).areas(main);
-    let items: Vec<ListItem> = view
-        .list
-        .iter()
-        .map(|catalog| {
-            let count = match &catalog.entries {
-                Ok(entries) => tr.f("plugins.count", &[("count", &entries.len())]),
-                Err(_) => tr.t("plugins.unreadable").to_string(),
-            };
-            ListItem::new(Line::from(vec![
-                Span::raw(format!("{:<28} ", catalog.name)),
-                Span::styled(count, dim),
-            ]))
-        })
-        .collect();
-    draw_list(
-        frame,
-        hits,
-        left,
-        ListId::PluginCatalogs,
-        &format!(" {} ", tr.t("plugins.catalogs")),
-        items,
-        view.row,
-        true,
-    );
-    let lines = catalogs_details(view, tr);
-    frame.render_widget(
-        Paragraph::new(lines)
-            .block(panel(
-                &view
-                    .current()
-                    .map(|c| format!(" {} ", c.name))
-                    .unwrap_or_default(),
-                false,
-            ))
-            .wrap(Wrap { trim: false }),
-        right,
-    );
-    let free = busy.is_none();
-    let chosen = free && view.current().is_some();
-    buttons(
-        frame,
-        bottom,
-        hits,
-        &[
-            (
-                tr.t("plugins.add_catalog"),
-                ButtonId::PluginCatalog(PluginCatalogButton::CatalogAdd),
-                free,
-            ),
-            (
-                tr.t("plugins.update_catalog"),
-                ButtonId::PluginCatalog(PluginCatalogButton::CatalogUpdate),
-                chosen,
-            ),
-            (
-                tr.t("plugins.remove_catalog"),
-                ButtonId::PluginCatalog(PluginCatalogButton::CatalogRemove),
-                chosen,
-            ),
-            (
-                tr.t("plugins.back"),
-                ButtonId::PluginCatalog(PluginCatalogButton::Back),
-                true,
-            ),
-        ],
-    );
+impl CatalogsView {
+    /// «Catalogs»: the added catalogs and what each holds.
+    pub fn draw(
+        &self,
+        frame: &mut Frame,
+        area: Rect,
+        hits: &mut Hits,
+        tr: &I18n,
+        busy: Option<&str>,
+    ) {
+        let [top, main, bottom] = Layout::vertical([
+            Constraint::Length(1),
+            Constraint::Min(0),
+            Constraint::Length(1),
+        ])
+        .areas(area);
+        let dim = theme::dim();
+        let bold = theme::bold();
+        frame.render_widget(
+            Line::from(vec![
+                Span::styled(format!(" {} ", tr.t("plugins.catalogs_title")), bold),
+                Span::styled(busy.unwrap_or_default().to_string(), dim),
+            ]),
+            top,
+        );
+        let [left, right] =
+            Layout::horizontal([Constraint::Percentage(40), Constraint::Percentage(60)])
+                .areas(main);
+        let items: Vec<ListItem> = self
+            .list
+            .iter()
+            .map(|catalog| {
+                let count = match &catalog.entries {
+                    Ok(entries) => tr.f("plugins.count", &[("count", &entries.len())]),
+                    Err(_) => tr.t("plugins.unreadable").to_string(),
+                };
+                ListItem::new(Line::from(vec![
+                    Span::raw(format!("{:<28} ", catalog.name)),
+                    Span::styled(count, dim),
+                ]))
+            })
+            .collect();
+        draw_list(
+            frame,
+            hits,
+            left,
+            ListView {
+                id: ListId::PluginCatalogs,
+                title: &format!(" {} ", tr.t("plugins.catalogs")),
+                items,
+                selected_row: self.row,
+                focused: true,
+            },
+        );
+        let lines = catalogs_details(self, tr);
+        frame.render_widget(
+            Paragraph::new(lines)
+                .block(panel(
+                    &self
+                        .current()
+                        .map(|c| format!(" {} ", c.name))
+                        .unwrap_or_default(),
+                    false,
+                ))
+                .wrap(Wrap { trim: false }),
+            right,
+        );
+        let free = busy.is_none();
+        let chosen = free && self.current().is_some();
+        buttons(
+            frame,
+            bottom,
+            hits,
+            &[
+                (
+                    tr.t("plugins.add_catalog"),
+                    ButtonId::PluginCatalog(PluginCatalogButton::CatalogAdd),
+                    free,
+                ),
+                (
+                    tr.t("plugins.update_catalog"),
+                    ButtonId::PluginCatalog(PluginCatalogButton::CatalogUpdate),
+                    chosen,
+                ),
+                (
+                    tr.t("plugins.remove_catalog"),
+                    ButtonId::PluginCatalog(PluginCatalogButton::CatalogRemove),
+                    chosen,
+                ),
+                (
+                    tr.t("plugins.back"),
+                    ButtonId::PluginCatalog(PluginCatalogButton::Back),
+                    true,
+                ),
+            ],
+        );
+    }
 }
 
 /// The right panel of «Catalogs»: the address, version and contents of the chosen one.

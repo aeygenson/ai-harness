@@ -14,7 +14,7 @@ use super::tab::{short_name, McpCatalogButton};
 use crate::tabs::roles::RolesTab;
 use crate::ui::i18n::I18n;
 use crate::ui::theme;
-use crate::ui::{buttons, draw_list, panel, ButtonId, Hits, ListId};
+use crate::ui::{buttons, draw_list, panel, ButtonId, Hits, ListId, ListView};
 
 /// The catalog: the servers found on the left, the chosen one on the right.
 pub(super) fn draw_catalog(
@@ -48,11 +48,13 @@ pub(super) fn draw_catalog(
         frame,
         hits,
         left,
-        ListId::McpCatalog,
-        &format!(" {} ", tr.t("mcp.catalog_list")),
-        items,
-        catalog.row,
-        true,
+        ListView {
+            id: ListId::McpCatalog,
+            title: &format!(" {} ", tr.t("mcp.catalog_list")),
+            items,
+            selected_row: catalog.row,
+            focused: true,
+        },
     );
 
     let (title, lines) = match catalog.current() {

@@ -22,11 +22,11 @@ use harness_core::git::{Repo, HARNESS_DIR};
 use harness_core::skills::Skills;
 use harness_core::task::branch;
 use harness_core::task::handoff::{NextStep, Role, Verdict};
-use harness_core::task::orchestrator::{self, Project, SameText, StopReason};
+use harness_core::task::orchestrator::{self, HumanDecision, Project, SameText, StopReason};
 use harness_core::task::pull_request::PullRequest;
 use harness_core::task::stop_request::StopRequest;
 use harness_core::task::store::TaskStore;
-use harness_core::task::Stage;
+use harness_core::task::{Stage, TaskState};
 use tokio::sync::oneshot::{self, error::TryRecvError};
 
 use super::agent_output::readable;
@@ -251,8 +251,7 @@ fn work(job: Job, events: &Sender<Event>, stop: oneshot::Receiver<()>) -> Result
         stop: stop_request,
     } = job;
     let root = root.as_path();
-    let text = |e: &dyn std::fmt::Display| e.to_string();
-    let repo = Repo::open(root).map_err(|e| text(&e))?;
+    let repo = Repo::open(root).map_err(|e| e.to_string())?;
     // An existing task's branch first: its settings are the ones to use, and
     // the user's decision and the roles' work are committed there. A merge stays
     // where the user is: it changes the folder only once everything is checked,
@@ -260,65 +259,24 @@ fn work(job: Job, events: &Sender<Event>, stop: oneshot::Receiver<()>) -> Result
     if let Request::Decide { task, .. } | Request::Continue(task) | Request::Publish(task) =
         &request
     {
-        if branch::enter(&repo, task).map_err(|e| text(&e))? {
+        if branch::enter(&repo, task).map_err(|e| e.to_string())? {
             let _ = events.send(Event::SwitchedBranch);
         }
     }
     let harness_dir = root.join(HARNESS_DIR);
     let config = load_config(&harness_dir, choice)?;
-    let runs = repo.runs_dir();
     let merging = matches!(request, Request::Merge(_));
     // Everything the agents need is checked before anything is saved: a
     // missing login leaves the task as it was.
     let agents = if runs_roles(&request) {
-        let team = builder(&config, root).map_err(|e| text(&e))?;
-        let skills = Skills::load(&harness_dir, &config).map_err(|e| text(&e))?;
+        let team = builder(&config, root).map_err(|e| e.to_string())?;
+        let skills = Skills::load(&harness_dir, &config).map_err(|e| e.to_string())?;
         Some((team, skills))
     } else {
         None
     };
 
-    let (store, mut state) = match request {
-        Request::New(description) => {
-            let id = branch::next_task_id(&repo).map_err(|e| text(&e))?;
-            orchestrator::create_project_task(&repo, &config, &id, &description, SameText::Refuse)
-                .map_err(|e| text(&e))?
-        }
-        Request::Decide {
-            task,
-            seen,
-            verdict,
-            next,
-            notes,
-            extra_rounds,
-        } => {
-            let (store, mut state) = TaskStore::open(&runs, &task).map_err(|e| text(&e))?;
-            if state.stage != seen {
-                return Err(format!(
-                    "{task} has moved on in its branch {}; look at it again and decide",
-                    branch::task_branch(&task)
-                ));
-            }
-            // The new limit is saved first, so the decision's commit carries it.
-            if extra_rounds > 0 {
-                store
-                    .add_rounds(&mut state, extra_rounds)
-                    .map_err(|e| text(&e))?;
-            }
-            orchestrator::record_human_decision(&repo, &store, &mut state, verdict, next, &notes)
-                .map_err(|e| text(&e))?;
-            (store, state)
-        }
-        Request::Continue(task) => {
-            let (store, mut state) = TaskStore::open(&runs, &task).map_err(|e| text(&e))?;
-            // A task the user stopped goes on with the role they stopped.
-            orchestrator::continue_stopped(&repo, &store, &mut state).map_err(|e| text(&e))?;
-            (store, state)
-        }
-        Request::Publish(task) | Request::Merge(task) => {
-            TaskStore::open(&runs, &task).map_err(|e| text(&e))?
-        }
-    };
+    let (store, mut state) = open_task(&repo, &config, request)?;
     let task = state.task_id.clone();
     let _ = events.send(Event::Started(task.clone()));
     let Some((team, skills)) = agents else {
@@ -339,7 +297,7 @@ fn work(job: Job, events: &Sender<Event>, stop: oneshot::Receiver<()>) -> Result
         orchestrator::run_project(&repo, &store, &mut state, &team, project),
         stop,
     )?
-    .map_err(|e| text(&e))?;
+    .map_err(|e| e.to_string())?;
     let published = if stop == StopReason::Done {
         send_to_github(&repo, &config, &store, &mut state)
     } else {
@@ -351,6 +309,67 @@ fn work(job: Job, events: &Sender<Event>, stop: oneshot::Receiver<()>) -> Result
         published,
         merged: None,
     })
+}
+
+/// The task the request is about: a new one made, or the saved one opened
+/// (with the user's decision recorded, or a stopped task set to go on).
+fn open_task(
+    repo: &Repo,
+    config: &Config,
+    request: Request,
+) -> Result<(TaskStore, TaskState), String> {
+    let runs = repo.runs_dir();
+    let opened = match request {
+        Request::New(description) => {
+            let id = branch::next_task_id(repo).map_err(|e| e.to_string())?;
+            orchestrator::create_project_task(repo, config, &id, &description, SameText::Refuse)
+                .map_err(|e| e.to_string())?
+        }
+        Request::Decide {
+            task,
+            seen,
+            verdict,
+            next,
+            notes,
+            extra_rounds,
+        } => {
+            let (store, mut state) = TaskStore::open(&runs, &task).map_err(|e| e.to_string())?;
+            if state.stage != seen {
+                return Err(format!(
+                    "{task} has moved on in its branch {}; look at it again and decide",
+                    branch::task_branch(&task)
+                ));
+            }
+            // The new limit is saved first, so the decision's commit carries it.
+            if extra_rounds > 0 {
+                store
+                    .add_rounds(&mut state, extra_rounds)
+                    .map_err(|e| e.to_string())?;
+            }
+            orchestrator::record_human_decision(
+                repo,
+                &store,
+                &mut state,
+                HumanDecision {
+                    verdict,
+                    next,
+                    notes: &notes,
+                },
+            )
+            .map_err(|e| e.to_string())?;
+            (store, state)
+        }
+        Request::Continue(task) => {
+            let (store, mut state) = TaskStore::open(&runs, &task).map_err(|e| e.to_string())?;
+            // A task the user stopped goes on with the role they stopped.
+            orchestrator::continue_stopped(repo, &store, &mut state).map_err(|e| e.to_string())?;
+            (store, state)
+        }
+        Request::Publish(task) | Request::Merge(task) => {
+            TaskStore::open(&runs, &task).map_err(|e| e.to_string())?
+        }
+    };
+    Ok(opened)
 }
 
 /// How «Merge pull request» waits for GitHub in the TUI, when `merging`:

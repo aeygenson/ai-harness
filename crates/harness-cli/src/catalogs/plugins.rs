@@ -1,13 +1,7 @@
-//! `harness marketplace ...` and `harness plugin ...`: plugin catalogs and
-//! copying plugins from them into the project.
-//!
-//! Catalogs are the user's, for all projects: the list is in
-//! `~/.harness/marketplaces.toml`, the copies in `~/.harness/marketplaces/`.
-//! A plugin is always copied into the project (`.harness/plugins/<name>/`) and
-//! committed, so the agents only ever see what is in the project's git.
+//! `harness plugin ...`: copying plugins from the catalogs into the project.
 
 use std::fmt::Write as _;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use anyhow::{bail, Context, Result};
 use harness_core::config::{AgentKind, Config, CONFIG_FILE};
@@ -15,95 +9,13 @@ use harness_core::git::{Repo, HARNESS_DIR};
 use harness_core::mcp::is_simple_name;
 use harness_core::plugins::catalog::{Entry, Registry, Source};
 use harness_core::plugins::install::Changes;
-use harness_core::plugins::ops::{self, CatalogUpdate};
+use harness_core::plugins::ops::{self, PluginChoice};
 use harness_core::plugins::{Contents, PLUGINS_DIR};
 use harness_core::task::handoff::Role;
 
-/// `~/.harness`.
-pub fn harness_home() -> Result<PathBuf> {
-    harness_platform::home::harness_dir().context("no home folder found")
-}
+use super::{harness_home, short};
 
-pub fn marketplace_add(source: &str, name: Option<&str>) -> Result<()> {
-    let home = harness_home()?;
-    let catalog = match ops::add_catalog(&home, source, name) {
-        Err(ops::OpsError::CatalogExists(name)) => bail!(
-            "a catalog named {name:?} is already added; use `harness marketplace update` \
-             or give this one another name with --name"
-        ),
-        other => other?,
-    };
-    println!(
-        "Added catalog {}: {}.",
-        catalog.name,
-        count(&catalog.entries)
-    );
-    println!("See its plugins with `harness plugin list`.");
-    Ok(())
-}
-
-/// "12 plugins: 10 for claude, 2 for codex".
-fn count(entries: &[Entry]) -> String {
-    let claude = entries
-        .iter()
-        .filter(|e| e.agent == AgentKind::Claude)
-        .count();
-    let codex = entries.len() - claude;
-    format!(
-        "{} plugins: {claude} for claude, {codex} for codex",
-        entries.len()
-    )
-}
-
-pub fn marketplace_list() -> Result<()> {
-    let home = harness_home()?;
-    let catalogs = ops::catalogs(&home)?;
-    if catalogs.is_empty() {
-        println!("No catalogs yet. Add one with `harness marketplace add owner/repo`.");
-    }
-    for catalog in catalogs {
-        let about = match &catalog.entries {
-            Ok(entries) => count(entries),
-            Err(e) => format!("cannot read: {e}"),
-        };
-        let commit = catalog
-            .commit
-            .map(|c| format!(" at {}", short(&c)))
-            .unwrap_or_default();
-        println!(
-            "{}  {}{commit}  ({about})",
-            catalog.name, catalog.config.source
-        );
-    }
-    Ok(())
-}
-
-pub fn marketplace_update(name: Option<&str>) -> Result<()> {
-    let home = harness_home()?;
-    let names: Vec<String> = match name {
-        Some(name) => vec![name.to_string()],
-        None => Registry::load(&home)?.marketplaces.into_keys().collect(),
-    };
-    for name in names {
-        match ops::update_catalog(&home, &name)? {
-            CatalogUpdate::Local => println!("{name}: a local folder, always read as it is."),
-            CatalogUpdate::Same(commit) => {
-                println!("{name}: already up to date ({}).", short(&commit));
-            }
-            CatalogUpdate::Updated(commit) => println!("{name}: updated to {}.", short(&commit)),
-        }
-    }
-    println!("Plugins already in projects are not changed; use `harness plugin update <name>`.");
-    Ok(())
-}
-
-pub fn marketplace_remove(name: &str) -> Result<()> {
-    let home = harness_home()?;
-    ops::remove_catalog(&home, name)?;
-    println!("Removed catalog {name}. Plugins already in projects stay there.");
-    Ok(())
-}
-
+/// `harness plugin list`: the plugins of all catalogs, marked when the project has them.
 pub fn plugin_list(project: &Path, agent: Option<AgentKind>) -> Result<()> {
     let home = harness_home()?;
     let registry = Registry::load(&home)?;
@@ -139,7 +51,7 @@ pub fn plugin_list(project: &Path, agent: Option<AgentKind>) -> Result<()> {
         };
         let note = match &entry.source {
             Source::Unsupported(kind) => format!("  (from {kind}: not supported yet)"),
-            _ => String::new(),
+            Source::InCatalog(_) | Source::Git { .. } => String::new(),
         };
         // Writing into a `String` cannot fail, so `let _ =` ignores the `Result`.
         let _ = write!(
@@ -159,12 +71,17 @@ pub fn plugin_list(project: &Path, agent: Option<AgentKind>) -> Result<()> {
 /// The options of `harness plugin add`.
 #[derive(Debug)]
 pub struct AddOptions {
+    /// The agent the plugin is for, when the catalogs have it for more than one.
     pub agent: Option<AgentKind>,
+    /// The role that gets the plugin; `None` adds it to the project only.
     pub role: Option<Role>,
+    /// Allow the plugin's hooks (commands that run by themselves).
     pub allow_hooks: bool,
+    /// Allow the plugin's own MCP or LSP servers.
     pub allow_mcp: bool,
 }
 
+/// `harness plugin add`: copies a plugin from a catalog into the project.
 pub fn plugin_add(project: &Path, wanted: &str, options: &AddOptions) -> Result<()> {
     let (name, catalog_name) = match wanted.split_once('@') {
         Some((name, catalog)) => (name, Some(catalog)),
@@ -213,15 +130,13 @@ pub fn plugin_add(project: &Path, wanted: &str, options: &AddOptions) -> Result<
             target.display()
         );
     }
-    let added = ops::add(
-        &repo,
-        &home,
-        entry,
-        options.role,
-        options.allow_hooks,
-        options.allow_mcp,
-    )
-    .with_context(|| format!("plugin {name} was not added"))?;
+    let choice = PluginChoice {
+        role: options.role,
+        allow_hooks: options.allow_hooks,
+        allow_mcp: options.allow_mcp,
+    };
+    let added = ops::add(&repo, &home, entry, choice)
+        .with_context(|| format!("plugin {name} was not added"))?;
     let (contents, commit) = (added.contents, added.commit);
 
     println!(
@@ -236,7 +151,7 @@ pub fn plugin_add(project: &Path, wanted: &str, options: &AddOptions) -> Result<
     );
     warn_about(name, contents, options.allow_hooks, options.allow_mcp);
     match options.role {
-        Some(role) => println!("The {role:?} role uses it now."),
+        Some(role) => println!("The {role} role uses it now."),
         None => println!(
             "No role uses it yet: add \"{name}\" to `plugins = [...]` of a role on \"{}\" in {}.",
             entry.agent,
@@ -246,6 +161,8 @@ pub fn plugin_add(project: &Path, wanted: &str, options: &AddOptions) -> Result<
     Ok(())
 }
 
+/// `harness plugin update`: takes the plugin's new version from its catalog; when that
+/// fails, the old one is kept.
 pub fn plugin_update(project: &Path, name: &str) -> Result<()> {
     let repo = open_repo(project)?;
     let home = harness_home()?;
@@ -279,6 +196,7 @@ pub fn plugin_update(project: &Path, name: &str) -> Result<()> {
     Ok(())
 }
 
+/// `harness plugin remove`: takes the plugin out of the project and every role.
 pub fn plugin_remove(project: &Path, name: &str) -> Result<()> {
     let repo = open_repo(project)?;
     ops::remove(&repo, name)?;
@@ -315,10 +233,6 @@ fn print_changes(changes: &Changes) {
 
 fn open_repo(project: &Path) -> Result<Repo> {
     Repo::open(project).context("the project must be a git repository (run `git init`)")
-}
-
-fn short(commit: &str) -> &str {
-    &commit[..commit.len().min(7)]
 }
 
 fn first_line(text: &str, max: usize) -> String {

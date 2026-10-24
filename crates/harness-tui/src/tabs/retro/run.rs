@@ -80,22 +80,30 @@ pub(super) fn generate(
     language: &str,
     stop: oneshot::Receiver<()>,
 ) -> Result<String, String> {
-    let text = |e: &dyn std::fmt::Display| e.to_string();
-    let repo = Repo::open(root).map_err(|e| text(&e))?;
-    let config = Config::load(&root.join(HARNESS_DIR)).map_err(|e| text(&e))?;
+    let repo = Repo::open(root).map_err(|e| e.to_string())?;
+    let config = Config::load(&root.join(HARNESS_DIR)).map_err(|e| e.to_string())?;
     // Everything the agent needs is checked before anything is saved.
-    ops::check_clean(&repo).map_err(|e| text(&e))?;
-    let agent = builder(&config).map_err(|e| text(&e))?;
-    let (dir, stats) = ops::save_stats(&repo, None, Some(&config)).map_err(|e| text(&e))?;
+    ops::check_clean(&repo).map_err(|e| e.to_string())?;
+    let agent = builder(&config).map_err(|e| e.to_string())?;
+    let (dir, stats) = ops::save_stats(&repo, None, Some(&config)).map_err(|e| e.to_string())?;
     let number = dir
         .file_name()
         .unwrap_or_default()
         .to_string_lossy()
         .into_owned();
     run_until_stopped(
-        suggest::suggest(&repo, &dir, &stats, &config, &agent, language),
+        suggest::suggest(
+            &repo,
+            &dir,
+            suggest::RetroInput {
+                stats: &stats,
+                config: &config,
+                language,
+            },
+            &agent,
+        ),
         stop,
     )?
-    .map_err(|e| text(&e))?;
+    .map_err(|e| e.to_string())?;
     Ok(number)
 }

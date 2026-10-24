@@ -280,7 +280,7 @@ pub enum ConfigError {
         source: toml::de::Error,
     },
     /// The file has no `[roles.<role>]` for an AI role that needs one.
-    #[error("no agent is set for the {0:?} role in harness.toml")]
+    #[error("no agent is set for the {0} role in harness.toml")]
     MissingRole(Role),
 }
 
