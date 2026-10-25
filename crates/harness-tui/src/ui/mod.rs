@@ -106,6 +106,8 @@ pub enum ButtonId {
     /// are for the next launch only.
     Menu(crate::tabs::tasks::Menu),
     Send,
+    /// «✗ Clear» on the Tasks tab: removes the whole message.
+    ClearMessage,
     /// «Stop after this step» on the Tasks tab while roles work; pressed
     /// again, it is taken back.
     StopAfterStep,

@@ -3,7 +3,8 @@
 //! `tab.rs` holds the tab's state and loads the tasks; the other files add to
 //! the same `TasksTab` by topic: `choice.rs` (whom the message goes to, model
 //! and level), `events.rs` (keys and mouse), `run.rs` (sending the message),
-//! `draw.rs` and `message_box.rs` (drawing), `steps.rs` (a step's text and
+//! `draw.rs` and `message_box.rs` (drawing), `message_text.rs` (the
+//! message's text: scrolling and clearing it), `steps.rs` (a step's text and
 //! files), `step_rows.rs` (the rows of the steps list), `github.rs`
 //! (sending a done task and merging its pull request),
 //! `stop.rs` (the user's stop buttons while roles work), `live_log.rs` and
@@ -21,6 +22,7 @@ mod labels;
 pub(crate) mod live_log;
 mod log_panel;
 mod message_box;
+mod message_text;
 mod run;
 pub(crate) mod runner;
 mod step_rows;

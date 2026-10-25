@@ -40,6 +40,7 @@ use harness_core::task::{Stage, TaskState};
 
 use super::choice::{Choice, Menu};
 use super::live_log::LiveLog;
+use super::message_text::MessageScroll;
 use super::steps::{agent_line, load_task, waits_on};
 use super::times::TaskTimes;
 use crate::tabs::tasks::runner::{RunChoice, Running};
@@ -110,6 +111,8 @@ pub struct TasksTab {
     pub(crate) scroll: u16,
     /// The message being written.
     pub(crate) input: String,
+    /// How far the message is scrolled back from its end.
+    pub(super) input_scroll: MessageScroll,
     pub(crate) choice: Choice,
     /// The task, its number of steps and its stage the choice was made for:
     /// when they change, the choice goes back to what the task needs next.
@@ -159,6 +162,7 @@ impl TasksTab {
             focus: Focus::Tasks,
             scroll: 0,
             input: String::new(),
+            input_scroll: MessageScroll::default(),
             choice: Choice::NewTask,
             choice_for: None,
             menu: None,

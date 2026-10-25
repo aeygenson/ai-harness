@@ -54,6 +54,12 @@ impl App {
             }
             return;
         }
+        if let (Tab::Tasks, Some((Target::Button(ButtonId::Input), _))) = (self.tab, hit) {
+            if let Some(tasks) = &mut self.tasks {
+                tasks.on_input_wheel(down);
+            }
+            return;
+        }
         match (self.tab, hit.and_then(|(t, r)| Hits::row(t, r))) {
             (Tab::Tasks, Some((list, _))) => {
                 if let Some(tasks) = &mut self.tasks {
