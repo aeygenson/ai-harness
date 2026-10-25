@@ -29,6 +29,30 @@ impl App {
         }
     }
 
+    /// A key while the message is being written: every key is text, except
+    /// the ones below. `false` when no message is being written.
+    fn typing_key(&mut self, key: KeyEvent) -> bool {
+        if self.tab != Tab::Tasks {
+            return false;
+        }
+        let Some(tasks) = self.tasks.as_mut().filter(|t| t.typing()) else {
+            return false;
+        };
+        let control = key.modifiers.contains(KeyModifiers::CONTROL);
+        let alt = key.modifiers.contains(KeyModifiers::ALT);
+        match (key.code, keys::latin(key.code)) {
+            // Enter is a new line; these send.
+            (_, KeyCode::Char('s')) if control => self.press(ButtonId::Send),
+            (KeyCode::Enter, _) if control || alt => self.press(ButtonId::Send),
+            // As in many terminal programs, Ctrl+U removes the text.
+            (_, KeyCode::Char('u')) if control => tasks.clear_input(),
+            // Other Ctrl and Alt keys are not text.
+            _ if control || alt => {}
+            (code, _) => tasks.on_key(code),
+        }
+        true
+    }
+
     /// One key press: Ctrl+C quits, the folder browser or a form gets it first.
     pub(crate) fn on_key(&mut self, key: KeyEvent) {
         if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c') {
@@ -39,21 +63,8 @@ impl App {
         if self.window_key(key.code) {
             return;
         }
-        // Writing the message: every key is text, except these.
-        if self.tab == Tab::Tasks {
-            if let Some(tasks) = self.tasks.as_mut().filter(|t| t.typing()) {
-                let control = key.modifiers.contains(KeyModifiers::CONTROL);
-                let alt = key.modifiers.contains(KeyModifiers::ALT);
-                match (key.code, keys::latin(key.code)) {
-                    // Enter is a new line; these send.
-                    (_, KeyCode::Char('s')) if control => self.press(ButtonId::Send),
-                    (KeyCode::Enter, _) if control || alt => self.press(ButtonId::Send),
-                    // Other Ctrl and Alt keys are not text.
-                    _ if control || alt => {}
-                    (code, _) => tasks.on_key(code),
-                }
-                return;
-            }
+        if self.typing_key(key) {
+            return;
         }
         // Hot keys work with a Russian keyboard layout too: «й» is q.
         let code = keys::latin(key.code);

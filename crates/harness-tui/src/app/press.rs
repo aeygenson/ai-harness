@@ -66,6 +66,7 @@ impl App {
             | ButtonId::TaskFile(_)
             | ButtonId::TaskQuestions
             | ButtonId::Input
+            | ButtonId::ClearMessage
             | ButtonId::Menu(_) => self.press_on_tasks(id),
             ButtonId::TaskPullRequest(index) => self.open_pull_request(index),
             ButtonId::Send => self.send_message(),
@@ -110,6 +111,7 @@ impl App {
             ButtonId::TaskFile(index) => tasks.open_file(index),
             ButtonId::TaskQuestions => tasks.open_questions(),
             ButtonId::Input => tasks.focus_input(),
+            ButtonId::ClearMessage => tasks.clear_input(),
             ButtonId::Menu(menu) => tasks.toggle_menu(menu),
             // `press` sends only the buttons above here.
             _ => {}

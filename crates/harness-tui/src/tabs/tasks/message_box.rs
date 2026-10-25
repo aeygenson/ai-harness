@@ -32,7 +32,7 @@ impl TasksTab {
         }
     }
 
-    /// The message box: several lines of text, «To ▾» and «Send».
+    /// The message box: several lines of text, «To ▾», «✗ Clear» and «Send».
     pub(super) fn draw_input(&self, frame: &mut Frame, area: Rect, hits: &mut Hits, tr: &I18n) {
         let title = tr.t("tasks.input_title");
         let block = panel(title, self.focus == Focus::Input);
@@ -69,6 +69,13 @@ impl TasksTab {
                 levels,
             ));
         }
+        if !self.input.is_empty() {
+            items.push((
+                tr.t("tasks.clear").to_string(),
+                ButtonId::ClearMessage,
+                true,
+            ));
+        }
         let stops = self.stop_buttons(tr);
         let stopping = !stops.is_empty();
         for (label, id) in stops {
@@ -92,25 +99,7 @@ impl TasksTab {
             inner.width.saturating_sub(buttons_width + 1)
         };
         let field = Rect::new(inner.x, inner.y, text_width, text_rows);
-        let typing = self.focus == Focus::Input;
-        let lines: Vec<Line> = if self.input.is_empty() && !typing {
-            vec![Line::styled(
-                format!(" {}", tr.t("tasks.input_hint")),
-                theme::dim(),
-            )]
-        } else {
-            let cursor = if typing { "▏" } else { "" };
-            let room = usize::from(text_width.saturating_sub(2)).max(1);
-            let wrapped = wrap(&format!("{}{cursor}", self.input), room);
-            // The end of a long text stays visible: that is where one types.
-            let skip = wrapped.len().saturating_sub(usize::from(text_rows));
-            wrapped
-                .into_iter()
-                .skip(skip)
-                .map(|l| Line::from(format!(" {l}")))
-                .collect()
-        };
-        frame.render_widget(Paragraph::new(lines), field);
+        self.draw_input_text(frame, field, area, tr);
         hits.add(field, Target::Button(ButtonId::Input));
 
         let shown: Vec<(&str, ButtonId, bool)> = items
@@ -251,12 +240,15 @@ fn buttons_total(items: &[(String, ButtonId, bool)]) -> u16 {
 }
 
 /// Drops buttons until they fit in `room` columns. The model and level go
-/// first. While roles work (`stopping`), the stop buttons matter most: then
+/// first, then «✗ Clear» (Ctrl+U clears too). While roles work (`stopping`), the stop buttons matter most: then
 /// «To» and the grey «Working…» go too (nothing can be sent then anyway),
 /// and last «Stop after this step».
 fn fit_buttons(items: &mut Vec<(String, ButtonId, bool)>, room: u16, stopping: bool) {
     if buttons_total(items) > room {
         items.retain(|(_, id, _)| !matches!(id, ButtonId::Menu(Menu::Model | Menu::Level)));
+    }
+    if buttons_total(items) > room {
+        items.retain(|(_, id, _)| *id != ButtonId::ClearMessage);
     }
     if stopping && buttons_total(items) > room {
         items.retain(|(_, id, _)| !matches!(id, ButtonId::Menu(Menu::To) | ButtonId::Send));
@@ -329,6 +321,7 @@ mod tests {
                 true,
             ),
         ];
+        items.push(("✗ Clear".to_string(), ButtonId::ClearMessage, true));
         if stopping {
             let after = "✓ Stops after this step (s: cancel)".to_string();
             items.push((after, ButtonId::StopAfterStep, true));
@@ -343,6 +336,19 @@ mod tests {
     }
 
     #[test]
+    fn clear_goes_after_the_model_and_level() {
+        // Without the model and level (two buttons and two gaps) the row fits.
+        let fits = buttons_total(&row(false)) - buttons_total(&row(false)[1..3]) - 1;
+        let mut items = row(false);
+        fit_buttons(&mut items, fits, false);
+        let to = ButtonId::Menu(Menu::To);
+        assert_eq!(ids(&items), [to, ButtonId::ClearMessage, ButtonId::Send]);
+        let mut items = row(false);
+        fit_buttons(&mut items, fits - 1, false);
+        assert_eq!(ids(&items), [to, ButtonId::Send]);
+    }
+
+    #[test]
     fn a_narrow_row_keeps_to_and_send_when_nothing_runs() {
         let mut items = row(false);
         fit_buttons(&mut items, 10, false);
@@ -352,7 +358,7 @@ mod tests {
     #[test]
     fn a_narrow_row_keeps_the_stop_buttons_while_roles_work() {
         let stops = [ButtonId::StopAfterStep, ButtonId::StopNow];
-        let both = buttons_total(&row(true)[3..5]);
+        let both = buttons_total(&row(true)[4..6]);
         let mut items = row(true);
         fit_buttons(&mut items, both, true);
         assert_eq!(ids(&items), stops);
@@ -368,6 +374,7 @@ mod tests {
             ids(&items),
             [
                 ButtonId::Menu(Menu::To),
+                ButtonId::ClearMessage,
                 ButtonId::StopAfterStep,
                 ButtonId::StopNow,
                 ButtonId::Send

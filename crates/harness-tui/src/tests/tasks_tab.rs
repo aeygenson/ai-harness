@@ -1415,3 +1415,46 @@ fn each_step_shows_how_long_it_took_from_its_commits() {
         "{text}"
     );
 }
+
+#[test]
+fn a_long_pasted_message_scrolls_and_is_cleared_at_once() {
+    let env = Env::new();
+    let (_, mut app) = empty_project(&env);
+    let pasted: Vec<String> = (1..=20).map(|i| format!("pasted {i:02}")).collect();
+    app.tasks.as_mut().unwrap().paste(&pasted.join("\n"));
+
+    // The box shows the end of the text; ▲ says more is above.
+    let text = screen(&mut app);
+    assert!(text.contains("│ pasted 20▏"), "{text}");
+    assert!(!text.contains("pasted 01"), "{text}");
+    assert!(text.contains('▲'), "{text}");
+
+    // The wheel over the box goes back to the start, and ▼ shows up.
+    let over_box = find(&text, "pasted 20");
+    for _ in 0..10 {
+        wheel(&mut app, over_box, false);
+    }
+    let text = screen(&mut app);
+    assert!(text.contains("│ pasted 01"), "{text}");
+    assert!(!text.contains("pasted 20"), "{text}");
+    assert!(text.contains('▼'), "{text}");
+
+    // Page Down comes back; typing shows the end again.
+    key(&mut app, KeyCode::PageDown);
+    key(&mut app, KeyCode::PageUp);
+    type_text(&mut app, "!");
+    assert!(screen(&mut app).contains("│ pasted 20!▏"));
+
+    // «✗ Clear» removes the whole text.
+    click(&mut app, " ✗ Clear ");
+    assert_eq!(app.tasks.as_ref().unwrap().input, "");
+    let text = screen(&mut app);
+    assert!(!text.contains("pasted"), "{text}");
+    assert!(!text.contains("✗ Clear"), "{text}");
+
+    // So does Ctrl+U while writing.
+    type_text(&mut app, "Another try");
+    app.on_key(KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL));
+    assert_eq!(app.tasks.as_ref().unwrap().input, "");
+    assert!(app.tasks.as_ref().unwrap().typing());
+}

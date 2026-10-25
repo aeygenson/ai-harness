@@ -19,6 +19,7 @@ impl TasksTab {
     pub fn paste(&mut self, text: &str) {
         self.input
             .push_str(&text.replace("\r\n", "\n").replace('\r', "\n"));
+        self.input_changed();
         self.focus = Focus::Input;
     }
 
@@ -31,11 +32,20 @@ impl TasksTab {
                 }
                 KeyCode::Up => self.cycle_choice(-1),
                 KeyCode::Down => self.cycle_choice(1),
-                KeyCode::Enter => self.input.push('\n'),
+                KeyCode::PageUp => self.page_input(true),
+                KeyCode::PageDown => self.page_input(false),
+                KeyCode::Enter => {
+                    self.input.push('\n');
+                    self.input_changed();
+                }
                 KeyCode::Backspace => {
                     self.input.pop();
+                    self.input_changed();
                 }
-                KeyCode::Char(c) => self.input.push(c),
+                KeyCode::Char(c) => {
+                    self.input.push(c);
+                    self.input_changed();
+                }
                 _ => {}
             }
             return;
