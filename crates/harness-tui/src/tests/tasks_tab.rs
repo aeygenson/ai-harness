@@ -1507,3 +1507,63 @@ fn a_long_pasted_message_scrolls_and_is_cleared_at_once() {
     assert_eq!(app.tasks.as_ref().unwrap().input, "");
     assert!(app.tasks.as_ref().unwrap().typing());
 }
+
+/// The sample project with 30 tasks: more than the tasks list shows at once.
+fn project_with_many_tasks(env: &Env) -> App {
+    let root = env.path("test");
+    project(&root);
+    let repo = Repo::open(&root).unwrap();
+    for number in 3..=30 {
+        let id = format!("task-{number:03}");
+        let description = format!("Task number {number}");
+        orchestrator::create_task(&repo, &id, &description, Workflow::Task, 5).unwrap();
+    }
+    env.app(&root)
+}
+
+#[test]
+fn choosing_a_task_on_screen_does_not_scroll_the_last_task_away() {
+    let env = Env::new();
+    let mut app = project_with_many_tasks(&env);
+    // The wheel over the list goes down to the last task.
+    let at = find(&screen(&mut app), "task-001  ");
+    for _ in 0..30 {
+        wheel(&mut app, at, true);
+        screen(&mut app);
+    }
+    assert_eq!(app.tasks.as_ref().unwrap().task, 29);
+    let text = screen(&mut app);
+    assert!(text.contains("task-021  "), "{text}");
+
+    // A click on a task near the top of the list chooses it; the list stays
+    // where it is, so the last task is still there to click.
+    click(&mut app, "task-021  ");
+    assert_eq!(app.tasks.as_ref().unwrap().task, 20);
+    let text = screen(&mut app);
+    assert!(text.contains("│▶ task-021  ● working"), "{text}");
+    assert!(text.contains("task-030  "), "{text}");
+    click(&mut app, "task-030  ");
+    assert_eq!(app.tasks.as_ref().unwrap().task, 29);
+}
+
+#[test]
+fn the_wheel_over_a_pull_request_link_moves_through_the_tasks() {
+    use harness_core::task::pull_request::PullRequest;
+    let env = Env::new();
+    let root = env.path("test");
+    project(&root);
+    let (store, mut state) = TaskStore::open(&root.join(".harness/runs"), "task-001").unwrap();
+    state.pull_request = Some(PullRequest {
+        number: 7,
+        url: "https://github.com/lisa/app/pull/7".into(),
+    });
+    let json = serde_json::to_string(&state).unwrap();
+    std::fs::write(store.dir().join("state.json"), json).unwrap();
+    let mut app = env.app(&root);
+
+    let at = find(&screen(&mut app), "PR #7");
+    wheel(&mut app, at, true);
+    let tasks = app.tasks.as_ref().unwrap();
+    assert_eq!(tasks.task, 1);
+    assert_eq!(tasks.scroll, 0);
+}

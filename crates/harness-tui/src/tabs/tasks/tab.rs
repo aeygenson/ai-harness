@@ -25,7 +25,7 @@
 //! `.harness/` is read again every few seconds, so a `harness run` in another
 //! terminal shows up here too.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 
@@ -107,6 +107,11 @@ pub struct TasksTab {
     pub problem: Option<String>,
     pub(crate) task: usize,
     pub(crate) step: usize,
+    /// The first task on screen, kept between frames so the list does not
+    /// jump when a task already on screen is chosen (see `draw_list_from`).
+    pub(super) first_task_row: Cell<usize>,
+    /// The first step on screen, kept the same way.
+    pub(super) first_step_row: Cell<usize>,
     pub(super) focus: Focus,
     pub(crate) scroll: u16,
     /// The message being written.
@@ -159,6 +164,8 @@ impl TasksTab {
             problem: None,
             task: 0,
             step: 0,
+            first_task_row: Cell::new(0),
+            first_step_row: Cell::new(0),
             focus: Focus::Tasks,
             scroll: 0,
             input: String::new(),

@@ -10,6 +10,7 @@ use crate::tabs::mcp::{McpButton, McpCatalogButton};
 use crate::tabs::plugins::{PluginButton, PluginCatalogButton};
 use crate::tabs::retro::{self, RetroButton};
 use crate::tabs::skills::SkillButton;
+use crate::tabs::tasks::TasksTab;
 use crate::ui::message::Message;
 use crate::ui::{ButtonId, Hits, ListId, Target};
 use crate::{App, Tab, DOUBLE_CLICK, TABS};
@@ -48,30 +49,8 @@ impl App {
         if self.form.is_some() {
             return;
         }
-        if let (Tab::Tasks, Some((Target::Log, _))) = (self.tab, hit) {
-            if let Some(tasks) = &mut self.tasks {
-                tasks.on_log_wheel(down);
-            }
-            return;
-        }
-        if let (Tab::Tasks, Some((Target::Button(ButtonId::Input), _))) = (self.tab, hit) {
-            if let Some(tasks) = &mut self.tasks {
-                tasks.on_input_wheel(down);
-            }
-            return;
-        }
         match (self.tab, hit.and_then(|(t, r)| Hits::row(t, r))) {
-            (Tab::Tasks, Some((list, _))) => {
-                if let Some(tasks) = &mut self.tasks {
-                    tasks.on_click_list(list);
-                    tasks.on_key(if down { KeyCode::Down } else { KeyCode::Up });
-                }
-            }
-            (Tab::Tasks, None) => {
-                if let Some(tasks) = &mut self.tasks {
-                    tasks.on_wheel(down);
-                }
-            }
+            (Tab::Tasks, _) => self.wheel_tasks(hit, down),
             (Tab::Projects, _) => {
                 self.projects
                     .on_key(if down { KeyCode::Down } else { KeyCode::Up });
@@ -138,6 +117,32 @@ impl App {
                     }
                 }
             }
+        }
+    }
+
+    /// A wheel turn over `hit` on the Tasks tab: the log, the message, a list
+    /// (its selection moves) or the step's text.
+    fn wheel_tasks(&mut self, hit: Option<(Target, u16)>, down: bool) {
+        let Some(tasks) = &mut self.tasks else {
+            return;
+        };
+        let move_in = |tasks: &mut TasksTab, list: ListId| {
+            tasks.on_click_list(list);
+            tasks.on_key(if down { KeyCode::Down } else { KeyCode::Up });
+        };
+        match hit {
+            Some((Target::Log, _)) => tasks.on_log_wheel(down),
+            Some((Target::Button(ButtonId::Input), _)) => tasks.on_input_wheel(down),
+            // The «PR #7» link sits on a task row: the wheel there moves
+            // through the tasks too, not the step's text.
+            Some((Target::Button(ButtonId::TaskPullRequest(_)), _)) => {
+                move_in(tasks, ListId::Tasks);
+            }
+            Some((target, row)) => match Hits::row(target, row) {
+                Some((list, _)) => move_in(tasks, list),
+                None => tasks.on_wheel(down),
+            },
+            None => tasks.on_wheel(down),
         }
     }
 
