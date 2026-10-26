@@ -637,6 +637,8 @@ stopped = "waiting: stopped, {role} next"
 done = "done"
 short_working = "working"
 short_waiting = "waiting"
+job_review = "review"
+job_final_review = "final review"
 
 [verdict]
 approved = "approved"

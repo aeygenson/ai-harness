@@ -12,7 +12,7 @@ use std::path::Path;
 use crate::skills::RoleSkills;
 use crate::task::handoff::{FileAction, FileChange, Handoff, NextStep, Role, Verdict};
 use crate::task::permissions::WriteRule;
-use crate::task::routes;
+use crate::task::routes::{self, ArchitectJob};
 use crate::task::TaskState;
 
 /// What a role is told about the task besides its own rules.
@@ -64,6 +64,9 @@ pub fn build(role: Role, state: &TaskState, context: Context<'_>, output_dir: &P
         round = state.round,
         description = context.description,
     );
+    if role == Role::Architect {
+        prompt.push_str(&review_text(state.architect_job, &state.task_id));
+    }
     // The facts from git come before the previous handoff: a reviewer should
     // see what really changed before it reads what the author says about it,
     // or it tends to confirm the author's view.
@@ -96,6 +99,26 @@ pub fn build(role: Role, state: &TaskState, context: Context<'_>, output_dir: &P
     );
     prompt.push_str(&handoff_format(role, state));
     prompt
+}
+
+/// Told to the architect when its turn is a review, not a new design (see
+/// [`ArchitectJob`]); empty for a design.
+fn review_text(job: ArchitectJob, task_id: &str) -> String {
+    let what = match job {
+        ArchitectJob::Design => return String::new(),
+        ArchitectJob::Review => "a review: check the developer's finished work against",
+        ArchitectJob::FinalReview => {
+            "the final review: security has finished; check the whole result, with \
+             the tester's and security's findings and fixes, against"
+        }
+    };
+    format!(
+        "This step is {what} the design the user approved (docs/design/{task_id}.md). \
+         Do not write a new design and do not change the code. Follow the \"Review\" part \
+         of your skill: verdict \"approved\" if the work does what the design says; \
+         \"rejected\" with each gap in issues if it does not; \"needs_human\" if the design \
+         itself turned out to be wrong.\n\n"
+    )
 }
 
 /// How the prompt asks a role to treat what other agents wrote: an earlier
@@ -198,7 +221,7 @@ fn handoff_format(role: Role, state: &TaskState) -> String {
     text.push_str(&answer_to_text(state));
     text.push_str("\nAllowed next_role for you:\n");
     for verdict in [Verdict::Approved, Verdict::Rejected, Verdict::NeedsHuman] {
-        let next = routes::allowed_next(state.workflow, role, verdict);
+        let next = routes::allowed_next(state, role, verdict);
         let names = if next.is_empty() {
             "(not allowed for your role)".to_string()
         } else {
@@ -234,7 +257,7 @@ fn answer_to_text(state: &TaskState) -> String {
 
 /// A valid approved handoff for this role and round.
 fn example(role: Role, state: &TaskState) -> Handoff {
-    let next = routes::allowed_next(state.workflow, role, Verdict::Approved)
+    let next = routes::allowed_next(state, role, Verdict::Approved)
         .first()
         .copied()
         .unwrap_or(NextStep::Done);
@@ -437,6 +460,44 @@ mod tests {
         );
         let tester = prompt_for(Role::Tester);
         assert!(tester.contains("verdict \"rejected\": \"developer\" or \"architect\""));
+    }
+
+    #[test]
+    fn a_reviewing_architect_is_told_to_check_the_code_and_where_it_may_send_it() {
+        let mut state = TaskState::new("task-007", Workflow::Task, DEFAULT_MAX_ROUNDS);
+        state.architect_job = ArchitectJob::Review;
+
+        let prompt = build(
+            Role::Architect,
+            &state,
+            context(None, &RoleSkills::default()),
+            Path::new("/p/.harness/runs/task-007/inbox"),
+        );
+
+        assert!(prompt.contains("This step is a review"), "{prompt}");
+        assert!(prompt.contains("docs/design/task-007.md"), "{prompt}");
+        assert!(
+            prompt.contains("verdict \"approved\": \"tester\""),
+            "{prompt}"
+        );
+        assert!(
+            prompt.contains("verdict \"rejected\": \"developer\""),
+            "{prompt}"
+        );
+        assert!(!prompt_for(Role::Architect).contains("This step is"));
+
+        state.architect_job = ArchitectJob::FinalReview;
+        let prompt = build(
+            Role::Architect,
+            &state,
+            context(None, &RoleSkills::default()),
+            Path::new("/p/.harness/runs/task-007/inbox"),
+        );
+        assert!(prompt.contains("This step is the final review"), "{prompt}");
+        assert!(
+            prompt.contains("verdict \"approved\": \"done\""),
+            "{prompt}"
+        );
     }
 
     #[test]

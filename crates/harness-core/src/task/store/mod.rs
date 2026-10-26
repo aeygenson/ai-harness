@@ -644,10 +644,10 @@ mod tests {
                 Role::Developer,
                 1,
                 Verdict::Approved,
-                NextStep::To(Role::Tester),
+                NextStep::To(Role::Architect),
             ),
             handoff(
-                Role::Tester,
+                Role::Architect,
                 1,
                 Verdict::Rejected,
                 NextStep::To(Role::Developer),
@@ -656,7 +656,7 @@ mod tests {
                 Role::Developer,
                 2,
                 Verdict::Approved,
-                NextStep::To(Role::Tester),
+                NextStep::To(Role::Architect),
             ),
         ];
         for (i, h) in steps.iter().enumerate() {
@@ -666,7 +666,7 @@ mod tests {
 
         let saved = store.steps().unwrap();
         assert_eq!(saved.len(), 5);
-        assert!(saved[3].dir.ends_with("round-01/04-tester"));
+        assert!(saved[3].dir.ends_with("round-01/04-architect"));
         assert_eq!(saved[3].notes, "notes 3");
         assert_eq!(saved[4].handoff, steps[4]);
     }

@@ -22,6 +22,12 @@ use harness_core::task::tripwire::Watched;
 use harness_core::task::{Stage, TaskState, WaitReason, DEFAULT_MAX_ROUNDS};
 use tempfile::TempDir;
 
+/// Words of the prompt that only the architect's review gets.
+const REVIEW_MARK: &str = "check the developer's finished work against";
+
+/// Words of the prompt that only the architect's final review gets.
+const FINAL_MARK: &str = "This step is the final review";
+
 fn approve(next: Role) -> MockStep {
     MockStep::finish(Verdict::Approved, NextStep::To(next))
 }
@@ -67,10 +73,12 @@ async fn happy_path_with_the_user_approving_the_design() {
     let (store, mut state) = new_task(&repo);
     let agent = MockAgent::new()
         .then(Role::Architect, approve(Role::Human))
-        .then(Role::Developer, approve(Role::Tester))
+        .then(Role::Developer, approve(Role::Architect))
+        .then(Role::Architect, approve(Role::Tester))
         .then(Role::Tester, approve(Role::Security))
+        .then(Role::Security, approve(Role::Architect))
         .then(
-            Role::Security,
+            Role::Architect,
             MockStep::finish(Verdict::Approved, NextStep::Done),
         );
 
@@ -100,10 +108,18 @@ async fn happy_path_with_the_user_approving_the_design() {
         [
             Role::Architect,
             Role::Developer,
+            Role::Architect,
             Role::Tester,
-            Role::Security
+            Role::Security,
+            Role::Architect
         ]
     );
+    // The second time the architect checks the code instead of writing a design.
+    let prompts = agent.prompts();
+    assert!(!prompts[0].contains(REVIEW_MARK), "{}", prompts[0]);
+    assert!(prompts[2].contains(REVIEW_MARK), "{}", prompts[2]);
+    // The last time it makes the final review, which finishes the task.
+    assert!(prompts[5].contains(FINAL_MARK), "{}", prompts[5]);
     let roles: Vec<Role> = store.history().unwrap().iter().map(|h| h.role).collect();
     assert_eq!(
         roles,
@@ -111,15 +127,19 @@ async fn happy_path_with_the_user_approving_the_design() {
             Role::Architect,
             Role::Human,
             Role::Developer,
+            Role::Architect,
             Role::Tester,
-            Role::Security
+            Role::Security,
+            Role::Architect
         ]
     );
     assert_eq!(
         git_log(&repo),
         [
+            "task-001 round 1: architect (approved) - Approved",
             "task-001 round 1: security (approved) - Approved",
             "task-001 round 1: tester (approved) - Approved",
+            "task-001 round 1: architect (approved) - Approved",
             "task-001 round 1: developer (approved) - Approved",
             "task-001 round 1: human (approved) - Looks good.",
             "task-001 round 1: architect (approved) - Approved",
@@ -137,15 +157,18 @@ async fn tester_sends_a_bug_back_and_the_developer_fixes_it() {
     let (store, mut state) = new_task(&repo);
     state.stage = Stage::Working(Role::Developer);
     let agent = MockAgent::new()
-        .then(Role::Developer, approve(Role::Tester))
+        .then(Role::Developer, approve(Role::Architect))
+        .then(Role::Architect, approve(Role::Tester))
         .then(
             Role::Tester,
             MockStep::finish(Verdict::Rejected, NextStep::To(Role::Developer)),
         )
-        .then(Role::Developer, approve(Role::Tester))
+        .then(Role::Developer, approve(Role::Architect))
+        .then(Role::Architect, approve(Role::Tester))
         .then(Role::Tester, approve(Role::Security))
+        .then(Role::Security, approve(Role::Architect))
         .then(
-            Role::Security,
+            Role::Architect,
             MockStep::finish(Verdict::Approved, NextStep::Done),
         );
 
@@ -155,8 +178,10 @@ async fn tester_sends_a_bug_back_and_the_developer_fixes_it() {
 
     assert_eq!(stop, StopReason::Done);
     assert_eq!(state.round, 2);
-    assert!(store.dir().join("round-01/02-tester").exists());
+    assert!(store.dir().join("round-01/03-tester").exists());
     assert!(store.dir().join("round-02/01-developer").exists());
+    // The fixed code is checked against the design again.
+    assert!(store.dir().join("round-02/02-architect").exists());
 }
 
 #[tokio::test]
@@ -485,16 +510,16 @@ async fn the_work_of_each_role_is_committed_with_its_handoff() {
             Role::Developer,
             MockStep::finish_writing(
                 Verdict::Approved,
-                NextStep::To(Role::Tester),
+                NextStep::To(Role::Architect),
                 &[("src/parser.rs", "fn parse() {}")],
             ),
         )
         .then(
-            Role::Tester,
+            Role::Architect,
             MockStep::finish_writing(
                 Verdict::NeedsHuman,
                 NextStep::To(Role::Human),
-                &[("tests/parser.rs", "#[test] fn t() {}")],
+                &[("docs/review.md", "A question about the design.")],
             ),
         );
 
@@ -525,7 +550,7 @@ async fn the_work_of_each_role_is_committed_with_its_handoff() {
     .unwrap();
     assert!(manifest.contains("\"role\": \"developer\""), "{manifest}");
     assert!(manifest.contains("\"prompt\": \""), "{manifest}");
-    assert!(!show.contains("tests/parser.rs"), "{show}");
+    assert!(!show.contains("docs/review.md"), "{show}");
     assert!(!show.contains("inbox"), "{show}");
 }
 
@@ -1167,13 +1192,15 @@ async fn an_empty_stub_named_file_without_claude_codes_block_is_the_agents_work(
             Role::Developer,
             MockStep::finish_writing(
                 Verdict::Approved,
-                NextStep::To(Role::Tester),
+                NextStep::To(Role::Architect),
                 &[(".env", ""), ("src/parser.rs", "fn parse() {}")],
             ),
         )
+        .then(Role::Architect, approve(Role::Tester))
         .then(Role::Tester, approve(Role::Security))
+        .then(Role::Security, approve(Role::Architect))
         .then(
-            Role::Security,
+            Role::Architect,
             MockStep::finish(Verdict::Approved, NextStep::Done),
         );
 

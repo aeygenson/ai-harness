@@ -44,11 +44,15 @@ flowchart LR
     A --> H{You<br>approve?}
     H -- "rework" --> A
     H -- "yes" --> D[Developer<br><sub>writes the code</sub>]
-    D --> Te[Tester<br><sub>writes and runs tests</sub>]
+    D --> R[Architect<br><sub>code matches the design?</sub>]
+    R --> Te[Tester<br><sub>writes and runs tests</sub>]
     Te --> S[Security<br><sub>read-only review</sub>]
-    S --> Done([Done])
+    S --> F[Architect<br><sub>final review</sub>]
+    F --> Done([Done])
+    R -. "fix" .-> D
     Te -. "bug" .-> D
     S -. "fix" .-> D
+    F -. "fix" .-> D
     D -. "design unclear" .-> A
     Te -. "design problem" .-> A
     S -. "design problem" .-> A
@@ -129,7 +133,8 @@ harness init                         # create .harness/harness.toml
 harness github vgs-prototype         # put the project on GitHub (private repository)
 harness task new task-001 "Add a CSV export to the report page"
 harness run task-001                 # Architect writes the design, then waits for you
-harness approve task-001             # Developer, Tester and Security take over
+harness approve task-001             # Developer, Tester and Security take over,
+                                     # with the Architect checking the code twice
 harness status task-001              # where the task is and its history
 harness retro task-001               # what went well and what to improve
 ```
