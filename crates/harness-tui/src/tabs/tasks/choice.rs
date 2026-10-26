@@ -5,6 +5,7 @@ use harness_core::config::AgentKind;
 use harness_core::models::ModelList;
 use harness_core::task::handoff::{NextStep, Role};
 use harness_core::task::permissions::WriteRule;
+use harness_core::task::routes::ArchitectJob;
 use harness_core::task::{Stage, WaitReason};
 
 use super::steps::wrote_design;
@@ -111,7 +112,7 @@ impl TasksTab {
     /// files (security) and listed issues cannot fix them itself, so the
     /// developer is suggested. An architect that wrote a design asks about
     /// it: the answer usually approves it, so the role that takes approved
-    /// work is suggested.
+    /// work is suggested. An architect in a review gets the answer itself.
     fn after_help_request(&self, role: Role) -> Role {
         if let Some(answer) = self.suggested_answer() {
             return answer.role;
@@ -125,7 +126,10 @@ impl TasksTab {
         let developer_here = self.scenario.roles().contains(&Role::Developer);
         if read_only && has_issues && developer_here {
             Role::Developer
-        } else if role == Role::Architect && last.is_some_and(wrote_design) {
+        } else if role == Role::Architect
+            && task.state.architect_job == ArchitectJob::Design
+            && last.is_some_and(wrote_design)
+        {
             task.state.workflow.after_approval()
         } else {
             role

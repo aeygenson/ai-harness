@@ -34,6 +34,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::task::handoff::{Handoff, NextStep, Role, Verdict, SCHEMA_VERSION};
 use crate::task::pull_request::PullRequest;
+use crate::task::routes::ArchitectJob;
 use crate::task::scenario::Workflow;
 
 /// Default limit on how many rounds a task may take before the user must step in.
@@ -85,6 +86,10 @@ pub struct TaskState {
     pub max_rounds: u32,
     /// Who works now, or why the task waits, or that it is done.
     pub stage: Stage,
+    /// Whether the architect's next turn is a design or a review of the
+    /// developer's work; left out of `state.json` while it is a design.
+    #[serde(default, skip_serializing_if = "ArchitectJob::is_design")]
+    pub architect_job: ArchitectJob,
     /// The pull request the finished task became on GitHub; missing in
     /// `state.json` until there is one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -209,6 +214,7 @@ impl TaskState {
             round: 1,
             max_rounds,
             stage: Stage::Working(workflow.start()),
+            architect_job: ArchitectJob::Design,
             pull_request: None,
         }
     }
@@ -267,12 +273,7 @@ impl TaskState {
             return Err(TransitionError::RejectedWithoutIssues);
         }
         self.check_answer_to(handoff)?;
-        if !routes::is_allowed(
-            self.workflow,
-            handoff.role,
-            handoff.verdict,
-            handoff.next_role,
-        ) {
+        if !routes::is_allowed(self, handoff.role, handoff.verdict, handoff.next_role) {
             return Err(TransitionError::RouteNotAllowed {
                 role: handoff.role,
                 verdict: handoff.verdict,
@@ -280,6 +281,7 @@ impl TaskState {
             });
         }
 
+        self.architect_job = self.architect_job.after(handoff);
         // Sending work back starts a new round.
         if handoff.verdict == Verdict::Rejected {
             self.round += 1;
@@ -359,9 +361,11 @@ mod tests {
         let steps = [
             (Role::Architect, NextStep::To(Role::Human)),
             (Role::Human, NextStep::To(Role::Developer)),
-            (Role::Developer, NextStep::To(Role::Tester)),
+            (Role::Developer, NextStep::To(Role::Architect)),
+            (Role::Architect, NextStep::To(Role::Tester)),
             (Role::Tester, NextStep::To(Role::Security)),
-            (Role::Security, NextStep::Done),
+            (Role::Security, NextStep::To(Role::Architect)),
+            (Role::Architect, NextStep::Done),
         ];
         for (role, next) in steps {
             task.apply(&handoff(role, 1, Verdict::Approved, next))
@@ -369,6 +373,73 @@ mod tests {
         }
         assert_eq!(task.stage, Stage::Done);
         assert_eq!(task.round, 1);
+    }
+
+    #[test]
+    fn the_architect_reviews_finished_code_but_cannot_skip_the_user_with_a_design() {
+        // Arrange: a design waits for the user.
+        let mut task = new_task();
+        let skip = handoff(
+            Role::Architect,
+            1,
+            Verdict::Approved,
+            NextStep::To(Role::Tester),
+        );
+        assert!(matches!(
+            task.apply(&skip),
+            Err(TransitionError::RouteNotAllowed { .. })
+        ));
+        task.apply(&handoff(
+            Role::Architect,
+            1,
+            Verdict::Approved,
+            NextStep::To(Role::Human),
+        ))
+        .unwrap();
+        task.apply(&handoff(
+            Role::Human,
+            1,
+            Verdict::Approved,
+            NextStep::To(Role::Developer),
+        ))
+        .unwrap();
+
+        // Act: the developer finishes, then the architect finds a gap in the code.
+        task.apply(&handoff(
+            Role::Developer,
+            1,
+            Verdict::Approved,
+            NextStep::To(Role::Architect),
+        ))
+        .unwrap();
+        let review = task.clone();
+        task.apply(&handoff(
+            Role::Architect,
+            1,
+            Verdict::Rejected,
+            NextStep::To(Role::Developer),
+        ))
+        .unwrap();
+
+        // Assert: the review was saved in the state, and its rejection starts round 2.
+        assert_eq!(review.architect_job, ArchitectJob::Review);
+        assert!(serde_json::to_string(&review)
+            .unwrap()
+            .contains("\"architect_job\":\"review\""));
+        assert_eq!(task.architect_job, ArchitectJob::Design);
+        assert_eq!(task.stage, Stage::Working(Role::Developer));
+        assert_eq!(task.round, 2);
+    }
+
+    #[test]
+    fn a_state_saved_without_the_architect_job_reads_as_a_design() {
+        let json =
+            r#"{"task_id":"task-001","round":1,"max_rounds":5,"stage":{"working":"architect"}}"#;
+        let state: TaskState = serde_json::from_str(json).unwrap();
+        assert_eq!(state.architect_job, ArchitectJob::Design);
+        assert!(!serde_json::to_string(&state)
+            .unwrap()
+            .contains("architect_job"));
     }
 
     #[test]
@@ -628,13 +699,13 @@ mod tests {
             Role::Developer,
             round,
             Verdict::Approved,
-            NextStep::To(Role::Tester),
+            NextStep::To(Role::Architect),
         ))
         .unwrap();
 
-        // Assert: the developer's handoff goes on to the tester.
+        // Assert: the developer's handoff goes on to the architect's review.
         assert_eq!(task.max_rounds, DEFAULT_MAX_ROUNDS + 5);
-        assert_eq!(task.stage, Stage::Working(Role::Tester));
+        assert_eq!(task.stage, Stage::Working(Role::Architect));
     }
 
     #[test]

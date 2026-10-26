@@ -357,6 +357,7 @@ mod tests {
     use crate::config::Config;
     use crate::task::handoff::Issue;
     use crate::task::handoff::{NextStep, Verdict};
+    use crate::task::routes::ArchitectJob;
     use crate::task::scenario::Workflow;
 
     fn handoff(role: Role, verdict: Verdict, next: NextStep) -> Handoff {
@@ -391,6 +392,7 @@ mod tests {
                 round: 2,
                 max_rounds: 5,
                 stage,
+                architect_job: ArchitectJob::Design,
                 pull_request: None,
             },
             handoffs,

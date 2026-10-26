@@ -124,8 +124,10 @@ fn a_new_task_runs_the_architect_then_the_answer_goes_to_the_developer() {
             Role::Architect,
             Role::Human,
             Role::Developer,
+            Role::Architect,
             Role::Tester,
-            Role::Security
+            Role::Security,
+            Role::Architect
         ]
     );
     assert_eq!(steps[1].handoff.summary, "Use serde");
@@ -204,7 +206,8 @@ fn more_rounds_raise_the_limit_and_send_the_work_on() {
     let steps = [
         (Role::Architect, Verdict::Approved, Role::Human),
         (Role::Human, Verdict::Approved, Role::Developer),
-        (Role::Developer, Verdict::Approved, Role::Tester),
+        (Role::Developer, Verdict::Approved, Role::Architect),
+        (Role::Architect, Verdict::Approved, Role::Tester),
         (Role::Tester, Verdict::Rejected, Role::Developer),
     ];
     for (role, verdict, next) in steps {
@@ -238,9 +241,9 @@ fn more_rounds_raise_the_limit_and_send_the_work_on() {
     let (_, state) = TaskStore::open(&root.join(".harness/runs"), "task-001").unwrap();
     assert_eq!(state.max_rounds, 6);
     let steps = store.steps().unwrap();
-    assert_eq!(steps[4].handoff.role, Role::Human);
-    assert_eq!(steps[4].handoff.next_role, NextStep::To(Role::Developer));
-    assert_eq!(steps.last().unwrap().handoff.role, Role::Security);
+    assert_eq!(steps[5].handoff.role, Role::Human);
+    assert_eq!(steps[5].handoff.next_role, NextStep::To(Role::Developer));
+    assert_eq!(steps.last().unwrap().handoff.role, Role::Architect);
 }
 
 #[test]
@@ -406,7 +409,7 @@ fn files_of_a_step_open_in_zed_with_a_click() {
     let mut developer = handoff(
         Role::Developer,
         Verdict::Approved,
-        NextStep::To(Role::Tester),
+        NextStep::To(Role::Architect),
         "Empty input fixed",
     );
     developer.round = 2;
@@ -733,7 +736,8 @@ fn a_fix_asked_for_by_security_goes_to_the_developer_by_default() {
     for (role, next) in [
         (Role::Architect, Role::Human),
         (Role::Human, Role::Developer),
-        (Role::Developer, Role::Tester),
+        (Role::Developer, Role::Architect),
+        (Role::Architect, Role::Tester),
         (Role::Tester, Role::Security),
     ] {
         let step = handoff(role, Verdict::Approved, NextStep::To(next), "step");
@@ -768,7 +772,8 @@ fn a_suggestion_wins_over_the_rule_for_security_with_issues() {
     for (role, next) in [
         (Role::Architect, Role::Human),
         (Role::Human, Role::Developer),
-        (Role::Developer, Role::Tester),
+        (Role::Developer, Role::Architect),
+        (Role::Architect, Role::Tester),
         (Role::Tester, Role::Security),
     ] {
         let step = handoff(role, Verdict::Approved, NextStep::To(next), "step");
@@ -806,7 +811,8 @@ fn a_question_from_security_without_issues_goes_back_to_security() {
     for (role, next) in [
         (Role::Architect, Role::Human),
         (Role::Human, Role::Developer),
-        (Role::Developer, Role::Tester),
+        (Role::Developer, Role::Architect),
+        (Role::Architect, Role::Tester),
         (Role::Tester, Role::Security),
     ] {
         let step = handoff(role, Verdict::Approved, NextStep::To(next), "step");
@@ -867,6 +873,40 @@ fn a_question_from_the_architect_without_a_design_goes_back_to_it() {
 }
 
 #[test]
+fn a_reviewing_architect_that_touched_the_design_gets_the_answer_itself() {
+    let env = Env::new();
+    let (root, mut app) = empty_project(&env);
+    let repo = Repo::open(&root).unwrap();
+    let (store, mut state) =
+        orchestrator::create_task(&repo, "task-001", "Build a parser", Workflow::Task, 5).unwrap();
+    for (role, next) in [
+        (Role::Architect, Role::Human),
+        (Role::Human, Role::Developer),
+        (Role::Developer, Role::Architect),
+    ] {
+        let step = handoff(role, Verdict::Approved, NextStep::To(next), "step");
+        store.record(&mut state, &step, "notes").unwrap();
+    }
+    let mut asked = handoff(
+        Role::Architect,
+        Verdict::NeedsHuman,
+        NextStep::To(Role::Human),
+        "the code reads TOML, the design says JSON",
+    );
+    asked.files = vec![harness_core::task::handoff::FileChange {
+        path: "docs/design/task-001.md".into(),
+        action: harness_core::task::handoff::FileAction::Modified,
+    }];
+    store.record(&mut state, &asked, "notes").unwrap();
+    repo.commit_all("the reviewing architect asked").unwrap();
+    key(&mut app, KeyCode::F(5));
+
+    let text = screen(&mut app);
+    assert!(text.contains(" To: architect ▾ "), "{text}");
+    assert!(text.contains("architect asked for help · review"), "{text}");
+}
+
+#[test]
 fn the_questions_of_the_waiting_role_open_from_the_message_box() {
     let env = Env::new();
     let (root, mut app) = architect_asked(&env, false);
@@ -920,7 +960,8 @@ fn tester_asked(env: &Env, answer_to: Option<(Role, &str)>) -> App {
     for (role, next) in [
         (Role::Architect, Role::Human),
         (Role::Human, Role::Developer),
-        (Role::Developer, Role::Tester),
+        (Role::Developer, Role::Architect),
+        (Role::Architect, Role::Tester),
     ] {
         let step = handoff(role, Verdict::Approved, NextStep::To(next), "step");
         store.record(&mut state, &step, "notes").unwrap();
@@ -993,17 +1034,25 @@ fn team_with_developer(developer: MockStep) -> harness_agents::Team {
     Team::new()
         .with(Role::Developer, agent(Role::Developer, developer))
         .with(
+            Role::Architect,
+            AnyAgent::Mock(
+                MockAgent::new()
+                    .then(Role::Architect, approve(NextStep::To(Role::Tester)))
+                    .then(Role::Architect, approve(NextStep::Done)),
+            ),
+        )
+        .with(
             Role::Tester,
             agent(Role::Tester, approve(NextStep::To(Role::Security))),
         )
         .with(
             Role::Security,
-            agent(Role::Security, approve(NextStep::Done)),
+            agent(Role::Security, approve(NextStep::To(Role::Architect))),
         )
 }
 
 /// A developer that works until «Stop after this step», then sends the
-/// work to the tester.
+/// work to the architect's review.
 #[expect(
     clippy::unnecessary_wraps,
     reason = "a fake must match the `Builder` function type"
@@ -1014,7 +1063,7 @@ fn developer_until_any_stop(
 ) -> Result<harness_agents::Team, harness_agents::build::BuildError> {
     Ok(team_with_developer(MockStep::WorkUntilStopped {
         files: vec![],
-        next: Some(NextStep::To(Role::Tester)),
+        next: Some(NextStep::To(Role::Architect)),
     }))
 }
 
@@ -1083,25 +1132,25 @@ fn stop_after_this_step_lets_the_role_finish_then_waits_for_the_user() {
     assert!(shown(&app).0.contains("stops after this step"));
     wait(&mut app);
 
-    // The developer's step is done; the tester did not start.
+    // The developer's step is done; the architect's review did not start.
     assert_eq!(
         stage(&app),
-        Stage::WaitingForHuman(WaitReason::StoppedByUser(Role::Tester))
+        Stage::WaitingForHuman(WaitReason::StoppedByUser(Role::Architect))
     );
     let (message, problem) = shown(&app);
     assert!(
-        message.contains("stopped as you asked; the tester is next"),
+        message.contains("stopped as you asked; the architect is next"),
         "{message}"
     );
     assert!(!problem);
     let text = screen(&mut app);
     assert!(!text.contains("Stop now (x)"), "{text}");
-    assert!(text.contains("waiting: stopped, tester next"), "{text}");
-    assert!(text.contains(" To: tester ▾ "), "{text}");
+    assert!(text.contains("waiting: stopped, architect next"), "{text}");
+    assert!(text.contains(" To: architect ▾ "), "{text}");
 
-    // «Continue: tester» goes on without a note.
-    click(&mut app, " To: tester ▾ ");
-    click(&mut app, "Continue: tester");
+    // «Continue: architect» goes on without a note.
+    click(&mut app, " To: architect ▾ ");
+    click(&mut app, "Continue: architect");
     click(&mut app, " Send ");
     wait(&mut app);
     assert_eq!(stage(&app), Stage::Done);
@@ -1384,7 +1433,7 @@ fn each_step_shows_how_long_it_took_from_its_commits() {
     let steps = [
         (Role::Architect, NextStep::To(Role::Human), 600),
         (Role::Human, NextStep::To(Role::Developer), 30),
-        (Role::Developer, NextStep::To(Role::Tester), 3_725),
+        (Role::Developer, NextStep::To(Role::Architect), 3_725),
     ];
     let mut time = created;
     for (role, next, took) in steps {
@@ -1401,7 +1450,7 @@ fn each_step_shows_how_long_it_took_from_its_commits() {
         "{text}"
     );
     assert!(
-        text.contains("r1 developer  approved → tester     1 h 02 min done"),
+        text.contains("r1 developer  approved → architect  1 h 02 min done"),
         "{text}"
     );
     // The user's own step has no time: only how long the task waited for them.
@@ -1411,7 +1460,7 @@ fn each_step_shows_how_long_it_took_from_its_commits() {
     );
     // The task is not done: it runs until now.
     assert!(
-        text.contains("· working: tester · task 2 h 00 min"),
+        text.contains("· working: architect · review · task 2 h 00 min"),
         "{text}"
     );
 }

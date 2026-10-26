@@ -72,8 +72,14 @@ fn project(root: &Path) {
         handoff(
             Role::Developer,
             Verdict::Approved,
-            NextStep::To(Role::Tester),
+            NextStep::To(Role::Architect),
             "Parser written",
+        ),
+        handoff(
+            Role::Architect,
+            Verdict::Approved,
+            NextStep::To(Role::Tester),
+            "Code matches the design",
         ),
     ];
     for step in &steps {
@@ -298,15 +304,34 @@ fn mock_team(
     Ok(Team::new()
         .with(
             Role::Architect,
-            agent(Role::Architect, NextStep::To(Role::Human)),
+            // Three turns: the design, the review of the developer's code and
+            // the final review after security.
+            AnyAgent::Mock(
+                MockAgent::new()
+                    .then(
+                        Role::Architect,
+                        MockStep::finish(Verdict::Approved, NextStep::To(Role::Human)),
+                    )
+                    .then(
+                        Role::Architect,
+                        MockStep::finish(Verdict::Approved, NextStep::To(Role::Tester)),
+                    )
+                    .then(
+                        Role::Architect,
+                        MockStep::finish(Verdict::Approved, NextStep::Done),
+                    ),
+            ),
         )
         .with(
             Role::Developer,
-            agent(Role::Developer, NextStep::To(Role::Tester)),
+            agent(Role::Developer, NextStep::To(Role::Architect)),
         )
         .with(
             Role::Tester,
             agent(Role::Tester, NextStep::To(Role::Security)),
         )
-        .with(Role::Security, agent(Role::Security, NextStep::Done)))
+        .with(
+            Role::Security,
+            agent(Role::Security, NextStep::To(Role::Architect)),
+        ))
 }

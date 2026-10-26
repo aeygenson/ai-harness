@@ -629,6 +629,8 @@ stopped = "ждёт: остановлено, дальше {role}"
 done = "готово"
 short_working = "работает"
 short_waiting = "ждёт"
+job_review = "проверка"
+job_final_review = "окончательная проверка"
 
 [verdict]
 approved = "одобрено"

@@ -15,7 +15,7 @@ use super::message_box::input_height;
 use super::steps::step_text;
 use super::tab::{Focus, TaskView, TasksTab, Zoom};
 use super::times::duration_label;
-use crate::tabs::tasks::labels::{short_stage, stage_label};
+use crate::tabs::tasks::labels::{short_stage, task_stage_label};
 use crate::ui::i18n::I18n;
 use crate::ui::theme;
 use crate::ui::{
@@ -95,7 +95,7 @@ impl TasksTab {
                 ("task", &task.id),
                 ("round", &task.state.round),
                 ("max", &task.state.max_rounds),
-                ("stage", &stage_label(task.state.stage, tr)),
+                ("stage", &task_stage_label(&task.state, tr)),
                 ("time", &took),
                 ("failures", &failures),
                 ("usage", &spent),

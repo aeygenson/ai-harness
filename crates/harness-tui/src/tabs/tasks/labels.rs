@@ -2,8 +2,9 @@
 //! next step, in the user's language.
 
 use harness_core::retro::usage::Usage;
-use harness_core::task::handoff::{NextStep, Severity, Verdict};
-use harness_core::task::{Stage, WaitReason};
+use harness_core::task::handoff::{NextStep, Role, Severity, Verdict};
+use harness_core::task::routes::ArchitectJob;
+use harness_core::task::{Stage, TaskState, WaitReason};
 use ratatui::style::Color;
 use ratatui::text::Span;
 
@@ -23,6 +24,31 @@ pub fn stage_label(stage: Stage, tr: &I18n) -> String {
             tr.f("stage.stopped", &[("role", &role.as_str())])
         }
         Stage::Done => tr.t("stage.done").into(),
+    }
+}
+
+/// The stage of a task, with the architect's job when its next turn is a
+/// review: «working: architect · review». A design is not named: it is the
+/// architect's usual job.
+pub fn task_stage_label(state: &TaskState, tr: &I18n) -> String {
+    let label = stage_label(state.stage, tr);
+    let architect_next = matches!(
+        state.stage,
+        Stage::Working(Role::Architect)
+            | Stage::WaitingForHuman(
+                WaitReason::RoleAskedForHelp(Role::Architect)
+                    | WaitReason::StoppedByUser(Role::Architect)
+            )
+    );
+    let job = match state.architect_job {
+        ArchitectJob::Design => return label,
+        ArchitectJob::Review => tr.t("stage.job_review"),
+        ArchitectJob::FinalReview => tr.t("stage.job_final_review"),
+    };
+    if architect_next {
+        format!("{label} · {job}")
+    } else {
+        label
     }
 }
 
@@ -88,7 +114,7 @@ fn short_number(number: u64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use harness_core::task::handoff::Role;
+    use harness_core::task::scenario::Workflow;
 
     #[test]
     fn stages_are_shown_in_the_chosen_language() {
@@ -101,6 +127,27 @@ mod tests {
         assert_eq!(short_stage(Stage::Done, &tr), "готово");
         assert_eq!(next_name(NextStep::Done, &tr), "готово");
         assert_eq!(severity_label(Severity::High, &tr).0, "высокая");
+    }
+
+    #[test]
+    fn a_reviewing_architect_shows_its_job() {
+        let mut tr = I18n::load(None);
+        let mut state = TaskState::new("task-001", Workflow::Task, 5);
+        assert_eq!(task_stage_label(&state, &tr), "working: architect");
+        state.architect_job = ArchitectJob::FinalReview;
+        assert_eq!(
+            task_stage_label(&state, &tr),
+            "working: architect · final review"
+        );
+        state.stage = Stage::Working(Role::Tester);
+        assert_eq!(task_stage_label(&state, &tr), "working: tester");
+        state.stage = Stage::WaitingForHuman(WaitReason::StoppedByUser(Role::Architect));
+        state.architect_job = ArchitectJob::Review;
+        tr.next();
+        assert_eq!(
+            task_stage_label(&state, &tr),
+            "ждёт: остановлено, дальше architect · проверка"
+        );
     }
 
     #[test]

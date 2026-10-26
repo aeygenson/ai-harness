@@ -7,6 +7,7 @@
 <p align="center">
   <b>A conductor for a team of AI coding agents.</b><br>
   It leads a task through Architect, Developer, Tester and Security roles,<br>
+  with the Architect checking the result against its own design,<br>
   each played by a real console agent: Claude Code, Codex CLI, Antigravity CLI or DeepSeek Harness<br>
   (with DeepSeek's models or NVIDIA's free ones).
 </p>
@@ -29,7 +30,8 @@ each other's work.
 
 AI Harness gives AI agents the same structure. Instead of one long chat, a task goes through
 a small team with clear jobs, written handoffs between them, and a human who approves the
-plan. You can put a different agent (and a different subscription) in each role, so Claude
+plan. The Architect who wrote the plan also checks that the code really follows it, before
+testing and once more at the very end. You can put a different agent (and a different subscription) in each role, so Claude
 can design, Codex can build and DeepSeek can review, or any other mix.
 
 The harness itself has **no agent loop and calls no model API**. It is the conductor, not
@@ -40,19 +42,37 @@ agent with the right permissions, checks what it did, and keeps the history.
 
 ```mermaid
 flowchart LR
-    T([Task]) --> A[Architect<br><sub>design in docs/</sub>]
+    T([Task]) --> A[Architect<br><sub>writes the design</sub>]
     A --> H{You<br>approve?}
     H -- "rework" --> A
     H -- "yes" --> D[Developer<br><sub>writes the code</sub>]
-    D --> Te[Tester<br><sub>writes and runs tests</sub>]
+    D --> R[Architect<br><sub>review: code<br>follows the design?</sub>]
+    R -- "yes" --> Te[Tester<br><sub>writes and runs tests</sub>]
     Te --> S[Security<br><sub>read-only review</sub>]
-    S --> Done([Done])
+    S --> F[Architect<br><sub>final review,<br>security of the design</sub>]
+    F -- "yes" --> Done([Done])
+    R -. "gap" .-> D
     Te -. "bug" .-> D
     S -. "fix" .-> D
+    F -. "gap" .-> D
     D -. "design unclear" .-> A
     Te -. "design problem" .-> A
     S -. "design problem" .-> A
 ```
+
+The Architect works three times in a task, always as the same role:
+
+1. **Design.** It reads the project and writes the design to `docs/`. The design always goes
+   to you; nothing is built until you approve it.
+2. **Review.** When the Developer is done, the Architect compares the code with the approved
+   design: every step built, interfaces as designed, nothing out of scope. A gap sends the
+   work back to the Developer; a design that turned out wrong comes to you.
+3. **Final review.** After the Tester and Security, the Architect looks at the whole result
+   once more, including their fixes and the security of the design (input checked where it
+   enters, secrets out of code and logs, no wider permissions than the task needs). Only
+   this step can finish a task.
+
+Every fix the Developer makes goes through the same review and the checks after it again.
 
 Each role finishes by writing short `notes.md` and a structured `handoff.json`: a verdict,
 the files it touched, the issues it found with their severity, and who it thinks should work
@@ -60,7 +80,9 @@ next. The harness then **trusts, but verifies**:
 
 - **Routes are checked.** A role only suggests the next step; the harness accepts it only if
   that move is in the allowed table (for example, the Tester may send work back to the
-  Developer, but the Architect always goes to you first).
+  Developer, an Architect's design always goes to you first, and only the Architect's final
+  review can finish a task). The harness remembers which of its three jobs the Architect is
+  doing, so a design can never skip your approval.
 - **File scope is checked.** The Architect may change only `docs/`, the Tester only test
   files, Security nothing at all. Files that steer agents (`.claude/`, `AGENTS.md`,
   `CLAUDE.md`, `.git/` and others) are off limits to every role, at any depth and in any
@@ -129,7 +151,8 @@ harness init                         # create .harness/harness.toml
 harness github vgs-prototype         # put the project on GitHub (private repository)
 harness task new task-001 "Add a CSV export to the report page"
 harness run task-001                 # Architect writes the design, then waits for you
-harness approve task-001             # Developer, Tester and Security take over
+harness approve task-001             # Developer, Tester and Security take over,
+                                     # with the Architect checking the code twice
 harness status task-001              # where the task is and its history
 harness retro task-001               # what went well and what to improve
 ```

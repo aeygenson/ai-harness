@@ -106,9 +106,13 @@ async fn stop_after_step_keeps_the_step_and_stops_before_the_next_role() {
             Role::Developer,
             MockStep::finish_writing(
                 Verdict::Approved,
-                NextStep::To(Role::Tester),
+                NextStep::To(Role::Architect),
                 &[("src/parser.rs", "fn parse() {}")],
             ),
+        )
+        .then(
+            Role::Architect,
+            MockStep::finish(Verdict::Approved, NextStep::To(Role::Tester)),
         )
         .then(
             Role::Tester,
@@ -116,6 +120,10 @@ async fn stop_after_step_keeps_the_step_and_stops_before_the_next_role() {
         )
         .then(
             Role::Security,
+            MockStep::finish(Verdict::Approved, NextStep::To(Role::Architect)),
+        )
+        .then(
+            Role::Architect,
             MockStep::finish(Verdict::Approved, NextStep::Done),
         );
     let stop = StopRequest::new();
@@ -123,12 +131,12 @@ async fn stop_after_step_keeps_the_step_and_stops_before_the_next_role() {
 
     let reason = run_with(&repo, &store, &mut state, &agent, &stop).await;
 
-    // The developer's step is accepted and committed; the tester never started.
-    assert_eq!(reason, stopped(Role::Tester));
+    // The developer's step is accepted and committed; the architect's review never started.
+    assert_eq!(reason, stopped(Role::Architect));
     assert_eq!(agent.calls(), [Role::Developer]);
     assert_eq!(
         state.stage,
-        Stage::WaitingForHuman(WaitReason::StoppedByUser(Role::Tester))
+        Stage::WaitingForHuman(WaitReason::StoppedByUser(Role::Architect))
     );
     assert_eq!(
         TaskStore::open(&repo.runs_dir(), "task-001").unwrap().1,
@@ -140,16 +148,26 @@ async fn stop_after_step_keeps_the_step_and_stops_before_the_next_role() {
     );
     assert_eq!(repo.changed_files().unwrap(), Vec::<String>::new());
     let log = git_log(&repo);
-    assert_eq!(log[0], "task-001 round 1: stopped by the user, tester next");
+    assert_eq!(
+        log[0],
+        "task-001 round 1: stopped by the user, architect next"
+    );
     assert!(log[1].contains("developer (approved)"), "{log:?}");
 
-    // «Continue»: the tester (the role that was next) goes on.
+    // «Continue»: the architect (the role that was next) goes on with its
+    // review, not a new design, so it may send the work to the tester.
     assert!(continue_stopped(&repo, &store, &mut state).unwrap());
     let reason = run_with(&repo, &store, &mut state, &agent, &StopRequest::new()).await;
     assert_eq!(reason, StopReason::Done);
     assert_eq!(
         agent.calls(),
-        [Role::Developer, Role::Tester, Role::Security]
+        [
+            Role::Developer,
+            Role::Architect,
+            Role::Tester,
+            Role::Security,
+            Role::Architect
+        ]
     );
 }
 
