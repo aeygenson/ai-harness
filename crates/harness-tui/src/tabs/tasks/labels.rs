@@ -16,6 +16,7 @@ pub fn stage_label(stage: Stage, tr: &I18n) -> String {
     match stage {
         Stage::Working(role) => tr.f("stage.working", &[("role", &role.as_str())]),
         Stage::WaitingForHuman(WaitReason::ApproveDesign) => tr.t("stage.approve_design").into(),
+        Stage::WaitingForHuman(WaitReason::AcceptResult) => tr.t("stage.accept_result").into(),
         Stage::WaitingForHuman(WaitReason::RoleAskedForHelp(role)) => {
             tr.f("stage.asked_for_help", &[("role", &role.as_str())])
         }

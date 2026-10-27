@@ -44,9 +44,13 @@ impl TasksTab {
             },
             (_, None) => return Err(tr.t("tasks.no_task").to_string()),
             (Choice::Role(role), Some((task, stage))) => {
-                // Sending the design back to the architect rejects it.
-                let rejected = role == Role::Architect
-                    && stage == Stage::WaitingForHuman(WaitReason::ApproveDesign);
+                // Sending the design back to the architect rejects it, and so
+                // does sending a result the user did not accept to any role.
+                let rejected = match stage {
+                    Stage::WaitingForHuman(WaitReason::ApproveDesign) => role == Role::Architect,
+                    Stage::WaitingForHuman(WaitReason::AcceptResult) => true,
+                    _ => false,
+                };
                 Request::Decide {
                     task,
                     seen: stage,
@@ -160,6 +164,9 @@ fn outcome_text(outcome: &Outcome, tr: &I18n) -> Message {
         StopReason::Done => Message::info(tr.f("tasks.stop_done", &[("task", task)])),
         StopReason::WaitingForHuman(WaitReason::ApproveDesign) => {
             Message::info(tr.f("tasks.stop_design", &[("task", task)]))
+        }
+        StopReason::WaitingForHuman(WaitReason::AcceptResult) => {
+            Message::info(tr.f("tasks.stop_accept", &[("task", task)]))
         }
         StopReason::WaitingForHuman(WaitReason::RoleAskedForHelp(r)) => {
             Message::info(tr.f("tasks.stop_help", &[("task", task), ("role", &role(r))]))

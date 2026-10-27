@@ -247,6 +247,93 @@ fn more_rounds_raise_the_limit_and_send_the_work_on() {
 }
 
 #[test]
+fn a_result_left_for_acceptance_is_finished_by_the_user() {
+    use harness_core::task::{Stage, WaitReason};
+    let env = Env::new();
+    let (root, mut app) = empty_project(&env);
+    let store = task_waiting_for_acceptance(&root);
+    key(&mut app, KeyCode::F(5));
+    assert_eq!(
+        stage(&app),
+        Stage::WaitingForHuman(WaitReason::AcceptResult)
+    );
+
+    // Finishing is what the user is offered first.
+    let text = screen(&mut app);
+    assert!(text.contains("waiting: accept the result"), "{text}");
+    assert!(text.contains(" To: Approve and finish ▾ "), "{text}");
+    click(&mut app, "Write here");
+    type_text(&mut app, "Checked live, works");
+    send(&mut app);
+    wait(&mut app);
+
+    assert_eq!(stage(&app), Stage::Done);
+    let last = store.steps().unwrap().pop().unwrap();
+    assert_eq!(last.handoff.role, Role::Human);
+    assert_eq!(last.handoff.next_role, NextStep::Done);
+}
+
+#[test]
+fn a_result_the_user_does_not_accept_goes_back_rejected() {
+    use harness_core::task::{Stage, WaitReason};
+    let env = Env::new();
+    let (root, mut app) = empty_project(&env);
+    let store = task_waiting_for_acceptance(&root);
+    key(&mut app, KeyCode::F(5));
+    assert_eq!(
+        stage(&app),
+        Stage::WaitingForHuman(WaitReason::AcceptResult)
+    );
+
+    click(&mut app, " To: Approve and finish ▾ ");
+    click(&mut app, "│  developer");
+    click(&mut app, "Write here");
+    type_text(&mut app, "Fails on an empty file");
+    send(&mut app);
+    wait(&mut app);
+
+    // The refusal is a rejection that starts a new round.
+    let human = store
+        .steps()
+        .unwrap()
+        .into_iter()
+        .rfind(|s| s.handoff.role == Role::Human)
+        .unwrap();
+    assert_eq!(human.handoff.verdict, Verdict::Rejected);
+    assert_eq!(human.handoff.next_role, NextStep::To(Role::Developer));
+    let (_, state) = TaskStore::open(&root.join(".harness/runs"), "task-001").unwrap();
+    assert!(state.round > 1, "{state:?}");
+}
+
+/// A task whose final review left a live check to the user.
+fn task_waiting_for_acceptance(root: &Path) -> TaskStore {
+    let repo = Repo::open(root).unwrap();
+    let (store, mut state) = orchestrator::create_task(
+        &repo,
+        "task-001",
+        "Build a parser; I check it live at the end",
+        Workflow::Task,
+        5,
+    )
+    .unwrap();
+    let steps = [
+        (Role::Architect, Role::Human),
+        (Role::Human, Role::Developer),
+        (Role::Developer, Role::Architect),
+        (Role::Architect, Role::Tester),
+        (Role::Tester, Role::Security),
+        (Role::Security, Role::Architect),
+        (Role::Architect, Role::Human),
+    ];
+    for (role, next) in steps {
+        let step = handoff(role, Verdict::Approved, NextStep::To(next), "step");
+        store.record(&mut state, &step, "notes").unwrap();
+    }
+    repo.commit_all("task waiting for acceptance").unwrap();
+    store
+}
+
+#[test]
 fn a_missing_login_stops_before_anything_is_saved() {
     let env = Env::new();
     let (root, mut app) = empty_project(&env);

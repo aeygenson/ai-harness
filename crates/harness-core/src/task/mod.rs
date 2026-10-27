@@ -46,6 +46,10 @@ pub const DEFAULT_MAX_ROUNDS: u32 = 5;
 pub enum WaitReason {
     /// The architect finished a design and it needs the user's approval.
     ApproveDesign,
+    /// The architect's final review passed, but the task asked for a step
+    /// only the user can do (a live check, a demo): they accept the result
+    /// («Approve and finish») or send it back to a role.
+    AcceptResult,
     /// A role said `needs_human`.
     RoleAskedForHelp(Role),
     /// Work was sent back too many times.
@@ -289,10 +293,7 @@ impl TaskState {
 
         self.stage = match handoff.next_role {
             NextStep::Done => Stage::Done,
-            NextStep::To(Role::Human) => Stage::WaitingForHuman(match handoff.verdict {
-                Verdict::NeedsHuman => WaitReason::RoleAskedForHelp(handoff.role),
-                Verdict::Approved | Verdict::Rejected => WaitReason::ApproveDesign,
-            }),
+            NextStep::To(Role::Human) => Stage::WaitingForHuman(self.wait_reason(handoff)),
             // The user may always continue past the limit; AI roles may not.
             NextStep::To(_) if self.round > self.max_rounds && handoff.role != Role::Human => {
                 Stage::WaitingForHuman(WaitReason::RoundLimitReached)
@@ -300,6 +301,21 @@ impl TaskState {
             NextStep::To(role) => Stage::Working(role),
         };
         Ok(())
+    }
+
+    /// Why the task waits for the user after `handoff` sent the work to them.
+    /// Called after `architect_job` is updated; a handoff to the user keeps it.
+    fn wait_reason(&self, handoff: &Handoff) -> WaitReason {
+        match (handoff.verdict, self.architect_job) {
+            (Verdict::NeedsHuman, _) => WaitReason::RoleAskedForHelp(handoff.role),
+            (Verdict::Approved, ArchitectJob::FinalReview) => WaitReason::AcceptResult,
+            // The routes let only a design reach the user with another verdict.
+            (
+                Verdict::Approved | Verdict::Rejected,
+                ArchitectJob::Design | ArchitectJob::Review,
+            )
+            | (Verdict::Rejected, ArchitectJob::FinalReview) => WaitReason::ApproveDesign,
+        }
     }
 
     /// A question to the user may suggest who gets their answer, but only a role of
@@ -477,6 +493,49 @@ mod tests {
             Stage::WaitingForHuman(WaitReason::ApproveDesign)
         );
         assert_eq!(task.expected_author(), Some(Role::Human));
+    }
+
+    #[test]
+    fn a_final_review_can_leave_the_acceptance_to_the_user() {
+        // Arrange: security approved, so the architect makes the final review.
+        let mut task = new_task();
+        task.stage = Stage::Working(Role::Security);
+        task.apply(&handoff(
+            Role::Security,
+            1,
+            Verdict::Approved,
+            NextStep::To(Role::Architect),
+        ))
+        .unwrap();
+
+        // Act: the review passes, but the task asked for a live check by the user.
+        task.apply(&handoff(
+            Role::Architect,
+            1,
+            Verdict::Approved,
+            NextStep::To(Role::Human),
+        ))
+        .unwrap();
+
+        // Assert: the task waits for the acceptance, not for a design approval,
+        // and finishes only when the user accepts.
+        assert_eq!(task.stage, Stage::WaitingForHuman(WaitReason::AcceptResult));
+        task.apply(&handoff(Role::Human, 1, Verdict::Approved, NextStep::Done))
+            .unwrap();
+        assert_eq!(task.stage, Stage::Done);
+    }
+
+    #[test]
+    fn acceptance_is_saved_by_name_in_state_json() {
+        let mut task = new_task();
+        task.stage = Stage::WaitingForHuman(WaitReason::AcceptResult);
+
+        let json = serde_json::to_value(&task).unwrap();
+
+        assert_eq!(
+            json["stage"],
+            serde_json::json!({"waiting_for_human": "accept_result"})
+        );
     }
 
     #[test]
