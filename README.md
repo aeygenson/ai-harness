@@ -51,6 +51,8 @@ flowchart LR
     Te --> S[Security<br><sub>read-only review</sub>]
     S --> F[Architect<br><sub>final review,<br>security of the design</sub>]
     F -- "yes" --> Done([Done])
+    F -- "task asks you<br>to check it" --> Acc{You<br>accept?}
+    Acc -- "yes" --> Done
     R -. "gap" .-> D
     Te -. "bug" .-> D
     S -. "fix" .-> D
@@ -70,7 +72,9 @@ The Architect works three times in a task, always as the same role:
 3. **Final review.** After the Tester and Security, the Architect looks at the whole result
    once more, including their fixes and the security of the design (input checked where it
    enters, secrets out of code and logs, no wider permissions than the task needs). Only
-   this step can finish a task.
+   this step can finish a task. When the task or the design asks for a step only you can
+   do (an acceptance, a live check, a demo), the final review hands the result to you
+   instead, with notes on what to check, and the task is done when you accept it.
 
 Every fix the Developer makes goes through the same review and the checks after it again.
 

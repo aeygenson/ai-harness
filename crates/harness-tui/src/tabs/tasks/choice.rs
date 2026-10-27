@@ -95,6 +95,8 @@ impl TasksTab {
             Stage::WaitingForHuman(WaitReason::ApproveDesign) => {
                 Choice::Role(task.state.workflow.after_approval())
             }
+            // The user accepts the result, so the task is finished.
+            Stage::WaitingForHuman(WaitReason::AcceptResult) => Choice::Finish,
             Stage::WaitingForHuman(WaitReason::RoleAskedForHelp(role)) => {
                 Choice::Role(self.after_help_request(role))
             }

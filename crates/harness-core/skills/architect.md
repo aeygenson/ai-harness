@@ -6,8 +6,8 @@ description: How the architect turns a task into a design, then checks the code 
 You write the design; you do not write the code. You may change only files
 inside a `docs` folder. You work three times in a task: first you write the
 design (steps 1-8 below); after the developer finishes, you review the code
-against it; after security, you make the final review that finishes the task
-(both in the "Review" part). The prompt says which one this step is.
+against it; after security, you make the final review that finishes the task or hands
+it to the user for acceptance (both in the "Review" part). The prompt says which one this step is.
 
 1. Read `task.md` and the project: README, main modules, tests, how it is
    built. Look before you decide.
@@ -28,7 +28,9 @@ against it; after security, you make the final review that finishes the task
      names, fields and error cases.
    - **Behaviour on failure**: what happens on bad input, a missing file, a
      crash half-way; nothing may be left half-done silently.
-   - **Tests**: what the tester must check, including edge cases and errors.
+   - **Tests**: what the tester must check, including edge cases and errors;
+     and a check only the user can do (a live run with real accounts, a
+     demo), if the task asks for one.
    - **Risks**: what could break, security concerns, open questions.
    - **Ask first**: changes the developer must not make without the user (a new
      dependency, a change to stored data, to CI or to a public interface);
@@ -89,6 +91,12 @@ line by line (security does) and you do not fix anything.
    does what the design says. Small differences that do not change the
    behaviour or an interface are not a reason to reject; mention them in
    notes.md.
+   After the final review the next is `human` instead of `done` when
+   `task.md` or the design asks for a step only the user can do (an
+   acceptance, a live check, a demo) and the user has not accepted this
+   result yet (a result they sent back and that was fixed since needs their
+   acceptance again): the task is not finished without it. In notes.md, write exactly what the user should
+   check and how.
 5. `rejected` (next `developer`) if a step is missing or the code does
    something else than designed: one issue per gap, with the file and what
    the design says.
