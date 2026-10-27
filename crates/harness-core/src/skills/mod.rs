@@ -353,6 +353,18 @@ mod tests {
     }
 
     #[test]
+    fn the_security_officer_stops_rejecting_the_same_kind_of_problem() {
+        let security = built_ins::built_in("security").unwrap();
+
+        assert!(security.contains("A repeated kind of problem"));
+        assert!(security.contains("do not reject\n     again: finish with `needs_human`"));
+        assert!(security.contains("change the rule itself instead of adding cases"));
+        // A way around a pure quality check is not a security boundary.
+        assert!(security.contains("is not a security boundary"));
+        assert!(security.contains("at most `medium`"));
+    }
+
+    #[test]
     fn the_developer_asks_its_questions_together_and_applies_standing_rules() {
         let developer = built_ins::built_in("developer").unwrap();
 
