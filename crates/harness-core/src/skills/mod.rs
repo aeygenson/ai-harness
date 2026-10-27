@@ -353,6 +353,16 @@ mod tests {
     }
 
     #[test]
+    fn security_stops_rejecting_the_same_root_cause_and_keeps_high_for_real_risk() {
+        let security = built_ins::built_in("security").unwrap();
+
+        assert!(security.contains("same root cause as one you already rejected"));
+        assert!(security.contains("do not reject\n     again: finish with `needs_human`"));
+        assert!(security.contains("A quality gap\n   is not a security risk"));
+        assert!(security.contains("is at most\n   `medium`"));
+    }
+
+    #[test]
     fn the_developer_asks_its_questions_together_and_applies_standing_rules() {
         let developer = built_ins::built_in("developer").unwrap();
 
