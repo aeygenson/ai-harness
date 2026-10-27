@@ -228,7 +228,9 @@ fn more_rounds_raise_the_limit_and_send_the_work_on() {
         Stage::WaitingForHuman(WaitReason::RoundLimitReached)
     );
 
-    click(&mut app, " To: developer ▾ ");
+    // At the limit every role is offered with more rounds, the developer first.
+    assert!(!screen(&mut app).contains(" To: developer ▾ "));
+    click(&mut app, " To: developer · 5 more rounds ▾ ");
     click(&mut app, "developer · 5 more rounds");
     assert!(screen(&mut app).contains(" To: developer · 5 more rounds ▾ "));
     click(&mut app, "Write here");
@@ -244,6 +246,79 @@ fn more_rounds_raise_the_limit_and_send_the_work_on() {
     assert_eq!(steps[5].handoff.role, Role::Human);
     assert_eq!(steps[5].handoff.next_role, NextStep::To(Role::Developer));
     assert_eq!(steps.last().unwrap().handoff.role, Role::Architect);
+}
+
+#[test]
+fn at_the_round_limit_the_architect_gets_more_rounds_and_finishes() {
+    use harness_core::task::{Stage, WaitReason};
+    let env = Env::new();
+    let (root, mut app) = empty_project(&env);
+    app.builder = final_review_team;
+    // A task with a limit of one round: the security officer's rejection stops it.
+    let repo = Repo::open(&root).unwrap();
+    let (store, mut state) =
+        orchestrator::create_task(&repo, "task-001", "Build a parser", Workflow::Task, 1).unwrap();
+    let steps = [
+        (Role::Architect, Verdict::Approved, Role::Human),
+        (Role::Human, Verdict::Approved, Role::Developer),
+        (Role::Developer, Verdict::Approved, Role::Architect),
+        (Role::Architect, Verdict::Approved, Role::Tester),
+        (Role::Tester, Verdict::Approved, Role::Security),
+        (Role::Security, Verdict::Rejected, Role::Developer),
+    ];
+    for (role, verdict, next) in steps {
+        let mut step = handoff(role, verdict, NextStep::To(next), "step");
+        if verdict == Verdict::Rejected {
+            step.issues = vec![Issue {
+                severity: Severity::Medium,
+                location: None,
+                description: "Another variant of the same gap".into(),
+            }];
+        }
+        store.record(&mut state, &step, "notes").unwrap();
+    }
+    repo.commit_all("task at its round limit").unwrap();
+    key(&mut app, KeyCode::F(5));
+    assert_eq!(
+        stage(&app),
+        Stage::WaitingForHuman(WaitReason::RoundLimitReached)
+    );
+
+    click(&mut app, " To: developer · 5 more rounds ▾ ");
+    click(&mut app, "architect · 5 more rounds");
+    click(&mut app, "Write here");
+    type_text(&mut app, "Accept it as a known limitation");
+    send(&mut app);
+    wait(&mut app);
+
+    // The architect did the final review, and its approval finished the task
+    // without another approval from the user.
+    assert_eq!(stage(&app), Stage::Done);
+    let (_, state) = TaskStore::open(&root.join(".harness/runs"), "task-001").unwrap();
+    assert_eq!(state.max_rounds, 6);
+    let steps = store.steps().unwrap();
+    assert_eq!(steps.len(), 8);
+    assert_eq!(steps[6].handoff.next_role, NextStep::To(Role::Architect));
+    assert_eq!(steps[7].handoff.role, Role::Architect);
+    assert_eq!(steps[7].handoff.next_role, NextStep::Done);
+}
+
+/// Only the architect runs, and its approval may only finish the task: a
+/// design or review job would be refused.
+#[expect(
+    clippy::unnecessary_wraps,
+    reason = "a fake must match the `Builder` function type"
+)]
+fn final_review_team(
+    _: &harness_core::config::Config,
+    _: &Path,
+) -> Result<harness_agents::Team, harness_agents::build::BuildError> {
+    use harness_agents::{AnyAgent, MockAgent, Team};
+    let finish = MockStep::finish(Verdict::Approved, NextStep::Done);
+    Ok(Team::new().with(
+        Role::Architect,
+        AnyAgent::Mock(MockAgent::new().then(Role::Architect, finish)),
+    ))
 }
 
 #[test]

@@ -248,14 +248,16 @@ fn click(app: &mut App, text: &str) {
     });
 }
 
+/// How long a mock run may take before a test calls it hung. Only a guard
+/// against a hang: a run of several roles, each with a git commit, took over
+/// 30 seconds on a busy Windows runner.
+const RUN_TIMEOUT: Duration = Duration::from_mins(2);
+
 /// Lets the background work finish, as the event loop does.
 fn wait(app: &mut App) {
     let start = Instant::now();
     while app.tasks.as_ref().unwrap().is_running() {
-        assert!(
-            start.elapsed() < Duration::from_secs(30),
-            "the run did not finish"
-        );
+        assert!(start.elapsed() < RUN_TIMEOUT, "the run did not finish");
         std::thread::sleep(Duration::from_millis(20));
         app.tick();
     }
