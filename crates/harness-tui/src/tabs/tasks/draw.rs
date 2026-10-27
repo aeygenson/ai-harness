@@ -19,7 +19,7 @@ use crate::tabs::tasks::labels::{short_stage, task_stage_label};
 use crate::ui::i18n::I18n;
 use crate::ui::theme;
 use crate::ui::{
-    draw_list, panel, selected, ButtonId, Hits, ListId, ListView, Target, LIST_MARK_WIDTH,
+    draw_list_from, panel, selected, ButtonId, Hits, ListId, ListView, Target, LIST_MARK_WIDTH,
 };
 
 impl TasksTab {
@@ -103,7 +103,7 @@ impl TasksTab {
         );
         let title = self.zoom_title(Zoom::Steps, &title, steps_area, hits);
         let items = self.step_items(task, tr);
-        draw_list(
+        draw_list_from(
             frame,
             hits,
             steps_area,
@@ -114,6 +114,7 @@ impl TasksTab {
                 selected_row: self.step,
                 focused: self.focus == Focus::Steps,
             },
+            &self.first_step_row,
         );
 
         self.draw_step(frame, task, detail_area, hits, tr);
@@ -151,7 +152,7 @@ impl TasksTab {
             Some(role) => tr.f("tasks.title_filtered", &[("role", &role)]),
             None => tr.t("tasks.title").to_string(),
         };
-        let first = draw_list(
+        let first = draw_list_from(
             frame,
             hits,
             area,
@@ -162,6 +163,7 @@ impl TasksTab {
                 selected_row: self.task,
                 focused: self.focus == Focus::Tasks,
             },
+            &self.first_task_row,
         );
         self.pull_request_hits(&lines, first, area, hits);
     }

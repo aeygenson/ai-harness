@@ -11,7 +11,7 @@ mod list;
 mod notes;
 
 pub(crate) use form::{wrapped_lines, Form};
-pub(crate) use list::{draw_list, ListView, LIST_MARK_WIDTH};
+pub(crate) use list::{draw_list, draw_list_from, ListView, LIST_MARK_WIDTH};
 pub(crate) use notes::{agent_note, unsaved_note};
 
 use ratatui::layout::Rect;
