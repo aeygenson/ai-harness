@@ -331,6 +331,7 @@ pub fn stage_text(stage: Stage) -> String {
     match stage {
         Stage::Working(role) => format!("working: {}", role.as_str()),
         Stage::WaitingForHuman(WaitReason::ApproveDesign) => "waiting: approve design".into(),
+        Stage::WaitingForHuman(WaitReason::AcceptResult) => "waiting: accept the result".into(),
         Stage::WaitingForHuman(WaitReason::RoleAskedForHelp(role)) => {
             format!("waiting: {} asked for help", role.as_str())
         }

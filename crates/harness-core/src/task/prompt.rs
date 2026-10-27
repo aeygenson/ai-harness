@@ -104,20 +104,24 @@ pub fn build(role: Role, state: &TaskState, context: Context<'_>, output_dir: &P
 /// Told to the architect when its turn is a review, not a new design (see
 /// [`ArchitectJob`]); empty for a design.
 fn review_text(job: ArchitectJob, task_id: &str) -> String {
-    let what = match job {
+    let (what, acceptance) = match job {
         ArchitectJob::Design => return String::new(),
-        ArchitectJob::Review => "a review: check the developer's finished work against",
-        ArchitectJob::FinalReview => {
+        ArchitectJob::Review => ("a review: check the developer's finished work against", ""),
+        ArchitectJob::FinalReview => (
             "the final review: security has finished; check the whole result, with \
-             the tester's and security's findings and fixes, against"
-        }
+             the tester's and security's findings and fixes, against",
+            " If the work is approved but task.md or the design asks for a step only the \
+             user can do (an acceptance, a live check, a demo) and the user has not accepted \
+             this result yet, \
+             send it to \"human\" instead of \"done\" and say in notes.md what to check.",
+        ),
     };
     format!(
         "This step is {what} the design the user approved (docs/design/{task_id}.md). \
          Do not write a new design and do not change the code. Follow the \"Review\" part \
          of your skill: verdict \"approved\" if the work does what the design says; \
          \"rejected\" with each gap in issues if it does not; \"needs_human\" if the design \
-         itself turned out to be wrong.\n\n"
+         itself turned out to be wrong.{acceptance}\n\n"
     )
 }
 
@@ -494,6 +498,7 @@ mod tests {
             Path::new("/p/.harness/runs/task-007/inbox"),
         );
         assert!(prompt.contains("This step is the final review"), "{prompt}");
+        assert!(prompt.contains("instead of \"done\""), "{prompt}");
         assert!(
             prompt.contains("verdict \"approved\": \"done\""),
             "{prompt}"

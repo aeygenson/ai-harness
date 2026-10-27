@@ -102,7 +102,9 @@ fn task_routes(role: Role, job: ArchitectJob, verdict: Verdict) -> &'static [Nex
         (Role::Architect, Verdict::Approved) => match job {
             ArchitectJob::Design => &[N::To(Role::Human)],
             ArchitectJob::Review => &[N::To(Role::Tester)],
-            ArchitectJob::FinalReview => &[N::Done],
+            // The user accepts the result when the task asked for a step only
+            // they can do, such as a live check; otherwise the task is done.
+            ArchitectJob::FinalReview => &[N::Done, N::To(Role::Human)],
         },
         (Role::Architect, Verdict::Rejected) => match job {
             ArchitectJob::Design => &[],
@@ -231,6 +233,29 @@ mod tests {
             }
             let finishes = is_allowed(&state, Role::Architect, Verdict::Approved, NextStep::Done);
             assert_eq!(finishes, job == ArchitectJob::FinalReview, "{job:?}");
+        }
+    }
+
+    #[test]
+    fn only_the_final_review_may_hand_approved_work_to_the_user_for_acceptance() {
+        let to_user = NextStep::To(Role::Human);
+        let final_review = task(ArchitectJob::FinalReview);
+        let review = task(ArchitectJob::Review);
+
+        assert!(is_allowed(
+            &final_review,
+            Role::Architect,
+            Verdict::Approved,
+            to_user
+        ));
+        assert!(!is_allowed(
+            &review,
+            Role::Architect,
+            Verdict::Approved,
+            to_user
+        ));
+        for role in [Role::Developer, Role::Tester, Role::Security] {
+            assert!(!is_allowed(&final_review, role, Verdict::Approved, to_user));
         }
     }
 

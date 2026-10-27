@@ -168,10 +168,15 @@ fn help_request_text(role: Role, task_id: &str, suggested: Option<&AnswerTo>) ->
 /// `suggested` is whom a role that asked for help suggests for the answer.
 fn explain(stop: &StopReason, task_id: &str, suggested: Option<&AnswerTo>) -> String {
     match stop {
-        StopReason::Done => "Done: security approved the work.".into(),
+        StopReason::Done => "Done: the work is approved.".into(),
         StopReason::WaitingForHuman(WaitReason::ApproveDesign) => format!(
             "The architect's design is ready. Read it, then:\n  \
              harness approve {task_id}   or   harness reject {task_id} --to architect --notes \"...\""
+        ),
+        StopReason::WaitingForHuman(WaitReason::AcceptResult) => format!(
+            "The final review passed; the task asks you to accept the result yourself. \
+             See the architect's notes.md for what to check, then:\n  \
+             harness approve {task_id}   or   harness reject {task_id} --to <role> --notes \"...\""
         ),
         StopReason::WaitingForHuman(WaitReason::RoleAskedForHelp(role)) => {
             help_request_text(*role, task_id, suggested)
@@ -281,8 +286,9 @@ fn hidden_changes_text(role: Role, put_back: &[PathBuf], reported: &[PathBuf]) -
 
 /// `harness approve` / `harness reject`: writes the user's decision as a handoff
 /// from the role `human`. Without `--to`, approved work goes where the task's
-/// workflow says (a design goes to the developer) and a role that asked for
-/// help gets the task back.
+/// workflow says (a design goes to the developer), a result waiting for the
+/// user's acceptance is finished, and a role that asked for help gets the
+/// task back.
 pub(crate) fn decide(
     project: &Path,
     task_id: &str,
@@ -308,6 +314,7 @@ pub(crate) fn decide(
             Stage::WaitingForHuman(WaitReason::ApproveDesign) => {
                 NextStep::To(state.workflow.after_approval())
             }
+            Stage::WaitingForHuman(WaitReason::AcceptResult) => NextStep::Done,
             Stage::WaitingForHuman(
                 WaitReason::RoleAskedForHelp(role) | WaitReason::StoppedByUser(role),
             ) => NextStep::To(role),
@@ -326,7 +333,11 @@ pub(crate) fn decide(
             notes,
         },
     )?;
-    println!("Saved. Next: harness run {task_id}");
+    if state.stage == Stage::Done {
+        println!("Saved. {task_id} is done.");
+    } else {
+        println!("Saved. Next: harness run {task_id}");
+    }
     Ok(())
 }
 
@@ -523,6 +534,24 @@ mod tests {
         assert!(text.contains("the developer continues next"), "{text}");
         assert!(text.contains("harness run task-001"), "{text}");
         assert!(text.contains("harness approve task-001 --notes"), "{text}");
+    }
+
+    #[test]
+    fn approve_without_to_accepts_a_result_left_for_the_user() {
+        let dir = tempfile::tempdir().unwrap();
+        let project = dir.path();
+        projects::init(project).unwrap();
+        new_task(project, "task-001", "Add a parser", false).unwrap();
+        let repo = open_repo(project).unwrap();
+        let (store, mut state) = open_task(&repo, "task-001").unwrap();
+        state.stage = Stage::WaitingForHuman(WaitReason::AcceptResult);
+        fs::write(store.state_file(), serde_json::to_string(&state).unwrap()).unwrap();
+        repo.commit_all("waiting for acceptance").unwrap();
+
+        decide(project, "task-001", Verdict::Approved, None, "Checked live").unwrap();
+
+        let (_, state) = open_task(&repo, "task-001").unwrap();
+        assert_eq!(state.stage, Stage::Done);
     }
 
     #[test]
