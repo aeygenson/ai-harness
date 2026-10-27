@@ -36,20 +36,31 @@ impl ArchitectJob {
 
     /// The architect's job after `handoff` is accepted.
     ///
-    /// A review starts when the developer (or security, for the final one)
-    /// hands over finished work, and lasts while the work stays with the
-    /// architect or the user (the architect may ask the user a question).
-    /// Once the work goes to any other role, the architect's next turn is a
-    /// design job again: for example a tester who finds a problem in the
-    /// design sends the work back to be redesigned.
+    /// A review starts when the developer hands over finished work, and lasts
+    /// while the work stays with the architect or the user (the architect may
+    /// ask the user a question). Every step of security makes the next job the
+    /// final review: security approved, or the user takes over after it (a
+    /// question, a rejection at the round limit) and sends the work to the
+    /// architect to finish. Only security's "the design is unsafe" sends the
+    /// work back to be redesigned. Once the work goes to any other role, the
+    /// architect's next turn is a design job again: for example a tester who
+    /// finds a problem in the design sends the work back to be redesigned.
+    #[expect(
+        clippy::match_same_arms,
+        reason = "one arm per case reads better than arms merged only because they give the same job"
+    )]
     pub fn after(self, handoff: &Handoff) -> ArchitectJob {
         match (handoff.role, handoff.verdict, handoff.next_role) {
             (Role::Developer, Verdict::Approved, NextStep::To(Role::Architect)) => {
                 ArchitectJob::Review
             }
-            (Role::Security, Verdict::Approved, NextStep::To(Role::Architect)) => {
-                ArchitectJob::FinalReview
+            // The final review job may wait while the developer fixes security's
+            // findings; whatever the developer hands over replaces it.
+            (Role::Developer, _, _) => ArchitectJob::Design,
+            (Role::Security, Verdict::Rejected, NextStep::To(Role::Architect)) => {
+                ArchitectJob::Design
             }
+            (Role::Security, _, _) => ArchitectJob::FinalReview,
             // The user sends the design back to be reworked.
             (Role::Human, Verdict::Rejected, NextStep::To(Role::Architect)) => ArchitectJob::Design,
             (_, _, NextStep::To(Role::Architect | Role::Human)) => self,
@@ -247,6 +258,68 @@ mod tests {
                 Verdict::Rejected
             ),
             &[NextStep::To(Role::Developer)]
+        );
+    }
+
+    #[test]
+    fn the_user_finishes_with_the_final_review_after_security_rejects() {
+        // Security rejects, the round limit stops the work, the user sends it
+        // to the architect: that is the final review, which may finish it.
+        let rejected = handoff(
+            Role::Security,
+            Verdict::Rejected,
+            NextStep::To(Role::Developer),
+        );
+        let to_architect = handoff(
+            Role::Human,
+            Verdict::Approved,
+            NextStep::To(Role::Architect),
+        );
+        let job = ArchitectJob::Design.after(&rejected).after(&to_architect);
+        assert_eq!(job, ArchitectJob::FinalReview);
+
+        // The same after security asks the user a question.
+        let question = handoff(
+            Role::Security,
+            Verdict::NeedsHuman,
+            NextStep::To(Role::Human),
+        );
+        let job = ArchitectJob::Design.after(&question).after(&to_architect);
+        assert_eq!(job, ArchitectJob::FinalReview);
+    }
+
+    #[test]
+    fn work_back_from_security_is_not_a_final_review() {
+        // Security finds the design itself unsafe: the architect redesigns.
+        let unsafe_design = handoff(
+            Role::Security,
+            Verdict::Rejected,
+            NextStep::To(Role::Architect),
+        );
+        assert_eq!(
+            ArchitectJob::Design.after(&unsafe_design),
+            ArchitectJob::Design
+        );
+
+        // The developer fixes security's findings: whatever it hands over
+        // replaces the waiting final review.
+        let unclear = handoff(
+            Role::Developer,
+            Verdict::Rejected,
+            NextStep::To(Role::Architect),
+        );
+        let question = handoff(
+            Role::Developer,
+            Verdict::NeedsHuman,
+            NextStep::To(Role::Human),
+        );
+        assert_eq!(
+            ArchitectJob::FinalReview.after(&unclear),
+            ArchitectJob::Design
+        );
+        assert_eq!(
+            ArchitectJob::FinalReview.after(&question),
+            ArchitectJob::Design
         );
     }
 

@@ -24,20 +24,23 @@ impl TasksTab {
         let stage = self.current().map(|t| t.state.stage);
         let waiting = matches!(stage, Some(Stage::WaitingForHuman(_)));
         let mut items = vec![(Choice::NewTask, true)];
-        match stage {
-            // The user stopped it: the stopped role (or the next one) may simply go on.
-            Some(
-                Stage::Working(role) | Stage::WaitingForHuman(WaitReason::StoppedByUser(role)),
-            ) => {
-                items.push((Choice::Continue(role), true));
-            }
-            Some(Stage::WaitingForHuman(WaitReason::RoundLimitReached)) => {
-                items.push((Choice::MoreRounds(self.after_round_limit()), true));
-            }
-            _ => {}
+        // The user stopped it: the stopped role (or the next one) may simply go on.
+        if let Some(
+            Stage::Working(role) | Stage::WaitingForHuman(WaitReason::StoppedByUser(role)),
+        ) = stage
+        {
+            items.push((Choice::Continue(role), true));
         }
+        // At the round limit a role without more rounds would stop again at
+        // its first handoff, so every role is offered with more rounds.
+        let at_limit = stage == Some(Stage::WaitingForHuman(WaitReason::RoundLimitReached));
         for &role in self.scenario.roles() {
-            items.push((Choice::Role(role), waiting));
+            let choice = if at_limit {
+                Choice::MoreRounds(role)
+            } else {
+                Choice::Role(role)
+            };
+            items.push((choice, waiting));
         }
         items.push((Choice::Finish, waiting));
         if self.needs_publishing() {
@@ -99,7 +102,7 @@ impl TasksTab {
                 Choice::Role(self.after_help_request(role))
             }
             Stage::WaitingForHuman(WaitReason::RoundLimitReached) => {
-                Choice::Role(self.after_round_limit())
+                Choice::MoreRounds(self.after_round_limit())
             }
             // A note to the role the user stopped; «Continue» is in the list too.
             Stage::WaitingForHuman(WaitReason::StoppedByUser(role)) => Choice::Role(role),
