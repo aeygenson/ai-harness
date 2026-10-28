@@ -27,7 +27,9 @@ it to the user for acceptance (both in the "Review" part). The prompt says which
    - **Interfaces**: new types, functions, commands, file formats, with exact
      names, fields and error cases.
    - **Behaviour on failure**: what happens on bad input, a missing file, a
-     crash half-way; nothing may be left half-done silently.
+     crash half-way; nothing may be left half-done silently. Running an
+     operation twice, or again after a crash half-way, ends in the same
+     state as running it once.
    - **Tests**: what the tester must check, including edge cases and errors;
      and a check only the user can do (a live run with real accounts, a
      demo), if the task asks for one.

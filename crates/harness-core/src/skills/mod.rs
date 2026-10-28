@@ -375,6 +375,15 @@ mod tests {
     }
 
     #[test]
+    fn the_tester_rejects_empty_tests_and_the_architect_asks_for_safe_reruns() {
+        let tester = built_ins::built_in("tester").unwrap();
+        let architect = built_ins::built_in("architect").unwrap();
+
+        assert!(tester.contains("would still pass if the code returned nothing"));
+        assert!(architect.contains("Running an\n     operation twice"));
+    }
+
+    #[test]
     fn a_project_file_replaces_a_built_in_skill() {
         let copy = copy_of_built_in("tester").unwrap();
         assert!(copy.starts_with("---\nbuiltin: "), "{copy}");
