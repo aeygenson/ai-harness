@@ -5,7 +5,7 @@ use super::{RunError, StopReason};
 use crate::git::Repo;
 use crate::task::agent_stubs::MissingStubs;
 use crate::task::handoff::Role;
-use crate::task::tripwire::{Snapshot, Watched};
+use crate::task::tripwire::{Changes, Snapshot, Watched};
 
 /// The state before one attempt of a role.
 pub(super) struct Before {
@@ -26,7 +26,7 @@ impl Before {
             branch: repo.current_branch()?,
             branch_heads: repo.branch_heads()?,
             config: repo.local_config()?,
-            hidden: watched.snapshot()?,
+            hidden: watched.snapshot(),
             stubs: MissingStubs::note(repo.root()),
         })
     }
@@ -43,12 +43,19 @@ impl Before {
         watched: &Watched,
         role: Role,
     ) -> Result<Option<StopReason>, RunError> {
-        // First of all, before git runs again with the agent's settings or hooks.
-        let config_changed = repo.local_config()? != self.config;
-        if config_changed {
-            repo.restore_local_config(&self.config)?;
+        // First of all, before git runs again with the agent's settings or
+        // hooks. The tripwire goes first: it runs no git and cannot fail, so
+        // an agent cannot keep a planted hook by breaking `.git/config`.
+        let changes = self.hidden.check_and_restore(watched);
+        let config_changed = self.restore_config(repo);
+        // A file that could not be put back may be a planted hook that git
+        // would run on the user's next command: this wins over everything,
+        // also over an error with the settings, and its message asks the
+        // user to check the commits and settings too.
+        if !changes.not_put_back.is_empty() {
+            return Ok(Some(hidden_changes(role, changes)));
         }
-        let changes = self.hidden.check_and_restore(watched)?;
+        let config_changed = config_changed?;
         // A new branch at the same commit would make the harness commit the
         // role's work on that branch, so a switch counts like a commit. So
         // does a made, moved or deleted branch: the harness later checks out
@@ -71,11 +78,7 @@ impl Before {
         } else if changes.is_empty() {
             None
         } else {
-            Some(StopReason::HiddenChanges {
-                role,
-                put_back: changes.put_back,
-                reported: changes.reported,
-            })
+            Some(hidden_changes(role, changes))
         };
         // Claude Code's empty stub files would otherwise end up in the role's
         // commit, or stop the next run as uncommitted changes, once
@@ -95,5 +98,24 @@ impl Before {
             }
         }
         Ok(stop)
+    }
+
+    /// Puts `.git/config` back when it changed; `true` when it did.
+    fn restore_config(&self, repo: &Repo) -> Result<bool, RunError> {
+        let changed = repo.local_config()? != self.config;
+        if changed {
+            repo.restore_local_config(&self.config)?;
+        }
+        Ok(changed)
+    }
+}
+
+/// The stop reason for what the tripwire found.
+fn hidden_changes(role: Role, changes: Changes) -> StopReason {
+    StopReason::HiddenChanges {
+        role,
+        put_back: changes.put_back,
+        reported: changes.reported,
+        not_put_back: changes.not_put_back,
     }
 }

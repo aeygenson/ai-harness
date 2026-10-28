@@ -5,6 +5,7 @@
 //! - [`env`]: the variables an agent inherits, and the ones a server may not set;
 //! - [`private`]: files and folders only the user can read;
 //! - [`process`]: stopping a program with everything it started, or becoming it;
+//! - [`file`]: making a symbolic link, removing what an agent made hard to remove;
 //! - [`lock`]: a lock file only one running program holds (one TUI window);
 //! - [`run_mark`]: finding the processes an agent run started that left its group;
 //! - [`stop`]: noticing that the system asks the harness to stop (terminal closed);
@@ -21,6 +22,7 @@
 
 pub mod editor;
 pub mod env;
+pub mod file;
 pub mod folder_dialog;
 pub mod home;
 pub mod input;

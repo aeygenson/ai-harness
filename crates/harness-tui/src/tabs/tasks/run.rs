@@ -233,12 +233,14 @@ fn outcome_text(outcome: &Outcome, tr: &I18n) -> Message {
             role: r,
             put_back,
             reported,
+            not_put_back,
         } => Message::error(tr.f(
             "tasks.stop_hidden",
             &[
                 ("task", task),
                 ("role", &role(r)),
                 ("put_back", &paths(put_back)),
+                ("not_put_back", &paths(not_put_back)),
                 ("reported", &paths(reported)),
             ],
         )),
@@ -253,7 +255,11 @@ fn paths(files: &[PathBuf]) -> String {
     if files.is_empty() {
         return "-".to_string();
     }
-    let shown: Vec<String> = files.iter().map(|f| f.display().to_string()).collect();
+    // The names come from the agent, which could hide terminal commands in them.
+    let shown: Vec<String> = files
+        .iter()
+        .map(|f| harness_core::text::safe(&f.display().to_string()))
+        .collect();
     shown.join(", ")
 }
 

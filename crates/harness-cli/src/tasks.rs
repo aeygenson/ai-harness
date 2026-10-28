@@ -237,7 +237,8 @@ fn explain(stop: &StopReason, task_id: &str, suggested: Option<&AnswerTo>) -> St
             role,
             put_back,
             reported,
-        } => hidden_changes_text(*role, put_back, reported),
+            not_put_back,
+        } => hidden_changes_text(*role, put_back, reported, not_put_back),
         StopReason::GitConfigChanged(role) => format!(
             "While the {role} was working, the project's git settings (.git/config) \
              changed. The role may have done it, or someone else working in this repository \
@@ -258,11 +259,20 @@ fn stopped_by_user_text(role: Role, task_id: &str) -> String {
     )
 }
 
-/// What `StopReason::HiddenChanges` says: git's files that were put back,
-/// and files outside the project the user should look at themselves.
-fn hidden_changes_text(role: Role, put_back: &[PathBuf], reported: &[PathBuf]) -> String {
+/// What `StopReason::HiddenChanges` says: git's files that were put back or
+/// could not be, and files outside the project the user should look at.
+fn hidden_changes_text(
+    role: Role,
+    put_back: &[PathBuf],
+    reported: &[PathBuf],
+    not_put_back: &[PathBuf],
+) -> String {
+    // The names come from the agent, which could hide terminal commands in them.
     let list = |files: &[PathBuf]| -> String {
-        let lines: Vec<String> = files.iter().map(|f| f.display().to_string()).collect();
+        let lines: Vec<String> = files
+            .iter()
+            .map(|f| harness_core::text::safe(&f.display().to_string()))
+            .collect();
         format!("\n  {}", lines.join("\n  "))
     };
     let mut text = format!(
@@ -272,6 +282,14 @@ fn hidden_changes_text(role: Role, put_back: &[PathBuf], reported: &[PathBuf]) -
     if !put_back.is_empty() {
         text.push_str("\nGit's own files (hooks, info/), now put back as they were:");
         text.push_str(&list(put_back));
+    }
+    if !not_put_back.is_empty() {
+        text.push_str(
+            "\nGit's own files that could NOT be put back (removed where possible); \
+             fix them by hand before running any git command, and check that the commits, \
+             branches and .git/config are the ones you expect:",
+        );
+        text.push_str(&list(not_put_back));
     }
     if !reported.is_empty() {
         text.push_str(
@@ -413,13 +431,31 @@ mod tests {
             Role::Developer,
             &[PathBuf::from("/p/.git/hooks/pre-commit")],
             &[PathBuf::from("/home/lisa/.bashrc")],
+            &[],
         );
 
         assert!(text.contains("put back as they were:\n  /p/.git/hooks/pre-commit"));
         assert!(text.contains("NOT put back"));
         assert!(text.contains("\n  /home/lisa/.bashrc"));
-        let only_hooks = hidden_changes_text(Role::Tester, &[PathBuf::from("h")], &[]);
+        let only_hooks = hidden_changes_text(Role::Tester, &[PathBuf::from("h")], &[], &[]);
         assert!(!only_hooks.contains("outside the project"));
+        assert!(!only_hooks.contains("could NOT"));
+    }
+
+    #[test]
+    fn hooks_not_put_back_are_named_without_terminal_commands() {
+        let stop = StopReason::HiddenChanges {
+            role: Role::Developer,
+            put_back: Vec::new(),
+            reported: Vec::new(),
+            not_put_back: vec![PathBuf::from("hooks/pre-commit\u{1b}[2J")],
+        };
+
+        let text = explain(&stop, "task-001", None);
+
+        assert!(text.contains("could NOT be put back"), "{text}");
+        assert!(text.contains("hooks/pre-commit"), "{text}");
+        assert!(!text.contains('\u{1b}'), "{text}");
     }
 
     #[test]
@@ -433,6 +469,7 @@ mod tests {
                 role: Role::Architect,
                 put_back: vec![PathBuf::from("h")],
                 reported: Vec::new(),
+                not_put_back: Vec::new(),
             },
         ];
 
