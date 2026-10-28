@@ -267,7 +267,16 @@ fn put_back(path: &Path, before: Option<&Content>) -> io::Result<()> {
     match fs::symlink_metadata(path) {
         Ok(meta) if meta.is_dir() => fs::remove_dir_all(path)?,
         Ok(_) => fs::remove_file(path)?,
-        Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+        // `NotADirectory`: a part of the path is a file, not a folder. The
+        // system says so (ENOTDIR) for a file inside a folder the agent made
+        // in place of a file: the paths are sorted, so that file was already
+        // put back just before and the folder is gone. Nothing is here.
+        // (Windows calls this "path not found", which is `NotFound`.)
+        Err(e)
+            if matches!(
+                e.kind(),
+                io::ErrorKind::NotFound | io::ErrorKind::NotADirectory
+            ) => {}
         Err(e) => return Err(e),
     }
     match before {
@@ -545,5 +554,63 @@ mod tests {
             .reported_files
             .iter()
             .any(|f| f.ends_with(".gitconfig")));
+    }
+
+    #[test]
+    fn a_file_at_the_size_limit_is_still_put_back_whole() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::create_dir_all(dir.path().join("hooks")).unwrap();
+        let hook = dir.path().join("hooks/pre-commit");
+        let limit = usize::try_from(MAX_KEPT_BYTES).unwrap();
+        fs::write(&hook, vec![b'a'; limit]).unwrap();
+        let watched = watched(dir.path());
+        let before = watched.snapshot().unwrap();
+        fs::write(&hook, vec![b'b'; limit]).unwrap();
+
+        let changes = before.check_and_restore(&watched).unwrap();
+
+        assert_eq!(changes.put_back, std::slice::from_ref(&hook));
+        assert_eq!(fs::read(&hook).unwrap(), vec![b'a'; limit]);
+    }
+
+    #[test]
+    fn a_big_home_file_is_reported_by_its_size() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::create_dir_all(dir.path().join("home")).unwrap();
+        let bashrc = dir.path().join("home/.bashrc");
+        let over_limit = usize::try_from(MAX_KEPT_BYTES).unwrap() + 1;
+        fs::write(&bashrc, vec![b'a'; over_limit]).unwrap();
+        let watched = watched(dir.path());
+        let before = watched.snapshot().unwrap();
+        fs::write(&bashrc, vec![b'a'; over_limit + 1]).unwrap();
+
+        let changes = before.check_and_restore(&watched).unwrap();
+
+        assert_eq!(changes.reported, [bashrc]);
+    }
+
+    #[test]
+    fn a_hook_replaced_by_a_folder_is_put_back_and_later_hooks_too() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::create_dir_all(dir.path().join("hooks")).unwrap();
+        let hook = dir.path().join("hooks/commit-msg");
+        fs::write(&hook, "original").unwrap();
+        let watched = watched(dir.path());
+        let before = watched.snapshot().unwrap();
+        fs::remove_file(&hook).unwrap();
+        fs::create_dir_all(&hook).unwrap();
+        fs::write(hook.join("run.sh"), "echo planted").unwrap();
+        // Sorted after the folder: it must still be removed.
+        let planted = dir.path().join("hooks/post-checkout");
+        fs::write(&planted, "echo planted").unwrap();
+
+        let changes = before.check_and_restore(&watched).unwrap();
+
+        assert_eq!(
+            changes.put_back,
+            [hook.clone(), hook.join("run.sh"), planted.clone()]
+        );
+        assert_eq!(fs::read_to_string(&hook).unwrap(), "original");
+        assert!(!planted.exists());
     }
 }

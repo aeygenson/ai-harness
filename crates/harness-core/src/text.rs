@@ -85,6 +85,12 @@ mod tests {
     }
 
     #[test]
+    fn a_backslash_inside_a_title_does_not_end_it() {
+        // Only `ESC \` ends the title, not a `\` after another character.
+        assert_eq!(safe("\u{1b}]0;C:\\temp\u{7}text"), "text");
+    }
+
+    #[test]
     fn control_characters_go_and_line_breaks_stay() {
         assert_eq!(safe("one\r\ntwo\u{7}\u{8}\u{0}"), "one\ntwo");
         assert_eq!(safe("a\tb"), "a b");
