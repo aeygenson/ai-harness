@@ -224,6 +224,6 @@ and checks keep it honest, and a person stays in charge of the decisions that ma
 
 ## Status
 
-Version 0.8.0. The core flow, four agents, the TUI, MCP, plugins, retrospectives and the
+Version 0.9.0. The core flow, four agents, the TUI, MCP, plugins, retrospectives and the
 installers all work and are used on Linux. macOS and Windows pass CI; live testing on
 those systems is in progress.

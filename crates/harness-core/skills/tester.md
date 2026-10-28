@@ -30,6 +30,9 @@ the project's language expects (`parser_test.go`, `parser.test.ts`,
    - Take each expected value from an independent source: the design, a
      worked example, a known-good literal. A test that computes the
      expected value the same way the code does always passes.
+   - A test that would still pass if the code returned nothing (an empty
+     value, zero, null, a default) proves nothing: check the actual
+     result, not only that no error happened.
 5. Reproduce before you report: for each suspected defect write a small test
    or command that fails on exactly that defect, run it, and put the command
    and its output in the issue.
