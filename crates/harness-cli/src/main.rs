@@ -14,6 +14,7 @@
 //! harness run task-001                 run roles until someone must look
 //! harness approve task-001 --notes "Looks good"
 //! harness reject task-001 --to architect --notes "Use serde"
+//! harness stop task-001               stop a run in the TUI or another terminal (--now: at once)
 //! harness status task-001
 //! harness retro task-001               statistics of one task (or --all)
 //! harness retro task-001 --suggest     ... and skill proposals from the [retro] agent
@@ -57,7 +58,7 @@ use crate::info::{agents, models};
 use crate::login::login;
 use crate::retro::{retro, retro_apply, retro_show};
 use crate::secrets::{list_secrets, mcp_login, set_secret};
-use crate::tasks::{decide, new_task, run, status, until_stopped};
+use crate::tasks::{decide, new_task, run, status, stop, until_stopped};
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
@@ -79,6 +80,7 @@ async fn main() -> Result<()> {
         Command::Reject { task_id, to, notes } => {
             decide(project, &task_id, Verdict::Rejected, Some(to), &notes)
         }
+        Command::Stop { task_id, now } => stop(project, &task_id, now),
         Command::Status { task_id } => status(project, &task_id),
         Command::Retro(args) => match args.command {
             Some(RetroCommand::Show { number }) => retro_show(project, &number),

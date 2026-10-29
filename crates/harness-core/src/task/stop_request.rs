@@ -8,9 +8,16 @@
 //! - the agent's process (`harness_agents::process::run`) every fraction of a
 //!   second while the agent works, so «Stop now» stops it at once.
 //!
+//! Another program (`harness stop`) cannot reach that memory: it writes the
+//! request into the run's stop file instead (see [`super::run_lock`]), and
+//! the request reads that file too.
+//!
 //! Nothing is sent back: the run ends as usual and says why it stopped.
 
-use std::sync::{Arc, Mutex, PoisonError};
+use std::fs;
+use std::io::Read;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 
 /// When the user wants the task to stop.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -23,6 +30,25 @@ pub enum StopWhen {
     Now,
 }
 
+impl StopWhen {
+    /// The word for this request in a stop file: `after_step` or `now`.
+    pub fn word(self) -> &'static str {
+        match self {
+            StopWhen::AfterStep => "after_step",
+            StopWhen::Now => "now",
+        }
+    }
+
+    /// The request a stop file holds; `None` for any other text.
+    pub fn from_word(text: &str) -> Option<Self> {
+        match text.trim() {
+            "after_step" => Some(StopWhen::AfterStep),
+            "now" => Some(StopWhen::Now),
+            _ => None,
+        }
+    }
+}
+
 /// A stop request shared between the screen and the run.
 ///
 /// `clone` gives another handle to the **same** request (`Arc`: shared
@@ -31,6 +57,9 @@ pub enum StopWhen {
 #[derive(Debug, Clone, Default)]
 pub struct StopRequest {
     asked: Arc<Mutex<Option<StopWhen>>>,
+    /// The stop file another program may write, once the run knows it.
+    /// `OnceLock`: set at most once, then read by every clone without a lock.
+    file: Arc<OnceLock<PathBuf>>,
 }
 
 impl StopRequest {
@@ -39,9 +68,28 @@ impl StopRequest {
         Self::default()
     }
 
-    /// What was asked, if anything.
+    /// Also takes requests another program writes into `file`. A request
+    /// that already reads a file keeps its first one.
+    pub fn also_read(&self, file: PathBuf) {
+        // `set` fails only when a file is already set; that one stays.
+        let _ = self.file.set(file);
+    }
+
+    /// What was asked, here or in the stop file, if anything. «Now» wins.
     pub fn asked(&self) -> Option<StopWhen> {
-        *self.lock()
+        let pressed = *self.lock();
+        // The agent's process asks every fraction of a second; reading a
+        // file that small (or not finding it) costs next to nothing.
+        if pressed == Some(StopWhen::Now) {
+            return pressed;
+        }
+        let written = self.file.get().and_then(|file| read_stop_file(file));
+        if written == Some(StopWhen::Now) {
+            // Remembered, so a later change of the file cannot take it back.
+            self.stop_now();
+            return written;
+        }
+        pressed.or(written)
     }
 
     /// «Stop after this step»: asks for it, or takes the request back when
@@ -74,6 +122,31 @@ impl StopRequest {
     }
 }
 
+/// The request in a stop file; `None` when there is none or it holds other text.
+pub fn read_stop_file(path: &Path) -> Option<StopWhen> {
+    StopWhen::from_word(&read_small_file(path)?)
+}
+
+/// The most a stop or task file is read: their words are much shorter.
+const SMALL_FILE_LIMIT: u64 = 64;
+
+/// The start of the plain file `path`, as text. `None` for anything else:
+/// a link, folder or pipe that an agent with a shell put there would point
+/// elsewhere, or hang a reader waiting for a writer.
+pub(crate) fn read_small_file(path: &Path) -> Option<String> {
+    let meta = fs::symlink_metadata(path).ok()?;
+    if !meta.file_type().is_file() {
+        return None;
+    }
+    let mut text = String::new();
+    fs::File::open(path)
+        .ok()?
+        .take(SMALL_FILE_LIMIT)
+        .read_to_string(&mut text)
+        .ok()?;
+    Some(text)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -101,5 +174,83 @@ mod tests {
 
         assert!(run.now());
         assert_eq!(run.asked(), Some(StopWhen::Now));
+    }
+
+    #[test]
+    fn a_request_written_into_the_stop_file_is_seen_by_every_clone() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("run.stop");
+        let request = StopRequest::new();
+        let run = request.clone();
+        request.also_read(file.clone());
+        assert_eq!(run.asked(), None, "no file yet: nothing asked");
+
+        std::fs::write(&file, "after_step\n").unwrap();
+        assert_eq!(run.asked(), Some(StopWhen::AfterStep));
+
+        std::fs::write(&file, "now").unwrap();
+        assert!(run.now());
+    }
+
+    #[test]
+    fn stop_now_in_the_file_wins_over_after_this_step_on_the_screen() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("run.stop");
+        std::fs::write(&file, "now").unwrap();
+        let request = StopRequest::new();
+        request.toggle_after_step();
+
+        request.also_read(file);
+
+        assert_eq!(request.asked(), Some(StopWhen::Now));
+    }
+
+    #[test]
+    fn stop_now_from_the_file_is_remembered() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("run.stop");
+        std::fs::write(&file, "now").unwrap();
+        let request = StopRequest::new();
+        request.also_read(file.clone());
+        assert!(request.now());
+
+        std::fs::write(&file, "after_step").unwrap();
+
+        assert!(request.now());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_link_in_place_of_the_stop_file_is_not_followed() {
+        let dir = tempfile::tempdir().unwrap();
+        let elsewhere = dir.path().join("elsewhere");
+        std::fs::write(&elsewhere, "now").unwrap();
+        let file = dir.path().join("run.stop");
+        std::os::unix::fs::symlink(&elsewhere, &file).unwrap();
+        let request = StopRequest::new();
+
+        request.also_read(file);
+
+        assert_eq!(request.asked(), None);
+    }
+
+    #[test]
+    fn a_stop_file_with_other_text_asks_for_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("run.stop");
+        std::fs::write(&file, "please stop").unwrap();
+        let request = StopRequest::new();
+
+        request.also_read(file);
+
+        assert_eq!(request.asked(), None);
+        assert_eq!(
+            StopWhen::from_word(StopWhen::Now.word()),
+            Some(StopWhen::Now)
+        );
+        assert_eq!(
+            StopWhen::from_word(StopWhen::AfterStep.word()),
+            Some(StopWhen::AfterStep)
+        );
     }
 }

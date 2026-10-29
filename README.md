@@ -157,6 +157,7 @@ harness task new task-001 "Add a CSV export to the report page"
 harness run task-001                 # Architect writes the design, then waits for you
 harness approve task-001             # Developer, Tester and Security take over,
                                      # with the Architect checking the code twice
+harness stop task-001                # stop a run in the TUI or another terminal (--now: at once)
 harness status task-001              # where the task is and its history
 harness retro task-001               # what went well and what to improve
 ```

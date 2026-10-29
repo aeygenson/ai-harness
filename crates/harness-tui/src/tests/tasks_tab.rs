@@ -409,6 +409,30 @@ fn task_waiting_for_acceptance(root: &Path) -> TaskStore {
 }
 
 #[test]
+fn a_task_is_not_started_while_another_harness_works_in_the_project() {
+    let env = Env::new();
+    let (root, mut app) = empty_project(&env);
+    // `harness run task-007` in a terminal holds the project's run lock.
+    let repo = harness_core::git::Repo::open(&root).unwrap();
+    let mut other = harness_core::task::run_lock::RunLock::hold(&repo).unwrap();
+    other.set_task("task-007").unwrap();
+    other
+        .connect(&harness_core::task::stop_request::StopRequest::new())
+        .unwrap();
+
+    click(&mut app, "Write here");
+    type_text(&mut app, "Something");
+    send(&mut app);
+    wait(&mut app);
+
+    let (message, problem) = shown(&app);
+    assert!(problem, "{message}");
+    assert!(message.contains("harness stop task-007"), "{message}");
+    assert!(!root.join(".harness/runs/task-001").exists());
+    drop(other);
+}
+
+#[test]
 fn a_missing_login_stops_before_anything_is_saved() {
     let env = Env::new();
     let (root, mut app) = empty_project(&env);
