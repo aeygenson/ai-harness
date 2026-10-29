@@ -1,5 +1,6 @@
 //! What happens to a role's changes after an attempt that was not accepted:
-//! checked, kept in the folder for the next run, or thrown away.
+//! checked, kept in the folder for the next run, or thrown away (saved as a
+//! patch first, see [`super::patch`]).
 //!
 //! When a limit (time or usage) or the user's «Stop now» stops a role, its
 //! changes stay in the project folder, uncommitted, and `unfinished.json` in
@@ -23,6 +24,7 @@ use crate::task::permissions;
 use crate::task::store::{StoreError, TaskStore};
 use crate::task::{TaskState, WaitReason};
 
+use super::patch::save_failed_work;
 use super::{oversized_changes, RunError, StopReason, MAX_CHANGE_BYTES};
 
 /// The record of unfinished work, in the task's folder.
@@ -255,7 +257,8 @@ pub(super) enum AfterFailure {
 
 /// After a failed attempt: resumed work stays in the folder, recorded again
 /// (after the checks), and `problem` says so; the next attempt continues
-/// from it. Without resumed work the attempt is thrown away as before.
+/// from it. Without resumed work the attempt is thrown away, after its
+/// changes are saved as a patch next to its log (`problem` says where).
 pub(super) fn after_failure(
     at: RoleAt,
     resumed: bool,
@@ -263,6 +266,7 @@ pub(super) fn after_failure(
     problem: &mut String,
 ) -> Result<AfterFailure, RunError> {
     if !resumed {
+        problem.push_str(&save_failed_work(at, failure_logs));
         at.repo.discard_changes()?;
         return Ok(AfterFailure::Retry(None));
     }

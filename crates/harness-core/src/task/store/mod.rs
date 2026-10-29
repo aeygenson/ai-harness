@@ -13,7 +13,7 @@
 //!   round-02/
 //!     01-developer/
 //!   inbox/               scratch folder where an agent writes its result
-//!   failures/            logs of failed attempts
+//!   failures/            logs of failed attempts, and patches of their changes
 //!   stopped/             logs of runs the user stopped («Stop now»)
 //! ```
 //!
@@ -37,7 +37,7 @@ use crate::task::scenario::Workflow;
 use crate::task::{Stage, TaskState, TransitionError};
 use files::{
     create_dir, io_error, read_handoff, read_json, read_notes, sorted_subdirs, to_json,
-    write_json_new, write_new,
+    write_json_new, write_new, write_new_bytes,
 };
 pub(crate) use ids::check_task_id;
 use ids::parse_failure;
@@ -194,6 +194,15 @@ impl TaskStore {
         log: &str,
     ) -> Result<PathBuf, StoreError> {
         self.save_numbered_log(FAILURES_DIR, round, role, log)
+    }
+
+    /// Saves the changes of the failed attempt whose log is `log` (from
+    /// [`TaskStore::save_failure_log`]) as a patch next to it, with the same
+    /// name: `failures/round-01-developer-1.patch`. Returns the patch's path.
+    pub fn save_failure_patch(&self, log: &Path, patch: &[u8]) -> Result<PathBuf, StoreError> {
+        let saved = log.with_extension("patch");
+        write_new_bytes(&saved, patch)?;
+        Ok(saved)
     }
 
     /// Saves the log of a run the user stopped («Stop now») as
@@ -519,6 +528,9 @@ mod tests {
         store.save_failure_log(2, Role::Tester, "boom").unwrap();
         store.save_failure_log(1, Role::Architect, "again").unwrap();
         fs::write(store.dir().join("failures/notes.txt"), "").unwrap();
+        let log = store.dir().join("failures/round-01-architect-1.log");
+        let patch = store.save_failure_patch(&log, b"diff").unwrap();
+        assert!(patch.ends_with("failures/round-01-architect-1.patch"));
         assert_eq!(
             store.failures().unwrap(),
             [

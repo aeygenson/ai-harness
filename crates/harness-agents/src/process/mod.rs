@@ -14,9 +14,11 @@ use harness_core::task::stop_request::StopRequest;
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWriteExt, BufReader};
 
 mod live_log;
+mod time_limit;
 
 use live_log::send_live;
 pub use live_log::{note_live, set_live_log};
+use time_limit::time_limit_passed;
 
 /// `program`, started in the project folder with an empty environment plus
 /// the whitelist. Each adapter adds its own variables and flags.
@@ -142,22 +144,24 @@ pub async fn run(
     // function then drops `tree`, which stops the agent with everything it
     // started, exactly as after the time limit.
     let waited = tokio::select! {
-        waited = tokio::time::timeout(timeout, work) => waited,
+        waited = work => waited,
+        () = time_limit_passed(timeout) => {
+            return Err(format!(
+                "{TIMED_OUT} {} s; the agent was stopped",
+                timeout.as_secs()
+            ));
+        }
         () = stop_now_pressed(stop) => {
             return Err(format!("{STOPPED_BY_USER}; the agent was stopped"));
         }
     };
     match waited {
-        Ok(Ok((stdout, stderr, status))) => Ok(Finished {
+        Ok((stdout, stderr, status)) => Ok(Finished {
             stdout: String::from_utf8_lossy(&stdout).into_owned(),
             stderr: String::from_utf8_lossy(&stderr).into_owned(),
             status,
         }),
-        Ok(Err(e)) => Err(format!("error while waiting for the agent: {e}")),
-        Err(_) => Err(format!(
-            "{TIMED_OUT} {} s; the agent was stopped",
-            timeout.as_secs()
-        )),
+        Err(e) => Err(format!("error while waiting for the agent: {e}")),
     }
 }
 

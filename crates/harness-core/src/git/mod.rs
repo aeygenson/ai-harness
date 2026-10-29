@@ -10,6 +10,7 @@ mod history;
 mod push;
 mod remote;
 mod restore;
+mod working_tree;
 
 pub(crate) use fingerprint::is_harness;
 pub use fingerprint::FileFingerprint;
@@ -231,36 +232,6 @@ impl Repo {
         })
     }
 
-    /// Throws away every change outside `.harness/`, so a failed attempt of a role
-    /// leaves nothing behind. Ignored files (like `target/`) are kept.
-    pub fn discard_changes(&self) -> Result<(), GitError> {
-        const OUTSIDE_HARNESS: &str = ":(exclude).harness";
-        if self.head()?.is_none() {
-            return Ok(());
-        }
-        // 1. Unstage everything the agent may have `git add`-ed.
-        self.git(&["reset", "-q"])?;
-        // 2. Put changed and deleted tracked files back as they are in the last commit.
-        let out = self.git(&[
-            "diff",
-            "--name-only",
-            "-z",
-            "HEAD",
-            "--",
-            ".",
-            OUTSIDE_HARNESS,
-        ])?;
-        let tracked: Vec<&str> = out.split('\0').filter(|p| !p.is_empty()).collect();
-        if !tracked.is_empty() {
-            let mut checkout = vec!["checkout", "-q", "HEAD", "--"];
-            checkout.extend(&tracked);
-            self.git_literal(&checkout)?;
-        }
-        // 3. Delete new files and folders.
-        self.git(&["clean", "-fdq", "--", ".", OUTSIDE_HARNESS])?;
-        Ok(())
-    }
-
     fn commit(&self, message: &str, paths: &[&str]) -> Result<bool, GitError> {
         let mut check = vec!["diff", "--cached", "--quiet", "--"];
         check.extend(paths);
@@ -305,6 +276,13 @@ impl Repo {
 
     /// Runs git with the harness's fixed settings and the extra variables `env`.
     fn run(&self, args: &[&str], env: &[(&str, &str)]) -> Result<String, GitError> {
+        let stdout = self.run_bytes(args, env)?;
+        Ok(String::from_utf8_lossy(&stdout).into_owned())
+    }
+
+    /// Like [`Repo::run`], but gives git's output byte for byte: a patch of a
+    /// file that is not UTF-8 must stay exactly as it is.
+    fn run_bytes(&self, args: &[&str], env: &[(&str, &str)]) -> Result<Vec<u8>, GitError> {
         let mut command = Command::new("git");
         command
             .current_dir(&self.root)
@@ -324,7 +302,7 @@ impl Repo {
             .envs(env.iter().copied());
         let output = command.output().map_err(GitError::CannotRun)?;
         if output.status.success() {
-            Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+            Ok(output.stdout)
         } else {
             Err(GitError::Failed {
                 command: args.join(" "),
@@ -498,6 +476,61 @@ mod tests {
         let harness = repo.root().join(HARNESS_DIR);
         assert!(repo.commit_paths(&[&harness], "state").unwrap());
         assert_eq!(repo.changed_files().unwrap(), ["src/main.rs"]);
+    }
+
+    #[test]
+    fn the_patch_of_the_changes_puts_them_back_after_they_are_thrown_away() {
+        let (_dir, repo) = new_repo();
+        write(&repo, ".gitignore", "target/\n");
+        repo.commit_all("ignore").unwrap();
+        write(&repo, "README.md", "changed\n");
+        write(&repo, "src/new.rs", "new\n");
+        fs::write(repo.root().join("logo.bin"), [0u8, 159, 146, 150, 255]).unwrap();
+        write(&repo, ".harness/note.md", "not in the patch");
+        write(&repo, "target/build.bin", "not in the patch");
+        let changed = repo.changed_files().unwrap();
+
+        let patch = repo.changes_as_patch().unwrap();
+        // Making the patch changes nothing in the folder.
+        assert_eq!(repo.changed_files().unwrap(), changed);
+        repo.discard_changes().unwrap();
+        let patch_file = repo.root().join(".harness/attempt.patch");
+        fs::write(&patch_file, &patch).unwrap();
+        repo.git(&["apply", ".harness/attempt.patch"]).unwrap();
+        fs::remove_file(&patch_file).unwrap();
+
+        assert_eq!(repo.changed_files().unwrap(), changed);
+        let readme = fs::read_to_string(repo.root().join("README.md")).unwrap();
+        assert_eq!(readme, "changed\n");
+        let logo = fs::read(repo.root().join("logo.bin")).unwrap();
+        assert_eq!(logo, [0u8, 159, 146, 150, 255]);
+        let text = String::from_utf8_lossy(&patch);
+        assert!(!text.contains("not in the patch"));
+    }
+
+    #[test]
+    fn the_users_diff_settings_do_not_change_the_patch() {
+        let (_dir, repo) = new_repo();
+        for (key, value) in [
+            ("diff.noprefix", "true"),
+            ("color.diff", "always"),
+            ("diff.external", "a-program-that-does-not-exist"),
+        ] {
+            repo.git(&["config", key, value]).unwrap();
+        }
+        write(&repo, "README.md", "changed\n");
+
+        let patch = String::from_utf8(repo.changes_as_patch().unwrap()).unwrap();
+
+        assert!(patch.contains("--- a/README.md\n+++ b/README.md\n"));
+        assert!(!patch.contains('\u{1b}'), "no colour codes");
+    }
+
+    #[test]
+    fn a_patch_of_no_changes_is_empty() {
+        let (_dir, repo) = new_repo();
+
+        assert_eq!(repo.changes_as_patch().unwrap(), Vec::<u8>::new());
     }
 
     #[test]

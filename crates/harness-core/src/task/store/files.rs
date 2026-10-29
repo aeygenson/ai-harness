@@ -24,14 +24,18 @@ pub(super) fn create_dir(path: &Path) -> Result<(), StoreError> {
 
 /// Writes a file that must not exist yet: history is never overwritten.
 pub(super) fn write_new(path: &Path, contents: &str) -> Result<(), StoreError> {
+    write_new_bytes(path, contents.as_bytes())
+}
+
+/// Like [`write_new`], for contents that need not be text (a patch).
+pub(super) fn write_new_bytes(path: &Path, contents: &[u8]) -> Result<(), StoreError> {
     use std::io::Write;
     let mut file = fs::OpenOptions::new()
         .write(true)
         .create_new(true)
         .open(path)
         .map_err(|e| io_error(path, e))?;
-    file.write_all(contents.as_bytes())
-        .map_err(|e| io_error(path, e))
+    file.write_all(contents).map_err(|e| io_error(path, e))
 }
 
 pub(super) fn to_json<T: Serialize>(path: &Path, value: &T) -> Result<String, StoreError> {

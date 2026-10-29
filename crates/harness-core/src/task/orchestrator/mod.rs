@@ -16,7 +16,8 @@
 //!    checked against the role's permissions and against [`MAX_CHANGE_BYTES`],
 //!    so build output never lands in git.
 //! 3. If the role's work is accepted, everything is committed:
-//!    `task-001 round 2: tester (rejected) - ...`. A failed attempt is thrown away.
+//!    `task-001 round 2: tester (rejected) - ...`. A failed attempt is thrown
+//!    away; its changes are kept as a patch next to its log first.
 //!
 //! The user can stop a run (see [`manual`]): after the running role's step, or at
 //! once, keeping the role's unfinished changes like a time limit does.
@@ -28,6 +29,7 @@ mod guard;
 mod human;
 mod job;
 mod manual;
+mod patch;
 mod protect;
 mod size;
 mod stop;
