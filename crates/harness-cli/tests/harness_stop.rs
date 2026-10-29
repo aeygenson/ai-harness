@@ -106,6 +106,17 @@ impl Setup {
     }
 }
 
+/// A running `harness run` that is killed if the test fails before it ends,
+/// so a failed test leaves no harness and fake agent behind.
+struct RunGuard(Child);
+
+impl Drop for RunGuard {
+    fn drop(&mut self) {
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
+}
+
 /// Waits up to 30 seconds for `done`.
 fn wait_for(what: &str, mut done: impl FnMut() -> bool) {
     let start = Instant::now();
@@ -122,7 +133,7 @@ fn stderr(out: &Output) -> String {
 #[test]
 fn a_second_harness_is_refused_and_harness_stop_ends_the_run() {
     let setup = Setup::new();
-    let mut run = setup.start_run();
+    let mut run = RunGuard(setup.start_run());
 
     let second = setup
         .harness(&["approve", "task-001", "--to", "developer"])
@@ -130,7 +141,7 @@ fn a_second_harness_is_refused_and_harness_stop_ends_the_run() {
         .unwrap();
     assert!(!second.status.success(), "{second:?}");
     assert!(
-        stderr(&second).contains("another harness is working on task-001"),
+        stderr(&second).contains("another harness is running task-001"),
         "{second:?}"
     );
 
@@ -140,7 +151,9 @@ fn a_second_harness_is_refused_and_harness_stop_ends_the_run() {
         .unwrap();
     assert!(stop.status.success(), "{stop:?}");
 
-    wait_for("the run did not stop", || run.try_wait().unwrap().is_some());
+    wait_for("the run did not stop", || {
+        run.0.try_wait().unwrap().is_some()
+    });
     assert!(
         setup.state().contains("stopped_by_lisa"),
         "{}",

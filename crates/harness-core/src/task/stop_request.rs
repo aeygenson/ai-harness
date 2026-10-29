@@ -80,11 +80,16 @@ impl StopRequest {
         let pressed = *self.lock();
         // The agent's process asks every fraction of a second; reading a
         // file that small (or not finding it) costs next to nothing.
-        let written = self.file.get().and_then(|file| read_stop_file(file));
-        match (pressed, written) {
-            (Some(StopWhen::Now), _) | (_, Some(StopWhen::Now)) => Some(StopWhen::Now),
-            (pressed, written) => pressed.or(written),
+        if pressed == Some(StopWhen::Now) {
+            return pressed;
         }
+        let written = self.file.get().and_then(|file| read_stop_file(file));
+        if written == Some(StopWhen::Now) {
+            // Remembered, so a later change of the file cannot take it back.
+            self.stop_now();
+            return written;
+        }
+        pressed.or(written)
     }
 
     /// «Stop after this step»: asks for it, or takes the request back when
@@ -198,6 +203,20 @@ mod tests {
         request.also_read(file);
 
         assert_eq!(request.asked(), Some(StopWhen::Now));
+    }
+
+    #[test]
+    fn stop_now_from_the_file_is_remembered() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("run.stop");
+        std::fs::write(&file, "now").unwrap();
+        let request = StopRequest::new();
+        request.also_read(file.clone());
+        assert!(request.now());
+
+        std::fs::write(&file, "after_step").unwrap();
+
+        assert!(request.now());
     }
 
     #[cfg(unix)]

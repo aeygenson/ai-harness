@@ -47,10 +47,12 @@ const TASK_FILE: &str = "run.task";
 #[derive(Debug, thiserror::Error)]
 pub enum RunLockError {
     /// Another harness works in this project folder right now.
-    #[error("{}", busy_text(.task.as_deref()))]
+    #[error("{}", busy_text(.task.as_deref(), *.can_stop))]
     Busy {
         /// The task it works on, when it has said so.
         task: Option<String>,
+        /// Whether `harness stop` can stop it (it runs roles).
+        can_stop: bool,
     },
     /// No harness runs roles of this task in this project right now.
     #[error("no harness is running {0} in this project right now")]
@@ -79,13 +81,16 @@ pub enum RunLockError {
 }
 
 /// The message for [`RunLockError::Busy`], with the command that helps.
-fn busy_text(task: Option<&str>) -> String {
-    match task {
-        Some(task) => format!(
-            "another harness is working on {task} in this project; wait until it \
+fn busy_text(task: Option<&str>, can_stop: bool) -> String {
+    match (task, can_stop) {
+        (Some(task), true) => format!(
+            "another harness is running {task} in this project; wait until it \
              finishes, or stop it with: harness stop {task}"
         ),
-        None => "another harness is working in this project; wait until it finishes".into(),
+        (Some(task), false) => {
+            format!("another harness is working on {task} in this project; wait until it finishes")
+        }
+        (None, _) => "another harness is working in this project; wait until it finishes".into(),
     }
 }
 
@@ -111,12 +116,16 @@ impl RunLock {
     pub fn hold(repo: &Repo) -> Result<Self, RunLockError> {
         let dir = lock_dir(repo)?;
         let Some(held) = try_hold(&dir)? else {
-            return Err(RunLockError::Busy {
-                task: read_task(&dir),
-            });
+            let task = read_task(&dir);
+            let can_stop = task
+                .as_deref()
+                .is_some_and(|task| is_plain_file(&stop_file(&dir, task)));
+            return Err(RunLockError::Busy { task, can_stop });
         };
-        // A task file a crashed run left would name the wrong task.
+        // Files a killed run left would name the wrong task, or let
+        // `harness stop` think work that cannot stop is a run.
         remove_file_if_there(&dir.join(TASK_FILE))?;
+        remove_stop_files(&dir)?;
         Ok(Self {
             dir,
             task: None,
@@ -192,7 +201,29 @@ pub fn ask_to_stop(repo: &Repo, task_id: &str, when: StopWhen) -> Result<(), Run
     if stop_request::read_stop_file(&file) == Some(StopWhen::Now) {
         return Ok(());
     }
-    fs::write(&file, when.word()).map_err(|source| io_error(&file, source))
+    // A new file renamed over the old one replaces the name itself: nothing
+    // is ever written through a link (also a hard link) put in its place.
+    let new = dir.join(format!("new-stop-{task_id}"));
+    fs::write(&new, when.word()).map_err(|source| io_error(&new, source))?;
+    fs::rename(&new, &file).map_err(|source| io_error(&file, source))
+}
+
+/// Removes every stop file in `dir`, also those of other tasks.
+fn remove_stop_files(dir: &Path) -> Result<(), RunLockError> {
+    let entries = match fs::read_dir(dir) {
+        Ok(entries) => entries,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(source) => return Err(io_error(dir, source)),
+    };
+    for entry in entries {
+        let entry = entry.map_err(|source| io_error(dir, source))?;
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if name.starts_with("stop-") || name.starts_with("new-stop-") {
+            remove_file_if_there(&entry.path())?;
+        }
+    }
+    Ok(())
 }
 
 /// `.git/harness` of this working folder.
@@ -263,13 +294,16 @@ mod tests {
         let (_dir, repo) = repo();
         let mut first = RunLock::hold(&repo).unwrap();
         let unnamed = RunLock::hold(&repo).unwrap_err();
-        assert!(matches!(unnamed, RunLockError::Busy { task: None }));
+        assert!(matches!(unnamed, RunLockError::Busy { task: None, .. }));
 
         first.set_task("task-007").unwrap();
-        let second = RunLock::hold(&repo).unwrap_err();
+        let deciding = RunLock::hold(&repo).unwrap_err().to_string();
+        assert!(deciding.contains("working on task-007"), "{deciding}");
+        assert!(!deciding.contains("harness stop"), "{deciding}");
 
-        assert!(matches!(&second, RunLockError::Busy { task: Some(t) } if t == "task-007"));
-        assert!(second.to_string().contains("harness stop task-007"));
+        first.connect(&StopRequest::new()).unwrap();
+        let running = RunLock::hold(&repo).unwrap_err().to_string();
+        assert!(running.contains("harness stop task-007"), "{running}");
     }
 
     #[test]
@@ -358,6 +392,21 @@ mod tests {
     }
 
     #[test]
+    fn a_stop_file_a_killed_run_left_does_not_make_a_decision_stoppable() {
+        let (_dir, repo) = repo();
+        let dir = lock_dir(&repo).unwrap();
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(stop_file(&dir, "task-001"), "").unwrap();
+
+        // `harness approve task-001`: the lock, but no stop file of its own.
+        let mut lock = RunLock::hold(&repo).unwrap();
+        lock.set_task("task-001").unwrap();
+
+        let refused = ask_to_stop(&repo, "task-001", StopWhen::AfterStep).unwrap_err();
+        assert!(matches!(refused, RunLockError::CannotStop(_)));
+    }
+
+    #[test]
     fn a_task_file_with_other_text_names_no_task() {
         let (_dir, repo) = repo();
         let lock = RunLock::hold(&repo).unwrap();
@@ -365,7 +414,7 @@ mod tests {
 
         let busy = RunLock::hold(&repo).unwrap_err();
 
-        assert!(matches!(busy, RunLockError::Busy { task: None }));
+        assert!(matches!(busy, RunLockError::Busy { task: None, .. }));
     }
 
     #[cfg(unix)]
@@ -383,5 +432,21 @@ mod tests {
 
         assert!(matches!(refused, RunLockError::CannotStop(_)));
         assert_eq!(fs::read_to_string(&users_file).unwrap(), "mine");
+    }
+
+    #[test]
+    fn harness_stop_does_not_write_through_a_hard_link() {
+        let (dir, repo) = repo();
+        let (lock, _stop) = running(&repo, "task-001");
+        let users_file = dir.path().join("bashrc");
+        fs::write(&users_file, "mine").unwrap();
+        let file = stop_file(&lock.dir, "task-001");
+        fs::remove_file(&file).unwrap();
+        fs::hard_link(&users_file, &file).unwrap();
+
+        ask_to_stop(&repo, "task-001", StopWhen::Now).unwrap();
+
+        assert_eq!(fs::read_to_string(&users_file).unwrap(), "mine");
+        assert_eq!(fs::read_to_string(&file).unwrap(), "now");
     }
 }

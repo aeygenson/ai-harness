@@ -416,6 +416,9 @@ fn a_task_is_not_started_while_another_harness_works_in_the_project() {
     let repo = harness_core::git::Repo::open(&root).unwrap();
     let mut other = harness_core::task::run_lock::RunLock::hold(&repo).unwrap();
     other.set_task("task-007").unwrap();
+    other
+        .connect(&harness_core::task::stop_request::StopRequest::new())
+        .unwrap();
 
     click(&mut app, "Write here");
     type_text(&mut app, "Something");
