@@ -8,14 +8,15 @@
 //! - the agent's process (`harness_agents::process::run`) every fraction of a
 //!   second while the agent works, so «Stop now» stops it at once.
 //!
-//! Another program (`harness stop`, the MCP server) cannot reach that memory:
-//! it writes the request into the run's stop file instead (see
-//! [`super::run_lock`]), and the request reads that file too.
+//! Another program (`harness stop`) cannot reach that memory: it writes the
+//! request into the run's stop file instead (see [`super::run_lock`]), and
+//! the request reads that file too.
 //!
 //! Nothing is sent back: the run ends as usual and says why it stopped.
 
 use std::fs;
-use std::path::PathBuf;
+use std::io::Read;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 
 /// When the user wants the task to stop.
@@ -79,11 +80,7 @@ impl StopRequest {
         let pressed = *self.lock();
         // The agent's process asks every fraction of a second; reading a
         // file that small (or not finding it) costs next to nothing.
-        let written = self
-            .file
-            .get()
-            .and_then(|file| fs::read_to_string(file).ok())
-            .and_then(|text| StopWhen::from_word(&text));
+        let written = self.file.get().and_then(|file| read_stop_file(file));
         match (pressed, written) {
             (Some(StopWhen::Now), _) | (_, Some(StopWhen::Now)) => Some(StopWhen::Now),
             (pressed, written) => pressed.or(written),
@@ -118,6 +115,31 @@ impl StopRequest {
     fn lock(&self) -> std::sync::MutexGuard<'_, Option<StopWhen>> {
         self.asked.lock().unwrap_or_else(PoisonError::into_inner)
     }
+}
+
+/// The request in a stop file; `None` when there is none or it holds other text.
+pub fn read_stop_file(path: &Path) -> Option<StopWhen> {
+    StopWhen::from_word(&read_small_file(path)?)
+}
+
+/// The most a stop or task file is read: their words are much shorter.
+const SMALL_FILE_LIMIT: u64 = 64;
+
+/// The start of the plain file `path`, as text. `None` for anything else:
+/// a link, folder or pipe that an agent with a shell put there would point
+/// elsewhere, or hang a reader waiting for a writer.
+pub(crate) fn read_small_file(path: &Path) -> Option<String> {
+    let meta = fs::symlink_metadata(path).ok()?;
+    if !meta.file_type().is_file() {
+        return None;
+    }
+    let mut text = String::new();
+    fs::File::open(path)
+        .ok()?
+        .take(SMALL_FILE_LIMIT)
+        .read_to_string(&mut text)
+        .ok()?;
+    Some(text)
 }
 
 #[cfg(test)]
@@ -176,6 +198,21 @@ mod tests {
         request.also_read(file);
 
         assert_eq!(request.asked(), Some(StopWhen::Now));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_link_in_place_of_the_stop_file_is_not_followed() {
+        let dir = tempfile::tempdir().unwrap();
+        let elsewhere = dir.path().join("elsewhere");
+        std::fs::write(&elsewhere, "now").unwrap();
+        let file = dir.path().join("run.stop");
+        std::os::unix::fs::symlink(&elsewhere, &file).unwrap();
+        let request = StopRequest::new();
+
+        request.also_read(file);
+
+        assert_eq!(request.asked(), None);
     }
 
     #[test]

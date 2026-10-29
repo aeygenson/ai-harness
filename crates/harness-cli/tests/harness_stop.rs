@@ -141,8 +141,12 @@ fn a_second_harness_is_refused_and_harness_stop_ends_the_run() {
     assert!(stop.status.success(), "{stop:?}");
 
     wait_for("the run did not stop", || run.try_wait().unwrap().is_some());
-    assert!(setup.state().contains("stopped_by_lisa"), "{}", setup.state());
+    assert!(
+        setup.state().contains("stopped_by_lisa"),
+        "{}",
+        setup.state()
+    );
     let again = setup.harness(&["stop", "task-001"]).output().unwrap();
     assert!(!again.status.success(), "nothing runs any more: {again:?}");
-    assert!(stderr(&again).contains("no harness is working on task-001"));
+    assert!(stderr(&again).contains("no harness is running task-001"));
 }

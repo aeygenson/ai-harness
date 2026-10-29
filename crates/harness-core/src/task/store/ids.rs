@@ -51,7 +51,7 @@ pub(super) fn parse_failure(name: &str) -> Option<(u32, Role)> {
 
 /// Task ids become folder names, so we allow only safe characters.
 /// This blocks tricks like `../../etc`.
-pub(super) fn check_task_id(task_id: &str) -> Result<(), StoreError> {
+pub(crate) fn check_task_id(task_id: &str) -> Result<(), StoreError> {
     let ok = !task_id.is_empty()
         && task_id
             .chars()

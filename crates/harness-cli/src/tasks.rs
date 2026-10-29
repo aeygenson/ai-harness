@@ -32,7 +32,8 @@ pub(crate) fn new_task(
     allow_duplicate: bool,
 ) -> Result<()> {
     let repo = open_repo(project)?;
-    let _lock = RunLock::hold(&repo, task_id)?;
+    let mut lock = RunLock::hold(&repo)?;
+    lock.set_task(task_id)?;
     let config = Config::load(&repo.root().join(HARNESS_DIR))?;
     let same_text = if allow_duplicate {
         SameText::Allow
@@ -80,7 +81,8 @@ pub(crate) async fn until_stopped(
 pub(crate) async fn run(project: &Path, task_id: &str) -> Result<()> {
     let repo = open_repo(project)?;
     // Held until the run ends: `harness stop` reaches this run through it.
-    let lock = RunLock::hold(&repo, task_id)?;
+    let mut lock = RunLock::hold(&repo)?;
+    lock.set_task(task_id)?;
     // First the task's branch: its settings and skills are the ones to use.
     enter_branch(&repo, task_id)?;
     let harness_dir = repo.root().join(HARNESS_DIR);
@@ -95,7 +97,7 @@ pub(crate) async fn run(project: &Path, task_id: &str) -> Result<()> {
     // The command line has no stop buttons: Ctrl+C stops it (`until_stopped`),
     // and `harness stop` from another terminal through the lock's stop file.
     let stop = StopRequest::new();
-    lock.connect(&stop);
+    lock.connect(&stop)?;
     let project = Project {
         config: &config,
         skills: &skills,
@@ -307,7 +309,8 @@ pub(crate) fn decide(
     notes: &str,
 ) -> Result<()> {
     let repo = open_repo(project)?;
-    let _lock = RunLock::hold(&repo, task_id)?;
+    let mut lock = RunLock::hold(&repo)?;
+    lock.set_task(task_id)?;
     // The user's decision is a commit too: it goes on the task's branch.
     enter_branch(&repo, task_id)?;
     let (store, mut state) = open_task(&repo, task_id)?;
@@ -352,8 +355,9 @@ pub(crate) fn decide(
     Ok(())
 }
 
-/// `harness stop`: asks the harness running `task_id` to stop; it does
-/// within a second or so and says so in its own window.
+/// `harness stop`: asks the harness running the roles of `task_id` to stop
+/// (at once with `now`, else once the running role has finished); that
+/// harness says so in its own window.
 pub(crate) fn stop(project: &Path, task_id: &str, now: bool) -> Result<()> {
     let repo = open_repo(project)?;
     let when = if now {

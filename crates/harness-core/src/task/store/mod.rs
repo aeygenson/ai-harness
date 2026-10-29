@@ -39,7 +39,8 @@ use files::{
     create_dir, io_error, read_handoff, read_json, read_notes, sorted_subdirs, to_json,
     write_json_new, write_new,
 };
-use ids::{check_task_id, parse_failure};
+pub(crate) use ids::check_task_id;
+use ids::parse_failure;
 
 const STATE_FILE: &str = "state.json";
 const TASK_FILE: &str = "task.md";

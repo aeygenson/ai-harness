@@ -257,8 +257,10 @@ fn work(job: Job, events: &Sender<Event>, stop: oneshot::Receiver<()>) -> Result
     let root = root.as_path();
     let repo = Repo::open(root).map_err(|e| e.to_string())?;
     // Held until the work ends, before anything is switched or saved.
-    let lock = RunLock::hold(&repo, lock_name(&request)).map_err(|e| e.to_string())?;
-    lock.connect(&stop_request);
+    let mut lock = RunLock::hold(&repo).map_err(|e| e.to_string())?;
+    if let Some(task) = task_of(&request) {
+        lock.set_task(task).map_err(|e| e.to_string())?;
+    }
     // An existing task's branch first: its settings are the ones to use, and
     // the user's decision and the roles' work are committed there. A merge stays
     // where the user is: it changes the folder only once everything is checked,
@@ -295,6 +297,8 @@ fn work(job: Job, events: &Sender<Event>, stop: oneshot::Receiver<()>) -> Result
         }
         return Ok(outcome);
     };
+    // Only work that runs roles can stop halfway, so only it gets a stop file.
+    lock.connect(&stop_request).map_err(|e| e.to_string())?;
     let project = Project {
         config: &config,
         skills: &skills,
@@ -319,14 +323,14 @@ fn work(job: Job, events: &Sender<Event>, stop: oneshot::Receiver<()>) -> Result
     })
 }
 
-/// What the run lock says this work is busy with: the task, or a new one.
-fn lock_name(request: &Request) -> &str {
+/// The task the request is about; `None` for a new one, which has no id yet.
+fn task_of(request: &Request) -> Option<&str> {
     match request {
-        Request::New(_) => "a new task",
+        Request::New(_) => None,
         Request::Decide { task, .. }
         | Request::Continue(task)
         | Request::Publish(task)
-        | Request::Merge(task) => task,
+        | Request::Merge(task) => Some(task),
     }
 }
 
