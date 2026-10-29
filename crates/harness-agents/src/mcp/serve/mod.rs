@@ -10,6 +10,7 @@
 //! commands. Design: `docs/design.md`, section 5.8.
 
 mod actions;
+mod arguments;
 mod decisions;
 mod read;
 mod tools;
@@ -51,7 +52,7 @@ run. Only one harness works in a project at a time, and while a run goes it swit
 branches and commits in the project folder: do not change files there yourself meanwhile. \
 Decisions on a waiting task (decide: approve a design, answer a role, send work back; \
 finish_task: accept the result) are the person's: make them only when they told you what \
-to decide, and pass their own words to finish_task. Pass seen_steps from task_status, so a \
+to decide, and pass their own words to finish_task. Pass seen_steps and seen_stage from task_status, so a \
 decision never lands on a task that has moved on.";
 
 /// The MCP server for one project.

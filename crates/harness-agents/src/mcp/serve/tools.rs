@@ -9,7 +9,10 @@ use std::time::Duration;
 
 use serde_json::{json, Value};
 
-use super::decisions::{self, Decide};
+use super::arguments::{
+    bool_argument, count_argument, number_argument, optional_text_argument, text_argument,
+};
+use super::decisions::{self, Decide, Seen};
 use super::{actions, read};
 
 /// How long `wait_for_change` waits when the agent does not say.
@@ -124,6 +127,10 @@ fn action_definitions(task: &Value) -> Vec<Value> {
         "minimum": 0,
         "description": "How many steps task_status showed: refused if the task has moved on since.",
     });
+    let seen_stage = json!({
+        "type": "string",
+        "description": "The stage task_status showed, as written there: refused if it has changed since.",
+    });
     vec![
         action(
             "create_task",
@@ -152,24 +159,26 @@ fn action_definitions(task: &Value) -> Vec<Value> {
         ),
         action(
             "decide",
-            "The user's decision on a task waiting for them: approve the architect's design (or send it back with to=architect), answer a role's question, send work back, or give a task at its round limit 5 more rounds. Saved like `harness approve`, marked as sent through MCP; then call start_run. Without `to`: the developer after a design, the role a question suggests (else the one that asked), the stopped role.",
+            "The user's decision on a task waiting for them: approve the architect's design (or send it back with to=architect), answer a role's question, send work back, or give a task at its round limit 5 more rounds. Saved like `harness approve`, marked as sent through MCP; then call start_run. Without `to`: the developer after a design, the role a question suggests in answer_to, the stopped role; elsewhere `to` is needed.",
             &json!({
                 "task": task,
                 "seen_steps": seen_steps,
+                "seen_stage": seen_stage,
                 "to": { "type": "string", "description": "The role that continues: architect, developer, tester or security." },
                 "notes": { "type": "string", "description": "What that role should know or do; the first line is the summary." },
             }),
-            &["task", "seen_steps", "notes"],
+            &["task", "seen_steps", "seen_stage", "notes"],
         ),
         action(
             "finish_task",
-            "Accepts the result and finishes the task (after the architect's final review handed it to the user, at the round limit, or when stopped). Only with the user's own words of acceptance, as they wrote them; they are saved in the history.",
+            "Accepts the result and finishes the task whenever it waits for the user (usually after the architect's final review handed it over). Only with the user's own words of acceptance, as they wrote them; they are saved in the history.",
             &json!({
                 "task": task,
                 "seen_steps": seen_steps,
+                "seen_stage": seen_stage,
                 "user_words": { "type": "string", "description": "The user's own message accepting the result, word for word." },
             }),
-            &["task", "seen_steps", "user_words"],
+            &["task", "seen_steps", "seen_stage", "user_words"],
         ),
     ]
 }
@@ -218,7 +227,7 @@ pub(super) fn call(
         "decide" => {
             let ask = Decide {
                 task: text_argument(arguments, "task")?,
-                seen_steps: count_argument(arguments, "seen_steps")?,
+                seen: seen_argument(arguments)?,
                 to: optional_text_argument(arguments, "to")?,
                 notes: text_argument(arguments, "notes")?,
             };
@@ -226,7 +235,7 @@ pub(super) fn call(
         }
         "finish_task" => {
             let task = text_argument(arguments, "task")?;
-            let seen = count_argument(arguments, "seen_steps")?;
+            let seen = seen_argument(arguments)?;
             let words = text_argument(arguments, "user_words")?;
             return decisions::finish_task(folders.root, task, seen, words)
                 .map_err(CallError::Failed);
@@ -246,6 +255,14 @@ pub(super) fn call(
     };
     let value = value.map_err(CallError::Failed)?;
     serde_json::to_string_pretty(&value).map_err(|e| CallError::Failed(e.to_string()))
+}
+
+/// The `seen_steps` and `seen_stage` arguments of a decision.
+fn seen_argument(arguments: &Value) -> Result<Seen<'_>, CallError> {
+    Ok(Seen {
+        steps: count_argument(arguments, "seen_steps")?,
+        stage: text_argument(arguments, "seen_stage")?,
+    })
 }
 
 /// One entry of the tool list, for a tool that only reads.
@@ -273,53 +290,6 @@ fn entry(
     })
 }
 
-/// A text argument the tool cannot work without.
-fn text_argument<'a>(arguments: &'a Value, name: &str) -> Result<&'a str, CallError> {
-    optional_text_argument(arguments, name)?
-        .ok_or_else(|| CallError::BadArguments(format!("the argument {name:?} is missing")))
-}
-
-/// A text argument that may be left out.
-fn optional_text_argument<'a>(
-    arguments: &'a Value,
-    name: &str,
-) -> Result<Option<&'a str>, CallError> {
-    match arguments.get(name) {
-        None | Some(Value::Null) => Ok(None),
-        Some(Value::String(text)) => Ok(Some(text)),
-        Some(_) => Err(CallError::BadArguments(format!("{name:?} must be text"))),
-    }
-}
-
-/// A count the tool cannot work without, such as `seen_steps`.
-fn count_argument(arguments: &Value, name: &str) -> Result<usize, CallError> {
-    let count = number_argument(arguments, name)?
-        .ok_or_else(|| CallError::BadArguments(format!("the argument {name:?} is missing")))?;
-    usize::try_from(count)
-        .map_err(|_too_big| CallError::BadArguments(format!("{name:?} is too big")))
-}
-
-/// A yes-or-no argument; left out means no.
-fn bool_argument(arguments: &Value, name: &str) -> Result<bool, CallError> {
-    match arguments.get(name) {
-        None | Some(Value::Null) => Ok(false),
-        Some(Value::Bool(value)) => Ok(*value),
-        Some(_) => Err(CallError::BadArguments(format!(
-            "{name:?} must be true or false"
-        ))),
-    }
-}
-
-/// A whole-number argument that may be left out.
-fn number_argument(arguments: &Value, name: &str) -> Result<Option<u64>, CallError> {
-    match arguments.get(name) {
-        None | Some(Value::Null) => Ok(None),
-        Some(value) => value.as_u64().map(Some).ok_or_else(|| {
-            CallError::BadArguments(format!("{name:?} must be a whole number of at least 0"))
-        }),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -345,28 +315,5 @@ mod tests {
             ]
         );
         assert_eq!(tools.as_array().unwrap().len(), 12);
-    }
-
-    #[test]
-    fn arguments_of_the_wrong_kind_are_refused() {
-        let arguments = json!({ "task": 7, "step": "two" });
-        assert!(matches!(
-            text_argument(&arguments, "task"),
-            Err(CallError::BadArguments(_))
-        ));
-        assert!(matches!(
-            number_argument(&arguments, "step"),
-            Err(CallError::BadArguments(_))
-        ));
-        assert!(matches!(
-            text_argument(&json!({}), "task"),
-            Err(CallError::BadArguments(_))
-        ));
-        assert_eq!(number_argument(&json!({}), "step"), Ok(None));
-        assert_eq!(bool_argument(&json!({}), "now"), Ok(false));
-        assert!(matches!(
-            bool_argument(&json!({ "now": "yes" }), "now"),
-            Err(CallError::BadArguments(_))
-        ));
     }
 }
