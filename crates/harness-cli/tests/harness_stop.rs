@@ -1,10 +1,12 @@
 //! The real `harness run` with a fake `claude` that works for a long time:
 //! while it runs, a second `harness` in the same project is refused, and
 //! `harness stop` from another terminal stops the run like the TUI's button.
+//! The same through the MCP server: an agent creates, starts and stops a task.
 
 use std::fs;
+use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Output, Stdio};
+use std::process::{Child, ChildStdin, ChildStdout, Command, Output, Stdio};
 use std::time::{Duration, Instant};
 
 /// `git` in `dir`, with a name and email so commits work on any machine.
@@ -162,4 +164,85 @@ fn a_second_harness_is_refused_and_harness_stop_ends_the_run() {
     let again = setup.harness(&["stop", "task-001"]).output().unwrap();
     assert!(!again.status.success(), "nothing runs any more: {again:?}");
     assert!(stderr(&again).contains("no harness is running task-001"));
+}
+
+/// Asks a background run to stop at once when dropped; a run that has
+/// already ended only makes `harness stop` say so.
+struct StopOnDrop<'a>(&'a Setup, &'a str);
+
+impl Drop for StopOnDrop<'_> {
+    fn drop(&mut self) {
+        let _ = self.0.harness(&["stop", self.1, "--now"]).output();
+    }
+}
+
+/// A conversation with `harness mcp-serve`, one JSON message per line.
+struct Mcp {
+    server: RunGuard,
+    input: ChildStdin,
+    output: BufReader<ChildStdout>,
+    next_id: u32,
+}
+
+impl Mcp {
+    fn start(setup: &Setup) -> Self {
+        let mut child = setup
+            .harness(&["mcp-serve"])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap();
+        let input = child.stdin.take().unwrap();
+        let output = BufReader::new(child.stdout.take().unwrap());
+        Self {
+            server: RunGuard(child),
+            input,
+            output,
+            next_id: 1,
+        }
+    }
+
+    /// Calls the tool `name` with `arguments` (JSON text) and returns the answer line.
+    fn call(&mut self, name: &str, arguments: &str) -> String {
+        let id = self.next_id;
+        self.next_id += 1;
+        writeln!(
+            self.input,
+            r#"{{"jsonrpc":"2.0","id":{id},"method":"tools/call","params":{{"name":"{name}","arguments":{arguments}}}}}"#
+        )
+        .unwrap();
+        self.input.flush().unwrap();
+        let mut line = String::new();
+        self.output.read_line(&mut line).unwrap();
+        line
+    }
+}
+
+#[test]
+fn an_agent_creates_starts_and_stops_a_task_through_mcp() {
+    let setup = Setup::new();
+    let mut mcp = Mcp::start(&setup);
+
+    let created = mcp.call("create_task", r#"{"description":"Write a CSV export"}"#);
+    assert!(created.contains("Created task-002."), "{created}");
+
+    // If an assert below fails, the run started in the background is stopped too.
+    let _stop = StopOnDrop(&setup, "task-002");
+    let started = mcp.call("start_run", r#"{"task":"task-002"}"#);
+    assert!(started.contains("task-002 is running"), "{started}");
+    wait_for("the fake agent never started", || setup.ready.exists());
+
+    let stopped = mcp.call("stop_run", r#"{"task":"task-002","now":true}"#);
+    assert!(stopped.contains("Asked task-002 to stop now"), "{stopped}");
+    let state = setup.project.join(".harness/runs/task-002/state.json");
+    wait_for("the run did not stop", || {
+        fs::read_to_string(&state).is_ok_and(|text| text.contains("stopped_by_lisa"))
+    });
+    // The stopped run has ended and let go of the project.
+    wait_for("the run kept the project locked", || {
+        mcp.call("read_run_log", r#"{"task":"task-002"}"#)
+            .contains("You stopped task-002")
+    });
+    drop(mcp.server);
 }

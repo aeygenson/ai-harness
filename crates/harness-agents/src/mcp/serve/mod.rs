@@ -1,13 +1,14 @@
-//! `harness mcp-serve`: the harness as an MCP server that only reads.
+//! `harness mcp-serve`: the harness as an MCP server.
 //!
 //! An AI agent on the user's computer (Claude Code, Codex, Gemini, ...) starts it
 //! like any MCP server and talks to it on standard input and output, one JSON
 //! message per line. Through it the agent sees the project's tasks, their
-//! steps, logs, statistics and settings, and can explain what happened or
-//! propose a change to the harness. It cannot change anything: the process
-//! runs on its own and the decisions are the user's, made in the TUI.
-//! Design: `docs/design.md`, section 5.8.
+//! steps, logs, statistics and settings, and drives the tasks the way the
+//! user does in the TUI: it creates a task, starts and stops its roles.
+//! Every agent that speaks MCP can do this, not only one that can run shell
+//! commands. Design: `docs/design.md`, section 5.8.
 
+mod actions;
 mod read;
 mod tools;
 
@@ -16,6 +17,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use harness_core::git::HARNESS_DIR;
+use harness_core::text::safe;
 use serde_json::{json, Value};
 
 use self::tools::{CallError, Folders};
@@ -37,28 +39,38 @@ const METHOD_NOT_FOUND: i64 = -32601;
 const INVALID_PARAMS: i64 = -32602;
 
 /// What the agent reads when it connects, so it knows its place.
-const INSTRUCTIONS: &str = "A read-only view of the AI harness in this project: its tasks, \
-their steps (each role's handoff, notes and log), retrospective statistics and settings. \
-You cannot change anything here, and you should not try to steer a task: the harness runs \
-the roles on its own and the person running it makes every decision in the harness itself. \
-Use these tools to explain what happened and why. If the process needs something new, \
-propose a change to the harness (a button, a skill, a check), not a way around it.";
+const INSTRUCTIONS: &str = "The AI harness in this project: a conductor that leads each task \
+through roles (architect, developer, tester, security), each an AI agent. Read its tasks, \
+their steps (each role's handoff, notes and log), retrospective statistics and settings, and \
+drive tasks for the person you work for: create_task, start_run (runs in the background; \
+follow it with wait_for_change and task_status), stop_run and read_run_log. This server \
+answers one call at a time, so wait in short steps (about a minute) to stay able to stop a \
+run. Only one harness works in a project at a time, and while a run goes it switches \
+branches and commits in the project folder: do not change files there yourself meanwhile. \
+Decisions that are the person's (approving a design, accepting a result, merging) are \
+theirs: ask them, do not decide for them.";
 
-/// The read-only MCP server for one project.
+/// The MCP server for one project.
 #[derive(Debug, Clone)]
-pub struct Observer {
+pub struct Server {
+    root: PathBuf,
     harness_dir: PathBuf,
     runs: PathBuf,
+    /// The `harness` program `start_run` starts: this program itself.
+    harness: PathBuf,
     poll: Duration,
 }
 
-impl Observer {
+impl Server {
     /// A server for the project in `root` (the folder with `.harness/`).
     pub fn new(root: &Path) -> Self {
         let harness_dir = root.join(HARNESS_DIR);
         Self {
+            root: root.to_path_buf(),
             runs: harness_dir.join("runs"),
             harness_dir,
+            // Without its own path (very rare) `harness` is looked up in PATH.
+            harness: std::env::current_exe().unwrap_or_else(|_| PathBuf::from("harness")),
             poll: POLL,
         }
     }
@@ -108,12 +120,15 @@ impl Observer {
         let empty = json!({});
         let arguments = params.get("arguments").unwrap_or(&empty);
         let folders = Folders {
+            root: &self.root,
+            harness: &self.harness,
             harness_dir: &self.harness_dir,
             runs: &self.runs,
         };
         match tools::call(&folders, self.poll, name, arguments) {
             Ok(text) => Ok(tool_result(&text, false)),
-            Err(failed @ CallError::Failed(_)) => Ok(tool_result(&failed.to_string(), true)),
+            // Errors can carry text from git, a hook or a changed file: no terminal codes.
+            Err(failed @ CallError::Failed(_)) => Ok(tool_result(&safe(&failed.to_string()), true)),
             Err(other) => Err((INVALID_PARAMS, other.to_string())),
         }
     }
@@ -122,7 +137,7 @@ impl Observer {
 /// `harness mcp-serve`: serves the project in `root` on standard input and output.
 pub fn run(root: &Path) -> io::Result<()> {
     let stdin = io::stdin();
-    Observer::new(root).serve(stdin.lock(), io::stdout())
+    Server::new(root).serve(stdin.lock(), io::stdout())
 }
 
 /// The answer to `initialize`: the version, the server's name and what it offers.

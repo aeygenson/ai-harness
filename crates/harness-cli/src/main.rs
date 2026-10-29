@@ -23,7 +23,7 @@
 //! harness tui                          full-screen window: tasks, settings, projects
 //! harness doctor                       is everything the harness needs installed?
 //! harness update                       install the newest release (--check: only look)
-//! harness mcp-serve                    let an AI agent watch the tasks (read-only MCP server)
+//! harness mcp-serve                    let an AI agent watch and drive the tasks (MCP server)
 //! ```
 
 mod catalogs;

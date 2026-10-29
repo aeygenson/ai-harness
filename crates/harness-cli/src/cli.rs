@@ -126,8 +126,9 @@ pub(crate) enum Command {
         #[arg(long)]
         check: bool,
     },
-    /// Let an AI agent watch this project's tasks: an MCP server on standard
-    /// input and output that only reads (tasks, steps, logs, statistics, settings).
+    /// Let an AI agent watch and drive this project's tasks: an MCP server on
+    /// standard input and output (read tasks, steps, logs, statistics and
+    /// settings; create a task, start and stop its roles).
     #[command(name = "mcp-serve")]
     McpServe,
     /// Used by Codex: start an MCP server from its private settings file.

@@ -108,7 +108,7 @@ next. The harness then **trusts, but verifies**:
 | **Skills** | Each role gets built-in instructions that work with any language or framework. Projects keep their own copies and add their own skills, shared by all agents. |
 | **MCP servers and plugins** | Give a role extra tools: MCP servers (local or on the web, with OAuth sign-in) and agent plugins from plugin catalogs. |
 | **Retrospective** | `harness retro` counts what happened across tasks (rounds, rejections, repeated issues, unused skills) without AI, then can ask an agent to propose skill changes that you approve one by one. |
-| **Watch from your own AI** | `harness mcp-serve` is a read-only MCP server: connect Claude Code, Codex or Gemini to it and ask what your tasks are doing and why. It cannot change anything; decisions stay in the TUI. |
+| **Drive it from your own AI** | `harness mcp-serve` is an MCP server: connect Claude Code, Codex, Gemini or any agent that speaks MCP, ask what your tasks are doing and why, and let it create, start and stop tasks. Approvals stay yours. |
 | **Agent manager** | Install, update, remove and sign in to agents from the Agents tab. `harness doctor` checks that Git, Node.js and at least one agent are ready. |
 | **Isolated agents** | Every project configures its agents itself: no personal plugins, MCP servers or saved keys leak in from your own setup. |
 | **Secrets handled carefully** | Logins and keys live in `~/.harness/credentials/` (readable only by you), never in the project, git, logs or an agent's environment, and are shown as `***` in every log. |

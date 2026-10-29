@@ -4,7 +4,8 @@
 //!
 //! On Linux and macOS the program gets its own process group, and the whole
 //! group is stopped. On Windows `taskkill /T` stops the program and every
-//! process it started.
+//! process it started. [`detached`] is the opposite: a program that keeps
+//! running after its starter has ended.
 
 use std::io;
 use std::process::{Child, Command, Stdio};
@@ -17,6 +18,35 @@ pub fn own_group(command: &mut Command) -> &mut Command {
         command.process_group(0);
     }
     command
+}
+
+/// Windows: the started program gets a console without a window. Not
+/// `DETACHED_PROCESS` (no console at all): then every console program it
+/// starts (git, the agents) would open a window of its own.
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+/// Windows: the started program does not get the Ctrl+C sent to the starter.
+#[cfg(windows)]
+const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
+
+/// Prepares `command` to keep running after the program that starts it has
+/// ended, like `nohup` in a shell: its own process group (Linux, macOS) or a
+/// hidden console of its own (Windows), and no input. Its output should go
+/// to a file; the starter's output may be gone. On Linux and macOS it stays
+/// in the starter's session (a new session needs `unsafe` code here).
+pub fn detached(command: &mut Command) -> &mut Command {
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        command.process_group(0);
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP);
+    }
+    command.stdin(Stdio::null())
 }
 
 /// Stops `child` and everything it started (for a child started with
