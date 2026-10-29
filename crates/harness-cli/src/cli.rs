@@ -90,6 +90,14 @@ pub(crate) enum Command {
         #[arg(long)]
         notes: String,
     },
+    /// Ask the harness that runs a task in this project (in the TUI or another
+    /// terminal) to stop after the running role, or at once with --now.
+    Stop {
+        task_id: String,
+        /// Stop the running agent at once; its unfinished work is kept.
+        #[arg(long)]
+        now: bool,
+    },
     /// Show where a task is and its history.
     Status { task_id: String },
     /// Count what happened in a task (or in all tasks) and save it in

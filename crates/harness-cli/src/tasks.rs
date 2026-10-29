@@ -1,5 +1,9 @@
-//! `harness task new`, `run`, `approve`, `reject` and `status`: moving a task
-//! through the roles.
+//! `harness task new`, `run`, `approve`, `reject`, `stop` and `status`: moving
+//! a task through the roles.
+//!
+//! Every command that changes a task first holds the project's run lock
+//! (`harness_core::task::run_lock`), so it never works under the feet of the
+//! TUI or of another terminal.
 
 use std::path::{Path, PathBuf};
 
@@ -11,7 +15,8 @@ use harness_core::skills::Skills;
 use harness_core::task::branch;
 use harness_core::task::handoff::{AnswerTo, NextStep, Role, Verdict, MAX_REASON_CHARS};
 use harness_core::task::orchestrator::{self, HumanDecision, Project, SameText, StopReason};
-use harness_core::task::stop_request::StopRequest;
+use harness_core::task::run_lock::{self, RunLock};
+use harness_core::task::stop_request::{StopRequest, StopWhen};
 use harness_core::task::store::TaskStore;
 use harness_core::task::{Stage, TaskState, WaitReason};
 use harness_platform::stop::StopSignals;
@@ -27,6 +32,7 @@ pub(crate) fn new_task(
     allow_duplicate: bool,
 ) -> Result<()> {
     let repo = open_repo(project)?;
+    let _lock = RunLock::hold(&repo, task_id)?;
     let config = Config::load(&repo.root().join(HARNESS_DIR))?;
     let same_text = if allow_duplicate {
         SameText::Allow
@@ -73,6 +79,8 @@ pub(crate) async fn until_stopped(
 /// TUI continues with the role they stopped (or the one that was next).
 pub(crate) async fn run(project: &Path, task_id: &str) -> Result<()> {
     let repo = open_repo(project)?;
+    // Held until the run ends: `harness stop` reaches this run through it.
+    let lock = RunLock::hold(&repo, task_id)?;
     // First the task's branch: its settings and skills are the ones to use.
     enter_branch(&repo, task_id)?;
     let harness_dir = repo.root().join(HARNESS_DIR);
@@ -84,13 +92,15 @@ pub(crate) async fn run(project: &Path, task_id: &str) -> Result<()> {
         println!("You stopped {task_id}; it continues now.");
     }
     println!("Running {task_id} (round {})...", state.round);
-    // The command line has no stop buttons; Ctrl+C stops it (`until_stopped`).
-    let no_stop_buttons = StopRequest::new();
+    // The command line has no stop buttons: Ctrl+C stops it (`until_stopped`),
+    // and `harness stop` from another terminal through the lock's stop file.
+    let stop = StopRequest::new();
+    lock.connect(&stop);
     let project = Project {
         config: &config,
         skills: &skills,
         agent_versions: agent.versions(),
-        stop: &no_stop_buttons,
+        stop: &stop,
     };
     let stop = orchestrator::run_project(&repo, &store, &mut state, &agent, project).await?;
     let suggested = suggestion(&store, &state, &stop);
@@ -297,6 +307,7 @@ pub(crate) fn decide(
     notes: &str,
 ) -> Result<()> {
     let repo = open_repo(project)?;
+    let _lock = RunLock::hold(&repo, task_id)?;
     // The user's decision is a commit too: it goes on the task's branch.
     enter_branch(&repo, task_id)?;
     let (store, mut state) = open_task(&repo, task_id)?;
@@ -337,6 +348,27 @@ pub(crate) fn decide(
         println!("Saved. {task_id} is done.");
     } else {
         println!("Saved. Next: harness run {task_id}");
+    }
+    Ok(())
+}
+
+/// `harness stop`: asks the harness running `task_id` to stop; it does
+/// within a second or so and says so in its own window.
+pub(crate) fn stop(project: &Path, task_id: &str, now: bool) -> Result<()> {
+    let repo = open_repo(project)?;
+    let when = if now {
+        StopWhen::Now
+    } else {
+        StopWhen::AfterStep
+    };
+    run_lock::ask_to_stop(&repo, task_id, when)?;
+    if now {
+        println!("Asked {task_id} to stop now. Continue it later with: harness run {task_id}");
+    } else {
+        println!(
+            "Asked {task_id} to stop once the running role has finished. \
+             Continue it later with: harness run {task_id}"
+        );
     }
     Ok(())
 }

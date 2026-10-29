@@ -5,7 +5,10 @@
 //!
 //! The user's stop buttons reach the run through a [`StopRequest`] the screen and
 //! the run share (see `harness_core::task::stop_request`): the run loop reads
-//! it before each role, the agent's process while the agent works.
+//! it before each role, the agent's process while the agent works. The work
+//! holds the project's run lock (`harness_core::task::run_lock`), so a
+//! `harness run` in a terminal cannot work in the same folder at once, and
+//! `harness stop` from a terminal reaches this run too.
 
 use std::future::Future;
 use std::path::{Path, PathBuf};
@@ -24,6 +27,7 @@ use harness_core::task::branch;
 use harness_core::task::handoff::{NextStep, Role, Verdict};
 use harness_core::task::orchestrator::{self, HumanDecision, Project, SameText, StopReason};
 use harness_core::task::pull_request::PullRequest;
+use harness_core::task::run_lock::RunLock;
 use harness_core::task::stop_request::StopRequest;
 use harness_core::task::store::TaskStore;
 use harness_core::task::{Stage, TaskState};
@@ -252,6 +256,9 @@ fn work(job: Job, events: &Sender<Event>, stop: oneshot::Receiver<()>) -> Result
     } = job;
     let root = root.as_path();
     let repo = Repo::open(root).map_err(|e| e.to_string())?;
+    // Held until the work ends, before anything is switched or saved.
+    let lock = RunLock::hold(&repo, lock_name(&request)).map_err(|e| e.to_string())?;
+    lock.connect(&stop_request);
     // An existing task's branch first: its settings are the ones to use, and
     // the user's decision and the roles' work are committed there. A merge stays
     // where the user is: it changes the folder only once everything is checked,
@@ -278,6 +285,7 @@ fn work(job: Job, events: &Sender<Event>, stop: oneshot::Receiver<()>) -> Result
 
     let (store, mut state) = open_task(&repo, &config, request)?;
     let task = state.task_id.clone();
+    lock.set_task(&task).map_err(|e| e.to_string())?;
     let _ = events.send(Event::Started(task.clone()));
     let Some((team, skills)) = agents else {
         let merge = merge_waiting(merging, stop);
@@ -309,6 +317,17 @@ fn work(job: Job, events: &Sender<Event>, stop: oneshot::Receiver<()>) -> Result
         published,
         merged: None,
     })
+}
+
+/// What the run lock says this work is busy with: the task, or a new one.
+fn lock_name(request: &Request) -> &str {
+    match request {
+        Request::New(_) => "a new task",
+        Request::Decide { task, .. }
+        | Request::Continue(task)
+        | Request::Publish(task)
+        | Request::Merge(task) => task,
+    }
 }
 
 /// The task the request is about: a new one made, or the saved one opened

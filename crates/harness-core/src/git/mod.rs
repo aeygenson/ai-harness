@@ -144,10 +144,16 @@ impl Repo {
         fs::write(&path, bytes).map_err(|source| GitError::Io { path, source })
     }
 
-    /// Where `.git/config` is. Git says so itself, because `.git` can also be a
-    /// file pointing elsewhere (a worktree or a submodule).
+    /// Where `.git/config` is.
     fn local_config_path(&self) -> Result<PathBuf, GitError> {
-        let path = self.git(&["rev-parse", "--git-path", "config"])?;
+        self.git_path("config")
+    }
+
+    /// Where `name` is inside git's own folder of this working folder, for
+    /// example `.git/config`. Git says so itself, because `.git` can also be
+    /// a file pointing elsewhere (a worktree or a submodule).
+    pub fn git_path(&self, name: &str) -> Result<PathBuf, GitError> {
+        let path = self.git(&["rev-parse", "--git-path", name])?;
         // A relative answer is relative to the project; `join` keeps an absolute one as it is.
         Ok(self.root.join(path.trim()))
     }
