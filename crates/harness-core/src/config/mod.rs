@@ -129,6 +129,7 @@ pub struct Config {
     #[serde(default = "default_max_rounds")]
     pub max_rounds: u32,
     /// `agent_timeout_minutes`: how long one agent run may take, in minutes, before it is stopped.
+    /// Time the computer slept counts too.
     #[serde(default = "default_timeout")]
     pub agent_timeout_minutes: u64,
     /// `BTreeMap` keeps the roles sorted, so saved files are stable.
