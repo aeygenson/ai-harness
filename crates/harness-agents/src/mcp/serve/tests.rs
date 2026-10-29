@@ -1,4 +1,4 @@
-//! Tests of the read-only MCP server: whole conversations on a fake project.
+//! Tests of the MCP server: whole conversations on a fake project.
 
 use std::fs;
 use std::io::Cursor;
@@ -46,14 +46,14 @@ fn project() -> tempfile::TempDir {
 }
 
 /// Sends `messages` (one per line) and returns the answers.
-fn talk(observer: &Observer, messages: &[Value]) -> Vec<Value> {
+fn talk(server: &Server, messages: &[Value]) -> Vec<Value> {
     let mut input = String::new();
     for message in messages {
         input.push_str(&message.to_string());
         input.push('\n');
     }
     let mut output = Vec::new();
-    observer.serve(Cursor::new(input), &mut output).unwrap();
+    server.serve(Cursor::new(input), &mut output).unwrap();
     String::from_utf8(output)
         .unwrap()
         .lines()
@@ -62,12 +62,12 @@ fn talk(observer: &Observer, messages: &[Value]) -> Vec<Value> {
 }
 
 /// Calls one tool and returns its answer's `result`.
-fn call(observer: &Observer, name: &str, arguments: &Value) -> Value {
+fn call(server: &Server, name: &str, arguments: &Value) -> Value {
     let request = json!({
         "jsonrpc": "2.0", "id": 1, "method": "tools/call",
         "params": { "name": name, "arguments": arguments },
     });
-    talk(observer, &[request]).remove(0)["result"].clone()
+    talk(server, &[request]).remove(0)["result"].clone()
 }
 
 /// The JSON a tool returned in its text block.
@@ -79,10 +79,10 @@ fn json_text(result: &Value) -> Value {
 #[test]
 fn initialize_and_list_answer_but_notifications_get_nothing() {
     let root = project();
-    let observer = Observer::new(root.path());
+    let server = Server::new(root.path());
 
     let answers = talk(
-        &observer,
+        &server,
         &[
             json!({"jsonrpc": "2.0", "id": 1, "method": "initialize",
                    "params": {"protocolVersion": "2025-03-26"}}),
@@ -109,7 +109,7 @@ fn an_unknown_version_gets_the_one_the_server_speaks() {
 #[test]
 fn list_tasks_shows_the_stage_and_the_first_line_as_title() {
     let root = project();
-    let tasks = json_text(&call(&Observer::new(root.path()), "list_tasks", &json!({})));
+    let tasks = json_text(&call(&Server::new(root.path()), "list_tasks", &json!({})));
 
     assert_eq!(tasks[0]["id"], "task-001");
     assert_eq!(tasks[0]["title"], "Build a parser");
@@ -121,7 +121,7 @@ fn list_tasks_shows_the_stage_and_the_first_line_as_title() {
 fn task_status_numbers_the_steps() {
     let root = project();
     let status = json_text(&call(
-        &Observer::new(root.path()),
+        &Server::new(root.path()),
         "task_status",
         &json!({"task": "task-001"}),
     ));
@@ -137,7 +137,7 @@ fn task_status_numbers_the_steps() {
 fn read_step_gives_the_handoff_notes_and_a_clean_log() {
     let root = project();
     let step = json_text(&call(
-        &Observer::new(root.path()),
+        &Server::new(root.path()),
         "read_step",
         &json!({"task": "task-001", "step": 1}),
     ));
@@ -151,14 +151,14 @@ fn read_step_gives_the_handoff_notes_and_a_clean_log() {
 #[test]
 fn a_missing_step_or_task_is_a_tool_error_with_the_reason() {
     let root = project();
-    let observer = Observer::new(root.path());
+    let server = Server::new(root.path());
 
     let no_step = call(
-        &observer,
+        &server,
         "read_step",
         &json!({"task": "task-001", "step": 0}),
     );
-    let no_task = call(&observer, "task_status", &json!({"task": "../etc"}));
+    let no_task = call(&server, "task_status", &json!({"task": "../etc"}));
 
     assert_eq!(no_step["isError"], true);
     assert!(no_step["content"][0]["text"]
@@ -171,10 +171,10 @@ fn a_missing_step_or_task_is_a_tool_error_with_the_reason() {
 #[test]
 fn a_wrong_tool_or_argument_is_a_protocol_error() {
     let root = project();
-    let observer = Observer::new(root.path());
+    let server = Server::new(root.path());
     let ask = |name: &str, arguments: Value| {
         talk(
-            &observer,
+            &server,
             &[json!({"jsonrpc": "2.0", "id": 9, "method": "tools/call",
                      "params": {"name": name, "arguments": arguments}})],
         )
@@ -191,11 +191,11 @@ fn a_wrong_tool_or_argument_is_a_protocol_error() {
 #[test]
 fn broken_json_and_unknown_methods_get_errors() {
     let root = project();
-    let observer = Observer::new(root.path());
+    let server = Server::new(root.path());
     let mut output = Vec::new();
     let input = "not json\n{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"resources/list\"}\n";
 
-    observer.serve(Cursor::new(input), &mut output).unwrap();
+    server.serve(Cursor::new(input), &mut output).unwrap();
 
     let answers: Vec<Value> = String::from_utf8(output)
         .unwrap()
@@ -209,10 +209,10 @@ fn broken_json_and_unknown_methods_get_errors() {
 #[test]
 fn read_settings_and_retro_stats_read_without_writing() {
     let root = project();
-    let observer = Observer::new(root.path());
+    let server = Server::new(root.path());
 
-    let settings = call(&observer, "read_settings", &json!({}));
-    let stats = call(&observer, "retro_stats", &json!({"task": "task-001"}));
+    let settings = call(&server, "read_settings", &json!({}));
+    let stats = call(&server, "retro_stats", &json!({"task": "task-001"}));
 
     assert_eq!(settings["content"][0]["text"], "max_rounds = 5\n");
     assert_eq!(stats["isError"], false);
@@ -226,11 +226,11 @@ fn read_settings_and_retro_stats_read_without_writing() {
 #[test]
 fn wait_for_change_returns_when_the_time_is_up() {
     let root = project();
-    let mut observer = Observer::new(root.path());
-    observer.poll = Duration::from_millis(10);
+    let mut server = Server::new(root.path());
+    server.poll = Duration::from_millis(10);
 
     let answer = json_text(&call(
-        &observer,
+        &server,
         "wait_for_change",
         &json!({"task": "task-001", "seconds": 1}),
     ));
@@ -242,8 +242,8 @@ fn wait_for_change_returns_when_the_time_is_up() {
 #[test]
 fn wait_for_change_returns_when_the_state_changes() {
     let root = project();
-    let mut observer = Observer::new(root.path());
-    observer.poll = Duration::from_millis(10);
+    let mut server = Server::new(root.path());
+    server.poll = Duration::from_millis(10);
     let runs = root.path().join(HARNESS_DIR).join("runs");
     // Another thread plays the user giving more rounds while the agent waits.
     let lisa = std::thread::spawn(move || {
@@ -253,7 +253,7 @@ fn wait_for_change_returns_when_the_state_changes() {
     });
 
     let answer = json_text(&call(
-        &observer,
+        &server,
         "wait_for_change",
         &json!({"task": "task-001", "seconds": 30}),
     ));

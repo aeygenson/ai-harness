@@ -20,19 +20,21 @@ pub fn own_group(command: &mut Command) -> &mut Command {
     command
 }
 
-/// Windows: the started program gets no console of its own and does not
-/// share the starter's, so closing the starter's window does not stop it.
+/// Windows: the started program gets a console without a window. Not
+/// `DETACHED_PROCESS` (no console at all): then every console program it
+/// starts (git, the agents) would open a window of its own.
 #[cfg(windows)]
-const DETACHED_PROCESS: u32 = 0x0000_0008;
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 /// Windows: the started program does not get the Ctrl+C sent to the starter.
 #[cfg(windows)]
 const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
 
 /// Prepares `command` to keep running after the program that starts it has
-/// ended, like `setsid nohup` in a shell: its own process group (Linux,
-/// macOS) or no console shared with the starter (Windows), and no input.
-/// Its output should go to a file; the starter's output may be gone.
+/// ended, like `nohup` in a shell: its own process group (Linux, macOS) or a
+/// hidden console of its own (Windows), and no input. Its output should go
+/// to a file; the starter's output may be gone. On Linux and macOS it stays
+/// in the starter's session (a new session needs `unsafe` code here).
 pub fn detached(command: &mut Command) -> &mut Command {
     #[cfg(unix)]
     {
@@ -42,7 +44,7 @@ pub fn detached(command: &mut Command) -> &mut Command {
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
-        command.creation_flags(DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP);
+        command.creation_flags(CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP);
     }
     command.stdin(Stdio::null())
 }

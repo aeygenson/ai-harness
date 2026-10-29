@@ -166,6 +166,16 @@ fn a_second_harness_is_refused_and_harness_stop_ends_the_run() {
     assert!(stderr(&again).contains("no harness is running task-001"));
 }
 
+/// Asks a background run to stop at once when dropped; a run that has
+/// already ended only makes `harness stop` say so.
+struct StopOnDrop<'a>(&'a Setup, &'a str);
+
+impl Drop for StopOnDrop<'_> {
+    fn drop(&mut self) {
+        let _ = self.0.harness(&["stop", self.1, "--now"]).output();
+    }
+}
+
 /// A conversation with `harness mcp-serve`, one JSON message per line.
 struct Mcp {
     server: RunGuard,
@@ -217,6 +227,8 @@ fn an_agent_creates_starts_and_stops_a_task_through_mcp() {
     let created = mcp.call("create_task", r#"{"description":"Write a CSV export"}"#);
     assert!(created.contains("Created task-002."), "{created}");
 
+    // If an assert below fails, the run started in the background is stopped too.
+    let _stop = StopOnDrop(&setup, "task-002");
     let started = mcp.call("start_run", r#"{"task":"task-002"}"#);
     assert!(started.contains("task-002 is running"), "{started}");
     wait_for("the fake agent never started", || setup.ready.exists());

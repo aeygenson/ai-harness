@@ -1,4 +1,4 @@
-//! What the observer's tools read: tasks, their steps, statistics and settings.
+//! What the server's reading tools read: tasks, their steps, statistics and settings.
 //!
 //! Nothing here writes a file. Every text an agent wrote goes through
 //! `text::safe` before it leaves (handoffs are already cleaned when they are read).
@@ -186,7 +186,7 @@ fn step_folder(step: &Step) -> String {
 }
 
 /// The last `max_chars` characters of `text`, and whether anything was cut.
-fn tail(text: &str, max_chars: usize) -> (String, bool) {
+pub(super) fn tail(text: &str, max_chars: usize) -> (String, bool) {
     let count = text.chars().count();
     if count <= max_chars {
         return (text.to_string(), false);

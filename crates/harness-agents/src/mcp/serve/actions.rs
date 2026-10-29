@@ -6,7 +6,7 @@
 //! task started here and one started in the TUI or a terminal never work in
 //! one folder at once. Design: `docs/design.md`, section 5.8.
 
-use std::fs::{self, File};
+use std::fs::{self, OpenOptions};
 use std::path::Path;
 use std::process::{Child, Command};
 use std::thread;
@@ -20,9 +20,9 @@ use harness_core::task::run_lock::{self, RunLock};
 use harness_core::task::stop_request::StopWhen;
 use harness_core::task::store;
 use harness_core::text::safe;
-use harness_platform::process;
+use harness_platform::{process, program};
 
-use super::read::LOG_TAIL_CHARS;
+use super::read::{tail, LOG_TAIL_CHARS};
 
 /// How long `start_run` watches the new run before it answers: long enough
 /// to catch a run that fails at once (a missing login, a busy project),
@@ -31,6 +31,10 @@ const START_WATCH: Duration = Duration::from_secs(3);
 
 /// How often `start_run` looks whether the new run has already ended.
 const START_POLL: Duration = Duration::from_millis(100);
+
+/// The longest task description `create_task` takes: a task is a few
+/// paragraphs, and the text is committed and shown to every role.
+const MAX_DESCRIPTION_CHARS: usize = 20_000;
 
 /// `create_task`: a new task with `description`, id `task` or the next free
 /// one, made and committed like `harness task new`.
@@ -42,6 +46,12 @@ pub(super) fn create_task(
 ) -> Result<String, String> {
     if description.trim().is_empty() {
         return Err("the description is empty: say what the task should do".into());
+    }
+    if description.chars().count() > MAX_DESCRIPTION_CHARS {
+        return Err(format!(
+            "the description is longer than {MAX_DESCRIPTION_CHARS} characters; \
+             put the details in a file of the project and refer to it"
+        ));
     }
     let repo = Repo::open(root).map_err(|e| e.to_string())?;
     let mut lock = RunLock::hold(&repo).map_err(|e| e.to_string())?;
@@ -68,18 +78,20 @@ pub(super) fn create_task(
 /// it is clearly running or has already ended.
 pub(super) fn start_run(root: &Path, harness: &Path, task: &str) -> Result<String, String> {
     let repo = Repo::open(root).map_err(|e| e.to_string())?;
-    check_task_exists(&repo, task)?;
-    // Only a test: the run takes the lock itself, and two holders would
-    // refuse each other. Dropped before the run starts.
-    drop(RunLock::hold(&repo).map_err(|e| e.to_string())?);
+    // First, because it also checks that the id is a task id.
     let log_path = run_lock::background_log(&repo, task).map_err(|e| e.to_string())?;
+    check_task_exists(&repo, task)?;
+    // Only a check that the project is free: the run takes the lock itself,
+    // and two holders would refuse each other. Dropped before the run starts.
+    drop(RunLock::hold(&repo).map_err(|e| e.to_string())?);
     let child = spawn_run(root, harness, task, &log_path)?;
     let ended = watch_start(child);
     let log = read_tail(&log_path);
     match ended {
         None => Ok(format!(
-            "{task} is running. Follow it with wait_for_change and task_status; \
-             stop it with stop_run. What the harness prints is in read_run_log."
+            "{task} is running (it may still fail while starting: a missing login, \
+             for example). Follow it with wait_for_change and task_status; stop it \
+             with stop_run. What the harness prints is in read_run_log."
         )),
         Some(true) => Ok(format!("The run of {task} has already ended:\n{log}")),
         Some(false) => Err(format!("The run of {task} failed:\n{log}")),
@@ -110,7 +122,7 @@ pub(super) fn stop_run(root: &Path, task: &str, now: bool) -> Result<String, Str
 pub(super) fn read_run_log(root: &Path, task: &str) -> Result<String, String> {
     let repo = Repo::open(root).map_err(|e| e.to_string())?;
     let path = run_lock::background_log(&repo, task).map_err(|e| e.to_string())?;
-    if !path.is_file() {
+    if !is_plain_file(&path) {
         return Err(format!("{task} has not been started with start_run yet"));
     }
     Ok(read_tail(&path))
@@ -135,8 +147,25 @@ fn spawn_run(root: &Path, harness: &Path, task: &str, log: &Path) -> Result<Chil
     if let Some(folder) = log.parent() {
         fs::create_dir_all(folder).map_err(cannot)?;
     }
-    let output = File::create(log).map_err(cannot)?;
+    // A fresh file: removing the old name first and `create_new` never write
+    // through a link (or into a hard-linked file) put in its place.
+    match fs::remove_file(log) {
+        Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(cannot(e)),
+        _ => {}
+    }
+    let output = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(log)
+        .map_err(cannot)?;
     let errors = output.try_clone().map_err(cannot)?;
+    // After `harness update` this program's own file may be gone (Linux
+    // then names it "... (deleted)"): the new one is found in PATH.
+    let harness = if harness.is_file() {
+        harness.to_path_buf()
+    } else {
+        program::resolve("harness")
+    };
     let mut command = Command::new(harness);
     command
         .arg("-C")
@@ -164,16 +193,19 @@ fn watch_start(mut child: Child) -> Option<bool> {
     None
 }
 
-/// The end of the log at `path`, without terminal codes.
+/// The end of the log at `path`, without terminal codes. Only a plain file
+/// is read: a link an agent put there could point at a private file.
 fn read_tail(path: &Path) -> String {
+    if !is_plain_file(path) {
+        return String::new();
+    }
     let text = fs::read(path).unwrap_or_default();
-    let text = String::from_utf8_lossy(&text);
-    let start = text
-        .char_indices()
-        .rev()
-        .nth(LOG_TAIL_CHARS)
-        .map_or(0, |(index, _)| index);
-    safe(&text[start..])
+    tail(&safe(&String::from_utf8_lossy(&text)), LOG_TAIL_CHARS).0
+}
+
+/// Is `path` a plain file (not a link or folder)?
+fn is_plain_file(path: &Path) -> bool {
+    fs::symlink_metadata(path).is_ok_and(|meta| meta.file_type().is_file())
 }
 
 #[cfg(test)]
@@ -264,6 +296,39 @@ mod tests {
         let _other = RunLock::hold(&repo).unwrap();
         let busy = start_run(dir.path(), &harness, "task-001").unwrap_err();
         assert!(busy.contains("another harness is working"), "{busy}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_log_is_never_written_or_read_through_a_link() {
+        let (dir, repo) = project();
+        create_task(dir.path(), None, "Build a parser", false).unwrap();
+        let private = dir.path().join("private");
+        fs::write(&private, "secret").unwrap();
+        let log = run_lock::background_log(&repo, "task-001").unwrap();
+        fs::create_dir_all(log.parent().unwrap()).unwrap();
+        std::os::unix::fs::symlink(&private, &log).unwrap();
+
+        let unread = read_run_log(dir.path(), "task-001").unwrap_err();
+        assert!(!unread.contains("secret"), "{unread}");
+        let harness = harness_fake::install(&dir.path().join("bin"), "harness", "print ran\n");
+        start_run(dir.path(), &harness, "task-001").unwrap();
+
+        assert_eq!(fs::read_to_string(&private).unwrap(), "secret");
+        assert!(read_run_log(dir.path(), "task-001")
+            .unwrap()
+            .contains("ran"));
+    }
+
+    #[test]
+    fn a_bad_task_id_or_a_huge_description_is_refused_first() {
+        let (dir, _repo) = project();
+        let harness = dir.path().join("no-harness-needed");
+        let bad = start_run(dir.path(), &harness, "../x").unwrap_err();
+        assert!(bad.contains("../x") || bad.contains("task id"), "{bad}");
+        let huge = "x".repeat(MAX_DESCRIPTION_CHARS + 1);
+        let refused = create_task(dir.path(), None, &huge, false).unwrap_err();
+        assert!(refused.contains("longer than"), "{refused}");
     }
 
     #[test]
