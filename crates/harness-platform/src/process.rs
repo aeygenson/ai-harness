@@ -4,7 +4,8 @@
 //!
 //! On Linux and macOS the program gets its own process group, and the whole
 //! group is stopped. On Windows `taskkill /T` stops the program and every
-//! process it started.
+//! process it started. [`detached`] is the opposite: a program that keeps
+//! running after its starter has ended.
 
 use std::io;
 use std::process::{Child, Command, Stdio};
@@ -17,6 +18,33 @@ pub fn own_group(command: &mut Command) -> &mut Command {
         command.process_group(0);
     }
     command
+}
+
+/// Windows: the started program gets no console of its own and does not
+/// share the starter's, so closing the starter's window does not stop it.
+#[cfg(windows)]
+const DETACHED_PROCESS: u32 = 0x0000_0008;
+
+/// Windows: the started program does not get the Ctrl+C sent to the starter.
+#[cfg(windows)]
+const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
+
+/// Prepares `command` to keep running after the program that starts it has
+/// ended, like `setsid nohup` in a shell: its own process group (Linux,
+/// macOS) or no console shared with the starter (Windows), and no input.
+/// Its output should go to a file; the starter's output may be gone.
+pub fn detached(command: &mut Command) -> &mut Command {
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        command.process_group(0);
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP);
+    }
+    command.stdin(Stdio::null())
 }
 
 /// Stops `child` and everything it started (for a child started with

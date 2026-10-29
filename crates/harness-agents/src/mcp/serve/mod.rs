@@ -1,13 +1,14 @@
-//! `harness mcp-serve`: the harness as an MCP server that only reads.
+//! `harness mcp-serve`: the harness as an MCP server.
 //!
 //! An AI agent on the user's computer (Claude Code, Codex, Gemini, ...) starts it
 //! like any MCP server and talks to it on standard input and output, one JSON
 //! message per line. Through it the agent sees the project's tasks, their
-//! steps, logs, statistics and settings, and can explain what happened or
-//! propose a change to the harness. It cannot change anything: the process
-//! runs on its own and the decisions are the user's, made in the TUI.
-//! Design: `docs/design.md`, section 5.8.
+//! steps, logs, statistics and settings, and drives the tasks the way the
+//! user does in the TUI: it creates a task, starts and stops its roles.
+//! Every agent that speaks MCP can do this, not only one that can run shell
+//! commands. Design: `docs/design.md`, section 5.8.
 
+mod actions;
 mod read;
 mod tools;
 
@@ -37,18 +38,22 @@ const METHOD_NOT_FOUND: i64 = -32601;
 const INVALID_PARAMS: i64 = -32602;
 
 /// What the agent reads when it connects, so it knows its place.
-const INSTRUCTIONS: &str = "A read-only view of the AI harness in this project: its tasks, \
-their steps (each role's handoff, notes and log), retrospective statistics and settings. \
-You cannot change anything here, and you should not try to steer a task: the harness runs \
-the roles on its own and the person running it makes every decision in the harness itself. \
-Use these tools to explain what happened and why. If the process needs something new, \
-propose a change to the harness (a button, a skill, a check), not a way around it.";
+const INSTRUCTIONS: &str = "The AI harness in this project: a conductor that leads each task \
+through roles (architect, developer, tester, security), each an AI agent. Read its tasks, \
+their steps (each role's handoff, notes and log), retrospective statistics and settings, and \
+drive tasks for the person you work for: create_task, start_run (runs in the background; \
+follow it with wait_for_change and task_status), stop_run and read_run_log. Only one harness \
+works in a project at a time. Decisions that are the person's (approving a design, accepting \
+a result, merging) are theirs: ask them, do not decide for them.";
 
-/// The read-only MCP server for one project.
+/// The MCP server for one project.
 #[derive(Debug, Clone)]
 pub struct Observer {
+    root: PathBuf,
     harness_dir: PathBuf,
     runs: PathBuf,
+    /// The `harness` program `start_run` starts: this program itself.
+    harness: PathBuf,
     poll: Duration,
 }
 
@@ -57,10 +62,19 @@ impl Observer {
     pub fn new(root: &Path) -> Self {
         let harness_dir = root.join(HARNESS_DIR);
         Self {
+            root: root.to_path_buf(),
             runs: harness_dir.join("runs"),
             harness_dir,
+            // Without its own path (very rare) `harness` is looked up in PATH.
+            harness: std::env::current_exe().unwrap_or_else(|_| PathBuf::from("harness")),
             poll: POLL,
         }
+    }
+
+    /// The same server starting `harness` as the harness program: a fake in tests.
+    pub fn with_program(mut self, harness: &Path) -> Self {
+        self.harness = harness.to_path_buf();
+        self
     }
 
     /// Answers the messages on `input` until it ends, writing the answers to `output`.
@@ -108,6 +122,8 @@ impl Observer {
         let empty = json!({});
         let arguments = params.get("arguments").unwrap_or(&empty);
         let folders = Folders {
+            root: &self.root,
+            harness: &self.harness,
             harness_dir: &self.harness_dir,
             runs: &self.runs,
         };

@@ -226,6 +226,17 @@ fn remove_stop_files(dir: &Path) -> Result<(), RunLockError> {
     Ok(())
 }
 
+/// Where the output of a `harness run` of `task_id` started in the background
+/// goes (by the MCP server): `.git/harness/run-<task>.log`, out of git's view.
+///
+/// # Errors
+///
+/// The id is not a task id, or git could not say where its folder is.
+pub fn background_log(repo: &Repo, task_id: &str) -> Result<PathBuf, RunLockError> {
+    check_task_id(task_id)?;
+    Ok(lock_dir(repo)?.join(format!("run-{task_id}.log")))
+}
+
 /// `.git/harness` of this working folder.
 fn lock_dir(repo: &Repo) -> Result<PathBuf, RunLockError> {
     Ok(repo.git_path(LOCK_DIR)?)

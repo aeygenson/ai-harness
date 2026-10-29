@@ -1,8 +1,7 @@
-//! The observer's tools: their descriptions for `tools/list` and the call of one.
+//! The server's tools: their descriptions for `tools/list` and the call of one.
 //!
-//! Every tool only reads, and says so (`readOnlyHint`), so an agent may call
-//! them without asking. There is on purpose no tool that approves, sends work
-//! back, adds rounds or starts a task: those are decisions made in the TUI.
+//! The reading tools say so (`readOnlyHint`), so an agent may call them
+//! without asking; the tools that act (see `actions`) do not.
 
 use std::fmt;
 use std::path::Path;
@@ -10,7 +9,7 @@ use std::time::Duration;
 
 use serde_json::{json, Value};
 
-use super::read;
+use super::{actions, read};
 
 /// How long `wait_for_change` waits when the agent does not say.
 const DEFAULT_WAIT_SECONDS: u64 = 60;
@@ -39,9 +38,13 @@ impl fmt::Display for CallError {
     }
 }
 
-/// Where the tools read from.
+/// Where the tools read from and work in.
 #[derive(Debug, Clone)]
 pub(super) struct Folders<'a> {
+    /// The project folder (a git repository).
+    pub(super) root: &'a Path,
+    /// The `harness` program `start_run` starts.
+    pub(super) harness: &'a Path,
     /// The project's `.harness` folder (with `harness.toml`).
     pub(super) harness_dir: &'a Path,
     /// The task folders, `.harness/runs`.
@@ -99,6 +102,37 @@ pub(super) fn definitions() -> Value {
             }),
             &["task"],
         ),
+        action(
+            "create_task",
+            "Creates a task and commits it, like `harness task new`. Refused when an unfinished task has the same text (unless allow_duplicate) or another harness works in the project.",
+            &json!({
+                "description": { "type": "string", "description": "What the task should do; the first line is its title." },
+                "task": { "type": "string", "description": "The id, for example task-012; the next free one if left out." },
+                "allow_duplicate": { "type": "boolean", "description": "Create it even if an unfinished task has the same text." },
+            }),
+            &["description"],
+        ),
+        action(
+            "start_run",
+            "Starts the task's roles in the background, like `harness run`, and answers within a few seconds. It runs until the task is done or needs a person; a stopped task continues, a done one is sent to GitHub again.",
+            &json!({ "task": task }),
+            &["task"],
+        ),
+        action(
+            "stop_run",
+            "Asks the harness running the task (here, in the TUI or a terminal) to stop once the running role has finished, or at once with now.",
+            &json!({
+                "task": task,
+                "now": { "type": "boolean", "description": "Stop the running agent at once; its unfinished work is kept." },
+            }),
+            &["task"],
+        ),
+        tool(
+            "read_run_log",
+            "The end of what the harness printed in the last run started with start_run: why it stopped and what comes next.",
+            &json!({ "task": task }),
+            &["task"],
+        ),
     ])
 }
 
@@ -126,6 +160,27 @@ pub(super) fn call(
         "read_settings" => {
             return read::read_settings(folders.harness_dir).map_err(CallError::Failed);
         }
+        "create_task" => {
+            let description = text_argument(arguments, "description")?;
+            let task = optional_text_argument(arguments, "task")?;
+            let duplicate = bool_argument(arguments, "allow_duplicate")?;
+            return actions::create_task(folders.root, task, description, duplicate)
+                .map_err(CallError::Failed);
+        }
+        "start_run" => {
+            let task = text_argument(arguments, "task")?;
+            return actions::start_run(folders.root, folders.harness, task)
+                .map_err(CallError::Failed);
+        }
+        "stop_run" => {
+            let now = bool_argument(arguments, "now")?;
+            return actions::stop_run(folders.root, text_argument(arguments, "task")?, now)
+                .map_err(CallError::Failed);
+        }
+        "read_run_log" => {
+            return actions::read_run_log(folders.root, text_argument(arguments, "task")?)
+                .map_err(CallError::Failed);
+        }
         "wait_for_change" => {
             let seconds = number_argument(arguments, "seconds")?
                 .unwrap_or(DEFAULT_WAIT_SECONDS)
@@ -139,13 +194,28 @@ pub(super) fn call(
     serde_json::to_string_pretty(&value).map_err(|e| CallError::Failed(e.to_string()))
 }
 
-/// One entry of the tool list. All tools only read.
+/// One entry of the tool list, for a tool that only reads.
 fn tool(name: &str, description: &str, properties: &Value, required: &[&str]) -> Value {
+    entry(name, description, properties, required, true)
+}
+
+/// One entry of the tool list, for a tool that changes something.
+fn action(name: &str, description: &str, properties: &Value, required: &[&str]) -> Value {
+    entry(name, description, properties, required, false)
+}
+
+fn entry(
+    name: &str,
+    description: &str,
+    properties: &Value,
+    required: &[&str],
+    read_only: bool,
+) -> Value {
     json!({
         "name": name,
         "description": description,
         "inputSchema": { "type": "object", "properties": properties, "required": required },
-        "annotations": { "readOnlyHint": true },
+        "annotations": { "readOnlyHint": read_only },
     })
 }
 
@@ -167,6 +237,17 @@ fn optional_text_argument<'a>(
     }
 }
 
+/// A yes-or-no argument; left out means no.
+fn bool_argument(arguments: &Value, name: &str) -> Result<bool, CallError> {
+    match arguments.get(name) {
+        None | Some(Value::Null) => Ok(false),
+        Some(Value::Bool(value)) => Ok(*value),
+        Some(_) => Err(CallError::BadArguments(format!(
+            "{name:?} must be true or false"
+        ))),
+    }
+}
+
 /// A whole-number argument that may be left out.
 fn number_argument(arguments: &Value, name: &str) -> Result<Option<u64>, CallError> {
     match arguments.get(name) {
@@ -182,13 +263,17 @@ mod tests {
     use super::*;
 
     #[test]
-    fn every_tool_only_reads() {
+    fn only_the_reading_tools_say_they_only_read() {
         let tools = definitions();
-        let tools = tools.as_array().unwrap();
-        assert_eq!(tools.len(), 6);
-        assert!(tools
+        let acting: Vec<&str> = tools
+            .as_array()
+            .unwrap()
             .iter()
-            .all(|t| t["annotations"]["readOnlyHint"] == true));
+            .filter(|t| t["annotations"]["readOnlyHint"] == false)
+            .map(|t| t["name"].as_str().unwrap())
+            .collect();
+        assert_eq!(acting, ["create_task", "start_run", "stop_run"]);
+        assert_eq!(tools.as_array().unwrap().len(), 10);
     }
 
     #[test]
@@ -207,5 +292,10 @@ mod tests {
             Err(CallError::BadArguments(_))
         ));
         assert_eq!(number_argument(&json!({}), "step"), Ok(None));
+        assert_eq!(bool_argument(&json!({}), "now"), Ok(false));
+        assert!(matches!(
+            bool_argument(&json!({ "now": "yes" }), "now"),
+            Err(CallError::BadArguments(_))
+        ));
     }
 }

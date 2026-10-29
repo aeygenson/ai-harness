@@ -95,7 +95,7 @@ fn initialize_and_list_answer_but_notifications_get_nothing() {
     assert_eq!(answers[0]["result"]["protocolVersion"], "2025-03-26");
     assert_eq!(answers[0]["result"]["serverInfo"]["name"], "harness");
     assert_eq!(answers[1]["id"], 2);
-    assert_eq!(answers[1]["result"]["tools"].as_array().unwrap().len(), 6);
+    assert_eq!(answers[1]["result"]["tools"].as_array().unwrap().len(), 10);
 }
 
 #[test]
