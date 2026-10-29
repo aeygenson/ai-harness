@@ -4,11 +4,14 @@
 //! like any MCP server and talks to it on standard input and output, one JSON
 //! message per line. Through it the agent sees the project's tasks, their
 //! steps, logs, statistics and settings, and drives the tasks the way the
-//! user does in the TUI: it creates a task, starts and stops its roles.
+//! user does in the TUI: it creates a task, starts and stops its roles, and
+//! passes on the user's decisions.
 //! Every agent that speaks MCP can do this, not only one that can run shell
 //! commands. Design: `docs/design.md`, section 5.8.
 
 mod actions;
+mod arguments;
+mod decisions;
 mod read;
 mod tools;
 
@@ -47,8 +50,10 @@ follow it with wait_for_change and task_status), stop_run and read_run_log. This
 answers one call at a time, so wait in short steps (about a minute) to stay able to stop a \
 run. Only one harness works in a project at a time, and while a run goes it switches \
 branches and commits in the project folder: do not change files there yourself meanwhile. \
-Decisions that are the person's (approving a design, accepting a result, merging) are \
-theirs: ask them, do not decide for them.";
+Decisions on a waiting task (decide: approve a design, answer a role, send work back; \
+finish_task: accept the result) are the person's: make them only when they told you what \
+to decide, and pass their own words to finish_task. Pass seen_steps and seen_stage from task_status, so a \
+decision never lands on a task that has moved on.";
 
 /// The MCP server for one project.
 #[derive(Debug, Clone)]
