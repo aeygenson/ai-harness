@@ -835,10 +835,18 @@ claude mcp add harness -- harness -C ~/code/app mcp-serve
 [mcp_servers.harness]
 command = "harness"
 args = ["-C", "/home/lisa/code/app", "mcp-serve"]
+# Без строки ниже `codex exec` (approval_policy = never) отказывает инструментам,
+# которые что-то меняют: «MCP tool call requires approval»
+default_tools_approval_mode = "approve"
 
 # Gemini CLI: ~/.gemini/settings.json
 { "mcpServers": { "harness": { "command": "harness", "args": ["-C", "/home/lisa/code/app", "mcp-serve"] } } }
 ```
+
+Проверено вживую (2026-10-29, codex-cli 0.165.0): Codex провёл задачу только через MCP —
+создал, запустил, утвердил дизайн, остановил разработчика, закрыл задачу дословными
+словами Лизы. Для одного запуска без изменения настроек:
+`codex exec -c mcp_servers.harness.command=harness -c 'mcp_servers.harness.args=["-C","<проект>","mcp-serve"]' -c mcp_servers.harness.default_tools_approval_mode="approve" ...`.
 
 ---
 
