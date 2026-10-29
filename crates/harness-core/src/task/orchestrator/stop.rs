@@ -83,6 +83,9 @@ pub enum StopReason {
         put_back: Vec<PathBuf>,
         /// Files outside the project that changed during the role.
         reported: Vec<PathBuf>,
+        /// Files in git's own folders that changed and could not be put back
+        /// (see [`crate::task::tripwire::Changes::not_put_back`]).
+        not_put_back: Vec<PathBuf>,
     },
     /// While the role was running, the repository's settings (`.git/config`)
     /// changed, where a setting can make git run any command. The role or
@@ -104,9 +107,6 @@ pub enum RunError {
     /// The task could not be put on its own branch.
     #[error(transparent)]
     Branch(#[from] BranchError),
-    /// Reading or putting back git's hooks or `info/` failed.
-    #[error("cannot check git's hooks: {0}")]
-    Tripwire(#[from] std::io::Error),
     /// The user wanted to finish the task while a role's unfinished work is still
     /// uncommitted in the folder; the task is not finished.
     #[error(

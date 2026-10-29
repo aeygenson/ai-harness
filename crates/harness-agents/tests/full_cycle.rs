@@ -861,11 +861,13 @@ async fn hooks_and_files_outside_the_project_are_noticed() {
         role,
         put_back,
         reported,
+        not_put_back,
     } = stop
     else {
         panic!("{stop:?}");
     };
     assert_eq!(role, Role::Developer);
+    assert_eq!(not_put_back, Vec::<std::path::PathBuf>::new());
     assert_eq!(put_back.len(), 1);
     assert!(put_back[0].ends_with("hooks/pre-commit"), "{put_back:?}");
     assert!(!hook.exists());
