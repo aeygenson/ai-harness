@@ -41,7 +41,7 @@ pub use create::{
 pub use human::{record_human_decision, HumanDecision};
 pub use manual::continue_stopped;
 pub use size::oversized_changes;
-pub use stop::{RunError, StopReason};
+pub use stop::{GitAfterRole, RunError, StopReason};
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};

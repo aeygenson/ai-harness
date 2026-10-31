@@ -14,7 +14,9 @@ use harness_core::git::{Repo, HARNESS_DIR};
 use harness_core::skills::Skills;
 use harness_core::task::branch;
 use harness_core::task::handoff::{AnswerTo, NextStep, Role, Verdict, MAX_REASON_CHARS};
-use harness_core::task::orchestrator::{self, HumanDecision, Project, SameText, StopReason};
+use harness_core::task::orchestrator::{
+    self, GitAfterRole, HumanDecision, Project, SameText, StopReason,
+};
 use harness_core::task::run_lock::{self, RunLock};
 use harness_core::task::stop_request::{StopRequest, StopWhen};
 use harness_core::task::store::TaskStore;
@@ -250,7 +252,13 @@ fn explain(stop: &StopReason, task_id: &str, suggested: Option<&AnswerTo>) -> St
             put_back,
             reported,
             not_put_back,
-        } => hidden_changes_text(*role, put_back, reported, not_put_back),
+            config_put_back,
+            git,
+        } => {
+            let mut text = hidden_changes_text(*role, put_back, reported, not_put_back);
+            text.push_str(&also_changed_text(*config_put_back, git));
+            text
+        }
         StopReason::GitConfigChanged(role) => format!(
             "While the {role} was working, the project's git settings (.git/config) \
              changed. The role may have done it, or someone else working in this repository \
@@ -312,6 +320,33 @@ fn hidden_changes_text(
     }
     text.push_str("\nThe project changes are left uncommitted for you to check.");
     text
+}
+
+/// What else the tripwire's stop message says: that `.git/config` was put
+/// back, and what git said about the commits and branches.
+fn also_changed_text(config_put_back: bool, git: &GitAfterRole) -> String {
+    let mut text = String::new();
+    if config_put_back {
+        text.push_str(
+            "\nThe project's git settings (.git/config) changed too; the old ones are back: \
+             if the change was yours, make it again after the role.",
+        );
+    }
+    let git_text = match git {
+        GitAfterRole::Same | GitAfterRole::NotChecked => String::new(),
+        GitAfterRole::Changed => "\nA new git commit appeared or the git branches changed too. \
+             Check with `git log`, `git branch` and `git status` that the commits and branches \
+             are the ones you expect and that the task's branch is checked out."
+            .to_string(),
+        // Git's message can hold names the agent chose.
+        GitAfterRole::Failed(error) => format!(
+            "\nGit could not run after the role ({}); a changed file above may be the \
+             cause. Once git works again, check with `git log` and `git branch` that the \
+             commits and branches are the ones you expect.",
+            harness_core::text::safe(error)
+        ),
+    };
+    text + &git_text
 }
 
 /// `harness approve` / `harness reject`: writes the user's decision as a handoff
@@ -479,12 +514,31 @@ mod tests {
     }
 
     #[test]
+    fn the_tripwire_message_also_tells_about_the_settings_and_git() {
+        assert_eq!(also_changed_text(false, &GitAfterRole::Same), "");
+
+        let config = also_changed_text(true, &GitAfterRole::Same);
+        let committed = also_changed_text(false, &GitAfterRole::Changed);
+        let failed = also_changed_text(false, &GitAfterRole::Failed("bad\u{1b}[2J".into()));
+
+        assert!(config.contains(".git/config) changed too"), "{config}");
+        assert!(committed.contains("`git log`"), "{committed}");
+        assert!(
+            failed.contains("Git could not run") && failed.contains("bad"),
+            "{failed}"
+        );
+        assert!(!failed.contains('\u{1b}'), "{failed}");
+    }
+
+    #[test]
     fn hooks_not_put_back_are_named_without_terminal_commands() {
         let stop = StopReason::HiddenChanges {
             role: Role::Developer,
             put_back: Vec::new(),
             reported: Vec::new(),
             not_put_back: vec![PathBuf::from("hooks/pre-commit\u{1b}[2J")],
+            config_put_back: false,
+            git: GitAfterRole::NotChecked,
         };
 
         let text = explain(&stop, "task-001", None);
@@ -506,6 +560,8 @@ mod tests {
                 put_back: vec![PathBuf::from("h")],
                 reported: Vec::new(),
                 not_put_back: Vec::new(),
+                config_put_back: false,
+                git: GitAfterRole::Same,
             },
         ];
 

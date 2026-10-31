@@ -94,7 +94,9 @@ enum Event {
     Started(String),
     /// The task's branch was checked out.
     SwitchedBranch,
-    Finished(Result<Outcome, String>),
+    /// The work ended with this result. Boxed: an outcome is large (it can
+    /// hold whole lists of files), and the other events are small.
+    Finished(Box<Result<Outcome, String>>),
 }
 
 /// A thread that runs agents. Dropping it (the TUI quits, the project is
@@ -214,7 +216,7 @@ impl Running {
             process::set_live_log(Some(log));
             let result = work(job, &events, stop);
             process::set_live_log(None);
-            let _ = events.send(Event::Finished(result));
+            let _ = events.send(Event::Finished(Box::new(result)));
         });
         Self {
             events: events_rx,
@@ -239,7 +241,7 @@ impl Running {
             match event {
                 Event::Started(task) => self.task = Some(task),
                 Event::SwitchedBranch => self.switched_branch = true,
-                Event::Finished(result) => return Some(result),
+                Event::Finished(result) => return Some(*result),
             }
         }
         None
