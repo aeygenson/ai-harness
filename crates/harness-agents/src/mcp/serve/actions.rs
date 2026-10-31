@@ -8,7 +8,7 @@
 
 use std::fs::{self, OpenOptions};
 use std::path::Path;
-use std::process::{Child, Command};
+use std::process::Child;
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -166,14 +166,14 @@ fn spawn_run(root: &Path, harness: &Path, task: &str, log: &Path) -> Result<Chil
     } else {
         program::resolve("harness")
     };
-    let mut command = Command::new(harness);
+    let mut command = process::detached_command(&harness, &format!("harness run {task}"));
     command
         .arg("-C")
         .arg(root)
         .args(["run", task])
         .stdout(output)
         .stderr(errors);
-    process::detached(&mut command).spawn().map_err(cannot)
+    command.spawn().map_err(cannot)
 }
 
 /// Watches a new run for [`START_WATCH`]: `None` while it still runs (then
