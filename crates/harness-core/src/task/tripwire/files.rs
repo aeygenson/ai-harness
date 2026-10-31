@@ -1,4 +1,5 @@
-//! Reading one watched file into a [`Content`], and writing it back.
+//! Reading one watched file or folder into a [`Content`], writing it back,
+//! and giving the folders their access rights back.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -23,6 +24,10 @@ pub(super) enum Content {
         bytes: Vec<u8>,
         permissions: fs::Permissions,
     },
+    /// A folder and its access rights ([`harness_platform::file::folder_mode`]).
+    /// It is watched on its own: an empty folder in place of a hook, or a
+    /// folder that others may now write to, is a change too.
+    Folder(u32),
     /// A symbolic link, and where it points (not followed: the file it
     /// points to may be anywhere and is not watched).
     Link(PathBuf),
@@ -40,25 +45,41 @@ pub(super) enum Content {
     Unreadable(io::ErrorKind),
 }
 
-/// Adds `path` to `files`: a folder with every file in it (at any depth),
-/// anything else (a file, a link) as one entry. A file or folder that cannot
-/// be read is an [`Content::Unreadable`] entry, so one such file, maybe
-/// planted on purpose, does not stop the check of all the others.
+/// Adds `path` to `files`: a folder as one entry and every file and folder
+/// in it (at any depth), anything else (a file, a link) as one entry. A file
+/// or folder that cannot be read is an [`Content::Unreadable`] entry, so one
+/// such file, maybe planted on purpose, does not stop the check of all the
+/// others.
+///
+/// Each folder's permissions are noted *before* the folder is unlocked for
+/// reading, and it is left unlocked: [`put_back_folder_modes`] gives the
+/// folders their noted permissions back.
 pub(super) fn add_tree(path: &Path, files: &mut BTreeMap<PathBuf, Option<Content>>) {
     // `symlink_metadata` does not follow a link: a link, even one in place of
     // the whole folder, is one entry, and the files it points to are not read.
     match fs::symlink_metadata(path) {
-        Ok(meta) if meta.is_dir() => match fs::read_dir(path) {
-            Ok(entries) => {
-                for entry in entries {
-                    match entry {
-                        Ok(entry) => add_tree(&entry.path(), files),
-                        Err(e) => unreadable(path, &e, files),
+        Ok(meta) if meta.is_dir() => {
+            files.insert(
+                path.to_path_buf(),
+                Some(Content::Folder(harness_platform::file::folder_mode(&meta))),
+            );
+            // An agent may have locked the folder (`chmod 500`) so that
+            // nothing in it can be read or removed. When unlocking fails,
+            // what is still locked shows up as unreadable, or later as not
+            // put back, so the error itself is not needed.
+            let _ = harness_platform::file::unlock_folder(path);
+            match fs::read_dir(path) {
+                Ok(entries) => {
+                    for entry in entries {
+                        match entry {
+                            Ok(entry) => add_tree(&entry.path(), files),
+                            Err(e) => unreadable(path, &e, files),
+                        }
                     }
                 }
+                Err(e) => unreadable(path, &e, files),
             }
-            Err(e) => unreadable(path, &e, files),
-        },
+        }
         Ok(_) => {
             let content = read(path).unwrap_or_else(|e| Some(Content::Unreadable(e.kind())));
             files.insert(path.to_path_buf(), content);
@@ -119,7 +140,7 @@ pub(super) fn put_back(path: &Path, before: Option<&Content>) -> io::Result<()> 
     }
     let before = match before {
         None => return Ok(()),
-        Some(content @ (Content::File { .. } | Content::Link(_))) => content,
+        Some(content @ (Content::File { .. } | Content::Folder(_) | Content::Link(_))) => content,
         // No copy was kept, so the changed file can only be removed.
         Some(Content::Summary { .. } | Content::Special | Content::Unreadable(_)) => {
             return Err(io::Error::other(
@@ -146,7 +167,48 @@ pub(super) fn put_back(path: &Path, before: Option<&Content>) -> io::Result<()> 
             // snapshot keeps its copy.
             file.set_permissions(permissions.clone())
         }
+        // Its permissions come back at the end, with all the other folders'.
+        Content::Folder(_) => fs::create_dir(path),
         Content::Link(target) => harness_platform::file::make_link(target, path),
         Content::Summary { .. } | Content::Special | Content::Unreadable(_) => Ok(()),
     }
+}
+
+/// Gives every folder in `files` that is still a folder the access rights
+/// noted there, and returns those it could not. Folders at or below a path
+/// in `skip` are left alone: something there could not be put back, maybe a
+/// link to elsewhere, and a folder below it would be another one. The
+/// deepest folders come first: a parent made read-only again would not let
+/// its folders change.
+pub(super) fn put_back_folder_modes(
+    files: &BTreeMap<PathBuf, Option<Content>>,
+    skip: &[PathBuf],
+) -> Vec<PathBuf> {
+    let mut failed = Vec::new();
+    // The map is sorted, so a folder comes before what is in it; `rev` turns that round.
+    for (path, content) in files.iter().rev() {
+        let Some(Content::Folder(mode)) = content else {
+            continue;
+        };
+        if skip.iter().any(|skipped| path.starts_with(skipped)) {
+            continue;
+        }
+        let meta = match fs::symlink_metadata(path) {
+            Ok(meta) => meta,
+            // It was not made again; that failure is already listed.
+            Err(e) if e.kind() == io::ErrorKind::NotFound => continue,
+            Err(_) => {
+                failed.push(path.clone());
+                continue;
+            }
+        };
+        // Only a real folder is changed, never what a link points to.
+        if !meta.is_dir() || harness_platform::file::folder_mode(&meta) == *mode {
+            continue;
+        }
+        if harness_platform::file::set_folder_mode(path, *mode).is_err() {
+            failed.push(path.clone());
+        }
+    }
+    failed
 }
