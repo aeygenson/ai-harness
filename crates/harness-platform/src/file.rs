@@ -97,10 +97,6 @@ fn folder_mode_here(meta: &fs::Metadata) -> u32 {
 }
 
 #[cfg(windows)]
-#[expect(
-    clippy::permissions_set_readonly_false,
-    reason = "on Windows this only clears the read-only flag of a folder"
-)]
 fn set_folder_mode_here(path: &Path, mode: u32) -> io::Result<()> {
     let mut permissions = fs::symlink_metadata(path)?.permissions();
     permissions.set_readonly(mode != 0);
