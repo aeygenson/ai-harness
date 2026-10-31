@@ -7,6 +7,7 @@
 mod branch;
 mod fingerprint;
 mod history;
+mod local_config;
 mod push;
 mod remote;
 mod restore;
@@ -14,6 +15,7 @@ mod working_tree;
 
 pub(crate) use fingerprint::is_harness;
 pub use fingerprint::FileFingerprint;
+pub use local_config::LocalConfig;
 pub use remote::{fetch, head_commit};
 
 use std::fs;
@@ -116,38 +118,12 @@ impl Repo {
         }
     }
 
-    /// The repository's own settings file (`.git/config`) as it is now; empty if missing.
-    ///
-    /// The harness reads it before and after each role: an agent with a shell
-    /// could add a setting there that makes git run a command of its choice
-    /// (`core.fsmonitor`, a `filter` driver) the next time anyone runs git.
-    pub fn local_config(&self) -> Result<Vec<u8>, GitError> {
-        let path = self.local_config_path()?;
-        match fs::read(&path) {
-            Ok(bytes) => Ok(bytes),
-            // A deleted file is a change too; it differs from what was read before.
-            Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(Vec::new()),
-            Err(source) => Err(GitError::Io { path, source }),
-        }
-    }
-
     /// Git's own folder shared by all worktrees of the repository (usually
     /// `.git`), where its hooks and `info/` live.
     pub fn git_common_dir(&self) -> Result<PathBuf, GitError> {
         let path = self.git(&["rev-parse", "--git-common-dir"])?;
         // A relative answer is relative to the project; `join` keeps an absolute one as it is.
         Ok(self.root.join(path.trim()))
-    }
-
-    /// Puts back the settings file that [`Repo::local_config`] read earlier.
-    pub fn restore_local_config(&self, bytes: &[u8]) -> Result<(), GitError> {
-        let path = self.local_config_path()?;
-        fs::write(&path, bytes).map_err(|source| GitError::Io { path, source })
-    }
-
-    /// Where `.git/config` is.
-    fn local_config_path(&self) -> Result<PathBuf, GitError> {
-        self.git_path("config")
     }
 
     /// Where `name` is inside git's own folder of this working folder, for
@@ -329,20 +305,6 @@ mod tests {
 
         assert_eq!(changed, ["README.md"]);
         assert!(!ran.exists());
-    }
-
-    #[test]
-    fn the_settings_file_is_read_and_put_back() {
-        let (_dir, repo) = new_repo();
-        let before = repo.local_config().unwrap();
-        assert!(String::from_utf8_lossy(&before).contains("[core]"));
-
-        repo.git(&["config", "filter.agent.clean", "sh agent-script.sh"])
-            .unwrap();
-        assert_ne!(repo.local_config().unwrap(), before);
-
-        repo.restore_local_config(&before).unwrap();
-        assert_eq!(repo.local_config().unwrap(), before);
     }
 
     #[test]

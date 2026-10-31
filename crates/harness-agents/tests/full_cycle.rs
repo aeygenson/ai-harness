@@ -820,6 +820,29 @@ async fn an_agent_that_changes_the_git_settings_is_stopped_and_they_are_put_back
 }
 
 #[tokio::test]
+async fn broken_git_settings_are_put_back_although_git_cannot_start() {
+    let (_dir, repo) = new_project();
+    let (store, mut state) = new_task(&repo);
+    let before = repo.local_config().unwrap();
+    // With this file git refuses to run at all, also to say where it is.
+    let agent = MockAgent::new().then(
+        Role::Architect,
+        MockStep::finish_writing(
+            Verdict::Approved,
+            NextStep::To(Role::Developer),
+            &[(".git/config", "[core\n")],
+        ),
+    );
+
+    let stop = orchestrator::run(&repo, &store, &mut state, &agent)
+        .await
+        .unwrap();
+
+    assert_eq!(stop, StopReason::GitConfigChanged(Role::Architect));
+    assert_eq!(repo.local_config().unwrap(), before);
+}
+
+#[tokio::test]
 async fn hooks_and_files_outside_the_project_are_noticed() {
     let (dir, repo) = new_project();
     let (store, mut state) = new_task(&repo);
