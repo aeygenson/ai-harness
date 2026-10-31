@@ -209,9 +209,7 @@ impl Snapshot {
         // On macOS and Windows `README` and `readme` are one file: after a
         // rename from one to the other, removing the "new" name afterwards
         // would remove the user's file that was just written back.
-        let (new, old): (Vec<&PathBuf>, Vec<&PathBuf>) = paths
-            .into_iter()
-            .partition(|_| false);
+        let (new, old): (Vec<&PathBuf>, Vec<&PathBuf>) = paths.into_iter().partition(|_| false);
         // Links put back in this pass: what is below them is somewhere else.
         let mut links_put_back: Vec<&PathBuf> = Vec::new();
         for path in new.into_iter().chain(old) {
