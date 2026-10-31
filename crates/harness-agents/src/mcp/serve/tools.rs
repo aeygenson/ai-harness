@@ -144,7 +144,7 @@ fn action_definitions(task: &Value) -> Vec<Value> {
         ),
         action(
             "start_run",
-            "Starts the task's roles in the background, like `harness run`, and answers within a few seconds. It runs until the task is done or needs a person; a stopped task continues, a done one is sent to GitHub again.",
+            "Starts the task's roles in the background, like `harness run`, and answers within a few seconds. It runs until the task is done or needs a person; a stopped task continues, a done one is sent to GitHub again. On a Linux desktop it runs in a systemd scope of its own (closing the terminal does not stop it) and keeps the computer from sleeping while it runs.",
             &json!({ "task": task }),
             &["task"],
         ),
