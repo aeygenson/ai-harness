@@ -1,8 +1,10 @@
 //! What the harness notes before an agent runs, and the first checks right
 //! after it, before git runs again with whatever settings the agent left.
 
+use std::path::PathBuf;
+
 use super::{RunError, StopReason};
-use crate::git::Repo;
+use crate::git::{LocalConfig, Repo};
 use crate::task::agent_stubs::MissingStubs;
 use crate::task::handoff::Role;
 use crate::task::tripwire::{Changes, Snapshot, Watched};
@@ -12,7 +14,8 @@ pub(super) struct Before {
     head: Option<String>,
     branch: Option<String>,
     branch_heads: String,
-    config: Vec<u8>,
+    config_path: PathBuf,
+    config: LocalConfig,
     hidden: Snapshot,
     stubs: MissingStubs,
 }
@@ -21,11 +24,13 @@ impl Before {
     /// Notes the last commit, the branches, `.git/config`, the files the
     /// tripwire watches and which of Claude Code's stub files are missing.
     pub(super) fn take(repo: &Repo, watched: &Watched) -> Result<Self, RunError> {
+        let config_path = repo.local_config_path()?;
         Ok(Self {
             head: repo.head()?,
             branch: repo.current_branch()?,
             branch_heads: repo.branch_heads()?,
-            config: repo.local_config()?,
+            config: LocalConfig::read(&config_path)?,
+            config_path,
             hidden: watched.snapshot(),
             stubs: MissingStubs::note(repo.root()),
         })
@@ -47,7 +52,7 @@ impl Before {
         // hooks. The tripwire goes first: it runs no git and cannot fail, so
         // an agent cannot keep a planted hook by breaking `.git/config`.
         let changes = self.hidden.check_and_restore(watched);
-        let config_changed = self.restore_config(repo);
+        let config_changed = self.restore_config();
         // A file that could not be put back may be a planted hook that git
         // would run on the user's next command: this wins over everything,
         // also over an error with the settings, and its message asks the
@@ -100,11 +105,13 @@ impl Before {
         Ok(stop)
     }
 
-    /// Puts `.git/config` back when it changed; `true` when it did.
-    fn restore_config(&self, repo: &Repo) -> Result<bool, RunError> {
-        let changed = repo.local_config()? != self.config;
+    /// Puts `.git/config` back when it changed; `true` when it did. No git
+    /// runs here: with broken settings it would not start. A file that can
+    /// no longer be read (`chmod 000`, too big) has changed too.
+    fn restore_config(&self) -> Result<bool, RunError> {
+        let changed = LocalConfig::read(&self.config_path).map_or(true, |now| now != self.config);
         if changed {
-            repo.restore_local_config(&self.config)?;
+            self.config.put_back(&self.config_path)?;
         }
         Ok(changed)
     }
@@ -117,5 +124,32 @@ fn hidden_changes(role: Role, changes: Changes) -> StopReason {
         put_back: changes.put_back,
         reported: changes.reported,
         not_put_back: changes.not_put_back,
+    }
+}
+
+// Only Linux and macOS can make a file unreadable with its mode.
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    // As root (in a container) every file can be read, so there this passes
+    // also without the fix; as a user (CI) the unreadable file used to end
+    // the check with an error before anything was put back.
+    #[test]
+    fn unreadable_settings_are_put_back() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        let repo = Repo::init(dir.path()).unwrap();
+        let watched = Watched::default();
+        let before = Before::take(&repo, &watched).unwrap();
+        let path = repo.local_config_path().unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o000)).unwrap();
+
+        let stop = before.check(&repo, &watched, Role::Developer).unwrap();
+
+        assert_eq!(stop, Some(StopReason::GitConfigChanged(Role::Developer)));
+        assert_eq!(repo.local_config().unwrap(), before.config);
     }
 }
