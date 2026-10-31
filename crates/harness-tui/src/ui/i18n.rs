@@ -245,6 +245,40 @@ mod tests {
         }
     }
 
+    /// The Russian texts speak to the user politely ("вы"), like the rest of
+    /// the interface, and never guess the user's gender.
+    #[test]
+    fn russian_texts_say_vy_and_do_not_guess_a_gender() {
+        const INFORMAL: &[&str] = &[
+            "ты",
+            "тебя",
+            "тебе",
+            "твой",
+            "твоя",
+            "твоё",
+            "твои",
+            "сама",
+            "меняла",
+            "проверь",
+            "исправь",
+            "сделай",
+            "посмотри",
+        ];
+        let (_, text) = BUILT_IN.iter().find(|(c, _)| *c == "ru").unwrap();
+        let russian = Language::parse("ru", text).unwrap();
+        let mut found = Vec::new();
+        for (key, value) in &russian.texts {
+            let words = value
+                .to_lowercase()
+                .split(|c: char| !c.is_alphabetic())
+                .filter(|word| INFORMAL.contains(word))
+                .map(|word| format!("{key}: {word}"))
+                .collect::<Vec<_>>();
+            found.extend(words);
+        }
+        assert_eq!(found, Vec::<String>::new());
+    }
+
     #[test]
     fn english_is_the_default_and_the_choice_is_saved() {
         let home = tempfile::tempdir().unwrap();
