@@ -113,7 +113,13 @@ impl Repo {
     pub fn head(&self) -> Result<Option<String>, GitError> {
         match self.git(&["rev-parse", "-q", "--verify", "HEAD"]) {
             Ok(out) => Ok(Some(out.trim().to_string())),
-            Err(GitError::Failed { .. }) => Ok(None),
+            // Either there is no commit yet, or git itself cannot run (for
+            // example broken settings), which must not look like "no
+            // commit". A command that needs no commit tells the two apart.
+            Err(GitError::Failed { .. }) => {
+                self.git(&["rev-parse", "--git-dir"])?;
+                Ok(None)
+            }
             Err(e) => Err(e),
         }
     }
@@ -305,6 +311,18 @@ mod tests {
 
         assert_eq!(changed, ["README.md"]);
         assert!(!ran.exists());
+    }
+
+    #[test]
+    fn head_is_an_error_when_git_cannot_run() {
+        let (dir, repo) = new_repo();
+        let empty = dir.path().join("empty");
+        fs::create_dir(&empty).unwrap();
+        assert_eq!(Repo::init(&empty).unwrap().head().unwrap(), None);
+        // Broken settings: git refuses to start, which is not "no commit".
+        fs::write(dir.path().join(".git/config"), "[core\n").unwrap();
+
+        repo.head().unwrap_err();
     }
 
     #[test]

@@ -86,6 +86,13 @@ pub enum StopReason {
         /// Files in git's own folders that changed and could not be put back
         /// (see [`crate::task::tripwire::Changes::not_put_back`]).
         not_put_back: Vec<PathBuf>,
+        /// The repository's settings (`.git/config`) changed too and are
+        /// now as before. (`false` also when they could not be put back:
+        /// then `not_put_back` is not empty, and its message says to check
+        /// `.git/config`.)
+        config_put_back: bool,
+        /// What git said about the commits and branches after the role.
+        git: GitAfterRole,
     },
     /// While the role was running, the repository's settings (`.git/config`)
     /// changed, where a setting can make git run any command. The role or
@@ -93,6 +100,21 @@ pub enum StopReason {
     /// it. The old settings are put back; the project's changes are left
     /// uncommitted for the user to look at.
     GitConfigChanged(Role),
+}
+
+/// What the harness learned about the commits and branches after a role
+/// whose tripwire found changes ([`StopReason::HiddenChanges`]): that stop
+/// reason must still tell the user about a commit or a broken git.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum GitAfterRole {
+    /// The commits and branches are as before the role.
+    Same,
+    /// A commit appeared or the branches changed (see [`StopReason::AgentCommitted`]).
+    Changed,
+    /// Git was not run, because a file could not be put back and git might run it.
+    NotChecked,
+    /// Git could not run, with its error message: maybe a broken `~/.gitconfig`.
+    Failed(String),
 }
 
 /// A real problem of the harness itself, not a mistake of an agent.

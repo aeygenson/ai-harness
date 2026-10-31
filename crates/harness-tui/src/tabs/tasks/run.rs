@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use anyhow::Result;
 
 use harness_core::task::handoff::{NextStep, Role, Verdict};
-use harness_core::task::orchestrator::{self, StopReason};
+use harness_core::task::orchestrator::{self, GitAfterRole, StopReason};
 use harness_core::task::{Stage, WaitReason};
 
 use super::choice::{Choice, MORE_ROUNDS};
@@ -234,22 +234,83 @@ fn outcome_text(outcome: &Outcome, tr: &I18n) -> Message {
             put_back,
             reported,
             not_put_back,
-        } => Message::error(tr.f(
-            "tasks.stop_hidden",
-            &[
-                ("task", task),
-                ("role", &role(r)),
-                ("put_back", &paths(put_back)),
-                ("not_put_back", &paths(not_put_back)),
-                ("reported", &paths(reported)),
-            ],
-        )),
+            config_put_back,
+            git,
+        } => {
+            let files = HiddenFiles {
+                put_back,
+                reported,
+                not_put_back,
+            };
+            let also = also_text(tr, *config_put_back, git);
+            Message::error(hidden_changes_text(tr, task, *r, &files, &also))
+        }
         StopReason::GitConfigChanged(r) => Message::error(tr.f(
             "tasks.stop_git_config",
             &[("task", task), ("role", &role(r))],
         )),
     }
 }
+
+/// The three lists of files in the tripwire's stop reason.
+struct HiddenFiles<'a> {
+    put_back: &'a [PathBuf],
+    reported: &'a [PathBuf],
+    not_put_back: &'a [PathBuf],
+}
+
+/// The tripwire's stop message; `also` is what it adds about the settings and git.
+fn hidden_changes_text(
+    tr: &I18n,
+    task: &str,
+    role: Role,
+    files: &HiddenFiles,
+    also: &str,
+) -> String {
+    tr.f(
+        "tasks.stop_hidden",
+        &[
+            ("task", &task),
+            ("role", &role.as_str()),
+            ("put_back", &paths(files.put_back)),
+            ("not_put_back", &paths(files.not_put_back)),
+            ("reported", &paths(files.reported)),
+            ("also", &also),
+        ],
+    )
+}
+
+/// What the tripwire's stop message adds about the settings and git.
+fn also_text(tr: &I18n, config_put_back: bool, git: &GitAfterRole) -> String {
+    format!(
+        "{}{}",
+        config_put_back_text(tr, config_put_back),
+        git_after_role_text(tr, git)
+    )
+}
+
+/// The sentence about `.git/config` in the tripwire's stop message, or nothing.
+fn config_put_back_text(tr: &I18n, config_put_back: bool) -> String {
+    if config_put_back {
+        tr.t("tasks.stop_hidden_config").to_string()
+    } else {
+        String::new()
+    }
+}
+
+/// The sentence about the commits and branches in the tripwire's stop message, or nothing.
+fn git_after_role_text(tr: &I18n, git: &GitAfterRole) -> String {
+    match git {
+        GitAfterRole::Same | GitAfterRole::NotChecked => String::new(),
+        GitAfterRole::Changed => tr.t("tasks.stop_hidden_git_changed").to_string(),
+        // Git's message can hold names the agent chose.
+        GitAfterRole::Failed(error) => tr.f(
+            "tasks.stop_hidden_git_failed",
+            &[("error", &harness_core::text::safe(error))],
+        ),
+    }
+}
+
 /// Paths for a message, separated by commas; `-` when there are none.
 fn paths(files: &[PathBuf]) -> String {
     if files.is_empty() {
@@ -266,6 +327,31 @@ fn paths(files: &[PathBuf]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_tripwire_message_tells_about_the_settings_and_git() {
+        let home = tempfile::tempdir().unwrap();
+        let tr = I18n::load(Some(home.path()));
+        let files = HiddenFiles {
+            put_back: &[],
+            reported: &[PathBuf::from("/home/lisa/.bashrc")],
+            not_put_back: &[],
+        };
+        let also = also_text(&tr, true, &GitAfterRole::Failed("bad\u{1b}[2J".into()));
+
+        let text = hidden_changes_text(&tr, "task-001", Role::Developer, &files, &also);
+
+        assert!(text.contains("/home/lisa/.bashrc"), "{text}");
+        assert!(text.contains(".git/config) changed too"), "{text}");
+        assert!(
+            text.contains("Git could not run") && text.contains("bad"),
+            "{text}"
+        );
+        assert!(!text.contains('\u{1b}'), "{text}");
+        assert_eq!(git_after_role_text(&tr, &GitAfterRole::Same), "");
+        assert_eq!(config_put_back_text(&tr, false), "");
+        assert!(git_after_role_text(&tr, &GitAfterRole::Changed).contains("git log"));
+    }
 
     #[test]
     fn paths_are_joined_and_none_is_a_dash() {
