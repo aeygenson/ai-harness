@@ -127,7 +127,8 @@ fn hidden_changes(role: Role, changes: Changes) -> StopReason {
     }
 }
 
-#[cfg(test)]
+// Only Linux and macOS can make a file unreadable with its mode.
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
     use std::fs;
@@ -135,7 +136,6 @@ mod tests {
     // As root (in a container) every file can be read, so there this passes
     // also without the fix; as a user (CI) the unreadable file used to end
     // the check with an error before anything was put back.
-    #[cfg(unix)]
     #[test]
     fn unreadable_settings_are_put_back() {
         use std::os::unix::fs::PermissionsExt;
