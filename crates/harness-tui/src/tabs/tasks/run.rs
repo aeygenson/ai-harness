@@ -102,6 +102,7 @@ impl TasksTab {
         let run = self.run.take().filter(|r| Some(r.role) == target);
         self.running = Some(Running::start(&self.root, request, run, builder));
         self.input.clear();
+        self.input_cursor = 0;
         self.menu = None;
         self.focus = Focus::Tasks;
         Ok(tr.t("tasks.started").to_string())

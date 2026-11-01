@@ -1,8 +1,8 @@
 //! The text of the message box: drawing it, scrolling it and clearing it.
 //!
 //! A long text (often a pasted one) does not fit in the few rows of the box.
-//! The box shows its end, where one types; the mouse wheel over the box and
-//! Page Up / Page Down while writing scroll back to the start. «✗ Clear» and Ctrl+U
+//! The box shows the line with the cursor; the mouse wheel over the box and
+//! Page Up / Page Down while writing scroll to other lines. «✗ Clear» and Ctrl+U
 //! remove the whole text at once.
 
 use std::cell::Cell;
@@ -13,6 +13,7 @@ use ratatui::widgets::Paragraph;
 use ratatui::Frame;
 
 use super::message_box::wrap;
+use super::message_edit::{row_of, with_cursor};
 use super::tab::{Focus, TasksTab};
 use crate::ui::i18n::I18n;
 use crate::ui::theme;
@@ -25,17 +26,33 @@ const WHEEL_LINES: usize = 3;
 pub(super) struct MessageScroll {
     /// Lines of the text hidden below the box: 0 shows the end.
     up: usize,
-    /// The lines the text took and the rows the box had when it was last
-    /// drawn: scrolling needs them to know where the start is. `Cell` lets
-    /// the drawing, which only borrows the tab (`&self`), write them down.
-    seen: Cell<(usize, usize)>,
+    /// How the text was last drawn. `Cell` lets the drawing, which only
+    /// borrows the tab (`&self`), write it down.
+    pub(super) seen: Cell<Seen>,
+}
+
+/// How the message was drawn in the last frame: scrolling and clicks need it.
+#[derive(Debug, Default, Clone, Copy)]
+pub(super) struct Seen {
+    /// The lines the text took.
+    pub(super) lines: usize,
+    /// The rows of the box.
+    pub(super) rows: usize,
+    /// The characters on one line.
+    pub(super) width: usize,
+    /// The lines hidden above the box.
+    pub(super) skip: usize,
+    /// The screen column of the box's left edge.
+    pub(super) left: u16,
+    /// Whether the cursor mark was drawn inside the text.
+    pub(super) with_cursor: bool,
 }
 
 impl MessageScroll {
     /// How many lines can be hidden below the box at most.
     fn most(&self) -> usize {
-        let (lines, rows) = self.seen.get();
-        lines.saturating_sub(rows)
+        let seen = self.seen.get();
+        seen.lines.saturating_sub(seen.rows)
     }
 }
 
@@ -43,13 +60,29 @@ impl TasksTab {
     /// Removes the whole message; the box keeps the focus for a new one.
     pub fn clear_input(&mut self) {
         self.input.clear();
+        self.input_cursor = 0;
         self.input_scroll.up = 0;
         self.focus = Focus::Input;
     }
 
-    /// The text was changed: the box shows its end again, where one types.
+    /// The text was changed: the box shows the cursor again, where one types.
     pub(super) fn input_changed(&mut self) {
-        self.input_scroll.up = 0;
+        self.show_cursor();
+    }
+
+    /// Scrolls the text so that the line with the cursor is in the box. Uses
+    /// the width and rows of the last drawing; the next one clamps the rest.
+    pub(super) fn show_cursor(&mut self) {
+        let seen = self.input_scroll.seen.get();
+        let shown = with_cursor(&self.input, self.cursor());
+        let lines = wrap(&shown, seen.width).len();
+        let row = row_of(&shown, seen.width, self.cursor());
+        // `up` counts the lines below the box: those after the cursor's line
+        // when it is the bottom row, but no more than keep it on the top row.
+        let below = lines - 1 - row;
+        let rows = seen.rows.max(1);
+        let up = self.input_scroll.up;
+        self.input_scroll.up = up.clamp(below.saturating_sub(rows - 1), below);
     }
 
     /// Scrolls the message `lines` lines towards its start (`back`) or its end.
@@ -69,7 +102,7 @@ impl TasksTab {
 
     /// Page Up and Page Down while writing: the rows of the box at a time.
     pub(super) fn page_input(&mut self, back: bool) {
-        let rows = self.input_scroll.seen.get().1.max(1);
+        let rows = self.input_scroll.seen.get().rows.max(1);
         self.scroll_input(back, rows);
     }
 
@@ -81,17 +114,36 @@ impl TasksTab {
         if self.input.is_empty() && !typing {
             let hint = Line::styled(format!(" {}", tr.t("tasks.input_hint")), theme::dim());
             frame.render_widget(Paragraph::new(hint), field);
-            self.input_scroll.seen.set((1, usize::from(field.height)));
+            self.input_scroll.seen.set(Seen {
+                lines: 1,
+                rows: usize::from(field.height),
+                left: field.x,
+                ..Seen::default()
+            });
             return;
         }
-        let cursor = if typing { "▏" } else { "" };
-        let room = usize::from(field.width.saturating_sub(2)).max(1);
-        let wrapped = wrap(&format!("{}{cursor}", self.input), room);
+        let shown = if typing {
+            with_cursor(&self.input, self.cursor())
+        } else {
+            self.input.clone()
+        };
+        let width = usize::from(field.width.saturating_sub(2)).max(1);
+        let wrapped = wrap(&shown, width);
         let rows = usize::from(field.height);
-        self.input_scroll.seen.set((wrapped.len(), rows));
+        let mut seen = Seen {
+            lines: wrapped.len(),
+            rows,
+            width,
+            skip: 0,
+            left: field.x,
+            with_cursor: typing,
+        };
+        self.input_scroll.seen.set(seen);
         // `up` may be more than the text allows now (the window got taller).
         let up = self.input_scroll.up.min(self.input_scroll.most());
         let skip = self.input_scroll.most() - up;
+        seen.skip = skip;
+        self.input_scroll.seen.set(seen);
         let lines: Vec<Line> = wrapped
             .into_iter()
             .skip(skip)
@@ -124,7 +176,12 @@ mod tests {
         let folder = tempfile::tempdir().unwrap();
         let mut tab = TasksTab::load(folder.path(), None);
         tab.input = "x\n".repeat(lines - 1) + "x";
-        tab.input_scroll.seen.set((lines, rows));
+        tab.input_scroll.seen.set(Seen {
+            lines,
+            rows,
+            width: 10,
+            ..Seen::default()
+        });
         tab
     }
 

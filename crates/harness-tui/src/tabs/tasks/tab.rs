@@ -116,6 +116,8 @@ pub struct TasksTab {
     pub(crate) scroll: u16,
     /// The message being written.
     pub(crate) input: String,
+    /// Where the cursor is in the message, in characters (see `message_edit`).
+    pub(super) input_cursor: usize,
     /// How far the message is scrolled back from its end.
     pub(super) input_scroll: MessageScroll,
     pub(crate) choice: Choice,
@@ -169,6 +171,7 @@ impl TasksTab {
             focus: Focus::Tasks,
             scroll: 0,
             input: String::new(),
+            input_cursor: 0,
             input_scroll: MessageScroll::default(),
             choice: Choice::NewTask,
             choice_for: None,

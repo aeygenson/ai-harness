@@ -17,9 +17,7 @@ impl TasksTab {
 
     /// Pasted text goes into the message.
     pub fn paste(&mut self, text: &str) {
-        self.input
-            .push_str(&text.replace("\r\n", "\n").replace('\r', "\n"));
-        self.input_changed();
+        self.insert_text(&text.replace("\r\n", "\n").replace('\r', "\n"));
         self.focus = Focus::Input;
     }
 
@@ -34,18 +32,14 @@ impl TasksTab {
                 KeyCode::Down => self.cycle_choice(1),
                 KeyCode::PageUp => self.page_input(true),
                 KeyCode::PageDown => self.page_input(false),
-                KeyCode::Enter => {
-                    self.input.push('\n');
-                    self.input_changed();
-                }
-                KeyCode::Backspace => {
-                    self.input.pop();
-                    self.input_changed();
-                }
-                KeyCode::Char(c) => {
-                    self.input.push(c);
-                    self.input_changed();
-                }
+                KeyCode::Left => self.move_cursor(false),
+                KeyCode::Right => self.move_cursor(true),
+                KeyCode::Home => self.cursor_to_line_edge(false),
+                KeyCode::End => self.cursor_to_line_edge(true),
+                KeyCode::Enter => self.insert_text("\n"),
+                KeyCode::Backspace => self.delete_back(),
+                KeyCode::Delete => self.delete_forward(),
+                KeyCode::Char(c) => self.insert_text(c.encode_utf8(&mut [0; 4])),
                 _ => {}
             }
             return;

@@ -22,6 +22,7 @@ mod labels;
 pub(crate) mod live_log;
 mod log_panel;
 mod message_box;
+mod message_edit;
 mod message_text;
 mod run;
 pub(crate) mod runner;

@@ -79,6 +79,8 @@ fn a_new_task_runs_the_architect_then_the_answer_goes_to_the_developer() {
     assert!(!app.quit);
     assert!(app.message.as_ref().unwrap().text.contains("not sent"));
     click(&mut app, "Build a CSV");
+    // The click put the cursor in the text; End takes it to the end.
+    key(&mut app, KeyCode::End);
     key(&mut app, KeyCode::Enter);
     type_text(&mut app, "Second line");
     assert!(!app.tasks.as_ref().unwrap().is_running());
@@ -1748,6 +1750,68 @@ fn a_long_pasted_message_scrolls_and_is_cleared_at_once() {
     app.on_key(KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL));
     assert_eq!(app.tasks.as_ref().unwrap().input, "");
     assert!(app.tasks.as_ref().unwrap().typing());
+}
+
+#[test]
+fn the_cursor_moves_with_keys_and_edits_in_the_middle() {
+    let env = Env::new();
+    let (_, mut app) = empty_project(&env);
+    click(&mut app, "Write here");
+    type_text(&mut app, "Fix the demo");
+
+    // ← goes back over «demo»; the mark is drawn where the cursor is.
+    for _ in 0..4 {
+        key(&mut app, KeyCode::Left);
+    }
+    type_text(&mut app, "new ");
+    assert!(screen(&mut app).contains("│ Fix the new ▏demo"));
+    // Home, End, Backspace and Delete work on the line.
+    key(&mut app, KeyCode::Home);
+    key(&mut app, KeyCode::Delete);
+    type_text(&mut app, "Please f");
+    key(&mut app, KeyCode::End);
+    key(&mut app, KeyCode::Backspace);
+    type_text(&mut app, "o!");
+    key(&mut app, KeyCode::Right);
+    type_text(&mut app, "?");
+
+    assert_eq!(
+        app.tasks.as_ref().unwrap().input,
+        "Please fix the new demo!?"
+    );
+}
+
+#[test]
+fn a_click_puts_the_cursor_under_the_mouse_in_a_scrolled_text() {
+    let env = Env::new();
+    let (_, mut app) = empty_project(&env);
+    let pasted: Vec<String> = (1..=20).map(|i| format!("pasted {i:02}")).collect();
+    app.tasks.as_mut().unwrap().paste(&pasted.join("\n"));
+    let over_box = find(&screen(&mut app), "pasted 20");
+    for _ in 0..10 {
+        wheel(&mut app, over_box, false);
+    }
+
+    // The click lands on «0» of «pasted 01»: the hit map knows the row, the
+    // lines hidden above the box come from the last drawing.
+    let (x, y) = find(&screen(&mut app), "01");
+    app.on_mouse(MouseEvent {
+        kind: MouseEventKind::Down(MouseButton::Left),
+        column: x,
+        row: y,
+        modifiers: KeyModifiers::NONE,
+    });
+    type_text(&mut app, "#");
+
+    let tasks = app.tasks.as_ref().unwrap();
+    assert!(
+        tasks.input.starts_with("pasted #01\npasted 02"),
+        "{}",
+        tasks.input
+    );
+    assert!(tasks.input.ends_with("pasted 20"), "{}", tasks.input);
+    // The box still shows the line that was clicked, with the cursor in it.
+    assert!(screen(&mut app).contains("│ pasted #▏01"));
 }
 
 /// The sample project with 30 tasks: more than the tasks list shows at once.
