@@ -2,6 +2,7 @@
 name = "harness-fake"
 version = "0.9.0"
 edition = "2021"
+license.workspace = true
 publish = false
 description = "A fake program for the harness's tests, the same on Linux, macOS and Windows."
 
