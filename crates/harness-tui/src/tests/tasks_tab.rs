@@ -1051,11 +1051,67 @@ fn an_architect_that_wrote_a_design_hands_the_answer_to_the_developer() {
     assert!(screen(&mut app).contains(" To: developer ▾ "));
 }
 
+/// How the run ends when the architect asks the user a question.
+fn architect_stopped() -> crate::tabs::tasks::runner::Outcome {
+    use harness_core::task::orchestrator::StopReason;
+    use harness_core::task::WaitReason;
+    crate::tabs::tasks::runner::Outcome {
+        task: "task-001".into(),
+        stop: Some(StopReason::WaitingForHuman(WaitReason::RoleAskedForHelp(
+            Role::Architect,
+        ))),
+        published: None,
+        merged: None,
+    }
+}
+
+#[test]
+fn a_finished_design_with_questions_is_shown_as_ready() {
+    let env = Env::new();
+    let (_, mut app) = architect_asked(&env, true);
+    let tr = crate::ui::i18n::I18n::load(None);
+
+    let text = screen(&mut app);
+    let message = app
+        .tasks
+        .as_ref()
+        .unwrap()
+        .outcome_message(&architect_stopped(), &tr);
+
+    assert!(
+        text.contains("waiting: design ready, questions from the architect"),
+        "{text}"
+    );
+    assert!(!text.contains("asked for help"), "{text}");
+    assert!(
+        message
+            .text
+            .contains("the design is ready and the architect has questions"),
+        "{}",
+        message.text
+    );
+}
+
 #[test]
 fn a_question_from_the_architect_without_a_design_goes_back_to_it() {
     let env = Env::new();
     let (_, mut app) = architect_asked(&env, false);
-    assert!(screen(&mut app).contains(" To: architect ▾ "));
+    let tr = crate::ui::i18n::I18n::load(None);
+
+    let text = screen(&mut app);
+    let message = app
+        .tasks
+        .as_ref()
+        .unwrap()
+        .outcome_message(&architect_stopped(), &tr);
+
+    assert!(text.contains(" To: architect ▾ "), "{text}");
+    assert!(text.contains("waiting: architect asked for help"), "{text}");
+    assert!(
+        message.text.contains("the architect needs your help"),
+        "{}",
+        message.text
+    );
 }
 
 #[test]

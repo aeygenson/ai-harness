@@ -5,10 +5,9 @@ use harness_core::config::AgentKind;
 use harness_core::models::ModelList;
 use harness_core::task::handoff::{NextStep, Role};
 use harness_core::task::permissions::WriteRule;
-use harness_core::task::routes::ArchitectJob;
 use harness_core::task::{Stage, WaitReason};
 
-use super::steps::wrote_design;
+use super::steps::asks_about_design;
 use super::tab::TasksTab;
 use crate::tabs::tasks::runner::RunChoice;
 
@@ -131,10 +130,7 @@ impl TasksTab {
         let developer_here = self.scenario.roles().contains(&Role::Developer);
         if read_only && has_issues && developer_here {
             Role::Developer
-        } else if role == Role::Architect
-            && task.state.architect_job == ArchitectJob::Design
-            && last.is_some_and(wrote_design)
-        {
+        } else if asks_about_design(task) {
             task.state.workflow.after_approval()
         } else {
             role
