@@ -32,6 +32,14 @@ impl App {
                 );
                 self.last_click = hit.map(|(target, row)| (now, target, row));
                 self.click(hit, double);
+                // A click in the message puts the cursor under the mouse: the
+                // hit map gives the row, the column comes from the mouse.
+                if let (Tab::Tasks, Some((Target::Button(ButtonId::Input), row))) = (self.tab, hit)
+                {
+                    if let Some(tasks) = &mut self.tasks {
+                        tasks.click_text(row, mouse.column);
+                    }
+                }
             }
             MouseEventKind::ScrollDown | MouseEventKind::ScrollUp => {
                 self.wheel(hit, mouse.kind == MouseEventKind::ScrollDown);
