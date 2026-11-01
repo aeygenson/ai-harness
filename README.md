@@ -1,4 +1,8 @@
 <p align="center">
+  <b>English</b> · <a href="README.ru.md">Русский</a>
+</p>
+
+<p align="center">
   <img src="assets/icons/ai-harness-128.png" alt="AI Harness icon" width="128" height="128">
 </p>
 
