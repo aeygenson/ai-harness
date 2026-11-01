@@ -8,6 +8,9 @@ use harness_core::task::{Stage, TaskState, WaitReason};
 use ratatui::style::Color;
 use ratatui::text::Span;
 
+use super::steps::asks_about_design;
+use super::tab::TaskView;
+
 use crate::ui::i18n::I18n;
 use crate::ui::theme;
 
@@ -50,6 +53,17 @@ pub fn task_stage_label(state: &TaskState, tr: &I18n) -> String {
         format!("{label} · {job}")
     } else {
         label
+    }
+}
+
+/// The stage in the title of a task's steps. An architect that finished its
+/// design and asks about it reads «waiting: design ready, questions from the
+/// architect», not «asked for help»: its work is done, only the answers are missing.
+pub(super) fn header_stage_label(task: &TaskView, tr: &I18n) -> String {
+    if asks_about_design(task) {
+        tr.t("stage.design_questions").into()
+    } else {
+        task_stage_label(&task.state, tr)
     }
 }
 

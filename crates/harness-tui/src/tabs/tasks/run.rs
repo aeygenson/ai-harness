@@ -10,7 +10,7 @@ use harness_core::task::{Stage, WaitReason};
 
 use super::choice::{Choice, MORE_ROUNDS};
 use super::github::github_text;
-use super::steps::sized_list;
+use super::steps::{asks_about_design, sized_list};
 use super::tab::{Focus, TasksTab};
 use crate::tabs::tasks::labels::stage_label;
 use crate::tabs::tasks::runner::{Builder, Outcome, Request, Running};
@@ -128,7 +128,7 @@ impl TasksTab {
         let message = match result {
             Ok(outcome) => {
                 self.show_task(&outcome.task);
-                outcome_text(&outcome, tr)
+                self.outcome_message(&outcome, tr)
             }
             Err(error) => {
                 self.reload();
@@ -137,6 +137,17 @@ impl TasksTab {
         };
         self.log.push(format!("── {}", message.text));
         Some(message)
+    }
+
+    /// The message after the work on the task the tab shows. An architect that
+    /// finished its design and asks about it gets the design's message, not «needs
+    /// your help»: its work is done, only the answers are missing.
+    pub fn outcome_message(&self, outcome: &Outcome, tr: &I18n) -> Message {
+        if self.current().is_some_and(asks_about_design) {
+            Message::info(tr.f("tasks.stop_design_questions", &[("task", &outcome.task)]))
+        } else {
+            outcome_text(outcome, tr)
+        }
     }
 
     /// The unfinished task whose text is `text` (spaces and line breaks do

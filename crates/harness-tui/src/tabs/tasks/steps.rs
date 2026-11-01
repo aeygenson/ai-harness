@@ -11,6 +11,7 @@ use harness_core::config::AgentKind;
 use harness_core::git::{Repo, HARNESS_DIR};
 use harness_core::retro::usage::{self, Usage};
 use harness_core::task::handoff::{AnswerTo, FileAction, NextStep, Role};
+use harness_core::task::routes::ArchitectJob;
 use harness_core::task::store::{Step, TaskStore};
 use harness_core::task::{Stage, WaitReason};
 
@@ -185,6 +186,15 @@ pub(super) fn wrote_design(step: &Step) -> bool {
         let changed = matches!(file.action, FileAction::Created | FileAction::Modified);
         changed && file.path.starts_with(DESIGN_DIR)
     })
+}
+
+/// True when the architect finished a design and then asked the user about it:
+/// the design is ready, only the answers are missing. The answer then usually
+/// approves the design, so the TUI says so and offers the developer.
+pub(super) fn asks_about_design(task: &TaskView) -> bool {
+    task.state.stage == Stage::WaitingForHuman(WaitReason::RoleAskedForHelp(Role::Architect))
+        && task.state.architect_job == ArchitectJob::Design
+        && task.steps.last().is_some_and(wrote_design)
 }
 
 /// `target (812 MB), data.bin (60 MB)`
