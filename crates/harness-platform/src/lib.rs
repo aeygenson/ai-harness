@@ -7,6 +7,7 @@
 //! - [`process`]: stopping a program with everything it started, or becoming it;
 //! - [`file`]: making a symbolic link, removing what an agent made hard to remove;
 //! - [`lock`]: a lock file only one running program holds (one TUI window);
+//! - [`whole_file`]: writing a file so that readers never see half of it;
 //! - [`run_mark`]: finding the processes an agent run started that left its group;
 //! - [`stop`]: noticing that the system asks the harness to stop (terminal closed);
 //! - [`open`]: opening an address in the browser;
@@ -35,3 +36,4 @@ pub mod program;
 pub mod run_mark;
 pub mod stop;
 pub mod terminal;
+pub mod whole_file;

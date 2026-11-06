@@ -26,6 +26,7 @@ mod agents_tab;
 mod footer;
 mod language;
 mod mcp_tab;
+mod pinned;
 mod plugins_tab;
 mod projects_tab;
 mod retro_tab;
@@ -121,9 +122,14 @@ impl Env {
         self.code.path().canonicalize().unwrap().join(name)
     }
 
-    /// The TUI with its own folder browser, starting in the code folder.
+    /// The main window with its own folder browser, starting in the code folder.
     fn app(&self, start: &Path) -> App {
-        let mut app = App::new(Some(self.home.path().to_path_buf()), start);
+        self.window(start, Window::Main)
+    }
+
+    /// The TUI as `window`, with its own folder browser and fake programs.
+    fn window(&self, start: &Path, window: Window) -> App {
+        let mut app = App::new(Some(self.home.path().to_path_buf()), start, window);
         app.start_dir = self.code.path().canonicalize().unwrap();
         // The real check asks the programs of this computer for their versions.
         app.tool_checker = fake_tools;

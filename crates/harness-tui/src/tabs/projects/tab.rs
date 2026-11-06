@@ -56,13 +56,13 @@ impl ProjectsTab {
             .min(self.list.projects.len().saturating_sub(1));
     }
 
-    /// Changes the list with `change` and saves it.
+    /// Changes the list with `change` and saves it. The list is read from
+    /// the file again first, so what another window added is kept.
     pub fn update(&mut self, change: impl FnOnce(&mut Projects), tr: &I18n) -> Result<(), String> {
         let Some(home) = &self.home else {
             return Err(tr.t("errors.no_home").to_string());
         };
-        change(&mut self.list);
-        self.list.save(home).map_err(|e| e.to_string())?;
+        self.list = Projects::change(home, change).map_err(|e| e.to_string())?;
         self.selected = self
             .selected
             .min(self.list.projects.len().saturating_sub(1));

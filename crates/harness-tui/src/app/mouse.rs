@@ -13,7 +13,7 @@ use crate::tabs::skills::SkillButton;
 use crate::tabs::tasks::TasksTab;
 use crate::ui::message::Message;
 use crate::ui::{ButtonId, Hits, ListId, Target};
-use crate::{App, Tab, DOUBLE_CLICK, TABS};
+use crate::{App, Tab, DOUBLE_CLICK};
 
 impl App {
     /// A mouse event: a click (two in a row are a double click) or a wheel turn.
@@ -218,7 +218,11 @@ impl App {
             return;
         };
         match target {
-            Target::Tab(index) => self.show(TABS[index].0),
+            Target::Tab(index) => {
+                if let Some(&(tab, _)) = self.tabs().get(index) {
+                    self.show(tab);
+                }
+            }
             Target::Button(id) => self.press(id),
             Target::List { .. } => {
                 if let Some((list, index)) = Hits::row(target, row) {

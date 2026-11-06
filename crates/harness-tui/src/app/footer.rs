@@ -115,7 +115,8 @@ impl App {
         };
         // The key that lets the terminal select text while the TUI has the mouse.
         let copy = harness_platform::terminal::select_text_key();
-        self.tr.f(hint, &[("copy", &copy)])
+        let tabs = self.tabs().len();
+        self.tr.f(hint, &[("copy", &copy), ("tabs", &tabs)])
     }
 
     /// Makes the mark at the top left of `area` clickable, with a column more

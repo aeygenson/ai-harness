@@ -4,7 +4,7 @@
 use std::fs;
 use std::path::Path;
 
-use super::{io, OpsError, ADDING_DIR, DOWNLOADS_DIR};
+use super::{hold_catalogs, io, OpsError, ADDING_DIR, DOWNLOADS_DIR};
 use crate::git;
 use crate::plugins::catalog::{self, Catalog, CatalogConfig, Entry, Registry};
 
@@ -70,6 +70,8 @@ pub fn catalogs(home: &Path) -> Result<Vec<CatalogInfo>, OpsError> {
 /// Adds a catalog: a local folder (read where it is), `owner/repo` on
 /// GitHub or a git address (cloned). `name` replaces the catalog's own name.
 pub fn add_catalog(home: &Path, source: &str, name: Option<&str>) -> Result<Catalog, OpsError> {
+    // Named on purpose: `let _ = ...` would let the lock go at once.
+    let _catalogs = hold_catalogs(home)?;
     let source = source.trim();
     let mut registry = Registry::load(home)?;
     let catalogs = home.join(catalog::CATALOGS_DIR);
@@ -132,6 +134,8 @@ pub enum CatalogUpdate {
 /// Downloads the newest version of a catalog. Plugins already in projects
 /// do not change.
 pub fn update_catalog(home: &Path, name: &str) -> Result<CatalogUpdate, OpsError> {
+    // Named on purpose: `let _ = ...` would let the lock go at once.
+    let _catalogs = hold_catalogs(home)?;
     let registry = Registry::load(home)?;
     let config = registry
         .marketplaces
@@ -156,6 +160,8 @@ pub fn update_catalog(home: &Path, name: &str) -> Result<CatalogUpdate, OpsError
 /// Takes a catalog off the list and deletes its copy and downloads.
 /// Plugins already in projects stay there.
 pub fn remove_catalog(home: &Path, name: &str) -> Result<(), OpsError> {
+    // Named on purpose: `let _ = ...` would let the lock go at once.
+    let _catalogs = hold_catalogs(home)?;
     let mut registry = Registry::load(home)?;
     let config = registry
         .marketplaces

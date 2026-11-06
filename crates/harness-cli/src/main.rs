@@ -49,6 +49,7 @@ use harness_core::git::{Repo, HARNESS_DIR};
 use harness_core::task::handoff::Verdict;
 use harness_core::task::store::TaskStore;
 use harness_core::task::TaskState;
+use harness_tui::Window;
 
 use crate::cli::{
     Cli, Command, MarketplaceCommand, McpCommand, PluginCommand, RetroCommand, SecretCommand,
@@ -94,11 +95,16 @@ async fn main() -> Result<()> {
         }
         Command::Doctor => doctor::doctor(project),
         Command::Update { check } => update::update(check),
-        Command::Tui => {
+        Command::Tui { pin: false } => {
             // Inside a project it opens that project, anywhere else the last one.
             let start =
                 Repo::open(project).map_or_else(|_| project.clone(), |r| r.root().to_path_buf());
-            harness_tui::run(&start)
+            harness_tui::run(&start, Window::Main)
+        }
+        Command::Tui { pin: true } => {
+            // Pinned to the top of the repository, wherever inside it we are.
+            let repo = open_repo(project)?;
+            harness_tui::run(repo.root(), Window::Pinned)
         }
         Command::McpExec { file } => {
             let error = launcher::exec_server(&file);

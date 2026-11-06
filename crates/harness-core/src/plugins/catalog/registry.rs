@@ -58,7 +58,8 @@ impl Registry {
         };
         fs::create_dir_all(harness_home).map_err(io)?;
         let text = toml::to_string(self).expect("the registry is plain TOML");
-        fs::write(&path, text).map_err(io)
+        // Whole, so another window never reads half of the list.
+        harness_platform::whole_file::write(&path, text.as_bytes()).map_err(io)
     }
 
     /// The folder with a catalog's files.
