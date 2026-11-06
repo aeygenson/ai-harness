@@ -106,6 +106,12 @@ pub(super) const GROK_INSTALL: Commands = Commands {
     windows: Some("irm https://x.ai/cli/install.ps1 | iex"),
 };
 
+/// Zed's own script; on Windows the site says how.
+pub(super) const ZED_INSTALL: Commands = Commands {
+    unix: Some("curl -f https://zed.dev/install.sh | sh"),
+    windows: None,
+};
+
 /// Every agent the harness knows: first the ones it runs, then the others.
 pub const CATALOG: &[Entry] = &[
     Entry {
@@ -284,5 +290,20 @@ pub const CATALOG: &[Entry] = &[
         update: Commands::both("npm install -g opencode-ai@latest"),
         remove: Commands::NONE,
         site: "https://opencode.ai",
+    },
+    Entry {
+        id: "zed",
+        name: "Zed",
+        vendor: "Zed Industries",
+        // The editor's command-line program: `zed`, or `zeditor` in some
+        // Linux packages. Its AI agent lives inside the editor window.
+        programs: &["zed", "zeditor"],
+        inside: None,
+        plan: "Zed Pro, or your own keys",
+        min_version: None,
+        install: ZED_INSTALL,
+        update: ZED_INSTALL,
+        remove: Commands::NONE,
+        site: "https://zed.dev",
     },
 ];
