@@ -161,7 +161,9 @@ harness tui --pin                    # in the project folder, or: harness tui --
 
 A pinned window stays on its project (it has no Projects tab), and only one can be pinned
 to a project at a time. The main window and windows pinned to other projects stay open
-next to it, and their tasks run in parallel.
+next to it, and their tasks run in parallel. The main window's Projects tab shows which
+task runs in each project and how many wait for you; a task running in another window
+cannot be started twice, but can be stopped from the main window.
 
 Everything can be done from the TUI. The same steps from the command line:
 

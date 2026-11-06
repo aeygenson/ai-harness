@@ -24,7 +24,7 @@ use ratatui::prelude::CrosstermBackend;
 use ratatui::{DefaultTerminal, Terminal};
 
 use crate::ui::i18n::I18n;
-use crate::App;
+use crate::{App, Tab};
 
 /// How often the open project is read again.
 const RELOAD_EVERY: Duration = Duration::from_secs(3);
@@ -131,6 +131,11 @@ pub(crate) fn event_loop(
         if loaded.elapsed() >= RELOAD_EVERY {
             if let Some(tasks) = &mut app.tasks {
                 tasks.reload();
+            }
+            // The list shows what other windows do: read it again too,
+            // but only while it is on screen.
+            if app.tab == Tab::Projects {
+                app.projects.refresh();
             }
             loaded = Instant::now();
         }

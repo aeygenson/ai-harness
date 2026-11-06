@@ -429,7 +429,11 @@ fn a_task_is_not_started_while_another_harness_works_in_the_project() {
 
     let (message, problem) = shown(&app);
     assert!(problem, "{message}");
-    assert!(message.contains("harness stop task-007"), "{message}");
+    // Checked when «Send» is pressed: the stop buttons can stop it.
+    assert!(
+        message.contains("task-007 runs in another window"),
+        "{message}"
+    );
     assert!(!root.join(".harness/runs/task-001").exists());
     drop(other);
 }
@@ -1359,12 +1363,25 @@ fn developer_next(env: &Env, builder: tabs::tasks::runner::Builder) -> (PathBuf,
 fn stop_after_this_step_lets_the_role_finish_then_waits_for_the_user() {
     use harness_core::task::{Stage, WaitReason};
     let env = Env::new();
-    let (_root, mut app) = developer_next(&env, developer_until_any_stop);
+    let (root, mut app) = developer_next(&env, developer_until_any_stop);
     // No stop buttons while no role works.
     assert!(!screen(&mut app).contains("Stop after this step"));
 
     click(&mut app, " Send ");
+    // Its own run, read again from disk once it has named its task, is not
+    // "another window".
+    let repo = Repo::open(&root).unwrap();
+    let start = std::time::Instant::now();
+    while harness_core::task::run_lock::working(&repo)
+        .unwrap()
+        .is_none()
+    {
+        assert!(start.elapsed() < std::time::Duration::from_secs(30));
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    app.reload_all();
     let text = screen(&mut app);
+    assert!(!text.contains("another window"), "{text}");
     assert!(text.contains("Stop after this step (s)"), "{text}");
     assert!(text.contains("Stop now (x)"), "{text}");
     key(&mut app, KeyCode::Char('s'));
@@ -1398,6 +1415,42 @@ fn stop_after_this_step_lets_the_role_finish_then_waits_for_the_user() {
     click(&mut app, " Send ");
     wait(&mut app);
     assert_eq!(stage(&app), Stage::Done);
+}
+
+#[test]
+fn a_stop_asked_from_another_window_is_not_taken_back_here() {
+    use harness_core::task::run_lock;
+    use harness_core::task::stop_request::StopWhen;
+    use harness_core::task::{Stage, WaitReason};
+    let env = Env::new();
+    let (root, mut app) = developer_next(&env, developer_until_any_stop);
+    click(&mut app, " Send ");
+    let repo = Repo::open(&root).unwrap();
+    let start = std::time::Instant::now();
+    // Until the run runs roles and has its stop file.
+    while !run_lock::working(&repo)
+        .unwrap()
+        .is_some_and(|w| w.can_stop)
+    {
+        assert!(start.elapsed() < std::time::Duration::from_secs(30));
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    // The main window asks this run to stop after the step.
+    run_lock::ask_to_stop(&repo, "task-001", StopWhen::AfterStep).unwrap();
+
+    key(&mut app, KeyCode::Char('s'));
+    key(&mut app, KeyCode::Char('s'));
+
+    assert!(
+        shown(&app).0.contains("cannot be taken back here"),
+        "{:?}",
+        shown(&app)
+    );
+    wait(&mut app);
+    assert_eq!(
+        stage(&app),
+        Stage::WaitingForHuman(WaitReason::StoppedByUser(Role::Architect))
+    );
 }
 
 #[test]

@@ -190,6 +190,9 @@ impl App {
         }
         self.reload_catalog_views();
         self.projects.reload(&self.tr);
+        if self.tab == Tab::Projects {
+            self.projects.refresh();
+        }
     }
 
     /// A window over the tabs (the start window, the folder browser, a form)

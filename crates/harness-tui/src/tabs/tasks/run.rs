@@ -28,6 +28,12 @@ impl TasksTab {
         if self.running.is_some() {
             return Err(tr.t("tasks.busy").to_string());
         }
+        // Read again (the last read may be seconds old) and checked before
+        // anything is cleared, so the typed note stays.
+        self.refresh_elsewhere();
+        if let Some(working) = &self.elsewhere {
+            return Err(tr.f("tasks.elsewhere", &[("task", &working.task)]));
+        }
         let notes = self.input.trim().to_string();
         let task = self.current().map(|t| (t.id.clone(), t.state.stage));
         let request = match (self.choice, task) {

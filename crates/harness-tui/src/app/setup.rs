@@ -99,9 +99,10 @@ impl App {
         } else if let Some(last) = last.filter(|p| has_config(p) && window == Window::Main) {
             app.open(&last);
         }
-        if window == Window::Pinned {
+        match window {
             // Never the Projects tab, even when the project could not be opened.
-            app.tab = Tab::Tasks;
+            Window::Pinned => app.tab = Tab::Tasks,
+            Window::Main => app.projects.refresh(),
         }
         app
     }
@@ -178,6 +179,9 @@ impl App {
     /// Opens a tab. The Agents tab checks the computer the first time.
     pub(crate) fn show(&mut self, tab: Tab) {
         self.tab = tab;
+        if tab == Tab::Projects {
+            self.projects.refresh();
+        }
         if tab == Tab::Agents && !self.agents.known {
             self.check_agents();
         }
