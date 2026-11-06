@@ -11,6 +11,10 @@ use harness_core::config::AgentKind;
 use crate::adapters::dsh::Provider;
 
 const TOKEN_FILE: &str = "oauth-token";
+/// Written by `harness login cursor` after Cursor's own `agent login`
+/// succeeded. Cursor keeps the login itself (on a Mac in the Keychain), so
+/// this file only says that the user signed in; it holds no secret.
+pub const CURSOR_SIGNED_IN: &str = "signed-in";
 
 /// Lives in `harness_core`, because MCP server settings carry secrets too.
 pub use harness_core::secret::Secret;
@@ -47,6 +51,7 @@ pub fn has_login(dir: &Path, agent: AgentKind) -> bool {
         AgentKind::Dsh => load_api_key(dir, Provider::DeepSeek).is_ok(),
         AgentKind::DshNvidia => load_api_key(dir, Provider::Nvidia).is_ok(),
         AgentKind::Antigravity => dir.join("antigravity/.gemini/antigravity-cli").is_dir(),
+        AgentKind::Cursor => dir.join("cursor").join(CURSOR_SIGNED_IN).is_file(),
     }
 }
 

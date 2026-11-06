@@ -4,7 +4,7 @@ use crate::config::AgentKind;
 use crate::task::handoff::Role;
 
 /// The built-in skills: name and text.
-pub(super) const BUILT_IN: [(&str, &str); 14] = [
+pub(super) const BUILT_IN: [(&str, &str); 15] = [
     ("common", include_str!("../../skills/common.md")),
     ("architect", include_str!("../../skills/architect.md")),
     ("developer", include_str!("../../skills/developer.md")),
@@ -17,6 +17,7 @@ pub(super) const BUILT_IN: [(&str, &str); 14] = [
         include_str!("../../skills/agent-antigravity.md"),
     ),
     ("agent-dsh", include_str!("../../skills/agent-dsh.md")),
+    ("agent-cursor", include_str!("../../skills/agent-cursor.md")),
     (
         "filesystem-attacks",
         include_str!("../../skills/filesystem-attacks.md"),
@@ -53,6 +54,7 @@ pub fn agent_note(agent: AgentKind) -> &'static str {
         AgentKind::Codex => "agent-codex",
         AgentKind::Antigravity => "agent-antigravity",
         AgentKind::Dsh | AgentKind::DshNvidia => "agent-dsh",
+        AgentKind::Cursor => "agent-cursor",
     }
 }
 

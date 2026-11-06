@@ -35,9 +35,10 @@ use harness_core::task::handoff::Role;
 
 use crate::process::{self, failed};
 use crate::role_settings::RoleSettings;
-pub(crate) use home::copy_dir;
+pub(crate) use home::{copy_dir, DENIED_FOR_ALL, DENIED_FOR_READERS};
 use home::{settings, toolchain_env};
-use output::{agy_error, last_line, RunResult};
+pub(crate) use output::last_line;
+use output::{agy_error, RunResult};
 
 /// Where `agy` keeps its settings, inside `HOME`.
 const SETTINGS_DIR: &str = ".gemini/antigravity-cli";

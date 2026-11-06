@@ -25,6 +25,10 @@ const ALWAYS_FORBIDDEN: &[&str] = &[
     ".agents",
     // DeepSeek Harness reads project skills from here.
     ".dsh",
+    // Cursor CLI reads project permissions, rules and MCP servers from here.
+    ".cursor",
+    // Cursor's older file of project rules.
+    ".cursorrules",
     "CLAUDE.md",
     "AGENTS.md",
     // Antigravity CLI reads it as project instructions.

@@ -56,7 +56,8 @@ agent_timeout_minutes = 30
 # Which agent works as each role: "claude" (Claude Code), "codex" (Codex CLI),
 # "antigravity" (Antigravity CLI), "dsh" (DeepSeek Harness, DeepSeek's own
 # agent; the Agents tab («Sign in») saves the API key) or "dsh+nvidia" (the
-# same agent with NVIDIA's free models from build.nvidia.com, with an NVIDIA key).
+# same agent with NVIDIA's free models from build.nvidia.com, with an NVIDIA key)
+# or "cursor" (Cursor CLI; sign in on the Agents tab).
 # Add `model = "..."` to pick a model, for example "opus" for claude,
 # "deepseek-v4-pro" for dsh (default "deepseek-flash") or "z-ai/glm-5.3" for
 # dsh+nvidia (default "moonshotai/kimi-k2.6"), and (except with dsh+nvidia)

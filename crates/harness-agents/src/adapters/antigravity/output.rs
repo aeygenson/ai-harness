@@ -47,7 +47,8 @@ pub(super) fn agy_error(stderr: &str) -> Option<String> {
         .map(|rest| rest.trim().to_string())
 }
 
-pub(super) fn last_line(text: &str) -> &str {
+/// The last line of `text` that is not blank, for an error message.
+pub(crate) fn last_line(text: &str) -> &str {
     text.lines()
         .rev()
         .find(|line| !line.trim().is_empty())
