@@ -430,7 +430,10 @@ fn a_task_is_not_started_while_another_harness_works_in_the_project() {
     let (message, problem) = shown(&app);
     assert!(problem, "{message}");
     // Checked when «Send» is pressed: the stop buttons can stop it.
-    assert!(message.contains("task-007 runs in another window"), "{message}");
+    assert!(
+        message.contains("task-007 runs in another window"),
+        "{message}"
+    );
     assert!(!root.join(".harness/runs/task-001").exists());
     drop(other);
 }
