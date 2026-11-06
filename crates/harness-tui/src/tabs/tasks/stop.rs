@@ -42,7 +42,15 @@ impl TasksTab {
         let Some(stop) = self.stop_request() else {
             return self.ask_elsewhere(StopWhen::AfterStep, tr);
         };
-        let asked = stop.toggle_after_step();
+        let pressed = stop.toggle_after_step();
+        // Another window, `harness stop` or MCP may have asked through the
+        // stop file; taking back the button here does not undo that.
+        let asked = stop.asked();
+        if pressed.is_none() && asked == Some(StopWhen::AfterStep) {
+            let text = tr.t("tasks.stop_asked_elsewhere").to_string();
+            self.log.push(format!("── {text}"));
+            return Some(text);
+        }
         let key = match asked {
             Some(StopWhen::AfterStep) => "tasks.stop_after_asked",
             None => "tasks.stop_after_cancelled",

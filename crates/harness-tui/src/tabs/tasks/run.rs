@@ -28,7 +28,9 @@ impl TasksTab {
         if self.running.is_some() {
             return Err(tr.t("tasks.busy").to_string());
         }
-        // Checked before anything is cleared, so the typed note stays.
+        // Read again (the last read may be seconds old) and checked before
+        // anything is cleared, so the typed note stays.
+        self.refresh_elsewhere();
         if let Some(working) = &self.elsewhere {
             return Err(tr.f("tasks.elsewhere", &[("task", &working.task)]));
         }

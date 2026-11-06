@@ -34,6 +34,9 @@ impl TasksTab {
     /// Asks the other harness to stop `when`. The message for the bottom
     /// line: what was asked, or why it could not be.
     pub(super) fn ask_elsewhere(&mut self, when: StopWhen, tr: &I18n) -> Option<String> {
+        // What runs, and what was asked of it, may have changed since the
+        // last read: another run, or a stop asked from elsewhere.
+        self.refresh_elsewhere();
         let task = self.stoppable_elsewhere()?.to_string();
         let asked_before = self.elsewhere.as_ref().and_then(|w| w.asked);
         if when == StopWhen::AfterStep && asked_before == Some(StopWhen::AfterStep) {
@@ -45,14 +48,13 @@ impl TasksTab {
         };
         Some(match asked {
             Ok(()) => {
-                if let Some(working) = &mut self.elsewhere {
-                    working.asked = Some(when);
-                }
+                // The file says what is asked now («now» is never undone).
+                self.refresh_elsewhere();
                 tr.f("tasks.stop_elsewhere_asked", &[("task", &task)])
             }
-            // It has finished meanwhile.
+            // It has finished meanwhile; another run may have begun.
             Err(RunLockError::NotRunning(_)) => {
-                self.elsewhere = None;
+                self.refresh_elsewhere();
                 tr.t("tasks.stop_nothing").to_string()
             }
             Err(error) => error.to_string(),
