@@ -49,10 +49,15 @@ impl TasksTab {
             tr.t("tasks.to"),
             Self::choice_label(self.choice, tr)
         );
-        let send = if self.running.is_some() {
-            tr.t("tasks.working")
-        } else {
-            tr.t("tasks.send")
+        // A run of another window: nothing is started here until it ends.
+        let elsewhere = self
+            .elsewhere
+            .as_ref()
+            .map(|w| tr.f("tasks.elsewhere", &[("task", &w.task)]));
+        let send = match &elsewhere {
+            Some(label) => label.as_str(),
+            None if self.running.is_some() => tr.t("tasks.working"),
+            None => tr.t("tasks.send"),
         };
         let default = tr.t("tasks.default");
         let mut items: Vec<(String, ButtonId, bool)> = vec![(to, ButtonId::Menu(Menu::To), true)];
@@ -81,7 +86,8 @@ impl TasksTab {
         for (label, id) in stops {
             items.push((label, id, true));
         }
-        items.push((send.to_string(), ButtonId::Send, self.running.is_none()));
+        let can_send = self.running.is_none() && elsewhere.is_none();
+        items.push((send.to_string(), ButtonId::Send, can_send));
         fit_buttons(&mut items, inner.width, stopping);
         let buttons_width = buttons_total(&items).min(inner.width);
         let bottom = inner.bottom() - 1;

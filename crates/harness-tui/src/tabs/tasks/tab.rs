@@ -34,7 +34,9 @@ use harness_core::git::HARNESS_DIR;
 use harness_core::models::{self, ModelList};
 use harness_core::retro::usage::Usage;
 use harness_core::task::handoff::Role;
+use harness_core::task::run_lock;
 use harness_core::task::scenario::Scenario;
+use harness_core::task::stop_request::StopWhen;
 use harness_core::task::store::{self, Step};
 use harness_core::task::{Stage, TaskState};
 
@@ -131,6 +133,10 @@ pub struct TasksTab {
     pub(crate) run: Option<RunChoice>,
     /// Roles working in the background.
     pub(crate) running: Option<Running>,
+    /// The task another window or terminal runs in this project now.
+    pub(super) elsewhere: Option<run_lock::Working>,
+    /// What this tab asked that other run, so it is not asked twice.
+    pub(super) elsewhere_asked: Option<StopWhen>,
     /// What the agent printed in the last run.
     pub(crate) log: LiveLog,
     /// The background work checked out a task's branch: the other tabs
@@ -178,6 +184,8 @@ impl TasksTab {
             menu: None,
             run: None,
             running: None,
+            elsewhere: None,
+            elsewhere_asked: None,
             log: LiveLog::default(),
             branch_changed: false,
             open: None,
@@ -240,6 +248,7 @@ impl TasksTab {
             Err(error) => problems.push(error.to_string()),
         }
         self.problem = problems.into_iter().next();
+        self.refresh_elsewhere();
         self.refresh_times();
         self.apply_filter(selected);
     }

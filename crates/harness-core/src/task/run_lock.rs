@@ -208,6 +208,40 @@ pub fn ask_to_stop(repo: &Repo, task_id: &str, when: StopWhen) -> Result<(), Run
     fs::rename(&new, &file).map_err(|source| io_error(&file, source))
 }
 
+/// A harness that works on a task in a project right now: what another
+/// window shows instead of starting a second run there.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Working {
+    /// The task it works on.
+    pub task: String,
+    /// Whether `harness stop` (and [`ask_to_stop`]) can stop it: it runs
+    /// roles, not a step that cannot stop halfway.
+    pub can_stop: bool,
+}
+
+/// Which task a harness works on in this project right now, if any.
+///
+/// Read without disturbing it: the lock is only tried when the task file
+/// is there, and a running harness holds the lock, so it is never taken
+/// from it. A task file a crashed run left is noticed by taking the free
+/// lock for a moment (as [`ask_to_stop`] does). A harness that has just
+/// taken the lock and not yet named its task counts as none.
+///
+/// # Errors
+///
+/// Git could not say where its folder is, or the lock cannot be used.
+pub fn working(repo: &Repo) -> Result<Option<Working>, RunLockError> {
+    let dir = lock_dir(repo)?;
+    let Some(task) = read_task(&dir) else {
+        return Ok(None);
+    };
+    if try_hold(&dir)?.is_some() {
+        return Ok(None);
+    }
+    let can_stop = is_plain_file(&stop_file(&dir, &task));
+    Ok(Some(Working { task, can_stop }))
+}
+
 /// Removes every stop file in `dir`, also those of other tasks.
 fn remove_stop_files(dir: &Path) -> Result<(), RunLockError> {
     let entries = match fs::read_dir(dir) {
@@ -315,6 +349,46 @@ mod tests {
         first.connect(&StopRequest::new()).unwrap();
         let running = RunLock::hold(&repo).unwrap_err().to_string();
         assert!(running.contains("harness stop task-007"), "{running}");
+    }
+
+    #[test]
+    fn working_names_the_running_task_and_whether_it_can_stop() {
+        let (_dir, repo) = repo();
+        assert_eq!(working(&repo).unwrap(), None);
+
+        let mut deciding = RunLock::hold(&repo).unwrap();
+        assert_eq!(working(&repo).unwrap(), None, "no task named yet");
+        deciding.set_task("task-007").unwrap();
+        let busy = working(&repo).unwrap();
+        assert_eq!(
+            busy,
+            Some(Working {
+                task: "task-007".into(),
+                can_stop: false
+            })
+        );
+        drop(deciding);
+
+        let (lock, _stop) = running(&repo, "task-008");
+        assert_eq!(working(&repo).unwrap().map(|w| w.can_stop), Some(true));
+        // Asking does not take the lock from the run.
+        assert!(matches!(
+            RunLock::hold(&repo),
+            Err(RunLockError::Busy { .. })
+        ));
+        drop(lock);
+        assert_eq!(working(&repo).unwrap(), None);
+    }
+
+    #[test]
+    fn a_task_file_a_crashed_run_left_is_not_a_run() {
+        let (_dir, repo) = repo();
+        let dir = lock_dir(&repo).unwrap();
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join(TASK_FILE), "task-009").unwrap();
+
+        assert_eq!(working(&repo).unwrap(), None);
+        RunLock::hold(&repo).unwrap();
     }
 
     #[test]

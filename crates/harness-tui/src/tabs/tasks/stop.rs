@@ -1,6 +1,8 @@
 //! The user's stop buttons on the message box while roles work: «Stop after this
 //! step» (s; pressed again, it is taken back) and «Stop now» (x, after a
 //! confirmation the app asks for). Both end with the task waiting for them.
+//! While another window runs a task here, they ask that one to stop (see
+//! `elsewhere.rs`); asking it cannot be taken back.
 
 use harness_core::task::stop_request::{StopRequest, StopWhen};
 
@@ -17,12 +19,18 @@ impl TasksTab {
     /// Can the user stop the work now? Only while roles work, and not again
     /// once «Stop now» is asked.
     pub fn can_stop(&self) -> bool {
-        self.stop_request().is_some_and(|stop| !stop.now())
+        match self.stop_request() {
+            Some(stop) => !stop.now(),
+            None => self.stoppable_elsewhere().is_some(),
+        }
     }
 
     /// What the user has asked for, if anything.
     pub fn stop_asked(&self) -> Option<StopWhen> {
-        self.stop_request().and_then(StopRequest::asked)
+        match self.stop_request() {
+            Some(stop) => stop.asked(),
+            None => self.elsewhere_asked,
+        }
     }
 
     /// «Stop after this step»: asks for it, or takes it back. The message
@@ -31,7 +39,10 @@ impl TasksTab {
         if !self.can_stop() {
             return None;
         }
-        let asked = self.stop_request()?.toggle_after_step();
+        let Some(stop) = self.stop_request() else {
+            return self.ask_elsewhere(StopWhen::AfterStep, tr);
+        };
+        let asked = stop.toggle_after_step();
         let key = match asked {
             Some(StopWhen::AfterStep) => "tasks.stop_after_asked",
             None => "tasks.stop_after_cancelled",
@@ -48,7 +59,10 @@ impl TasksTab {
         if !self.can_stop() {
             return None;
         }
-        self.stop_request()?.stop_now();
+        let Some(stop) = self.stop_request() else {
+            return self.ask_elsewhere(StopWhen::Now, tr);
+        };
+        stop.stop_now();
         let text = tr.t("tasks.stop_now_asked").to_string();
         self.log.push(format!("── {text}"));
         Some(text)

@@ -1359,12 +1359,25 @@ fn developer_next(env: &Env, builder: tabs::tasks::runner::Builder) -> (PathBuf,
 fn stop_after_this_step_lets_the_role_finish_then_waits_for_the_user() {
     use harness_core::task::{Stage, WaitReason};
     let env = Env::new();
-    let (_root, mut app) = developer_next(&env, developer_until_any_stop);
+    let (root, mut app) = developer_next(&env, developer_until_any_stop);
     // No stop buttons while no role works.
     assert!(!screen(&mut app).contains("Stop after this step"));
 
     click(&mut app, " Send ");
+    // Its own run, read again from disk once it has named its task, is not
+    // "another window".
+    let repo = Repo::open(&root).unwrap();
+    let start = std::time::Instant::now();
+    while harness_core::task::run_lock::working(&repo)
+        .unwrap()
+        .is_none()
+    {
+        assert!(start.elapsed() < std::time::Duration::from_secs(30));
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    app.reload_all();
     let text = screen(&mut app);
+    assert!(!text.contains("another window"), "{text}");
     assert!(text.contains("Stop after this step (s)"), "{text}");
     assert!(text.contains("Stop now (x)"), "{text}");
     key(&mut app, KeyCode::Char('s'));

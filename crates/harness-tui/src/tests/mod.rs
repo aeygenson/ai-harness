@@ -26,6 +26,7 @@ mod agents_tab;
 mod footer;
 mod language;
 mod mcp_tab;
+mod other_window;
 mod pinned;
 mod plugins_tab;
 mod projects_tab;
