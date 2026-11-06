@@ -24,16 +24,19 @@ pub enum AgentKind {
     /// `DeepSeek` Harness with NVIDIA's free models (build.nvidia.com) instead
     /// of `DeepSeek`'s own API: the same program, another key.
     DshNvidia,
+    /// Cursor CLI (`agent`, earlier `cursor-agent`).
+    Cursor,
 }
 
 impl AgentKind {
     /// Every agent, in the order the screens list them.
-    pub const ALL: [AgentKind; 5] = [
+    pub const ALL: [AgentKind; 6] = [
         AgentKind::Claude,
         AgentKind::Codex,
         AgentKind::Antigravity,
         AgentKind::Dsh,
         AgentKind::DshNvidia,
+        AgentKind::Cursor,
     ];
 
     /// The name as written in `harness.toml`, e.g. `"codex"`.
@@ -44,6 +47,7 @@ impl AgentKind {
             AgentKind::Antigravity => "antigravity",
             AgentKind::Dsh => "dsh",
             AgentKind::DshNvidia => "dsh+nvidia",
+            AgentKind::Cursor => "cursor",
         }
     }
 
@@ -53,7 +57,9 @@ impl AgentKind {
         match self {
             AgentKind::Dsh => "deepseek",
             AgentKind::DshNvidia => "nvidia",
-            AgentKind::Claude | AgentKind::Codex | AgentKind::Antigravity => self.as_str(),
+            AgentKind::Claude | AgentKind::Codex | AgentKind::Antigravity | AgentKind::Cursor => {
+                self.as_str()
+            }
         }
     }
 
@@ -61,7 +67,9 @@ impl AgentKind {
     pub fn has_plugins(self) -> bool {
         match self {
             AgentKind::Claude | AgentKind::Codex => true,
-            AgentKind::Antigravity | AgentKind::Dsh | AgentKind::DshNvidia => false,
+            AgentKind::Antigravity | AgentKind::Dsh | AgentKind::DshNvidia | AgentKind::Cursor => {
+                false
+            }
         }
     }
 }
@@ -85,8 +93,8 @@ pub enum UnknownAgent {
     Removed,
     /// Any other text that is not an agent name.
     #[error(
-        "{0:?} is not an agent; use \"claude\", \"codex\", \"antigravity\", \"dsh\" \
-         or \"dsh+nvidia\""
+        "{0:?} is not an agent; use \"claude\", \"codex\", \"antigravity\", \"dsh\", \
+         \"dsh+nvidia\" or \"cursor\""
     )]
     Other(String),
 }
@@ -102,6 +110,7 @@ impl FromStr for AgentKind {
             "antigravity" => Ok(AgentKind::Antigravity),
             "dsh" => Ok(AgentKind::Dsh),
             "dsh+nvidia" => Ok(AgentKind::DshNvidia),
+            "cursor" => Ok(AgentKind::Cursor),
             "codex+deepseek" => Err(UnknownAgent::Removed),
             _ => Err(UnknownAgent::Other(text.to_string())),
         }

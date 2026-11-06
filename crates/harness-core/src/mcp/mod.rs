@@ -284,7 +284,8 @@ pub fn agent_runs(agent: AgentKind, _server: &crate::config::McpConfig) -> bool 
         | AgentKind::Codex
         | AgentKind::Antigravity
         | AgentKind::Dsh
-        | AgentKind::DshNvidia => true,
+        | AgentKind::DshNvidia
+        | AgentKind::Cursor => true,
     }
 }
 

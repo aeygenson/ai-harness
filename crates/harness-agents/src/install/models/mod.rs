@@ -8,6 +8,7 @@
 //! - Claude Code: the `initialize` request of its stream-json mode;
 //! - Codex: `codex debug models`;
 //! - Antigravity: `agy models`;
+//! - Cursor: `agent models`, with Cursor's own login and an empty config folder;
 //! - `DeepSeek` Harness: `GET /models` of `DeepSeek`'s API with the saved key,
 //!   with dsh's effort levels; with NVIDIA, `GET /v1/models` of NVIDIA's API.
 //!   NVIDIA lists every model it serves, also ones not made for chat.
@@ -28,7 +29,9 @@ use crate::adapters::codex::{keep_refreshed_login, AUTH_FILE};
 use crate::adapters::dsh::Provider;
 use crate::install::credentials;
 use crate::process::base_command;
-pub use parse::{parse_agy, parse_api_models, parse_claude, parse_codex, with_dsh_efforts};
+pub use parse::{
+    parse_agy, parse_api_models, parse_claude, parse_codex, parse_cursor, with_dsh_efforts,
+};
 
 /// How long one agent may take to answer.
 const TIME_LIMIT: Duration = Duration::from_secs(90);
@@ -48,6 +51,8 @@ pub struct Programs {
     pub curl: PathBuf,
     /// The Antigravity CLI program.
     pub agy: PathBuf,
+    /// The Cursor CLI program.
+    pub cursor: PathBuf,
 }
 
 impl Default for Programs {
@@ -57,6 +62,7 @@ impl Default for Programs {
             codex: "codex".into(),
             curl: "curl".into(),
             agy: "agy".into(),
+            cursor: crate::adapters::cursor::program(),
         }
     }
 }
@@ -153,6 +159,15 @@ pub fn ask(
                 .env("AGY_CLI_DISABLE_AUTO_UPDATE", "true")
                 .arg("models");
             parse_agy(&run(command, "", &[])?)
+        }
+        AgentKind::Cursor => {
+            // An empty config folder, as for a role: nothing of the user's own setup.
+            let mut command = base_command(&programs.cursor, tmp);
+            command
+                .env("CURSOR_CONFIG_DIR", tmp)
+                .env("NO_OPEN_BROWSER", "1")
+                .arg("models");
+            parse_cursor(&run(command, "", &[])?)
         }
     };
     if models.is_empty() {
@@ -390,6 +405,15 @@ print {"data":[{"id":"moonshotai/kimi-k2.6"}]}"#,
         let ids: Vec<&str> = models.iter().map(|m| m.id.as_str()).collect();
         assert_eq!(ids, ["gemini-3.8-flash-high", "claude-opus-4-6-thinking"]);
         assert!(models[0].default && models[0].efforts.is_empty());
+
+        let models = parse_cursor(
+            "Available models\n\nauto - Auto\ngpt-5 - GPT-5 (current)\nsonnet-4.5-thinking - Claude 4.5 Sonnet Thinking\nTip: use --model <id>\n",
+        );
+        let ids: Vec<&str> = models.iter().map(|m| m.id.as_str()).collect();
+        assert_eq!(ids, ["auto", "gpt-5", "sonnet-4.5-thinking"]);
+        assert!(!models[0].default && models[1].default);
+        assert_eq!(models[1].name.as_deref(), Some("GPT-5"));
+        assert!(parse_cursor("- composer-1 - Composer 1\n")[0].default);
     }
 
     #[test]

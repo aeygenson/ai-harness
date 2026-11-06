@@ -16,7 +16,7 @@ use crate::adapters::dsh::Provider;
 use crate::install::catalog;
 use crate::install::credentials::{self, Secret};
 use crate::role_settings::RoleSettings;
-use crate::{Antigravity, AnyAgent, ClaudeCode, Codex, Dsh, Team};
+use crate::{Antigravity, AnyAgent, ClaudeCode, Codex, Cursor, Dsh, Team};
 
 /// Why an agent cannot be built, in words for the user: a missing login or a
 /// broken setting.
@@ -129,6 +129,10 @@ pub fn build_agent(
         ))),
         AgentKind::Dsh => dsh_agent(&dir, choice, Provider::DeepSeek, settings),
         AgentKind::DshNvidia => dsh_agent(&dir, choice, Provider::Nvidia, settings),
+        AgentKind::Cursor => {
+            cursor_login(&dir)?;
+            Ok(AnyAgent::Cursor(Cursor::new(settings)))
+        }
     }
 }
 
@@ -182,6 +186,17 @@ fn antigravity_login(dir: &Path) -> Result<PathBuf, BuildError> {
     } else {
         Err(problem(
             "no Antigravity login saved; sign in on the Agents tab first",
+        ))
+    }
+}
+
+/// Did the user sign in to Cursor on the Agents tab? Cursor keeps the login itself.
+fn cursor_login(dir: &Path) -> Result<(), BuildError> {
+    if credentials::has_login(dir, AgentKind::Cursor) {
+        Ok(())
+    } else {
+        Err(problem(
+            "not signed in to Cursor; sign in on the Agents tab first",
         ))
     }
 }

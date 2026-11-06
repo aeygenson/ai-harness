@@ -231,14 +231,15 @@ impl ClaudeCode {
 }
 
 /// The last line of `stream-json` output: `{"type":"result","is_error":false,"result":"..."}`.
+/// Cursor CLI ends its `stream-json` output with the same event.
 #[derive(Debug, PartialEq, Eq)]
-struct FinalResult {
-    is_error: bool,
-    text: String,
+pub(crate) struct FinalResult {
+    pub(crate) is_error: bool,
+    pub(crate) text: String,
 }
 
 impl FinalResult {
-    fn find(stdout: &str) -> Option<Self> {
+    pub(crate) fn find(stdout: &str) -> Option<Self> {
         stdout
             .lines()
             .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())

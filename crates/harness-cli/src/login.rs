@@ -20,8 +20,10 @@ pub(crate) fn login(agent: &str) -> Result<()> {
         "deepseek" => login_api_key(&dir, &DEEPSEEK),
         "nvidia" => login_api_key(&dir, &NVIDIA),
         "antigravity" => login_antigravity(&dir),
+        "cursor" => login_cursor(&dir, &harness_agents::adapters::cursor::program()),
         other => bail!(
-            "unknown agent {other:?}; use `claude`, `codex`, `deepseek`, `nvidia` or `antigravity`"
+            "unknown agent {other:?}; use `claude`, `codex`, `deepseek`, `nvidia`, \
+             `antigravity` or `cursor`"
         ),
     }
 }
@@ -189,9 +191,47 @@ fn login_antigravity(dir: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Runs Cursor's own `agent login` (in the browser), then `agent status` to
+/// check it. Cursor saves the login itself (on a Mac in the Keychain), so the
+/// harness never sees a key; it only notes in `credentials/cursor/` that the
+/// user signed in, so the Agents tab can show it.
+fn login_cursor(dir: &Path, program: &Path) -> Result<()> {
+    println!("Starting `agent login`; finish the login in your browser.");
+    for step in ["login", "status"] {
+        let status = std::process::Command::new(harness_platform::program::resolve(program))
+            .arg(step)
+            .status()
+            .context("cannot start `agent`; is Cursor CLI installed?")?;
+        if !status.success() {
+            bail!("`agent {step}` failed ({status}); nothing was saved");
+        }
+    }
+    let note = dir.join("cursor");
+    fs::create_dir_all(&note)?;
+    fs::write(
+        note.join(credentials::CURSOR_SIGNED_IN),
+        "Signed in with `agent login`; Cursor keeps the login itself.\n",
+    )?;
+    println!("Signed in to Cursor.");
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cursor_counts_as_signed_in_only_after_login_and_status_succeed() {
+        let creds = tempfile::tempdir().unwrap();
+        let bin = tempfile::tempdir().unwrap();
+        let failing = harness_fake::install(bin.path(), "agent", "when-arg 1 status exit 1\n");
+        assert!(login_cursor(creds.path(), &failing).is_err());
+        assert!(!credentials::has_login(creds.path(), AgentKind::Cursor));
+
+        let working = harness_fake::install(bin.path(), "agent", "print ok\n");
+        login_cursor(creds.path(), &working).unwrap();
+        assert!(credentials::has_login(creds.path(), AgentKind::Cursor));
+    }
 
     #[test]
     fn a_deepseek_key_pasted_twice_is_refused() {

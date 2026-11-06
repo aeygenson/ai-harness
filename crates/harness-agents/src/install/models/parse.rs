@@ -199,6 +199,40 @@ pub fn parse_agy(output: &str) -> Vec<Model> {
     models
 }
 
+/// `agent models` of Cursor: `id - Name` per line under a heading, the
+/// default or current one marked `(default)` / `(current)`. The effort is
+/// part of the id (`...-thinking`), so there are no separate levels. Lines
+/// that do not look like a model (the heading, hints) are skipped.
+pub fn parse_cursor(output: &str) -> Vec<Model> {
+    let mut models: Vec<Model> = output
+        .lines()
+        .filter_map(|line| {
+            let line = line.trim().trim_start_matches(['-', '*', '•']).trim();
+            let (id, name) = line.split_once(" - ")?;
+            let id = id.trim();
+            let ok = !id.is_empty()
+                && id
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || "-._/:".contains(c));
+            let marked = name.contains("(default)") || name.contains("(current)");
+            let name = name.replace("(default)", "").replace("(current)", "");
+            ok.then(|| Model {
+                id: id.to_string(),
+                name: Some(name.trim().to_string()).filter(|n| !n.is_empty() && n != id),
+                efforts: Vec::new(),
+                default_effort: None,
+                default: marked,
+            })
+        })
+        .collect();
+    if !models.iter().any(|m| m.default) {
+        if let Some(first) = models.first_mut() {
+            first.default = true;
+        }
+    }
+    models
+}
+
 fn strings(value: &Value) -> Vec<String> {
     value
         .as_array()

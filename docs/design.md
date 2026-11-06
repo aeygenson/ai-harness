@@ -16,7 +16,7 @@ Tester → Security → Architect (окончательная проверка) 
 работу назад. Каждая роль оставляет короткие заметки (`notes.md`) и `handoff.json`.
 
 **Главная идея: харнесс — дирижёр, а не музыкант.** ✅
-Роли выполняют **готовые консольные агенты**: Claude Code, OpenAI Codex CLI, Antigravity CLI, DeepSeek Harness.
+Роли выполняют **готовые консольные агенты**: Claude Code, OpenAI Codex CLI, Antigravity CLI, DeepSeek Harness, Cursor CLI.
 Они сами читают и меняют файлы, запускают `cargo test` и так далее. Мы не пишем своего
 агента. Наша программа:
 
@@ -333,6 +333,7 @@ MCP-серверы для каждой роли — раздел 5.5 (этап 6
 | `antigravity` | Antigravity CLI (`agy`) | аккаунт Google / подписка Google AI Pro | |
 | `dsh` | DeepSeek Harness, собственный агент DeepSeek | тот же ключ API DeepSeek | раздел 5.4a |
 | `dsh+nvidia` | тот же DeepSeek Harness с моделями NVIDIA (build.nvidia.com) | бесплатный ключ API NVIDIA | раздел 5.4a |
+| `cursor` | Cursor CLI (`agent`, раньше `cursor-agent`) | подписка Cursor (у Лизы — рабочее место) | раздел 5.4b |
 | `mock` | заранее записанный «агент» | бесплатно | для тестов всего цикла без интернета |
 
 **Подписки Лизы** (27.09.2026): Claude за $100 (Max), OpenAI за $100, Google AI Pro (Gemini Pro).
@@ -399,6 +400,7 @@ MCP-серверы для каждой роли — раздел 5.5 (этап 6
 | Antigravity CLI | несколько служебных файлов в `~/.gemini/antigravity-cli/` и `~/.gemini/config/` (одного файла с токеном нет; проверено на agy 1.2.12) | скопировать всю сохранённую папку входа (без логов и истории) во временный `HOME` |
 | DeepSeek Harness | просто ключ API | `harness login deepseek` → `~/.harness/credentials/deepseek/`; перед ролью ключ кладётся в `.credentials.yaml` временной `DSH_HOME` (права 600), не в окружение |
 | DeepSeek Harness + NVIDIA | просто ключ API | `harness login nvidia` → `~/.harness/credentials/nvidia/`; дальше так же, как у DeepSeek |
+| Cursor CLI | хранит сам Cursor после `agent login` (на macOS, вероятно, в Keychain) | ничего не передаётся: роль запускается с настоящим `HOME`, вход Cursor находит сам. Харнесс только отмечает в `~/.harness/credentials/cursor/signed-in`, что вход был |
 
 Точные имена файлов и флаги проверим на практике при написании каждого адаптера.
 
@@ -614,6 +616,25 @@ build.nvidia.com: Kimi, GLM, Nemotron, Qwen и другие модели чер�
 Ограничения бесплатного доступа: около 40 запросов в минуту на модель, в часы пик бывают
 ошибки 429; по условиям NVIDIA он для прототипов и разработки, не для продакшена; код
 проекта уходит на серверы NVIDIA.
+
+### 5.4b. Адаптер Cursor CLI (этап 1, живьём ещё не проверен)
+
+Сделан по документации Cursor CLI (cursor.com/docs/cli, ноябрь 2026); из облака
+cursor.com закрыт, поэтому всё, что помечено «проверить», проверяется первым живым
+прогоном на Mac.
+
+| Что | Как |
+|-----|-----|
+| Запуск | `agent -p --output-format stream-json --trust --force --workspace <проект> [--model m] [--approve-mcps] "<промпт>"`; промпт — последний аргумент, стандартный ввод пустой. Программа ищется как `cursor-agent`, потом `agent` |
+| Окружение | `env_clear()` и короткий список, плюс `CURSOR_CONFIG_DIR` и `NO_OPEN_BROWSER=1`. `CURSOR_API_KEY` из оболочки до агента не доходит |
+| Папка настроек | `CURSOR_CONFIG_DIR` — временная папка вне проекта (доступна только Лизе), удаляется после роли. В ней только наши `cli-config.json` и `mcp.json`, настройки Cursor самой Лизы роль не видит. Проверить: что вход при этом не теряется |
+| Вход | `harness login cursor` (кнопка «Войти» на вкладке «Агенты») запускает `agent login` в браузере, потом `agent status`. Ключ хранит сам Cursor; харнесс его не видит и агенту не передаёт |
+| Права роли | все роли с `--force` (без него в режиме без окна изменения только предлагаются). Ограничивают запреты в `cli-config.json`: тот же список команд, что у Antigravity, в виде `Shell(rm)`, `Shell(git:commit*)`; `Write(.git/**)`, `Write(.cursor/**)`; роли без сети — `WebFetch(*)`. Папки проверяет `git status` из раздела 6. Песочница Cursor (`--sandbox`) пока не включается |
+| Подпись | `attribution.attributeCommitsToAgent` и `attributePRsToAgent` выключены: никаких «Made with Cursor» |
+| Настройки проекта | Cursor читает права, правила и MCP проекта из `.cursor/` и правила из `.cursorrules`; обе добавлены в «никому нельзя» |
+| MCP | серверы роли — в `mcp.json` временной папки, их инструменты разрешены `Mcp(<имя>:*)`, флаг `--approve-mcps`. Проверить: читает ли Cursor `mcp.json` из `CURSOR_CONFIG_DIR` |
+| Вывод | события JSON по строкам; последнее `{"type":"result","is_error":false,"result":"..."}` — как у Claude Code. При ошибке события `result` может не быть, причина в stderr |
+| Модели | `agent models`, строки `id - Название`; уровня нет, он часть имени модели (`...-thinking`). Проверить формат |
 
 ### 5.5. MCP-серверы для ролей ✅ (этап 6b)
 
@@ -1649,7 +1670,8 @@ DeepSeek Harness — `reasoningEffort` в его файле настроек (`o
   (ключ в закрытом файле, не в командной строке) и уровни `dsh`; с NVIDIA —
   `GET https://integrate.api.nvidia.com/v1/models`, без уровней;
 - Antigravity — `agy models`; уровень у него часть имени модели
-  (`gemini-3.8-flash-high`).
+  (`gemini-3.8-flash-high`);
+- Cursor — `agent models`; уровень тоже часть имени модели.
 
 Ответы хранятся в `~/.harness/models/<агент>.json` (модуль
 `harness_core::models`), поэтому вкладка работает без сети. На вкладке под агентом

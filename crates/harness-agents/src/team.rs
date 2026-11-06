@@ -8,7 +8,7 @@ use harness_core::task::agent::{AgentOutcome, AgentRunner, RoleJob};
 use harness_core::task::handoff::Role;
 
 use crate::process::failed;
-use crate::{Antigravity, ClaudeCode, Codex, Dsh, MockAgent};
+use crate::{Antigravity, ClaudeCode, Codex, Cursor, Dsh, MockAgent};
 
 /// One of the agents the harness knows.
 ///
@@ -25,6 +25,8 @@ pub enum AnyAgent {
     Antigravity(Antigravity),
     /// `DeepSeek` Harness.
     Dsh(Dsh),
+    /// Cursor CLI.
+    Cursor(Cursor),
     /// The scripted mock agent, for tests.
     Mock(MockAgent),
 }
@@ -36,6 +38,7 @@ impl AgentRunner for AnyAgent {
             AnyAgent::Codex(agent) => agent.run(job).await,
             AnyAgent::Antigravity(agent) => agent.run(job).await,
             AnyAgent::Dsh(agent) => agent.run(job).await,
+            AnyAgent::Cursor(agent) => agent.run(job).await,
             AnyAgent::Mock(agent) => agent.run(job).await,
         }
     }

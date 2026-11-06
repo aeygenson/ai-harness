@@ -224,10 +224,10 @@ mod tests {
         assert!(agy.installed() && agy.version.is_none() && !agy.old());
         assert!(agy.problem.as_deref().unwrap().contains("did not answer"));
 
-        // Cursor's second program name counts; the catalog has no login for it.
+        // Cursor's second program name counts; it has not been signed in to.
         let cursor = get("cursor");
         assert_eq!(cursor.path, Some(PathBuf::from("/bin/agent")));
-        assert_eq!(cursor.login, None);
+        assert_eq!(cursor.login, Some(false));
         assert_eq!(all.len(), CATALOG.len());
     }
 
