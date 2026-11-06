@@ -6,6 +6,15 @@
 //! `~/.harness/marketplaces.toml`, the copies in `~/.harness/marketplaces/`.
 //! A plugin is always copied into the project (`.harness/plugins/<name>/`) and
 //! committed, so the agents only ever see what is in the project's git.
+//!
+//! Several harness windows may be open at once, and they share these
+//! catalogs. So everything that changes or downloads into them (adding,
+//! updating and removing a catalog, adding a plugin or preparing its update)
+//! holds the lock `~/.harness/catalogs.lock` while it works: one window at a
+//! time. A second window does not wait (a download can take minutes, and the
+//! TUI would freeze); it is told to try again. Showing a catalog takes no
+//! lock, so a window may read one while another window updates it, and then
+//! show a passing error until the next refresh.
 
 mod catalogs;
 
@@ -29,10 +38,22 @@ use crate::task::handoff::Role;
 const ADDING_DIR: &str = ".adding";
 /// Plugins that live in other repositories are downloaded here.
 const DOWNLOADS_DIR: &str = ".downloads";
+/// The lock file held while one window changes or downloads into the catalogs.
+const CATALOGS_LOCK: &str = "catalogs.lock";
+/// How long to try for the catalogs lock: long enough to step over a program
+/// that is just being started (see `harness_platform::lock::try_hold_for`),
+/// short enough that the TUI does not seem to freeze.
+const CATALOGS_PATIENCE: std::time::Duration = std::time::Duration::from_secs(1);
 
 /// Why adding, updating or removing a plugin or a catalog failed.
 #[derive(Debug, thiserror::Error)]
 pub enum OpsError {
+    /// Another harness window or command is changing the catalogs right now.
+    #[error(
+        "another harness window is adding, updating or downloading a catalog or plugin; \
+         try again when it has finished"
+    )]
+    CatalogsBusy,
     /// harness.toml has no plugin with this name.
     #[error("harness.toml has no [plugins.{0}]")]
     NoPlugin(String),
@@ -118,6 +139,15 @@ fn io(path: &Path) -> impl FnOnce(std::io::Error) -> OpsError {
     move |source| OpsError::Io { path, source }
 }
 
+/// Holds the catalogs in `home` until the returned value is dropped, or
+/// says [`OpsError::CatalogsBusy`] when another window works on them.
+fn hold_catalogs(home: &Path) -> Result<harness_platform::lock::Held, OpsError> {
+    let path = home.join(CATALOGS_LOCK);
+    harness_platform::lock::try_hold_for(&path, CATALOGS_PATIENCE)
+        .map_err(io(&path))?
+        .ok_or(OpsError::CatalogsBusy)
+}
+
 /// A plugin that was added to the project.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Added {
@@ -164,6 +194,9 @@ pub fn add(
     if target.exists() {
         return Err(OpsError::Exists(target.display().to_string()));
     }
+    // Before the list of catalogs is read, so no other window changes it
+    // (or the catalog's files) until the plugin is copied.
+    let _catalogs = hold_catalogs(home)?;
     let registry = Registry::load(home)?;
     let staged = staging(&target);
     let (contents, commit) = fetch_and_stage(home, &registry, entry, &staged)?;
@@ -236,6 +269,8 @@ pub fn prepare_update(repo: &Repo, home: &Path, name: &str) -> Result<Option<Pre
         .as_deref()
         .and_then(|s| s.split_once('/'))
         .ok_or_else(|| OpsError::NoSource(name.to_string()))?;
+    // Named on purpose: `let _ = ...` would let the lock go at once.
+    let _catalogs = hold_catalogs(home)?;
     let registry = Registry::load(home)?;
     if !registry.marketplaces.contains_key(catalog_name) {
         return Err(OpsError::CatalogGone {
@@ -310,7 +345,8 @@ pub fn discard(prepared: &Prepared) {
     let _ = fs::remove_dir_all(&prepared.staged);
 }
 
-/// Downloads (if needed) and stages the plugin into `staged`.
+/// Downloads (if needed) and stages the plugin into `staged`. The caller
+/// holds the catalogs (see [`hold_catalogs`]).
 fn fetch_and_stage(
     home: &Path,
     registry: &Registry,
@@ -410,6 +446,39 @@ mod tests {
             r#"{"name": "notes"}"#,
         );
         write(&dir.join("plugins/notes/commands/note.md"), "# note");
+    }
+
+    #[test]
+    fn a_second_window_is_told_to_wait_while_the_catalogs_are_busy() {
+        let home = tempfile::tempdir().unwrap();
+        let source = tempfile::tempdir().unwrap();
+        local_catalog(source.path());
+        let project = tempfile::tempdir().unwrap();
+        projects::init(project.path()).unwrap();
+        let repo = Repo::open(project.path()).unwrap();
+        let catalog = add_catalog(home.path(), &source.path().display().to_string(), None).unwrap();
+        // Another window is downloading into the catalogs.
+        let other = hold_catalogs(home.path()).unwrap();
+
+        let source_text = source.path().display().to_string();
+        let added = add_catalog(home.path(), &source_text, Some("again"));
+        let plugin = add(
+            &repo,
+            home.path(),
+            &catalog.entries[1],
+            PluginChoice::default(),
+        );
+        let removed = remove_catalog(home.path(), "mine");
+
+        assert!(matches!(added, Err(OpsError::CatalogsBusy)), "{added:?}");
+        assert!(matches!(plugin, Err(OpsError::CatalogsBusy)), "{plugin:?}");
+        assert!(
+            matches!(removed, Err(OpsError::CatalogsBusy)),
+            "{removed:?}"
+        );
+        drop(other);
+        assert_eq!(catalogs(home.path()).unwrap().len(), 1, "nothing changed");
+        remove_catalog(home.path(), "mine").unwrap();
     }
 
     #[test]

@@ -11,7 +11,7 @@ use ratatui::Frame;
 
 use crate::ui::{self, theme};
 use crate::ui::{buttons, panel, ButtonId, Target};
-use crate::{App, Tab, TABS};
+use crate::{App, Tab, Window};
 
 impl App {
     /// Draws everything and registers every clickable place in the hit map.
@@ -131,9 +131,15 @@ impl App {
             x = x.saturating_add(width);
             rect
         };
-        put(frame, format!(" ◆ {name} "), theme::primary());
+        // A pinned window says so next to its project, which it never leaves.
+        let title = if self.window == Window::Pinned {
+            format!(" ◆ {name} · {} ", self.tr.t("tabs.pinned"))
+        } else {
+            format!(" ◆ {name} ")
+        };
+        put(frame, title, theme::primary());
         put(frame, " ".into(), Style::new());
-        for (index, (tab, label)) in TABS.iter().enumerate() {
+        for (index, (tab, label)) in self.tabs().iter().enumerate() {
             if index > 0 {
                 put(frame, "│".into(), theme::dim());
             }
@@ -161,8 +167,11 @@ impl App {
         if let Some(label) = &update {
             items.push((label.as_str(), ButtonId::HarnessUpdate));
         }
+        // A pinned window makes no projects: that is the main window's work.
+        if self.window == Window::Main {
+            items.push((self.tr.t("tabs.new_project"), ButtonId::NewProject));
+        }
         items.extend([
-            (self.tr.t("tabs.new_project"), ButtonId::NewProject),
             (self.tr.label(), ButtonId::Language),
             (theme_label.as_str(), ButtonId::Theme),
         ]);

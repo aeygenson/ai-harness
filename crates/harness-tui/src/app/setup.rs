@@ -23,10 +23,13 @@ use crate::ui;
 use crate::ui::i18n::I18n;
 use crate::ui::message::Message;
 use crate::ui::Hits;
-use crate::{ask_agents, sign_in, App, Tab};
+use crate::{ask_agents, sign_in, App, Tab, Window, PINNED_TABS, TABS};
 
 impl App {
-    pub(crate) fn new(home: Option<PathBuf>, start: &Path) -> Self {
+    /// The app of a `window`. The main window opens `start` if it is a
+    /// project, otherwise the project opened last; a pinned window only ever
+    /// opens `start`.
+    pub(crate) fn new(home: Option<PathBuf>, start: &Path, window: Window) -> Self {
         let tr = I18n::load(home.as_deref());
         let mut app = Self {
             tab: Tab::Projects,
@@ -34,6 +37,7 @@ impl App {
             tr,
             home,
             project: None,
+            window,
             tasks: None,
             roles: None,
             skills: None,
@@ -92,8 +96,12 @@ impl App {
         let last = app.projects.list.last.clone();
         if has_config(&start) {
             app.open(&start);
-        } else if let Some(last) = last.filter(|p| has_config(p)) {
+        } else if let Some(last) = last.filter(|p| has_config(p) && window == Window::Main) {
             app.open(&last);
+        }
+        if window == Window::Pinned {
+            // Never the Projects tab, even when the project could not be opened.
+            app.tab = Tab::Tasks;
         }
         app
     }
@@ -101,6 +109,11 @@ impl App {
     /// Opens a project: it becomes the current one and the one opened last.
     pub(crate) fn open(&mut self, root: &Path) {
         if self.busy() {
+            return;
+        }
+        let other_project = self.project.as_deref().is_some_and(|open| open != root);
+        if self.window == Window::Pinned && other_project {
+            self.message = Some(Message::error(self.tr.t("projects.pinned_only")));
             return;
         }
         if !has_config(root) {
@@ -125,7 +138,11 @@ impl App {
                 if !list.projects.iter().any(|p| p.path == root) {
                     list.add(&name_of(root), root);
                 }
-                list.last = Some(root.to_path_buf());
+                // The main window starts with the project it showed last;
+                // a pinned window must not change that.
+                if self.window == Window::Main {
+                    list.last = Some(root.to_path_buf());
+                }
             },
             &self.tr,
         );
@@ -147,6 +164,15 @@ impl App {
             return true;
         }
         running
+    }
+
+    /// The tabs this window shows, in order: a pinned one has no Projects tab.
+    pub(crate) fn tabs(&self) -> &'static [(Tab, &'static str)] {
+        if self.window == Window::Pinned {
+            &PINNED_TABS
+        } else {
+            &TABS
+        }
     }
 
     /// Opens a tab. The Agents tab checks the computer the first time.

@@ -14,3 +14,4 @@ mod setup;
 pub(crate) mod splash;
 mod tab_keys;
 pub(crate) mod terminal;
+pub(crate) mod window_lock;

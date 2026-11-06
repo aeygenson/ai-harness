@@ -83,6 +83,28 @@ const TABS: [(Tab, &str); 8] = [
     (Tab::Agents, "tabs.agents"),
 ];
 
+/// The tabs of a pinned window: all but Projects, since it cannot switch.
+const PINNED_TABS: [(Tab, &str); 7] = [
+    (Tab::Tasks, "tabs.tasks"),
+    (Tab::Roles, "tabs.roles"),
+    (Tab::Skills, "tabs.skills"),
+    (Tab::Mcp, "tabs.mcp"),
+    (Tab::Plugins, "tabs.plugins"),
+    (Tab::Retro, "tabs.retro"),
+    (Tab::Agents, "tabs.agents"),
+];
+
+/// Which kind of window `harness tui` opens.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Window {
+    /// The main window, opened from a shell: one per user, it sees every
+    /// project and can switch between them.
+    Main,
+    /// A window pinned to one project (`harness tui --pin`), for a terminal
+    /// inside Claude Code or Codex: one per project, it cannot switch.
+    Pinned,
+}
+
 /// What the open form is for.
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Purpose {
@@ -188,14 +210,21 @@ enum Pick {
     Open,
 }
 
-/// Opens the TUI and runs until `q`. It starts with `start` if that folder is
-/// a harness project, otherwise with the project opened last.
-pub fn run(start: &Path) -> Result<()> {
+/// Opens the TUI and runs until `q`.
+///
+/// The main window starts with `start` if that folder is a harness project,
+/// otherwise with the project opened last; a second main window is refused.
+/// A pinned window opens only `start`, which must be a harness project; a
+/// second pinned window on the same project is refused.
+pub fn run(start: &Path, window: Window) -> Result<()> {
     app::terminal::check_size()?;
+    let home = projects::harness_home();
     // Held until `run` returns. A named variable on purpose: `let _ = ...`
     // would drop the lock at once.
-    let home = projects::harness_home();
-    let _one_window = app::terminal::hold_the_window(home.as_deref())?;
+    let _one_window = match window {
+        Window::Main => app::window_lock::hold_the_window(home.as_deref())?,
+        Window::Pinned => Some(app::window_lock::hold_the_project(start)?),
+    };
     // First of all: from here on, closing the window no longer kills the TUI
     // while an agent runs; the app is closed normally instead.
     let stop = app::terminal::watch_stop_signals().context("cannot listen for stop signals")?;
@@ -214,7 +243,7 @@ pub fn run(start: &Path) -> Result<()> {
         let _ = ratatui::try_restore();
         hook(info);
     }));
-    let mut app = App::new(home, start);
+    let mut app = App::new(home, start, window);
     app.native = true;
     app.splash.open = app.splash.at_start;
     // Which agents are installed: asked once at the start, in the background.
@@ -287,6 +316,9 @@ struct App {
     tr: I18n,
     /// The open project.
     project: Option<PathBuf>,
+    /// The main window, or one pinned to the open project: that one has no
+    /// Projects tab and opens no other project.
+    window: Window,
     tasks: Option<TasksTab>,
     roles: Option<RolesTab>,
     skills: Option<SkillsTab>,

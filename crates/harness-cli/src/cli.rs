@@ -104,7 +104,15 @@ pub(crate) enum Command {
     /// .harness/retros/<NNN>/; with --suggest also ask for skill proposals.
     Retro(RetroArgs),
     /// A full-screen window with tabs: tasks, role settings, projects.
-    Tui,
+    /// Without `--pin` it is the main window (one per user, all projects);
+    /// with `--pin` it stays on the project folder (one per project).
+    Tui {
+        /// Pin the window to the project (this folder or `-C`): for a terminal
+        /// inside Claude Code or Codex. It cannot switch projects, and it can
+        /// be open next to the main window and to windows pinned elsewhere.
+        #[arg(long)]
+        pin: bool,
+    },
     /// The models (and effort levels) each agent offers, as last asked.
     Models {
         /// Ask every agent with a saved login again first.

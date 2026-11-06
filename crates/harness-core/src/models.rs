@@ -89,13 +89,14 @@ pub fn load(home: &Path, agent: AgentKind) -> Option<ModelList> {
 }
 
 /// Writes `list` to `<home>/models/<agent>.json`, creating the folder if needed.
+/// The file is written whole, so another window never reads half of it.
 pub fn save(home: &Path, list: &ModelList) -> io::Result<()> {
     let path = cache_path(home, list.agent);
     if let Some(dir) = path.parent() {
         fs::create_dir_all(dir)?;
     }
-    let text = serde_json::to_string_pretty(list).map_err(io::Error::other)?;
-    fs::write(path, text + "\n")
+    let text = serde_json::to_string_pretty(list).map_err(io::Error::other)? + "\n";
+    harness_platform::whole_file::write(&path, text.as_bytes())
 }
 
 #[cfg(test)]

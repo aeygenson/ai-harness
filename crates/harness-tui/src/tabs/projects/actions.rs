@@ -10,12 +10,16 @@ use crate::tabs::projects::has_config;
 use crate::tabs::projects::picker::Browser;
 use crate::ui::message::Message;
 use crate::ui::Form;
-use crate::{App, Pick, Purpose, Tab};
+use crate::{App, Pick, Purpose, Tab, Window};
 
 impl App {
     /// Chooses a folder: in the system's dialog if there is one, otherwise
     /// in the TUI's own browser.
     pub(crate) fn pick(&mut self, pick: Pick) {
+        if self.window == Window::Pinned {
+            self.message = Some(Message::error(self.tr.t("projects.pinned_only")));
+            return;
+        }
         let title = match pick {
             Pick::NewProject => self.tr.t("picker.new_title"),
             Pick::Open => self.tr.t("picker.open_title"),

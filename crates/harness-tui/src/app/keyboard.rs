@@ -11,7 +11,7 @@ use crate::tabs::tasks::TasksTab;
 use crate::ui::keys;
 use crate::ui::message::Message;
 use crate::ui::ButtonId;
-use crate::{App, Tab, TABS};
+use crate::{App, Tab};
 
 impl App {
     /// Pasted text goes to the open form, the new folder name, or the message box.
@@ -142,7 +142,10 @@ impl App {
             KeyCode::Char('M') | KeyCode::F(4) => self.toggle_status(),
             KeyCode::Char(c @ '1'..='8') => {
                 let index = usize::from(c as u8 - b'1');
-                self.show(TABS[index].0);
+                // A pinned window has one tab less, so `8` opens nothing there.
+                if let Some(&(tab, _)) = self.tabs().get(index) {
+                    self.show(tab);
+                }
             }
             KeyCode::Char('r') | KeyCode::F(5) => self.reload_all(),
             code => self.tab_key(code),

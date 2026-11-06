@@ -108,7 +108,7 @@ next. The harness then **trusts, but verifies**:
 | | |
 |---|---|
 | **Five agents, one interface** | Claude Code, OpenAI Codex CLI, Google Antigravity CLI, DeepSeek Harness (with DeepSeek's API or NVIDIA's free models) and Cursor CLI, behind one Rust trait (plus a mock agent for tests). Choose an agent, model and effort level per role, per project. |
-| **Full-screen terminal UI** | `harness tui` (Ratatui) with tabs for Tasks, Roles, Skills, MCP, Plugins, Retro, Agents and Projects. Works with mouse and keyboard, in English and Russian, with five colour themes. |
+| **Full-screen terminal UI** | `harness tui` (Ratatui) with tabs for Tasks, Roles, Skills, MCP, Plugins, Retro, Agents and Projects. Works with mouse and keyboard, in English and Russian, with five colour themes. One main window per computer, plus `harness tui --pin` windows pinned to one project each. |
 | **Skills** | Each role gets built-in instructions that work with any language or framework. Projects keep their own copies and add their own skills, shared by all agents. |
 | **MCP servers and plugins** | Give a role extra tools: MCP servers (local or on the web, with OAuth sign-in) and agent plugins from plugin catalogs. |
 | **Retrospective** | `harness retro` counts what happened across tasks (rounds, rejections, repeated issues, unused skills) without AI, then can ask an agent to propose skill changes that you approve one by one. |
@@ -150,6 +150,18 @@ Then open the interface:
 ```bash
 harness tui
 ```
+
+This is the main window: one per computer, it sees every project. To work on several
+projects at once, for example one per Claude Code or Codex window, open a window pinned to
+the project in that window's built-in terminal:
+
+```bash
+harness tui --pin                    # in the project folder, or: harness tui --pin -C ~/code/A
+```
+
+A pinned window stays on its project (it has no Projects tab), and only one can be pinned
+to a project at a time. The main window and windows pinned to other projects stay open
+next to it, and their tasks run in parallel.
 
 Everything can be done from the TUI. The same steps from the command line:
 

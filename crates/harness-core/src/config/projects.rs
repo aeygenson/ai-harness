@@ -11,6 +11,10 @@
 //! ```
 //!
 //! Removing a project from the list never deletes its folder.
+//!
+//! Several TUI windows can be open at once (the main one and one pinned to
+//! each project), so the list is changed through [`Projects::change`]: under
+//! a lock it reads the file again, changes it and writes it whole.
 
 use std::fs;
 use std::io;
@@ -23,6 +27,9 @@ use crate::git::{GitError, Repo, HARNESS_DIR};
 
 /// The name of the project list file inside `~/.harness`.
 pub const PROJECTS_FILE: &str = "projects.toml";
+
+/// The lock file held while one window changes the project list.
+const PROJECTS_LOCK: &str = "projects.toml.lock";
 
 /// Why the project list or a new project could not be read, saved or set up.
 #[derive(Debug, thiserror::Error)]
@@ -96,12 +103,38 @@ impl Projects {
     }
 
     /// Writes the list to `<home>/projects.toml`, creating `home` if needed.
+    /// The file is written whole, so another window never reads half of it.
     pub fn save(&self, home: &Path) -> Result<(), ProjectError> {
         let path = home.join(PROJECTS_FILE);
         let text = toml::to_string(self)?;
         fs::create_dir_all(home)
-            .and_then(|()| fs::write(&path, text))
+            .and_then(|()| harness_platform::whole_file::write(&path, text.as_bytes()))
             .map_err(|source| ProjectError::Io { path, source })
+    }
+
+    /// Reads the list from `home` again, changes it with `change` and saves
+    /// it, while no other window does the same. Returns the saved list.
+    ///
+    /// Reading again first keeps what another window added meanwhile; the
+    /// lock keeps two windows from both reading the old list and the second
+    /// one writing over the first one's change.
+    ///
+    /// # Errors
+    ///
+    /// The lock, the file or the folder cannot be used, or the file is broken.
+    pub fn change(home: &Path, change: impl FnOnce(&mut Self)) -> Result<Self, ProjectError> {
+        let lock_path = home.join(PROJECTS_LOCK);
+        // Named on purpose: `let _ = ...` would let the lock go at once.
+        let _held = harness_platform::lock::wait_and_hold(&lock_path).map_err(|source| {
+            ProjectError::Io {
+                path: lock_path.clone(),
+                source,
+            }
+        })?;
+        let mut list = Self::load(home)?;
+        change(&mut list);
+        list.save(home)?;
+        Ok(list)
     }
 
     /// Adds the project, or renames it if the folder is already listed.
@@ -216,6 +249,43 @@ mod tests {
             Projects::load(home.path()),
             Err(ProjectError::Toml { .. })
         ));
+    }
+
+    #[test]
+    fn a_change_keeps_what_another_window_saved_meanwhile() {
+        let home = tempfile::tempdir().unwrap();
+        // This window read the list while it was empty...
+        let mut stale = Projects::load(home.path()).unwrap();
+        // ...then another window added a project.
+        Projects::change(home.path(), |list| list.add("a", Path::new("/code/a"))).unwrap();
+
+        let saved =
+            Projects::change(home.path(), |list| list.add("b", Path::new("/code/b"))).unwrap();
+        stale.add("b", Path::new("/code/b"));
+
+        let names: Vec<_> = saved.projects.iter().map(|p| p.name.as_str()).collect();
+        assert_eq!(names, ["a", "b"]);
+        assert_eq!(Projects::load(home.path()).unwrap(), saved);
+        assert_ne!(saved, stale, "the old copy alone would have lost project a");
+    }
+
+    #[test]
+    fn changes_from_many_windows_at_once_are_all_kept() {
+        let home = tempfile::tempdir().unwrap();
+        let threads: Vec<_> = (0..8)
+            .map(|n| {
+                let home = home.path().to_path_buf();
+                std::thread::spawn(move || {
+                    let path = PathBuf::from(format!("/code/p{n}"));
+                    Projects::change(&home, |list| list.add(&format!("p{n}"), &path)).unwrap();
+                })
+            })
+            .collect();
+        for thread in threads {
+            thread.join().unwrap();
+        }
+
+        assert_eq!(Projects::load(home.path()).unwrap().projects.len(), 8);
     }
 
     #[test]

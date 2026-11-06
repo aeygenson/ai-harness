@@ -28,6 +28,9 @@ pub const LOCALES_DIR: &str = "locales";
 /// `<home>/tui.toml` remembers the language: `language = "ru"`.
 pub const SETTINGS_FILE: &str = "tui.toml";
 
+/// The lock file held while one window changes `tui.toml`.
+const SETTINGS_LOCK: &str = "tui.toml.lock";
+
 #[derive(Debug, Clone)]
 pub struct Language {
     /// `en`, `ru`: the file name.
@@ -210,22 +213,54 @@ pub fn saved_setting(home: &Path, key: &str) -> Option<String> {
 }
 
 /// Saves one setting in `tui.toml`, keeping the others.
+///
+/// Another window may save its own setting at the same moment: the lock
+/// keeps both changes, and the file is written whole, so a window reading
+/// it never sees half of it. A file that cannot be read is an error (its
+/// settings would be lost); a broken one is started again.
 pub fn save_setting(home: &Path, key: &str, value: &str) -> Result<(), String> {
+    let lock_path = home.join(SETTINGS_LOCK);
+    // Named on purpose: `let _ = ...` would let the lock go at once.
+    let _held = harness_platform::lock::wait_and_hold(&lock_path)
+        .map_err(|e| format!("{}: {e}", lock_path.display()))?;
     let path = home.join(SETTINGS_FILE);
-    let mut table: toml::Table = fs::read_to_string(&path)
-        .ok()
-        .and_then(|text| toml::from_str(&text).ok())
-        .unwrap_or_default();
+    let text = match fs::read_to_string(&path) {
+        Ok(text) => text,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(error) => return Err(format!("{}: {error}", path.display())),
+    };
+    let mut table: toml::Table = toml::from_str(&text).unwrap_or_default();
     table.insert(key.to_string(), toml::Value::String(value.to_string()));
     let text = toml::to_string(&table).map_err(|e| e.to_string())?;
     fs::create_dir_all(home)
-        .and_then(|()| fs::write(&path, text))
+        .and_then(|()| harness_platform::whole_file::write(&path, text.as_bytes()))
         .map_err(|e| format!("{}: {e}", path.display()))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn settings_saved_by_many_windows_at_once_are_all_kept() {
+        let home = tempfile::tempdir().unwrap();
+        let threads: Vec<_> = (0..8)
+            .map(|n| {
+                let home = home.path().to_path_buf();
+                std::thread::spawn(move || save_setting(&home, &format!("key{n}"), "on").unwrap())
+            })
+            .collect();
+        for thread in threads {
+            thread.join().unwrap();
+        }
+
+        for n in 0..8 {
+            assert_eq!(
+                saved_setting(home.path(), &format!("key{n}")).as_deref(),
+                Some("on")
+            );
+        }
+    }
 
     fn keys(code: &str) -> Vec<String> {
         let (_, text) = BUILT_IN.iter().find(|(c, _)| *c == code).unwrap();

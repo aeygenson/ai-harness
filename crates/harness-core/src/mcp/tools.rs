@@ -68,13 +68,14 @@ pub fn load(home: &Path, name: &str, server: &McpConfig) -> Option<ToolList> {
 }
 
 /// Writes `list` to its cache file for these settings, creating the folder if needed.
+/// The file is written whole, so another window never reads half of it.
 pub fn save(home: &Path, server: &McpConfig, list: &ToolList) -> io::Result<()> {
     let path = cache_path(home, &list.server, server);
     if let Some(dir) = path.parent() {
         fs::create_dir_all(dir)?;
     }
-    let text = serde_json::to_string_pretty(list).map_err(io::Error::other)?;
-    fs::write(path, text + "\n")
+    let text = serde_json::to_string_pretty(list).map_err(io::Error::other)? + "\n";
+    harness_platform::whole_file::write(&path, text.as_bytes())
 }
 
 /// What changed in a server's tools between two checks.
