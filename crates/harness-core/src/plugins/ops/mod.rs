@@ -48,10 +48,10 @@ const CATALOGS_PATIENCE: std::time::Duration = std::time::Duration::from_secs(1)
 /// Why adding, updating or removing a plugin or a catalog failed.
 #[derive(Debug, thiserror::Error)]
 pub enum OpsError {
-    /// Another harness window or command is changing the catalogs right now.
+    /// A window or command is changing or downloading into the catalogs right now.
     #[error(
-        "another harness window is adding, updating or downloading a catalog or plugin; \
-         try again when it has finished"
+        "a catalog or plugin is being added, updated or downloaded right now (in this \
+         or another harness window, or by a harness command); try again when it has finished"
     )]
     CatalogsBusy,
     /// harness.toml has no plugin with this name.
@@ -139,6 +139,12 @@ fn io(path: &Path) -> impl FnOnce(std::io::Error) -> OpsError {
     move |source| OpsError::Io { path, source }
 }
 
+/// Writes harness.toml whole, so a window open on the same project never
+/// reads half of it.
+fn write_config(path: &Path, text: &str) -> Result<(), OpsError> {
+    harness_platform::whole_file::write(path, text.as_bytes()).map_err(io(path))
+}
+
 /// Holds the catalogs in `home` until the returned value is dropped, or
 /// says [`OpsError::CatalogsBusy`] when another window works on them.
 fn hold_catalogs(home: &Path) -> Result<harness_platform::lock::Held, OpsError> {
@@ -189,7 +195,6 @@ pub fn add(
         return Err(OpsError::BadName(name.to_string()));
     }
     let config_path = repo.root().join(HARNESS_DIR).join(CONFIG_FILE);
-    let text = fs::read_to_string(&config_path).map_err(io(&config_path))?;
     let target = repo.root().join(PLUGINS_DIR).join(name);
     if target.exists() {
         return Err(OpsError::Exists(target.display().to_string()));
@@ -200,6 +205,15 @@ pub fn add(
     let registry = Registry::load(home)?;
     let staged = staging(&target);
     let (contents, commit) = fetch_and_stage(home, &registry, entry, &staged)?;
+    // Read only now, after the download (which can take minutes): another
+    // window on this project may have saved its settings meanwhile.
+    let text = match fs::read_to_string(&config_path) {
+        Ok(text) => text,
+        Err(error) => {
+            let _ = fs::remove_dir_all(&staged);
+            return Err(io(&config_path)(error));
+        }
+    };
     let new_text = edit::add_plugin(
         &text,
         &NewPlugin {
@@ -220,13 +234,13 @@ pub fn add(
         }
     };
     install::put_in_place(&staged, &target).map_err(io(&target))?;
-    fs::write(&config_path, &new_text).map_err(io(&config_path))?;
+    write_config(&config_path, &new_text)?;
     let checked = Config::parse(&new_text)
         .map_err(OpsError::from)
         .and_then(|config| Ok(Plugins::load(repo.root(), &config)?));
     if let Err(e) = checked {
         let _ = fs::remove_dir_all(&target);
-        let _ = fs::write(&config_path, &text);
+        let _ = write_config(&config_path, &text);
         return Err(e);
     }
     repo.commit_paths(
@@ -322,14 +336,14 @@ pub fn apply_update(repo: &Repo, prepared: &Prepared) -> Result<(), OpsError> {
         Some(commit) => edit::set_plugin_commit(&text, name, commit)?,
         None => text.clone(),
     };
-    fs::write(&config_path, &new_text).map_err(io(&config_path))?;
+    write_config(&config_path, &new_text)?;
     let checked = Config::parse(&new_text)
         .map_err(OpsError::from)
         .and_then(|config| Ok(Plugins::load(repo.root(), &config)?));
     if let Err(e) = checked {
         let _ = fs::remove_dir_all(target);
         let _ = fs::rename(&old, target);
-        let _ = fs::write(&config_path, &text);
+        let _ = write_config(&config_path, &text);
         return Err(e);
     }
     let _ = fs::remove_dir_all(&old);
@@ -387,7 +401,7 @@ pub fn remove(repo: &Repo, name: &str) -> Result<(), OpsError> {
         .ok_or_else(|| OpsError::NoPlugin(name.to_string()))?;
     let folder = repo.root().join(plugins::relative_path(name, plugin));
     let new_text = edit::remove_plugin(&text, name)?;
-    fs::write(&config_path, new_text).map_err(io(&config_path))?;
+    write_config(&config_path, &new_text)?;
     if folder.starts_with(repo.root().join(PLUGINS_DIR)) && folder.exists() {
         fs::remove_dir_all(&folder).map_err(io(&folder))?;
     }

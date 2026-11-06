@@ -73,7 +73,7 @@ pub fn apply(
     }
     if result.is_ok() && text != old_config {
         backups.push((config_path.clone(), Some(old_config)));
-        if let Err(source) = fs::write(&config_path, &text) {
+        if let Err(source) = harness_platform::whole_file::write(&config_path, text.as_bytes()) {
             result = Err(ApplyError::Io {
                 path: config_path.clone(),
                 source,

@@ -20,6 +20,22 @@ fn a_pinned_window_shows_its_project_without_the_projects_tab() {
     assert!(text.contains("6 Retro │ 7 Agents"), "{text}");
     assert!(!text.contains("Projects"), "{text}");
     assert!(!text.contains("New project"), "{text}");
+    assert!(text.contains("1–7 tabs"), "{text}");
+}
+
+#[test]
+fn the_help_window_of_a_pinned_window_has_its_own_steps_and_keys() {
+    let env = Env::new();
+    let root = env.path("test");
+    project(&root);
+    let mut app = pinned_app(&env, &root);
+
+    key(&mut app, KeyCode::Char('H'));
+
+    let text = screen_of_size(&mut app, 200, 50);
+    assert!(text.contains("1. Agents (7)"), "{text}");
+    assert!(!text.contains("Projects (7)"), "{text}");
+    assert!(text.contains("1–7 tabs · ↑↓ select · Enter open"), "{text}");
 }
 
 #[test]

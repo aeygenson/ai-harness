@@ -60,9 +60,12 @@ pub fn save(repo: &Repo, text: &str) -> Result<bool, SettingsError> {
     if fs::read_to_string(&path).is_ok_and(|old| old == text) {
         return Ok(false);
     }
-    fs::write(&path, text).map_err(|source| SettingsError::Io {
-        path: path.clone(),
-        source,
+    // Whole: a window open on the same project never reads half of it.
+    harness_platform::whole_file::write(&path, text.as_bytes()).map_err(|source| {
+        SettingsError::Io {
+            path: path.clone(),
+            source,
+        }
     })?;
     Ok(repo.commit_paths(&[&path], "harness: settings")?)
 }

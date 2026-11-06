@@ -15,7 +15,7 @@ use harness_agents::install::update::VERSION;
 
 use crate::ui::message::Message;
 use crate::ui::{buttons, clear, i18n, keys, panel, theme, wrapped_lines, ButtonId, Target};
-use crate::App;
+use crate::{App, Window};
 
 /// The start window: open now, and whether it opens when the harness starts.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -162,13 +162,15 @@ impl App {
             Line::default(),
             Line::styled(tr.t("splash.steps_title").to_string(), theme::accent()),
         ];
-        lines.extend(
-            tr.t("splash.steps")
-                .lines()
-                .map(|l| Line::from(l.to_string())),
-        );
+        // A pinned window has no Projects tab, so its steps and numbers differ.
+        let steps = match self.window {
+            Window::Main => "splash.steps",
+            Window::Pinned => "splash.steps_pinned",
+        };
+        lines.extend(tr.t(steps).lines().map(|l| Line::from(l.to_string())));
         lines.push(Line::default());
-        lines.push(Line::styled(tr.t("splash.keys").to_string(), theme::dim()));
+        let keys = tr.f("splash.keys", &[("tabs", &self.tabs().len())]);
+        lines.push(Line::styled(keys, theme::dim()));
         lines
     }
 }
