@@ -176,6 +176,13 @@ mod tests {
     }
 
     #[test]
+    fn zed_is_in_the_catalog_but_not_run_yet() {
+        let zed = CATALOG.iter().find(|e| e.id == "zed").unwrap();
+        assert!(!zed.runs());
+        assert_eq!(zed.programs, ["zed", "zeditor"]);
+    }
+
+    #[test]
     fn a_version_is_read_from_what_the_program_prints() {
         assert_eq!(parse_version("codex-cli 0.159.2\n").unwrap(), "0.159.2");
         assert_eq!(parse_version("2.1.283 (Claude Code)").unwrap(), "2.1.283");
