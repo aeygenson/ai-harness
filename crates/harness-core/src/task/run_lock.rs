@@ -115,7 +115,7 @@ impl RunLock {
     /// or the file system failed.
     pub fn hold(repo: &Repo) -> Result<Self, RunLockError> {
         let dir = lock_dir(repo)?;
-        let Some(held) = try_hold(&dir)? else {
+        let Some(held) = try_hold_patiently(&dir)? else {
             let task = read_task(&dir);
             let can_stop = task
                 .as_deref()
@@ -217,6 +217,8 @@ pub struct Working {
     /// Whether `harness stop` (and [`ask_to_stop`]) can stop it: it runs
     /// roles, not a step that cannot stop halfway.
     pub can_stop: bool,
+    /// The stop already asked of it (by any window, `harness stop` or MCP).
+    pub asked: Option<StopWhen>,
 }
 
 /// Which task a harness works on in this project right now, if any.
@@ -238,8 +240,18 @@ pub fn working(repo: &Repo) -> Result<Option<Working>, RunLockError> {
     if try_hold(&dir)?.is_some() {
         return Ok(None);
     }
-    let can_stop = is_plain_file(&stop_file(&dir, &task));
-    Ok(Some(Working { task, can_stop }))
+    let file = stop_file(&dir, &task);
+    let can_stop = is_plain_file(&file);
+    let asked = if can_stop {
+        stop_request::read_stop_file(&file)
+    } else {
+        None
+    };
+    Ok(Some(Working {
+        task,
+        can_stop,
+        asked,
+    }))
 }
 
 /// Removes every stop file in `dir`, also those of other tasks.
@@ -279,6 +291,20 @@ fn lock_dir(repo: &Repo) -> Result<PathBuf, RunLockError> {
 /// The stop file of `task` in the lock folder.
 fn stop_file(dir: &Path, task: &str) -> PathBuf {
     dir.join(format!("stop-{task}"))
+}
+
+/// How long [`RunLock::hold`] tries for the lock. Another window that only
+/// checks who works here ([`working`], [`ask_to_stop`]) may hold it for a
+/// moment, and a program it starts meanwhile keeps a copy of the lock until
+/// it really runs (see `harness_platform::lock::try_hold_for`); a real run
+/// holds it much longer than this.
+const START_PATIENCE: std::time::Duration = std::time::Duration::from_millis(500);
+
+/// Takes the lock in `dir`, trying again for [`START_PATIENCE`]; `None` when
+/// another program holds it.
+fn try_hold_patiently(dir: &Path) -> Result<Option<Held>, RunLockError> {
+    let file = dir.join(LOCK_FILE);
+    lock::try_hold_for(&file, START_PATIENCE).map_err(|source| io_error(&file, source))
 }
 
 /// Takes the lock in `dir`; `None` when another program holds it.
@@ -364,13 +390,17 @@ mod tests {
             busy,
             Some(Working {
                 task: "task-007".into(),
-                can_stop: false
+                can_stop: false,
+                asked: None,
             })
         );
         drop(deciding);
 
         let (lock, _stop) = running(&repo, "task-008");
         assert_eq!(working(&repo).unwrap().map(|w| w.can_stop), Some(true));
+        ask_to_stop(&repo, "task-008", StopWhen::AfterStep).unwrap();
+        let asked = working(&repo).unwrap().and_then(|w| w.asked);
+        assert_eq!(asked, Some(StopWhen::AfterStep));
         // Asking does not take the lock from the run.
         assert!(matches!(
             RunLock::hold(&repo),

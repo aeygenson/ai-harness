@@ -16,8 +16,9 @@ use crate::task::Stage;
 pub struct Overview {
     /// The task a harness works on there right now, if any.
     pub working: Option<Working>,
-    /// The tasks that wait for the user (a design to approve, a question,
-    /// a result to accept), in id order.
+    /// The tasks that wait for the user, in id order: a design to approve,
+    /// a question, a result to accept, or a role that stopped (a time limit,
+    /// a failure, a crash) with nobody running it now.
     pub waiting: Vec<String>,
 }
 
@@ -33,18 +34,29 @@ pub enum OverviewError {
 }
 
 /// Reads the overview of the project in `repo`. Changes nothing: a running
-/// harness is never disturbed (see [`run_lock::working`]).
+/// harness is never disturbed (see [`run_lock::working`]). A task whose
+/// files cannot be read is left out (the Tasks tab shows why), so it never
+/// hides the running task.
 ///
 /// # Errors
 ///
-/// A task's files cannot be read, or the run lock cannot be checked.
+/// The list of tasks cannot be read, or the run lock cannot be checked.
 pub fn overview(repo: &Repo) -> Result<Overview, OverviewError> {
     let working = run_lock::working(repo)?;
+    let running = working.as_ref().map(|w| w.task.as_str());
     let runs = repo.runs_dir();
     let mut waiting = Vec::new();
     for id in store::task_ids(&runs)? {
-        let (_store, state) = TaskStore::open(&runs, &id)?;
-        if matches!(state.stage, Stage::WaitingForHuman(_)) {
+        let Ok((_store, state)) = TaskStore::open(&runs, &id) else {
+            continue;
+        };
+        let waits = match state.stage {
+            Stage::WaitingForHuman(_) => true,
+            // A role "works" but no harness runs it: it stopped on its own.
+            Stage::Working(_) => running != Some(id.as_str()),
+            Stage::Done => false,
+        };
+        if waits {
             waiting.push(id);
         }
     }
@@ -97,13 +109,19 @@ mod tests {
         designed(&repo, "task-001");
         orchestrator::create_task(&repo, "task-002", "Other", Workflow::Task, 5).unwrap();
         designed(&repo, "task-003");
+        // A role stopped by itself (a time limit, a crash): nobody runs it.
+        orchestrator::create_task(&repo, "task-004", "Stuck", Workflow::Task, 5).unwrap();
+        // A task whose files are broken hides nothing else.
+        std::fs::write(repo.runs_dir().join("task-005"), "not a folder").unwrap();
+        std::fs::create_dir_all(repo.runs_dir().join("task-006")).unwrap();
+        std::fs::write(repo.runs_dir().join("task-006/state.json"), "{ broken").unwrap();
         // Another window runs task-002.
         let mut lock = RunLock::hold(&repo).unwrap();
         lock.set_task("task-002").unwrap();
 
         let seen = overview(&repo).unwrap();
 
-        assert_eq!(seen.waiting, ["task-001", "task-003"]);
+        assert_eq!(seen.waiting, ["task-001", "task-003", "task-004"]);
         assert_eq!(seen.working.map(|w| w.task).as_deref(), Some("task-002"));
     }
 }

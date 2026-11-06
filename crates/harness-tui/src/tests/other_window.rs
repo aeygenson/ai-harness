@@ -48,6 +48,7 @@ fn the_stop_buttons_ask_the_other_window_to_stop() {
     assert!(shown(&app)
         .0
         .contains("Asked the other window to stop task-007"));
+    assert!(screen(&mut app).contains("✓ Asked to stop after this step"));
     key(&mut app, KeyCode::Char('s'));
     assert!(
         shown(&app).0.contains("cannot be taken back"),
@@ -63,6 +64,42 @@ fn the_stop_buttons_ask_the_other_window_to_stop() {
     assert_eq!(stop.asked(), Some(StopWhen::Now));
     let text = screen(&mut app);
     assert!(!text.contains("Stop now (x)"), "asked once: {text}");
+}
+
+#[test]
+fn the_keyboard_does_not_start_a_second_run_and_keeps_the_note() {
+    let env = Env::new();
+    let (root, mut app) = empty_project(&env);
+    let (_lock, _stop) = other_run(&root, "task-007");
+    key(&mut app, KeyCode::Char('r'));
+    click(&mut app, "Write here");
+    type_text(&mut app, "A long note");
+
+    app.press(ButtonId::Send);
+
+    let (message, problem) = shown(&app);
+    assert!(
+        problem && message.contains("task-007 runs in another window"),
+        "{message}"
+    );
+    assert!(!app.tasks.as_ref().unwrap().is_running());
+    assert_eq!(app.tasks.as_ref().unwrap().input, "A long note");
+}
+
+#[test]
+fn a_stop_asked_elsewhere_shows_here_too() {
+    let env = Env::new();
+    let (root, mut app) = empty_project(&env);
+    let (_lock, _stop) = other_run(&root, "task-007");
+    // `harness stop task-007 --now` in a terminal.
+    let repo = Repo::open(&root).unwrap();
+    harness_core::task::run_lock::ask_to_stop(&repo, "task-007", StopWhen::Now).unwrap();
+
+    key(&mut app, KeyCode::Char('r'));
+
+    let text = screen(&mut app);
+    assert!(text.contains("task-007 runs in another window"), "{text}");
+    assert!(!text.contains("Stop now (x)"), "already asked: {text}");
 }
 
 #[test]
@@ -91,7 +128,9 @@ fn the_projects_tab_shows_running_and_waiting_tasks_of_every_project() {
     let text = screen_of_width(&mut app, 160);
 
     assert!(text.contains("other  ▶ task-002"), "{text}");
-    assert!(text.contains("busy  waits for you: 1"), "{text}");
+    // task-003 waits for its design; task-001 and task-002 have a role
+    // "working" that nobody runs, which needs the user too.
+    assert!(text.contains("busy  waits for you: 3"), "{text}");
     assert!(text.contains("Running now: task-002"), "{text}");
     // The other window has finished: the list says so after a refresh.
     drop(lock);

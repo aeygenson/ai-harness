@@ -118,6 +118,7 @@ stop_after_asked = "The task stops after this step: the running role finishes, t
 stop_after_cancelled = "Stopping after this step is cancelled: the roles go on"
 stop_now_asked = "Stopping the agent now…"
 elsewhere = "{task} runs in another window"
+stop_after_on_elsewhere = "✓ Asked to stop after this step"
 stop_elsewhere_asked = "Asked the other window to stop {task}"
 stop_elsewhere_once = "{task}: the other window was already asked to stop after this step; that cannot be taken back from here"
 stop_now_title = "Stop the agent now?"

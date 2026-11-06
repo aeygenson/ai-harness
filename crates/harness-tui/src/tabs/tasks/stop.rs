@@ -29,7 +29,7 @@ impl TasksTab {
     pub fn stop_asked(&self) -> Option<StopWhen> {
         match self.stop_request() {
             Some(stop) => stop.asked(),
-            None => self.elsewhere_asked,
+            None => self.elsewhere.as_ref().and_then(|w| w.asked),
         }
     }
 
@@ -76,6 +76,10 @@ impl TasksTab {
         }
         let after = match self.stop_asked() {
             None => tr.t("tasks.stop_after"),
+            // Asked of another window: that cannot be taken back.
+            Some(StopWhen::AfterStep) if self.stop_request().is_none() => {
+                tr.t("tasks.stop_after_on_elsewhere")
+            }
             Some(StopWhen::AfterStep) => tr.t("tasks.stop_after_on"),
             // Stopping already: nothing more to ask.
             Some(StopWhen::Now) => return vec![],
