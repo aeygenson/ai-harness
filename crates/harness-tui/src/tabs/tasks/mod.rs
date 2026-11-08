@@ -7,7 +7,8 @@
 //! message's text: scrolling and clearing it), `steps.rs` (a step's text and
 //! files), `step_rows.rs` (the rows of the steps list), `github.rs`
 //! (sending a done task and merging its pull request),
-//! `stop.rs` (the user's stop buttons while roles work), `live_log.rs` and
+//! `stop.rs` (the user's stop buttons while roles work), `elsewhere.rs`
+//! (a run of another window in this project), `live_log.rs` and
 //! `log_panel.rs` (the scrollable live log), `times.rs` (how long a task
 //! and its steps took).
 //! `runner.rs` runs the roles in the background while the tab keeps
@@ -16,6 +17,7 @@
 pub(crate) mod agent_output;
 mod choice;
 mod draw;
+mod elsewhere;
 mod events;
 mod github;
 mod labels;

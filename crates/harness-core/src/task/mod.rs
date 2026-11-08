@@ -9,8 +9,9 @@
 //! (the pull request a finished task becomes on GitHub), `tripwire` (what
 //! `git status` does not show), `agent_stubs` (the empty files Claude Code
 //! makes when it starts, which are not a reason to stop), `stop_request`
-//! (the user's «Stop after this step» and «Stop now») and `run_lock` (one
-//! harness at a time in a project folder, and `harness stop`).
+//! (the user's «Stop after this step» and «Stop now»), `run_lock` (one
+//! harness at a time in a project folder, and `harness stop`) and `overview`
+//! (what is going on in a project, for the main window's list).
 
 pub mod agent;
 pub mod agent_stubs;
@@ -19,6 +20,7 @@ pub mod facts;
 pub mod handoff;
 pub mod manifest;
 pub mod orchestrator;
+pub mod overview;
 pub mod permissions;
 pub mod prompt;
 pub mod pull_request;

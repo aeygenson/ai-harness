@@ -1,10 +1,14 @@
-//! The Projects tab: the list from `~/.harness/projects.toml`.
+//! The Projects tab: the list from `~/.harness/projects.toml`, with what is
+//! going on in each project (a running task, tasks waiting for the user),
+//! read from disk, so the work of other windows shows too.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use harness_core::config::projects::{Project, Projects};
 use harness_core::config::CONFIG_FILE;
-use harness_core::git::HARNESS_DIR;
+use harness_core::git::{Repo, HARNESS_DIR};
+use harness_core::task::overview::{self, Overview};
 use ratatui::crossterm::event::KeyCode;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::text::Line;
@@ -22,6 +26,8 @@ pub struct ProjectsTab {
     pub list: Projects,
     pub selected: usize,
     pub problem: Option<String>,
+    /// What is going on in each project, by folder (see [`Self::refresh`]).
+    overviews: HashMap<PathBuf, Overview>,
 }
 
 /// Is there a harness project in `root`?
@@ -36,6 +42,7 @@ impl ProjectsTab {
             list: Projects::default(),
             selected: 0,
             problem: None,
+            overviews: HashMap::new(),
         };
         tab.reload(tr);
         tab
@@ -67,6 +74,58 @@ impl ProjectsTab {
             .selected
             .min(self.list.projects.len().saturating_sub(1));
         Ok(())
+    }
+
+    /// Reads again what is going on in every project on the list. A
+    /// project that cannot be read (a missing folder, no settings) shows
+    /// nothing.
+    pub fn refresh(&mut self) {
+        self.overviews = self
+            .list
+            .projects
+            .iter()
+            .filter(|p| has_config(&p.path))
+            .filter_map(|p| {
+                let repo = Repo::open(&p.path).ok()?;
+                let seen = overview::overview(&repo).ok()?;
+                Some((p.path.clone(), seen))
+            })
+            .collect();
+    }
+
+    /// The short state of a project after its name: the running task and
+    /// how many tasks wait for the user; empty when nothing goes on.
+    fn status(&self, path: &Path, tr: &I18n) -> String {
+        let Some(seen) = self.overviews.get(path) else {
+            return String::new();
+        };
+        let mut parts = Vec::with_capacity(2);
+        if let Some(working) = &seen.working {
+            parts.push(tr.f("projects.row_running", &[("task", &working.task)]));
+        }
+        if !seen.waiting.is_empty() {
+            let count = seen.waiting.len();
+            parts.push(tr.f("projects.row_waiting", &[("count", &count)]));
+        }
+        parts.join(" · ")
+    }
+
+    /// The running task and the waiting tasks of a project, one line each.
+    fn details(&self, path: &Path, tr: &I18n) -> Vec<Line<'static>> {
+        let Some(seen) = self.overviews.get(path) else {
+            return vec![];
+        };
+        let mut lines = Vec::with_capacity(2);
+        if let Some(working) = &seen.working {
+            let text = tr.f("projects.about_running", &[("task", &working.task)]);
+            lines.push(Line::styled(text, theme::accent()));
+        }
+        if !seen.waiting.is_empty() {
+            let tasks = seen.waiting.join(", ");
+            let text = tr.f("projects.about_waiting", &[("tasks", &tasks)]);
+            lines.push(Line::styled(text, theme::warn()));
+        }
+        lines
     }
 
     pub fn current(&self) -> Option<&Project> {
@@ -126,7 +185,12 @@ impl ProjectsTab {
                 } else {
                     "  "
                 };
-                ListItem::new(format!("{mark}{}", p.name))
+                let status = self.status(&p.path, tr);
+                if status.is_empty() {
+                    ListItem::new(format!("{mark}{}", p.name))
+                } else {
+                    ListItem::new(format!("{mark}{}  {status}", p.name))
+                }
             })
             .collect();
         draw_list(
@@ -156,14 +220,16 @@ impl ProjectsTab {
                 } else {
                     Line::styled(tr.t("projects.no_config").to_string(), theme::warn())
                 };
-                vec![
+                let mut lines = vec![
                     Line::from(project.name.clone()),
                     Line::from(project.path.display().to_string()),
                     Line::default(),
                     state,
-                    Line::default(),
-                    Line::from(tr.t("projects.open_hint").to_string()),
-                ]
+                ];
+                lines.extend(self.details(&project.path, tr));
+                lines.push(Line::default());
+                lines.push(Line::from(tr.t("projects.open_hint").to_string()));
+                lines
             }
         };
         frame.render_widget(
