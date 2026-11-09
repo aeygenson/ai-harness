@@ -48,6 +48,7 @@ impl App {
             sign_in: None,
             tool_install: None,
             tool_sign_in: None,
+            notice: None,
             agents: AgentsTab::new(),
             agent_checker: tabs::agents::check,
             agent_check: None,

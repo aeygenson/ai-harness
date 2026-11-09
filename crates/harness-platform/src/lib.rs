@@ -11,6 +11,7 @@
 //! - [`run_mark`]: finding the processes an agent run started that left its group;
 //! - [`stop`]: noticing that the system asks the harness to stop (terminal closed);
 //! - [`open`]: opening an address in the browser;
+//! - [`notify`]: the terminal's bell and a system notification when work ends;
 //! - [`program`]: finding a program by name (`codex.cmd` on Windows);
 //! - [`path`]: paths written with `/`, as git writes them;
 //! - [`editor`]: opening a file in Zed, `$EDITOR` or the system's editor;
@@ -28,6 +29,7 @@ pub mod folder_dialog;
 pub mod home;
 pub mod input;
 pub mod lock;
+pub mod notify;
 pub mod open;
 pub mod path;
 pub mod private;

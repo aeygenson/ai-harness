@@ -336,6 +336,9 @@ struct App {
     /// A program to sign in after this event (the GitHub CLI): its name and
     /// its full path.
     tool_sign_in: Option<(&'static str, PathBuf)>,
+    /// Agent work has ended (a task's run, a retrospective): the text for the
+    /// bell and the system notification after this event.
+    notice: Option<String>,
     projects: ProjectsTab,
     agents: AgentsTab,
     /// Checks which agents are installed; tests give a fake one.
