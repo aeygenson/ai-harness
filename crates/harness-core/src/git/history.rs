@@ -1,7 +1,7 @@
 //! Questions about the project's git history: an older text of a file, the
 //! files of a commit, the day of a change.
 
-use super::Repo;
+use super::{GitError, Repo};
 
 impl Repo {
     /// The text of `file` (relative to the project, with `/`) in the commit
@@ -72,13 +72,18 @@ impl Repo {
         .ok()
     }
 
-    /// The hash of the commit that added `added`, or `None`.
+    /// The hash of the commit that added `added`, or `None` (also when git failed).
     fn commit_adding(&self, added: &str) -> Option<String> {
-        let commit = self
-            .git_literal(&["log", "-1", "--diff-filter=A", "--format=%H", "--", added])
-            .ok()?;
+        self.find_commit_adding(added).ok().flatten()
+    }
+
+    /// The hash of the commit that added `added` (relative to the project,
+    /// with `/`); `Ok(None)` when no commit in this branch's history did.
+    pub fn find_commit_adding(&self, added: &str) -> Result<Option<String>, GitError> {
+        let commit =
+            self.git_literal(&["log", "-1", "--diff-filter=A", "--format=%H", "--", added])?;
         let commit = commit.trim();
-        (!commit.is_empty()).then(|| commit.to_string())
+        Ok((!commit.is_empty()).then(|| commit.to_string()))
     }
 
     /// The files changed between the last commit that changed `path`

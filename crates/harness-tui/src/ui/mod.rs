@@ -115,6 +115,8 @@ pub enum ButtonId {
     StopNow,
     /// «Triage» on the Tasks tab: the user's own agent looks into the task.
     Triage,
+    /// «Restore code here» on a step of the Tasks tab: marks it for the next Send.
+    RestoreCode,
     /// A button of the Skills tab.
     Skill(crate::tabs::skills::SkillButton),
     /// A link in «Files» of the step on the Tasks tab.

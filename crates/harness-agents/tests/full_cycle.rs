@@ -95,6 +95,7 @@ async fn happy_path_with_the_user_approving_the_design() {
             verdict: Verdict::Approved,
             next: NextStep::To(Role::Developer),
             notes: "Looks good.",
+            restore_to: None,
         },
     )
     .unwrap();
@@ -480,6 +481,7 @@ async fn continues_after_a_restart() {
             verdict: Verdict::Approved,
             next: NextStep::To(Role::Developer),
             notes: "",
+            restore_to: None,
         },
     )
     .unwrap();

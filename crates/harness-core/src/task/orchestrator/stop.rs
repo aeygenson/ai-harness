@@ -140,6 +140,41 @@ pub enum RunError {
         /// The uncommitted files of the recorded unfinished work.
         files: Vec<String>,
     },
+    /// The code cannot be restored to a step while the folder has uncommitted
+    /// changes: they would be lost or mixed into the restored code.
+    #[error(
+        "the folder has uncommitted changes ({}); commit or remove them before restoring \
+         the code to a step",
+        files.join(", ")
+    )]
+    NotClean {
+        /// The changed files, relative to the project.
+        files: Vec<String>,
+    },
+    /// The step to restore the code to has no commit in this branch.
+    #[error("step {step} is not in this branch's history; the code cannot be restored to it")]
+    NoStepCommit {
+        /// The step, for example `round-01/01-architect`.
+        step: String,
+    },
+    /// Restoring the code would write over ignored files in the folder that
+    /// the step's commit had in git (such as local settings).
+    #[error(
+        "restoring the code would write over files git ignores ({}); move them away or \
+         commit them first",
+        files.join(", ")
+    )]
+    IgnoredInTheWay {
+        /// The ignored files, relative to the project.
+        files: Vec<String>,
+    },
+    /// The project is a folder inside a larger git repository: restoring the
+    /// code is only done for a project at the top of its own repository.
+    #[error(
+        "the project is a folder inside a larger git repository; the code is restored to a \
+         step only in a project that is the top of its own repository"
+    )]
+    NotTopLevel,
     /// An unfinished task already has this text: a second one is not created.
     #[error(
         "{task} already has this text and is not done ({stage}); continue it or change the text"

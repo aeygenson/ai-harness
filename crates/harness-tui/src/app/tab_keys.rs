@@ -21,6 +21,7 @@ impl App {
                 KeyCode::Char('s') => self.press(ButtonId::StopAfterStep),
                 KeyCode::Char('x') => self.press(ButtonId::StopNow),
                 KeyCode::Char('t') => self.press(ButtonId::Triage),
+                KeyCode::Char('b') => self.press(ButtonId::RestoreCode),
                 code => {
                     if let Some(tasks) = &mut self.tasks {
                         tasks.on_key(code);

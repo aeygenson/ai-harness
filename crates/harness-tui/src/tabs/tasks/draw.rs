@@ -116,7 +116,6 @@ impl TasksTab {
             },
             &self.first_step_row,
         );
-        self.draw_triage(frame, steps_area, &title, hits, tr);
 
         self.draw_step(frame, task, detail_area, hits, tr);
         self.draw_input(frame, input_area, hits, tr);
@@ -249,6 +248,8 @@ impl TasksTab {
                 .scroll((self.scroll, 0)),
             area,
         );
+        // Over the border just drawn.
+        self.draw_step_buttons(frame, area, &title, hits, tr);
     }
 
     /// The agents of the roles; a click on a role filters the tasks.

@@ -73,6 +73,11 @@ impl App {
             ButtonId::StopAfterStep => self.stop_after_step(),
             ButtonId::StopNow => self.ask_to_stop_now(),
             ButtonId::Triage => self.triage(),
+            ButtonId::RestoreCode => {
+                if let Some(tasks) = &mut self.tasks {
+                    self.message = Some(tasks.toggle_restore(&self.tr));
+                }
+            }
             ButtonId::UseProject => self.use_project(),
             ButtonId::NewProject => self.pick(Pick::NewProject),
             ButtonId::OpenFolder => self.pick(Pick::Open),

@@ -152,6 +152,8 @@ pub struct TasksTab {
     pub(super) usages: RefCell<HashMap<PathBuf, Option<Usage>>>,
     /// When each task and its steps were committed, by task id.
     pub(super) times: HashMap<String, TaskTimes>,
+    /// The step whose code comes back on the next Send (see `restore.rs`).
+    pub(crate) restore_to: Option<PathBuf>,
 }
 
 impl TasksTab {
@@ -190,6 +192,7 @@ impl TasksTab {
             commits: RefCell::default(),
             usages: RefCell::default(),
             times: HashMap::new(),
+            restore_to: None,
         };
         tab.reload();
         tab.step = tab.last_step();

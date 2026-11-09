@@ -79,6 +79,70 @@ fn triage_gives_the_terminal_to_the_users_own_agent_for_the_selected_task() {
     );
 }
 
+#[test]
+fn a_marked_step_gets_its_code_back_before_the_message_goes_to_a_role() {
+    let env = Env::new();
+    let (root, mut app) = empty_project(&env);
+    let repo = Repo::open(&root).unwrap();
+    let (store, mut state) =
+        orchestrator::create_task(&repo, "task-001", "Build a parser", Workflow::Task, 5).unwrap();
+    // Each step with its own commit, as a real run makes them.
+    for (role, verdict, next) in [
+        (Role::Architect, Verdict::Approved, Role::Human),
+        (Role::Human, Verdict::Approved, Role::Developer),
+        (Role::Developer, Verdict::NeedsHuman, Role::Human),
+    ] {
+        if role == Role::Developer {
+            fs::write(root.join("parser.rs"), "fn parse() {}").unwrap();
+        }
+        let step = handoff(role, verdict, NextStep::To(next), "step");
+        store.record(&mut state, &step, "notes").unwrap();
+        repo.commit_all("step").unwrap();
+    }
+    key(&mut app, KeyCode::F(5));
+    // The last step has no button: the code is already as after it.
+    assert!(!screen(&mut app).contains("Restore code here"));
+
+    click(&mut app, "r1 architect");
+    click(&mut app, " ↶ Restore code here (b) ");
+    assert!(app
+        .message
+        .as_ref()
+        .unwrap()
+        .text
+        .contains("goes back to how it was after round-01/01-architect"));
+    assert!(screen(&mut app).contains(" ✓ Code back here on Send (b) "));
+    // A narrow window has room for one button: Triage stays.
+    let narrow = screen_of_width(&mut app, 80);
+    assert!(narrow.contains(" Triage (t) "), "{narrow}");
+    assert!(!narrow.contains("Code back here"), "{narrow}");
+    // b again takes the mark back, and once more puts it there.
+    key(&mut app, KeyCode::Char('b'));
+    assert_eq!(
+        app.message.as_ref().unwrap().text,
+        "The code stays as it is"
+    );
+    key(&mut app, KeyCode::Char('b'));
+    click(&mut app, "Write here");
+    type_text(&mut app, "Smaller, please");
+    send(&mut app);
+    wait(&mut app);
+
+    assert!(!root.join("parser.rs").exists());
+    let log = std::process::Command::new("git")
+        .current_dir(&root)
+        .args(["log", "--format=%s"])
+        .output()
+        .unwrap();
+    let log = String::from_utf8(log.stdout).unwrap();
+    assert!(
+        log.contains("task-001 round 1: code restored to round-01/01-architect by the user"),
+        "{log}"
+    );
+    assert!(log.contains("human (rejected) - Smaller, please"), "{log}");
+    assert!(app.tasks.as_ref().unwrap().restore_to.is_none());
+}
+
 fn no_login(
     _: &harness_core::config::Config,
     _: &Path,
@@ -880,6 +944,7 @@ fn a_decision_on_an_old_copy_of_a_task_on_another_branch_is_refused() {
             verdict: Verdict::Approved,
             next: NextStep::To(Role::Developer),
             notes: "go",
+            restore_to: None,
         },
     )
     .unwrap();

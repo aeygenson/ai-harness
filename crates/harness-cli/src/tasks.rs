@@ -13,16 +13,15 @@ use harness_core::config::Config;
 use harness_core::git::{Repo, HARNESS_DIR};
 use harness_core::skills::Skills;
 use harness_core::task::branch;
-use harness_core::task::handoff::{AnswerTo, NextStep, Role, Verdict, MAX_REASON_CHARS};
-use harness_core::task::orchestrator::{
-    self, GitAfterRole, HumanDecision, Project, SameText, StopReason,
-};
+use harness_core::task::handoff::{AnswerTo, Role, MAX_REASON_CHARS};
+use harness_core::task::orchestrator::{self, GitAfterRole, Project, SameText, StopReason};
 use harness_core::task::run_lock::{self, RunLock};
 use harness_core::task::stop_request::{StopRequest, StopWhen};
 use harness_core::task::store::TaskStore;
 use harness_core::task::{Stage, TaskState, WaitReason};
 use harness_platform::stop::StopSignals;
 
+use crate::decide::step_name;
 use crate::{open_repo, open_task};
 
 /// `harness task new`: creates the task folder and commits it. Refuses a
@@ -127,7 +126,7 @@ pub(crate) async fn run(project: &Path, task_id: &str) -> Result<()> {
 }
 
 /// Checks out the task's branch if it has one, and says so when it switched.
-fn enter_branch(repo: &Repo, task_id: &str) -> Result<()> {
+pub(crate) fn enter_branch(repo: &Repo, task_id: &str) -> Result<()> {
     if branch::enter(repo, task_id)? {
         println!(
             "Switched to the task's branch {}.",
@@ -349,65 +348,6 @@ fn also_changed_text(config_put_back: bool, git: &GitAfterRole) -> String {
     text + &git_text
 }
 
-/// `harness approve` / `harness reject`: writes the user's decision as a handoff
-/// from the role `human`. Without `--to`, approved work goes where the task's
-/// workflow says (a design goes to the developer), a result waiting for the
-/// user's acceptance is finished, and a role that asked for help gets the
-/// task back.
-pub(crate) fn decide(
-    project: &Path,
-    task_id: &str,
-    verdict: Verdict,
-    to: Option<NextStep>,
-    notes: &str,
-) -> Result<()> {
-    let repo = open_repo(project)?;
-    let mut lock = RunLock::hold(&repo)?;
-    lock.set_task(task_id)?;
-    // The user's decision is a commit too: it goes on the task's branch.
-    enter_branch(&repo, task_id)?;
-    let (store, mut state) = open_task(&repo, task_id)?;
-    // Rejecting starts a new round, and recorded unfinished work belongs to
-    // this one: it could not be continued any more.
-    if verdict == Verdict::Rejected && !orchestrator::unfinished_left(&repo, &store)?.is_empty() {
-        bail!(
-            "{task_id} has unfinished work in the folder; give your note to the role \
-             that continues it with:\n  harness approve {task_id} --notes \"...\""
-        );
-    }
-    let next = match to {
-        Some(next) => next,
-        None => match state.stage {
-            Stage::WaitingForHuman(WaitReason::ApproveDesign) => {
-                NextStep::To(state.workflow.after_approval())
-            }
-            Stage::WaitingForHuman(WaitReason::AcceptResult) => NextStep::Done,
-            Stage::WaitingForHuman(
-                WaitReason::RoleAskedForHelp(role) | WaitReason::StoppedByUser(role),
-            ) => NextStep::To(role),
-            Stage::WaitingForHuman(WaitReason::RoundLimitReached)
-            | Stage::Working(_)
-            | Stage::Done => bail!("say who continues with --to <role|done>"),
-        },
-    };
-    orchestrator::record_human_decision(
-        &repo,
-        &store,
-        &mut state,
-        HumanDecision {
-            verdict,
-            next,
-            notes,
-        },
-    )?;
-    if state.stage == Stage::Done {
-        println!("Saved. {task_id} is done.");
-    } else {
-        println!("Saved. Next: harness run {task_id}");
-    }
-    Ok(())
-}
-
 /// `harness stop`: asks the harness running the roles of `task_id` to stop
 /// (at once with `now`, else once the running role has finished); that
 /// harness says so in its own window.
@@ -444,10 +384,16 @@ pub(crate) fn status(project: &Path, task_id: &str) -> Result<()> {
     if let Some(page) = state.pull_request.as_ref().and_then(|p| p.page()) {
         println!("  pull request: {page}");
     }
-    for handoff in store.history()? {
+    // The step's folder comes first: `harness reject --restore` takes it.
+    for step in store.steps()? {
+        let handoff = &step.handoff;
         println!(
-            "  round {} {:?} {:?} -> {:?}: {}",
-            handoff.round, handoff.role, handoff.verdict, handoff.next_role, handoff.summary
+            "  {} {:?} {:?} -> {:?}: {}",
+            step_name(&store, &step.dir),
+            handoff.role,
+            handoff.verdict,
+            handoff.next_role,
+            handoff.summary
         );
     }
     Ok(())
@@ -460,7 +406,20 @@ mod tests {
     use harness_core::config::projects;
     use harness_core::config::CONFIG_FILE;
 
+    use harness_core::task::handoff::{NextStep, Verdict};
+
     use super::*;
+    use crate::decide::{decide, Decision};
+
+    /// `harness approve` with `--to` and `--notes`.
+    fn approve(to: Option<NextStep>, notes: &str) -> Decision<'_> {
+        Decision {
+            verdict: Verdict::Approved,
+            to,
+            notes,
+            restore: None,
+        }
+    }
 
     #[test]
     fn a_decision_lands_on_the_task_branch_after_the_user_switched_away() {
@@ -483,7 +442,7 @@ mod tests {
         repo.switch_branch(&base).unwrap();
         let base_commit = repo.head().unwrap();
 
-        decide(project, "task-001", Verdict::Approved, None, "ok").unwrap();
+        decide(project, "task-001", approve(None, "ok")).unwrap();
 
         assert_eq!(
             repo.current_branch().unwrap(),
@@ -494,6 +453,47 @@ mod tests {
         assert_eq!(repo.changed_files().unwrap(), Vec::<String>::new());
         repo.switch_branch(&base).unwrap();
         assert_eq!(repo.head().unwrap(), base_commit);
+    }
+
+    /// Saves `next` as where `task-001` stands, with a commit.
+    fn set_stage(repo: &Repo, next: Stage) {
+        let (store, mut state) = open_task(repo, "task-001").unwrap();
+        state.stage = next;
+        let json = serde_json::to_string(&state).unwrap();
+        fs::write(store.dir().join("state.json"), json).unwrap();
+        repo.commit_all("stage").unwrap();
+    }
+
+    #[test]
+    fn reject_with_restore_brings_back_the_code_of_a_named_step() {
+        let dir = tempfile::tempdir().unwrap();
+        let project = dir.path();
+        projects::init(project).unwrap();
+        let repo = open_repo(project).unwrap();
+        new_task(project, "task-001", "Add a parser", false).unwrap();
+        set_stage(&repo, Stage::WaitingForHuman(WaitReason::ApproveDesign));
+        decide(project, "task-001", approve(None, "ok")).unwrap();
+        // The developer's code, then the result waits for the user.
+        fs::write(project.join("parser.rs"), "fn parse() {}").unwrap();
+        set_stage(&repo, Stage::WaitingForHuman(WaitReason::AcceptResult));
+        let reject = |restore| Decision {
+            verdict: Verdict::Rejected,
+            to: Some(NextStep::To(Role::Developer)),
+            notes: "Again",
+            restore: Some(restore),
+        };
+
+        let error = decide(project, "task-001", reject("round-09/01-tester")).unwrap_err();
+        decide(project, "task-001", reject("round-01/01-human")).unwrap();
+
+        assert!(
+            error
+                .to_string()
+                .contains("its steps are: round-01/01-human"),
+            "{error}"
+        );
+        assert!(!project.join("parser.rs").exists());
+        assert_eq!(repo.changed_files().unwrap(), Vec::<String>::new());
     }
 
     #[test]
@@ -677,7 +677,7 @@ mod tests {
         fs::write(store.state_file(), serde_json::to_string(&state).unwrap()).unwrap();
         repo.commit_all("waiting for acceptance").unwrap();
 
-        decide(project, "task-001", Verdict::Approved, None, "Checked live").unwrap();
+        decide(project, "task-001", approve(None, "Checked live")).unwrap();
 
         let (_, state) = open_task(&repo, "task-001").unwrap();
         assert_eq!(state.stage, Stage::Done);
@@ -700,14 +700,13 @@ mod tests {
         fs::write(project.join("half.rs"), "fn half() {}").unwrap();
 
         // Rejecting would start a new round and strand the unfinished work.
-        let error = decide(
-            project,
-            "task-001",
-            Verdict::Rejected,
-            Some(NextStep::To(Role::Developer)),
-            "No",
-        )
-        .unwrap_err();
+        let reject = Decision {
+            verdict: Verdict::Rejected,
+            to: Some(NextStep::To(Role::Developer)),
+            notes: "No",
+            restore: None,
+        };
+        let error = decide(project, "task-001", reject).unwrap_err();
         assert!(
             error
                 .to_string()
@@ -715,7 +714,7 @@ mod tests {
             "{error}"
         );
 
-        decide(project, "task-001", Verdict::Approved, None, "Use serde").unwrap();
+        decide(project, "task-001", approve(None, "Use serde")).unwrap();
 
         let (_, state) = open_task(&repo, "task-001").unwrap();
         assert_eq!(state.stage, Stage::Working(Role::Developer));

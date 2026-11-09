@@ -10,7 +10,8 @@
 //! `stop.rs` (the user's stop buttons while roles work), `elsewhere.rs`
 //! (a run of another window in this project), `live_log.rs` and
 //! `log_panel.rs` (the scrollable live log), `times.rs` (how long a task
-//! and its steps took), `triage.rs` (the «Triage» button).
+//! and its steps took), `triage.rs` (the «Triage» button), `restore.rs` (restoring
+//! the code to a step).
 //! `runner.rs` runs the roles in the background while the tab keeps
 //! working.
 
@@ -26,6 +27,7 @@ mod log_panel;
 mod message_box;
 mod message_edit;
 mod message_text;
+mod restore;
 mod run;
 pub(crate) mod runner;
 mod step_rows;

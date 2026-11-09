@@ -187,6 +187,12 @@ impl Repo {
         self.commit(message, &[])
     }
 
+    /// Commits what is staged now, without adding anything else; `false`
+    /// when nothing is staged.
+    pub fn commit_staged(&self, message: &str) -> Result<bool, GitError> {
+        self.commit(message, &[])
+    }
+
     /// Commits only the given paths (files or folders), whatever else changed.
     pub fn commit_paths(&self, paths: &[&Path], message: &str) -> Result<bool, GitError> {
         // A path that is dropped here would leave `git add -A --` without

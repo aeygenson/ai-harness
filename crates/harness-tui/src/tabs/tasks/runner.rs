@@ -57,6 +57,8 @@ pub enum Request {
         notes: String,
         /// Rounds added to the task's limit before the decision; 0 for none.
         extra_rounds: u32,
+        /// First bring back the code of this step (its folder); `None` keeps it.
+        restore_to: Option<PathBuf>,
     },
     /// A role stopped part-way (a limit, a failure): run the task again.
     Continue(String),
@@ -357,6 +359,7 @@ fn open_task(
             next,
             notes,
             extra_rounds,
+            restore_to,
         } => {
             let (store, mut state) = TaskStore::open(&runs, &task).map_err(|e| e.to_string())?;
             if state.stage != seen {
@@ -379,6 +382,7 @@ fn open_task(
                     verdict,
                     next,
                     notes: &notes,
+                    restore_to: restore_to.as_deref(),
                 },
             )
             .map_err(|e| e.to_string())?;
@@ -457,6 +461,7 @@ mod tests {
             next,
             notes: String::new(),
             extra_rounds: 0,
+            restore_to: None,
         };
         assert!(runs_roles(&Request::New("Do it".into())));
         assert!(runs_roles(&Request::Continue("task-001".into())));

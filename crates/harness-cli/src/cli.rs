@@ -89,6 +89,11 @@ pub(crate) enum Command {
         to: NextStep,
         #[arg(long)]
         notes: String,
+        /// First make the code outside .harness/ as it was after this step,
+        /// for example `round-01/01-architect` (see `harness status`), with a
+        /// new commit; later commits and the task's history stay.
+        #[arg(long)]
+        restore: Option<String>,
     },
     /// Ask the harness that runs a task in this project (in the TUI or another
     /// terminal) to stop after the running role, or at once with --now.

@@ -1,11 +1,11 @@
 //! The user's decisions, saved as a handoff with role `human`.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use super::{commit_message, RunError};
 use crate::git::Repo;
 use crate::task::handoff::{Handoff, NextStep, Role, Verdict};
-use crate::task::store::TaskStore;
+use crate::task::store::{StoreError, TaskStore};
 use crate::task::TaskState;
 
 /// What the user decided on a waiting task.
@@ -17,10 +17,16 @@ pub struct HumanDecision<'a> {
     pub next: NextStep,
     /// The user's notes for the next role; the first line is the summary.
     pub notes: &'a str,
+    /// First make the code as it was after this step (its folder in
+    /// `runs/`), with its own commit; `None` leaves the code as it is.
+    pub restore_to: Option<&'a Path>,
 }
 
 /// The user's decision (approve the design, send work back, answer a question),
 /// saved like any other handoff with role `human`.
+///
+/// With `restore_to`, the code is first restored to that step (see
+/// `restore.rs`) and the notes say so to the next role.
 ///
 /// Finishing the task is refused ([`RunError::UnfinishedWork`]) while the
 /// unfinished work a limit or «Stop now» left is still uncommitted: it
@@ -35,6 +41,7 @@ pub fn record_human_decision(
         verdict,
         next,
         notes,
+        restore_to,
     } = decision;
     if next == NextStep::Done {
         let files = super::changes::unfinished_left(repo, store)?;
@@ -42,6 +49,7 @@ pub fn record_human_decision(
             return Err(RunError::UnfinishedWork { files });
         }
     }
+    // The summary is the first line of the user's own notes.
     let summary = notes
         .lines()
         .next()
@@ -70,6 +78,22 @@ pub fn record_human_decision(
         issues,
         answer_to: None,
     };
+    let notes = match restore_to {
+        Some(step_dir) => {
+            // Check the decision on a copy first: a refused one (a wrong
+            // route, a task that does not wait for the user) must not leave
+            // a restored-code commit behind.
+            state.clone().apply(&handoff).map_err(StoreError::from)?;
+            let line = super::restore::restore_code(repo, state, step_dir)?;
+            if notes.trim().is_empty() {
+                line
+            } else {
+                format!("{}\n\n{line}", notes.trim_end())
+            }
+        }
+        None => notes.to_string(),
+    };
+    let notes = notes.as_str();
     let step_dir = store.record(state, &handoff, notes)?;
     // Commit only the task folder: code the user changed themselves is theirs to commit.
     repo.commit_paths(&[store.dir()], &commit_message(&handoff))?;
