@@ -72,6 +72,7 @@ impl App {
             ButtonId::Send => self.send_message(),
             ButtonId::StopAfterStep => self.stop_after_step(),
             ButtonId::StopNow => self.ask_to_stop_now(),
+            ButtonId::Triage => self.triage(),
             ButtonId::UseProject => self.use_project(),
             ButtonId::NewProject => self.pick(Pick::NewProject),
             ButtonId::OpenFolder => self.pick(Pick::Open),

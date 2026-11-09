@@ -10,7 +10,7 @@
 //! `stop.rs` (the user's stop buttons while roles work), `elsewhere.rs`
 //! (a run of another window in this project), `live_log.rs` and
 //! `log_panel.rs` (the scrollable live log), `times.rs` (how long a task
-//! and its steps took).
+//! and its steps took), `triage.rs` (the «Triage» button).
 //! `runner.rs` runs the roles in the background while the tab keeps
 //! working.
 
@@ -33,6 +33,7 @@ mod steps;
 mod stop;
 mod tab;
 mod times;
+mod triage;
 
 pub(crate) use choice::Menu;
 pub(crate) use tab::{TasksTab, Zoom};

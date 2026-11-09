@@ -116,6 +116,7 @@ impl TasksTab {
             },
             &self.first_step_row,
         );
+        self.draw_triage(frame, steps_area, &title, hits, tr);
 
         self.draw_step(frame, task, detail_area, hits, tr);
         self.draw_input(frame, input_area, hits, tr);

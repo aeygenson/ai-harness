@@ -4,7 +4,8 @@
 //! Layout: `adapters/` holds one file per agent, `mcp/` the MCP tools that run outside a
 //! role (check, OAuth sign-in, the web bridge, the registry), and `install/` the agent
 //! catalog, saved logins and model lists. The single files are shared by all of them;
-//! `github` runs the GitHub CLI.
+//! `github` runs the GitHub CLI; `triage` starts the user's own agent to find
+//! out why a task went wrong.
 
 pub mod adapters;
 pub mod agent_home;
@@ -16,6 +17,7 @@ pub mod mcp;
 pub mod process;
 pub mod role_settings;
 pub mod team;
+pub mod triage;
 
 pub use adapters::antigravity::Antigravity;
 pub use adapters::claude::ClaudeCode;

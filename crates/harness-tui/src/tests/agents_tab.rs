@@ -121,10 +121,12 @@ fn agents_app(env: &Env) -> App {
     app
 }
 
+/// Waits for the check of the agents and of the other programs: they run in
+/// two threads, and a busy machine can finish the agents first.
 fn wait_for_agents(app: &mut App) {
     for _ in 0..200 {
         app.tick();
-        if !app.agents.checking && app.install_events.is_none() {
+        if !app.agents.checking && app.tool_check.is_none() && app.install_events.is_none() {
             return;
         }
         std::thread::sleep(Duration::from_millis(10));

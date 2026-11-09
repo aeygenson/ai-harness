@@ -49,6 +49,8 @@ impl App {
             tool_install: None,
             tool_sign_in: None,
             notice: None,
+            triage: None,
+            triage_finder: harness_platform::program::find,
             agents: AgentsTab::new(),
             agent_checker: tabs::agents::check,
             agent_check: None,

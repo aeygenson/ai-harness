@@ -339,6 +339,10 @@ struct App {
     /// Agent work has ended (a task's run, a retrospective): the text for the
     /// bell and the system notification after this event.
     notice: Option<String>,
+    /// «Triage»: an agent to give the terminal to after this event.
+    triage: Option<app::triage::TriageJob>,
+    /// Finds the triage agent's program; tests give a fake one.
+    triage_finder: harness_agents::triage::Finder,
     projects: ProjectsTab,
     agents: AgentsTab,
     /// Checks which agents are installed; tests give a fake one.
