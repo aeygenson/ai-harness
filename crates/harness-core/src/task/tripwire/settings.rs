@@ -97,7 +97,10 @@ mod tests {
         let names: Vec<String> = files
             .iter()
             .map(|f| {
-                let rest = f.strip_prefix(dir.path()).unwrap();
+                // Git spells the folder its own way on Windows (`/`, short names).
+                let top = dir.path().canonicalize().unwrap();
+                let file = f.canonicalize().unwrap();
+                let rest = file.strip_prefix(&top).unwrap().to_path_buf();
                 rest.to_string_lossy().replace('\\', "/")
             })
             .collect();

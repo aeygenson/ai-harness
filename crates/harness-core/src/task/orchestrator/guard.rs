@@ -230,7 +230,12 @@ mod tests {
         let Some(StopReason::HiddenChanges { reported, .. }) = stop else {
             panic!("{stop:?}");
         };
-        assert_eq!(reported, [settings]);
+        // Git spells the folder its own way on Windows (`/`, long names).
+        assert_eq!(reported.len(), 1, "{reported:?}");
+        assert_eq!(
+            reported[0].canonicalize().unwrap(),
+            settings.canonicalize().unwrap()
+        );
     }
 
     #[test]
