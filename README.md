@@ -114,6 +114,7 @@ next. The harness then **trusts, but verifies**:
 | **Retrospective** | `harness retro` counts what happened across tasks (rounds, rejections, repeated issues, unused skills) without AI, then can ask an agent to propose skill changes that you approve one by one. |
 | **Drive it from your own AI** | `harness mcp-serve` is an MCP server: connect Claude Code, Codex, Gemini or any agent that speaks MCP, ask what your tasks are doing and why, and let it create, start and stop tasks. Approvals stay yours. |
 | **Agent manager** | Install, update, remove and sign in to agents from the Agents tab. `harness doctor` checks that Git, Node.js and at least one agent are ready. |
+| **Triage** | `harness triage <task>` starts your own Claude Code, Codex or Cursor with a ready playbook: it reads the task's logs and handoffs, names the cause and the next command, and drafts a GitHub issue for a harness bug. It changes nothing until you agree. |
 | **Isolated agents** | Every project configures its agents itself: no personal plugins, MCP servers or saved keys leak in from your own setup. |
 | **Secrets handled carefully** | Logins and keys live in `~/.harness/credentials/` (readable only by you), never in the project, git, logs or an agent's environment, and are shown as `***` in every log. |
 | **Runs everywhere** | Linux, macOS (Apple silicon and Intel) and Windows, with one-command installers and ready-made binaries. |

@@ -100,6 +100,16 @@ pub(crate) enum Command {
     },
     /// Show where a task is and its history.
     Status { task_id: String },
+    /// Start your own agent (Claude Code, Codex or Cursor) in this terminal to
+    /// find out why a task went wrong. It reads the task's files and logs and
+    /// says what to do next; it changes nothing until you agree.
+    Triage {
+        /// The task to look into; without it the agent asks.
+        task_id: Option<String>,
+        /// `claude`, `codex` or `cursor`; by default the first one installed.
+        #[arg(long)]
+        agent: Option<AgentKind>,
+    },
     /// Count what happened in a task (or in all tasks) and save it in
     /// .harness/retros/<NNN>/; with --suggest also ask for skill proposals.
     Retro(RetroArgs),

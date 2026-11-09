@@ -34,6 +34,7 @@ mod login;
 mod retro;
 mod secrets;
 mod tasks;
+mod triage;
 mod update;
 
 use std::fs;
@@ -83,6 +84,7 @@ async fn main() -> Result<()> {
         }
         Command::Stop { task_id, now } => stop(project, &task_id, now),
         Command::Status { task_id } => status(project, &task_id),
+        Command::Triage { task_id, agent } => triage::triage(project, task_id.as_deref(), agent),
         Command::Retro(args) => match args.command {
             Some(RetroCommand::Show { number }) => retro_show(project, &number),
             Some(RetroCommand::Apply { number, ids }) => retro_apply(project, &number, &ids),
