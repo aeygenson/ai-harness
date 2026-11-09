@@ -17,7 +17,7 @@ pub(crate) struct TriageJob {
     pub(crate) task: String,
     /// What the plain terminal shows above the agent.
     pub(crate) heading: String,
-    /// The agent with its playbook, in the project folder.
+    /// The agent with its playbook, in the task's folder.
     pub(crate) command: Command,
 }
 
@@ -25,8 +25,8 @@ impl App {
     /// Picks the agent for the selected task; the event loop then gives it
     /// the terminal. Without an installed agent it says so at the bottom.
     pub(crate) fn triage(&mut self) {
-        let task = self.tasks.as_ref().and_then(TasksTab::triage_target);
-        let (Some(root), Some(task)) = (self.project.clone(), task) else {
+        // The agent starts in the task's folder: its own one, or the project folder.
+        let Some((task, root)) = self.tasks.as_ref().and_then(TasksTab::triage_target) else {
             return;
         };
         match triage::pick_agent(None, self.triage_finder) {

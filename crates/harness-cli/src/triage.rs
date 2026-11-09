@@ -7,6 +7,8 @@ use std::path::Path;
 use anyhow::{anyhow, bail, Context, Result};
 use harness_agents::triage;
 use harness_core::config::AgentKind;
+use harness_core::git::Repo;
+use harness_core::task::branch;
 
 use crate::{open_repo, open_task};
 
@@ -17,10 +19,18 @@ pub(crate) fn triage(
     task_id: Option<&str>,
     agent: Option<AgentKind>,
 ) -> Result<()> {
-    let repo = open_repo(project)?;
+    let mut repo = open_repo(project)?;
     if let Some(task_id) = task_id {
         // A wrong id stops here, before an agent starts and searches in vain.
         open_task(&repo, task_id)?;
+        // The agent looks in the task's own folder, where its files are. A
+        // folder that is gone is not made again: triage only reads.
+        let place = branch::task_places(&repo)?
+            .into_iter()
+            .find(|place| place.id == task_id);
+        if let Some(place) = place {
+            repo = Repo::open(&place.root)?;
+        }
     }
     let (agent, program) =
         triage::pick_agent(agent, harness_platform::program::find).map_err(|e| anyhow!(e))?;

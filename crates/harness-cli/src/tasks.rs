@@ -49,8 +49,9 @@ pub(crate) fn new_task(
     );
     if config.github.is_some() {
         println!(
-            "It works on its own branch: {}",
-            branch::task_branch(task_id)
+            "It works on its own branch {} in its own folder: {}",
+            branch::task_branch(task_id),
+            branch::task_folder(&repo, task_id)?.display()
         );
     }
     Ok(())
@@ -84,12 +85,13 @@ pub(crate) async fn run(project: &Path, task_id: &str) -> Result<()> {
     // Held until the run ends: `harness stop` reaches this run through it.
     let mut lock = RunLock::hold(&repo)?;
     lock.set_task(task_id)?;
-    // First the task's branch: its settings and skills are the ones to use.
-    enter_branch(&repo, task_id)?;
+    // The settings and skills are the project folder's; the work is done in
+    // the task's own folder.
     let harness_dir = repo.root().join(HARNESS_DIR);
     let config = Config::load(&harness_dir)?;
     let skills = Skills::load(&harness_dir, &config)?;
     let agent = build_team(&config, repo.root())?;
+    let repo = enter_task(&repo, task_id)?;
     let (store, mut state) = open_task(&repo, task_id)?;
     if orchestrator::continue_stopped(&repo, &store, &mut state)? {
         println!("You stopped {task_id}; it continues now.");
@@ -125,15 +127,19 @@ pub(crate) async fn run(project: &Path, task_id: &str) -> Result<()> {
     Ok(())
 }
 
-/// Checks out the task's branch if it has one, and says so when it switched.
-pub(crate) fn enter_branch(repo: &Repo, task_id: &str) -> Result<()> {
-    if branch::enter(repo, task_id)? {
-        println!(
-            "Switched to the task's branch {}.",
-            branch::task_branch(task_id)
-        );
+/// The repository the task works in (its own folder in a project on GitHub,
+/// see `branch::enter`); says where that is when it is not the project folder.
+pub(crate) fn enter_task(repo: &Repo, task_id: &str) -> Result<Repo> {
+    let task_repo = branch::enter(repo, task_id)?;
+    // Git may spell the same folder differently (`/private/tmp` on macOS).
+    let same = match (task_repo.root().canonicalize(), repo.root().canonicalize()) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => task_repo.root() == repo.root(),
+    };
+    if !same {
+        println!("{task_id} works in {}", task_repo.root().display());
     }
-    Ok(())
+    Ok(task_repo)
 }
 
 /// Whom the role that asked for help suggests for the user's answer (its
@@ -422,37 +428,42 @@ mod tests {
     }
 
     #[test]
-    fn a_decision_lands_on_the_task_branch_after_the_user_switched_away() {
+    fn a_decision_lands_in_the_task_folder_and_the_project_folder_stays() {
         let dir = tempfile::tempdir().unwrap();
-        let project = dir.path();
+        // In a subfolder, so the tasks' folders (`app.tasks`) are inside `dir` too.
+        let project = &dir.path().join("app");
+        fs::create_dir(project).unwrap();
         projects::init(project).unwrap();
         let config = project.join(HARNESS_DIR).join(CONFIG_FILE);
         let text = fs::read_to_string(&config).unwrap();
         fs::write(&config, format!("{text}\n[github]\nrepo = \"lisa/app\"\n")).unwrap();
         let repo = open_repo(project).unwrap();
         repo.commit_all("on GitHub").unwrap();
-        let base = repo.current_branch().unwrap().unwrap();
+        let base = repo.current_branch().unwrap();
+        let base_commit = repo.head().unwrap();
         new_task(project, "task-001", "Add a parser", false).unwrap();
         // The architect is done and the design waits for the user.
+        let task = branch::enter(&repo, "task-001").unwrap();
+        assert_ne!(task.root(), repo.root());
         let (store, mut state) = open_task(&repo, "task-001").unwrap();
         state.stage = Stage::WaitingForHuman(WaitReason::ApproveDesign);
         let json = serde_json::to_string(&state).unwrap();
         fs::write(store.dir().join("state.json"), json).unwrap();
-        repo.commit_all("design ready").unwrap();
-        repo.switch_branch(&base).unwrap();
-        let base_commit = repo.head().unwrap();
+        task.commit_all("design ready").unwrap();
 
         decide(project, "task-001", approve(None, "ok")).unwrap();
 
-        assert_eq!(
-            repo.current_branch().unwrap(),
-            Some(branch::task_branch("task-001"))
-        );
         let (_, state) = open_task(&repo, "task-001").unwrap();
         assert_eq!(state.stage, Stage::Working(Role::Developer));
-        assert_eq!(repo.changed_files().unwrap(), Vec::<String>::new());
-        repo.switch_branch(&base).unwrap();
+        assert_eq!(task.changed_files().unwrap(), Vec::<String>::new());
+        assert_eq!(
+            task.current_branch().unwrap(),
+            Some(branch::task_branch("task-001"))
+        );
+        // The project folder never left its branch and has nothing of the task.
+        assert_eq!(repo.current_branch().unwrap(), base);
         assert_eq!(repo.head().unwrap(), base_commit);
+        assert!(!repo.runs_dir().join("task-001").exists());
     }
 
     /// Saves `next` as where `task-001` stands, with a commit.

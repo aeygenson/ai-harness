@@ -8,6 +8,7 @@
 //! operating system, which not every agent has.
 
 mod files;
+mod settings;
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -70,7 +71,8 @@ pub struct Watched {
 
 impl Watched {
     /// The usual list for `repo`: its git folders, the [`HOME_FILES`] in the
-    /// home folder, and the running program itself.
+    /// home folder, the running program itself, and, when `repo` is a task's
+    /// own folder, the harness settings in the project folder.
     pub fn for_repo(repo: &Repo) -> Result<Self, GitError> {
         let common = repo.git_common_dir()?;
         let restored_folders = GIT_FOLDERS.iter().map(|name| common.join(name)).collect();
@@ -80,6 +82,7 @@ impl Watched {
         if let Ok(program) = std::env::current_exe() {
             reported_files.push(program);
         }
+        reported_files.extend(settings::project_settings(repo)?);
         let ignored_files = GIT_OWN_FILES.iter().map(|name| common.join(name)).collect();
         Ok(Self {
             restored_folders,

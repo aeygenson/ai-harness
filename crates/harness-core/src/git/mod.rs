@@ -12,11 +12,13 @@ mod push;
 mod remote;
 mod restore;
 mod working_tree;
+mod worktree;
 
 pub(crate) use fingerprint::is_harness;
 pub use fingerprint::FileFingerprint;
 pub use local_config::LocalConfig;
 pub use remote::{fetch, head_commit};
+pub use worktree::Worktree;
 
 use std::fs;
 use std::io;

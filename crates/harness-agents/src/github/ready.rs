@@ -77,7 +77,14 @@ pub(super) fn check_ready(
             "pull request #{number} is a draft; mark it ready on GitHub, then merge"
         )));
     }
-    let files = repo.changed_files().map_err(|e| refused(&e))?;
+    // The task's work is in its own folder when it has one; the project
+    // folder may hold the user's own unrelated changes.
+    let folder = repo.worktree_of(branch).map_err(|e| refused(&e))?;
+    let work = match folder {
+        Some(folder) => Repo::open(&folder).map_err(|e| refused(&e))?,
+        None => repo.clone(),
+    };
+    let files = work.changed_files().map_err(|e| refused(&e))?;
     if !files.is_empty() {
         return Err(NotReady::Refused(format!(
             "these files have uncommitted changes, which would not be in the merge: {}. \

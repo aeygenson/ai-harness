@@ -85,7 +85,7 @@ pub(super) fn github_text(outcome: &Outcome, tr: &I18n) -> Option<Message> {
     };
     let number = merged.number.to_string();
     let base = &merged.base;
-    Some(match &merged.folder {
+    let mut message = match &merged.folder {
         Folder::Updated if merged.left_behind => Message::info(tr.f(
             "tasks.merged_left_behind",
             &[
@@ -99,6 +99,19 @@ pub(super) fn github_text(outcome: &Outcome, tr: &I18n) -> Option<Message> {
             "tasks.merged",
             &[("task", task), ("number", &number), ("base", base)],
         )),
+        Folder::BaseMoved(branch) => {
+            // A detached HEAD has no branch name; its commit is not worth showing.
+            let branch = branch.as_deref().unwrap_or("HEAD");
+            Message::info(tr.f(
+                "tasks.merged_base_moved",
+                &[
+                    ("task", task),
+                    ("number", &number),
+                    ("base", base),
+                    ("branch", &branch),
+                ],
+            ))
+        }
         Folder::Uncommitted(files) => Message::error(tr.f(
             "tasks.merged_uncommitted",
             &[
@@ -117,7 +130,15 @@ pub(super) fn github_text(outcome: &Outcome, tr: &I18n) -> Option<Message> {
                 ("error", &error(e)),
             ],
         )),
-    })
+    };
+    // The task's own folder stays when git would not remove it.
+    if let Some(reason) = &merged.task_folder_kept {
+        message.text.push(' ');
+        message
+            .text
+            .push_str(&tr.f("tasks.task_folder_kept", &[("error", &error(reason))]));
+    }
+    Some(message)
 }
 
 #[cfg(test)]
@@ -136,6 +157,7 @@ mod tests {
                 base: "main".into(),
                 folder,
                 left_behind: false,
+                task_folder_kept: None,
             })),
         }
     }
@@ -160,6 +182,28 @@ mod tests {
             later.text.contains("stay on harness/task-001"),
             "{}",
             later.text
+        );
+
+        let mut kept_folder = merged(Folder::Updated);
+        if let Some(Ok(m)) = kept_folder.merged.as_mut() {
+            m.task_folder_kept = Some("it has uncommitted changes".into());
+        }
+        let kept_folder = github_text(&kept_folder, &tr).unwrap();
+        assert!(
+            kept_folder
+                .text
+                .contains("The task's own folder stays: it has uncommitted changes"),
+            "{}",
+            kept_folder.text
+        );
+
+        let own = github_text(&merged(Folder::BaseMoved(Some("lisa/ideas".into()))), &tr);
+        let own = own.unwrap();
+        assert!(
+            own.text
+                .contains("main here now has the merged work. Your folder stays on lisa/ideas"),
+            "{}",
+            own.text
         );
 
         let files = format!("evil\u{1b}[2J{}", "x".repeat(400));

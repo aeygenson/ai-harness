@@ -60,7 +60,6 @@ decision never lands on a task that has moved on.";
 pub struct Server {
     root: PathBuf,
     harness_dir: PathBuf,
-    runs: PathBuf,
     /// The `harness` program `start_run` starts: this program itself.
     harness: PathBuf,
     poll: Duration,
@@ -72,7 +71,6 @@ impl Server {
         let harness_dir = root.join(HARNESS_DIR);
         Self {
             root: root.to_path_buf(),
-            runs: harness_dir.join("runs"),
             harness_dir,
             // Without its own path (very rare) `harness` is looked up in PATH.
             harness: std::env::current_exe().unwrap_or_else(|_| PathBuf::from("harness")),
@@ -128,7 +126,6 @@ impl Server {
             root: &self.root,
             harness: &self.harness,
             harness_dir: &self.harness_dir,
-            runs: &self.runs,
         };
         match tools::call(&folders, self.poll, name, arguments) {
             Ok(text) => Ok(tool_result(&text, false)),

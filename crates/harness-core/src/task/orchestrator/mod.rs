@@ -422,7 +422,7 @@ mod tests {
             .unwrap();
         }
         assert_eq!(
-            same_task(&runs, "Fix the demo: two defects.").unwrap(),
+            same_task(&repo, "Fix the demo: two defects.").unwrap(),
             None
         );
         create_task(

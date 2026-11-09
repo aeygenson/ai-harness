@@ -32,8 +32,10 @@ use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 
+use crate::git::Repo;
+use crate::task::branch::{self, BranchError};
 use crate::task::handoff::{Handoff, Role, Severity};
-use crate::task::store::{self, StoreError, TaskStore};
+use crate::task::store::{StoreError, TaskStore};
 use crate::task::{Stage, TaskState, WaitReason};
 use usage::Usage;
 
@@ -95,12 +97,23 @@ impl TaskHistory {
         })
     }
 
-    /// Every task in `runs_dir`, sorted by id.
-    pub fn load_all(runs_dir: &Path) -> Result<Vec<Self>, StoreError> {
-        store::task_ids(runs_dir)?
-            .iter()
-            .map(|id| Self::load(runs_dir, id))
-            .collect()
+    /// Every task of the project in `repo`, in its folder and in the tasks'
+    /// own folders (see [`branch::task_places`]), sorted by id.
+    pub fn load_all(repo: &Repo) -> Result<Vec<Self>, BranchError> {
+        let mut tasks = Vec::new();
+        for place in branch::task_places(repo)? {
+            tasks.push(Self::load(&place.runs_dir(), &place.id)?);
+        }
+        Ok(tasks)
+    }
+
+    /// One task of the project in `repo`, from wherever it lives.
+    pub fn load_one(repo: &Repo, task_id: &str) -> Result<Self, BranchError> {
+        let place = branch::task_places(repo)?
+            .into_iter()
+            .find(|place| place.id == task_id);
+        let runs = place.map_or_else(|| repo.runs_dir(), |place| place.runs_dir());
+        Ok(Self::load(&runs, task_id)?)
     }
 }
 
@@ -621,7 +634,7 @@ mod tests {
         fs::write(step.join("agent.log"), claude_result).unwrap();
         store.save_failure_log(1, Role::Architect, "boom").unwrap();
 
-        let tasks = TaskHistory::load_all(&runs).unwrap();
+        let tasks = vec![TaskHistory::load(&runs, "task-001").unwrap()];
         assert_eq!(tasks.len(), 1);
         assert_eq!(tasks[0].handoffs, [design]);
         assert_eq!(tasks[0].failures, [(1, Role::Architect)]);

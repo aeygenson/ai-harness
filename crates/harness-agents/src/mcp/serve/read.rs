@@ -4,13 +4,15 @@
 //! `text::safe` before it leaves (handoffs are already cleaned when they are read).
 
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::thread;
 use std::time::{Duration, Instant};
 
 use harness_core::config::{Config, CONFIG_FILE};
+use harness_core::git::Repo;
 use harness_core::retro::{stage_text, Scope, Stats, TaskHistory};
-use harness_core::task::store::{self, Step, TaskStore};
+use harness_core::task::branch;
+use harness_core::task::store::{Step, TaskStore};
 use harness_core::task::TaskState;
 use harness_core::text::{safe, safe_line};
 use serde_json::{json, Value};
@@ -25,13 +27,26 @@ const TITLE_CHARS: usize = 120;
 /// An error message from the store is cut to this many characters.
 const ERROR_CHARS: usize = 300;
 
-/// Every task of the project with its stage and round; a task that cannot be
-/// read is listed with the reason.
-pub(super) fn list_tasks(runs: &Path) -> Result<Value, String> {
-    let ids = store::task_ids(runs).map_err(|e| e.to_string())?;
-    let tasks: Vec<Value> = ids
+/// The folder of the task folders that holds `task`: in the task's own
+/// folder (see `branch::task_places`) or in the project's `.harness/runs`.
+pub(super) fn task_runs(root: &Path, task: &str) -> Result<PathBuf, String> {
+    let repo = Repo::open(root).map_err(|e| e.to_string())?;
+    let places = branch::task_places(&repo).map_err(|e| e.to_string())?;
+    Ok(places
+        .into_iter()
+        .find(|place| place.id == task)
+        .map_or_else(|| repo.runs_dir(), |place| place.runs_dir()))
+}
+
+/// Every task of the project in `root` with its stage and round; a task that
+/// cannot be read is listed with the reason.
+pub(super) fn list_tasks(root: &Path) -> Result<Value, String> {
+    let repo = Repo::open(root).map_err(|e| e.to_string())?;
+    let places = branch::task_places(&repo).map_err(|e| e.to_string())?;
+    let tasks: Vec<Value> = places
         .iter()
-        .map(|id| match TaskStore::open(runs, id) {
+        .map(|place| (place.id.as_str(), place.runs_dir()))
+        .map(|(id, runs)| match TaskStore::open(&runs, id) {
             Ok((store, state)) => {
                 let mut row = state_json(&state);
                 let description = store.description().unwrap_or_default();
@@ -93,18 +108,19 @@ pub(super) fn read_step(runs: &Path, task: &str, number: usize) -> Result<Value,
 /// The retrospective statistics of one task, or of all of them, as Markdown.
 /// Counted from the saved history only: no file is written and no agent runs.
 pub(super) fn retro_stats(
+    root: &Path,
     harness_dir: &Path,
-    runs: &Path,
     task: Option<&str>,
 ) -> Result<String, String> {
+    let repo = Repo::open(root).map_err(|e| e.to_string())?;
     let (scope, histories) = match task {
         Some(id) => {
-            let history = TaskHistory::load(runs, id).map_err(|e| e.to_string())?;
+            let history = TaskHistory::load_one(&repo, id).map_err(|e| e.to_string())?;
             (Scope::Task(id.to_string()), vec![history])
         }
         None => (
             Scope::All,
-            TaskHistory::load_all(runs).map_err(|e| e.to_string())?,
+            TaskHistory::load_all(&repo).map_err(|e| e.to_string())?,
         ),
     };
     // Without a readable harness.toml the skills are just not compared, as in `harness retro`.

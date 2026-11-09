@@ -48,6 +48,7 @@ use harness_agents::launcher;
 use harness_core::config::projects;
 use harness_core::config::CONFIG_FILE;
 use harness_core::git::{Repo, HARNESS_DIR};
+use harness_core::task::branch;
 use harness_core::task::handoff::Verdict;
 use harness_core::task::store::TaskStore;
 use harness_core::task::TaskState;
@@ -227,10 +228,14 @@ pub(crate) fn open_repo(project: &Path) -> Result<Repo> {
     Repo::open(project).context("the project must be a git repository (run `git init`)")
 }
 
-/// Opens the task folder `runs/<task_id>` and reads where the task stands.
+/// Opens the task folder `runs/<task_id>`, in the project folder or in the
+/// task's own folder (see `branch::task_places`), and reads where the task stands.
 pub(crate) fn open_task(repo: &Repo, task_id: &str) -> Result<(TaskStore, TaskState)> {
-    TaskStore::open(&repo.runs_dir(), task_id)
-        .with_context(|| format!("cannot open task {task_id}"))
+    let place = branch::task_places(repo)?
+        .into_iter()
+        .find(|place| place.id == task_id);
+    let runs = place.map_or_else(|| repo.runs_dir(), |place| place.runs_dir());
+    TaskStore::open(&runs, task_id).with_context(|| format!("cannot open task {task_id}"))
 }
 
 /// `harness init`: creates the git repository and `.harness/harness.toml` if

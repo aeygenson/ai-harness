@@ -228,8 +228,6 @@ mod tests {
         store: TaskStore,
         state: TaskState,
         github: GitHub,
-        /// The branch the project started on.
-        base: String,
     }
 
     fn setup() -> Setup {
@@ -239,7 +237,6 @@ mod tests {
         let repo = Repo::init(&project).unwrap();
         fs::write(project.join("README.md"), "hello\n").unwrap();
         repo.commit_all("first").unwrap();
-        let base = repo.current_branch().unwrap().unwrap();
         let config = Config::parse(ON_GITHUB).unwrap();
         let (store, mut state) = harness_core::task::orchestrator::create_project_task(
             &repo,
@@ -249,6 +246,8 @@ mod tests {
             harness_core::task::orchestrator::SameText::Refuse,
         )
         .unwrap();
+        // The task works in its own folder.
+        let repo = harness_core::task::branch::enter(&repo, "task-001").unwrap();
         state.stage = Stage::Done;
         fs::write(
             store.dir().join("state.json"),
@@ -274,7 +273,6 @@ mod tests {
             store,
             state,
             github,
-            base,
         }
     }
 
@@ -411,7 +409,9 @@ mod tests {
         assert!(error.contains("not done yet"), "{error}");
 
         s.state.stage = Stage::Done;
-        s.repo.switch_branch(&s.base).unwrap();
+        // The base branch is checked out in the project folder, so the task's
+        // folder goes to another branch.
+        s.repo.create_branch("elsewhere").unwrap();
         let error = publish_with(&s.repo, &s.store, &mut s.state, &s.github, &[]).unwrap_err();
         assert!(
             error.contains("is not on its branch harness/task-001"),

@@ -30,13 +30,14 @@ use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 
 use harness_core::config::{AgentKind, Config, RoleConfig};
-use harness_core::git::HARNESS_DIR;
+use harness_core::git::{Repo, HARNESS_DIR};
 use harness_core::models::{self, ModelList};
 use harness_core::retro::usage::Usage;
+use harness_core::task::branch;
 use harness_core::task::handoff::Role;
 use harness_core::task::run_lock;
 use harness_core::task::scenario::Scenario;
-use harness_core::task::store::{self, Step};
+use harness_core::task::store::Step;
 use harness_core::task::{Stage, TaskState};
 
 use super::choice::{Choice, Menu};
@@ -50,6 +51,9 @@ use crate::tabs::tasks::runner::{RunChoice, Running};
 #[derive(Debug, Clone)]
 pub(super) struct TaskView {
     pub(super) id: String,
+    /// The working folder the task lives in: the project folder, or the
+    /// task's own folder (see `branch::task_places`).
+    pub(super) root: PathBuf,
     pub(super) state: TaskState,
     pub(super) description: String,
     pub(super) steps: Vec<Step>,
@@ -203,20 +207,22 @@ impl TasksTab {
     pub fn reload(&mut self) {
         let selected = self.tasks.get(self.task).map(|t| t.id.clone());
         let harness_dir = self.root.join(HARNESS_DIR);
-        let runs = harness_dir.join("runs");
         let mut problems = Vec::new();
 
         self.all.clear();
-        match store::task_ids(&runs) {
-            Ok(ids) => {
-                for id in ids {
-                    match load_task(&runs, &id) {
+        let places = Repo::open(&self.root)
+            .map_err(|e| e.to_string())
+            .and_then(|repo| branch::task_places(&repo).map_err(|e| e.to_string()));
+        match places {
+            Ok(places) => {
+                for place in places {
+                    match load_task(&place.root, &place.id) {
                         Ok(task) => self.all.push(task),
-                        Err(error) => problems.push(format!("{id}: {error}")),
+                        Err(error) => problems.push(format!("{}: {error}", place.id)),
                     }
                 }
             }
-            Err(error) => problems.push(error.to_string()),
+            Err(error) => problems.push(error),
         }
 
         self.roles.clear();
@@ -314,6 +320,12 @@ impl TasksTab {
 
     pub(super) fn current(&self) -> Option<&TaskView> {
         self.tasks.get(self.task)
+    }
+
+    /// The working folder of the selected task (the project folder when none is).
+    pub(super) fn task_root(&self) -> PathBuf {
+        self.current()
+            .map_or_else(|| self.root.clone(), |task| task.root.clone())
     }
 
     pub(super) fn last_step(&self) -> usize {

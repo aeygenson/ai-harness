@@ -208,6 +208,32 @@ mod tests {
     }
 
     #[test]
+    fn a_task_in_its_own_folder_is_stopped_when_the_project_settings_change() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("app");
+        fs::create_dir_all(root.join(".harness")).unwrap();
+        fs::write(root.join(".harness/harness.toml"), "max_rounds = 5\n").unwrap();
+        let repo = Repo::init(&root).unwrap();
+        repo.commit_all("first").unwrap();
+        let folder = dir.path().join("app.tasks/task-001");
+        repo.add_worktree_with_branch(&folder, "harness/task-001")
+            .unwrap();
+        let task = Repo::open(&folder).unwrap();
+        let watched = Watched::for_repo(&task).unwrap();
+        let before = Before::take(&task, &watched).unwrap();
+        // The agent works in the task's folder, but writes the project's settings.
+        let settings = root.join(".harness/harness.toml");
+        fs::write(&settings, "[roles.developer]\nmcp = [\"evil\"]\n").unwrap();
+
+        let stop = before.check(&task, &watched, Role::Developer).unwrap();
+
+        let Some(StopReason::HiddenChanges { reported, .. }) = stop else {
+            panic!("{stop:?}");
+        };
+        assert_eq!(reported, [settings]);
+    }
+
+    #[test]
     fn a_broken_project_inside_another_repository_is_not_a_commit() {
         let outer = tempfile::tempdir().unwrap();
         let outer_repo = Repo::init(outer.path()).unwrap();

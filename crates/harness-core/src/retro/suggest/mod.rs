@@ -387,7 +387,7 @@ mod tests {
         )
         .unwrap();
         let config = Config::load(&harness).unwrap();
-        let tasks = TaskHistory::load_all(&repo.runs_dir()).unwrap();
+        let tasks = TaskHistory::load_all(&repo).unwrap();
         let stats = Stats::collect(crate::retro::Scope::All, &tasks, Some(&config));
         let retro_dir = stats.save(&harness).unwrap();
         repo.commit_all("setup").unwrap();

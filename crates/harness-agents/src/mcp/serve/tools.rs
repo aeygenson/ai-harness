@@ -51,8 +51,6 @@ pub(super) struct Folders<'a> {
     pub(super) harness: &'a Path,
     /// The project's `.harness` folder (with `harness.toml`).
     pub(super) harness_dir: &'a Path,
-    /// The task folders, `.harness/runs`.
-    pub(super) runs: &'a Path,
 }
 
 /// The tool list for `tools/list`.
@@ -190,19 +188,25 @@ pub(super) fn call(
     name: &str,
     arguments: &Value,
 ) -> Result<String, CallError> {
-    let runs = folders.runs;
+    // Each task is read where it lives: the project folder or its own folder.
+    let runs_of = |task: &str| read::task_runs(folders.root, task).map_err(CallError::Failed);
     let value = match name {
-        "list_tasks" => read::list_tasks(runs),
-        "task_status" => read::task_status(runs, text_argument(arguments, "task")?),
+        "list_tasks" => read::list_tasks(folders.root),
+        "task_status" => {
+            let task = text_argument(arguments, "task")?;
+            read::task_status(&runs_of(task)?, task)
+        }
         "read_step" => {
             let step = number_argument(arguments, "step")?.unwrap_or(0);
             let step = usize::try_from(step)
                 .map_err(|_too_big| CallError::BadArguments(format!("step {step} is too big")))?;
-            read::read_step(runs, text_argument(arguments, "task")?, step)
+            let task = text_argument(arguments, "task")?;
+            read::read_step(&runs_of(task)?, task, step)
         }
         "retro_stats" => {
             let task = optional_text_argument(arguments, "task")?;
-            return read::retro_stats(folders.harness_dir, runs, task).map_err(CallError::Failed);
+            return read::retro_stats(folders.root, folders.harness_dir, task)
+                .map_err(CallError::Failed);
         }
         "read_settings" => {
             return read::read_settings(folders.harness_dir).map_err(CallError::Failed);
@@ -249,7 +253,7 @@ pub(super) fn call(
                 .unwrap_or(DEFAULT_WAIT_SECONDS)
                 .clamp(1, MAX_WAIT_SECONDS);
             let task = text_argument(arguments, "task")?;
-            read::wait_for_change(runs, task, Duration::from_secs(seconds), poll)
+            read::wait_for_change(&runs_of(task)?, task, Duration::from_secs(seconds), poll)
         }
         _ => return Err(CallError::UnknownTool(name.to_string())),
     };
