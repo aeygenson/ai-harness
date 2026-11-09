@@ -32,6 +32,53 @@ fn the_mouse_moves_through_tasks_and_steps() {
     assert!(app.quit);
 }
 
+#[test]
+fn triage_gives_the_terminal_to_the_users_own_agent_for_the_selected_task() {
+    let env = Env::new();
+    let root = env.path("test");
+    project(&root);
+    let mut app = env.app(&root);
+    app.triage_finder = |name| (name == "codex").then(|| PathBuf::from("/fake/codex"));
+    assert!(screen(&mut app).contains(" Triage (t) "));
+
+    click(&mut app, " Triage (t) ");
+
+    let job = app.triage.take().unwrap();
+    assert_eq!(job.task, "task-001");
+    assert!(
+        job.heading.starts_with("codex looks into task-001"),
+        "{}",
+        job.heading
+    );
+    assert_eq!(job.command.get_program(), "/fake/codex");
+    let playbook = job
+        .command
+        .get_args()
+        .next()
+        .unwrap()
+        .to_string_lossy()
+        .into_owned();
+    assert!(playbook.contains("task: task-001"), "{playbook}");
+
+    // The key does the same; without an agent the message says what to install.
+    app.triage_finder = |_| None;
+    key(&mut app, KeyCode::Char('t'));
+    assert!(app.triage.is_none());
+    assert!(app
+        .message
+        .as_ref()
+        .unwrap()
+        .text
+        .starts_with("Triage needs Claude Code"));
+
+    app.finish_triage("task-001", Err("exit status: 1".into()));
+    let (message, problem) = shown(&app);
+    assert!(
+        problem && message.contains("did not work: exit status: 1"),
+        "{message}"
+    );
+}
+
 fn no_login(
     _: &harness_core::config::Config,
     _: &Path,
@@ -115,7 +162,10 @@ fn a_new_task_runs_the_architect_then_the_answer_goes_to_the_developer() {
 
     key(&mut app, KeyCode::Enter);
     type_text(&mut app, "Use serde");
+    assert!(screen(&mut app).contains(" Triage (t) "));
     send(&mut app);
+    // While roles work, triage would read files they are still writing.
+    assert!(!screen(&mut app).contains("Triage (t)"));
     wait(&mut app);
     assert_eq!(stage(&app), Stage::Done);
     let steps = TaskStore::open(&root.join(".harness/runs"), "task-001")

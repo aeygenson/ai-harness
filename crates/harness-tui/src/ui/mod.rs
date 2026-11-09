@@ -113,6 +113,8 @@ pub enum ButtonId {
     StopAfterStep,
     /// «Stop now» on the Tasks tab while roles work, after a confirmation.
     StopNow,
+    /// «Triage» on the Tasks tab: the user's own agent looks into the task.
+    Triage,
     /// A button of the Skills tab.
     Skill(crate::tabs::skills::SkillButton),
     /// A link in «Files» of the step on the Tasks tab.

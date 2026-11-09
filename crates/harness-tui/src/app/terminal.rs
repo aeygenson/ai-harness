@@ -131,6 +131,10 @@ pub(crate) fn event_loop(
             let result = install_outside(terminal, name, &command, &app.tr);
             app.finish_tool_install(name, result);
         }
+        if let Some(job) = app.triage.take() {
+            let result = run_outside(terminal, &job.heading, vec![job.command], &app.tr);
+            app.finish_triage(&job.task, result);
+        }
         if let Some((name, path)) = app.tool_sign_in.take() {
             let heading = app.tr.f("agents.signing_in", &[("name", &name)]);
             let commands = harness_agents::github::sign_in_commands(&path);
