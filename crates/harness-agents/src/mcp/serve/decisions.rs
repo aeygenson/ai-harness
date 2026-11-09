@@ -123,6 +123,7 @@ fn record(opened: Opened, ask: Decide<'_>) -> Result<String, String> {
         verdict,
         next: NextStep::To(role),
         notes: &notes,
+        restore_to: None,
     };
     orchestrator::record_human_decision(&repo, &store, &mut state, decision)
         .map_err(|e| e.to_string())?;
@@ -168,6 +169,7 @@ pub(super) fn finish_task(
             verdict: Verdict::Approved,
             next: NextStep::Done,
             notes: &notes,
+            restore_to: None,
         };
         orchestrator::record_human_decision(&repo, &store, &mut state, decision)
             .map_err(|e| e.to_string())?;

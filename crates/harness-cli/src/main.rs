@@ -28,6 +28,7 @@
 
 mod catalogs;
 mod cli;
+mod decide;
 mod doctor;
 mod info;
 mod login;
@@ -56,11 +57,12 @@ use crate::cli::{
     Cli, Command, MarketplaceCommand, McpCommand, PluginCommand, RetroCommand, SecretCommand,
     TaskCommand,
 };
+use crate::decide::{decide, Decision};
 use crate::info::{agents, models};
 use crate::login::login;
 use crate::retro::{retro, retro_apply, retro_show};
 use crate::secrets::{list_secrets, mcp_login, set_secret};
-use crate::tasks::{decide, new_task, run, status, stop, until_stopped};
+use crate::tasks::{new_task, run, status, stop, until_stopped};
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
@@ -77,10 +79,27 @@ async fn main() -> Result<()> {
         Command::Task { command } => task(project, command),
         Command::Run { task_id } => until_stopped(run(project, &task_id)).await,
         Command::Approve { task_id, to, notes } => {
-            decide(project, &task_id, Verdict::Approved, to, &notes)
+            let decision = Decision {
+                verdict: Verdict::Approved,
+                to,
+                notes: &notes,
+                restore: None,
+            };
+            decide(project, &task_id, decision)
         }
-        Command::Reject { task_id, to, notes } => {
-            decide(project, &task_id, Verdict::Rejected, Some(to), &notes)
+        Command::Reject {
+            task_id,
+            to,
+            notes,
+            restore,
+        } => {
+            let decision = Decision {
+                verdict: Verdict::Rejected,
+                to: Some(to),
+                notes: &notes,
+                restore: restore.as_deref(),
+            };
+            decide(project, &task_id, decision)
         }
         Command::Stop { task_id, now } => stop(project, &task_id, now),
         Command::Status { task_id } => status(project, &task_id),

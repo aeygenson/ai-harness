@@ -230,6 +230,7 @@ async fn stop_now_keeps_the_unfinished_work_and_waits_for_the_user() {
             verdict: Verdict::Approved,
             next: NextStep::To(Role::Developer),
             notes: "Keep the old API",
+            restore_to: None,
         },
     )
     .unwrap();
@@ -278,6 +279,7 @@ async fn a_note_to_another_role_stops_on_the_stopped_roles_changes() {
             verdict: Verdict::Approved,
             next: NextStep::To(Role::Architect),
             notes: "Change the design first",
+            restore_to: None,
         },
     )
     .unwrap();
@@ -348,6 +350,7 @@ async fn a_stopped_task_with_unfinished_work_is_not_finished() {
             verdict: Verdict::Approved,
             next: NextStep::Done,
             notes: "Good enough",
+            restore_to: None,
         },
     )
     .unwrap_err();
@@ -370,6 +373,7 @@ async fn a_stopped_task_with_unfinished_work_is_not_finished() {
             verdict: Verdict::Approved,
             next: NextStep::Done,
             notes: "Good enough",
+            restore_to: None,
         },
     )
     .unwrap();

@@ -31,6 +31,7 @@ mod job;
 mod manual;
 mod patch;
 mod protect;
+mod restore;
 mod size;
 mod stop;
 

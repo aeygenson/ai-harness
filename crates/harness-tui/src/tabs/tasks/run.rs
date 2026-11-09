@@ -36,6 +36,11 @@ impl TasksTab {
         }
         let notes = self.input.trim().to_string();
         let task = self.current().map(|t| (t.id.clone(), t.state.stage));
+        // A marked step (↶) only goes with a message to a role.
+        let restore_to = self.restore_for_send();
+        if restore_to.is_some() && !matches!(self.choice, Choice::Role(_)) {
+            return Err(tr.t("tasks.restore_needs_role").to_string());
+        }
         let request = match (self.choice, task) {
             (Choice::NewTask, _) if notes.is_empty() => {
                 return Err(tr.t("tasks.need_text").to_string())
@@ -52,11 +57,15 @@ impl TasksTab {
             (Choice::Role(role), Some((task, stage))) => {
                 // Sending the design back to the architect rejects it, and so
                 // does sending a result the user did not accept to any role.
-                let rejected = match stage {
-                    Stage::WaitingForHuman(WaitReason::ApproveDesign) => role == Role::Architect,
-                    Stage::WaitingForHuman(WaitReason::AcceptResult) => true,
-                    _ => false,
-                };
+                // So does throwing later code away by restoring a step.
+                let rejected = restore_to.is_some()
+                    || match stage {
+                        Stage::WaitingForHuman(WaitReason::ApproveDesign) => {
+                            role == Role::Architect
+                        }
+                        Stage::WaitingForHuman(WaitReason::AcceptResult) => true,
+                        _ => false,
+                    };
                 Request::Decide {
                     task,
                     seen: stage,
@@ -68,6 +77,7 @@ impl TasksTab {
                     next: NextStep::To(role),
                     notes,
                     extra_rounds: 0,
+                    restore_to: restore_to.clone(),
                 }
             }
             (Choice::MoreRounds(role), Some((task, stage))) => Request::Decide {
@@ -77,6 +87,7 @@ impl TasksTab {
                 next: NextStep::To(role),
                 notes,
                 extra_rounds: MORE_ROUNDS,
+                restore_to: None,
             },
             (Choice::Finish, Some((task, stage))) => Request::Decide {
                 task,
@@ -85,12 +96,21 @@ impl TasksTab {
                 next: NextStep::Done,
                 notes,
                 extra_rounds: 0,
+                restore_to: None,
             },
             (Choice::Continue(_), Some((task, _))) => Request::Continue(task),
             (Choice::Publish, Some((task, _))) => Request::Publish(task),
             (Choice::Merge, Some((task, _))) => Request::Merge(task),
         };
         self.log.clear();
+        if let Some(dir) = &restore_to {
+            let step = super::restore::step_label(dir);
+            self.log.push(format!(
+                "── {}",
+                tr.f("tasks.restore_log", &[("step", &step)])
+            ));
+        }
+        self.restore_to = None;
         if let (Some(role), Some((agent, model, effort))) = (self.target(), self.run_choice()) {
             let default = tr.t("tasks.default");
             let line = tr.f(

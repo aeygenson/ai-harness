@@ -30,6 +30,65 @@ impl Repo {
         Ok(())
     }
 
+    /// Makes every file outside `.harness/` as it is in `commit`, in the
+    /// folder and staged: changed files get their old text, files added since
+    /// are removed, removed files come back. `.harness/` (the tasks' history,
+    /// settings and skills) stays as it is. Needs git 2.23 (`git restore`).
+    ///
+    /// The paths are relative to the project folder (`.`), not to the top of
+    /// the git repository, so nothing outside the project is touched. If git
+    /// stops part-way (a file held open on Windows, for example), the files
+    /// are put back as in the last commit before the error is returned.
+    pub fn restore_project_from(&self, commit: &str) -> Result<(), GitError> {
+        if let Err(error) = self.restore_outside_harness(commit) {
+            // Best effort: the error the user needs to see is the first one.
+            let _ = self.restore_outside_harness("HEAD");
+            return Err(error);
+        }
+        Ok(())
+    }
+
+    /// `git restore` of everything outside `.harness/` from `source`.
+    fn restore_outside_harness(&self, source: &str) -> Result<(), GitError> {
+        let source = format!("--source={source}");
+        // `.` is the project folder, `:(exclude).harness` leaves out
+        // `.harness/`: git's own path patterns, so not `git_literal`.
+        self.git(&[
+            "restore",
+            &source,
+            "--staged",
+            "--worktree",
+            "--",
+            ".",
+            ":(exclude).harness",
+        ])?;
+        Ok(())
+    }
+
+    /// The ignored files in the folder that `commit` has in git, outside
+    /// `.harness/`: restoring that commit would write over them, and git
+    /// does not warn about ignored files (a `.env`, local settings).
+    pub fn ignored_in_the_way(&self, commit: &str) -> Result<Vec<String>, GitError> {
+        let ignored = self.git(&[
+            "ls-files",
+            "--others",
+            "--ignored",
+            "--exclude-standard",
+            "-z",
+            "--",
+            ".",
+        ])?;
+        let tracked = self.git(&["ls-tree", "-r", "--name-only", "-z", commit, "--", "."])?;
+        // A set, so the check is not a scan of one list per file of the other.
+        let tracked: std::collections::HashSet<&str> = tracked.split('\0').collect();
+        Ok(ignored
+            .split('\0')
+            .filter(|path| !path.is_empty() && !path.starts_with(".harness/"))
+            .filter(|path| tracked.contains(path))
+            .map(String::from)
+            .collect())
+    }
+
     /// What changed in each of `paths` since the last commit, as text for
     /// the user: the `git diff` of a known file, or the start of a new one.
     pub fn describe_changes(&self, paths: &[String]) -> Result<String, GitError> {
