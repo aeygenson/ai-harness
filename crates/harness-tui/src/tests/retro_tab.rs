@@ -179,6 +179,8 @@ fn a_retrospective_is_generated_edited_and_its_proposals_applied() {
         app.message.as_ref().unwrap().text,
         "Retrospective 001 is ready"
     );
+    // The bell and the system notification say the same.
+    assert_eq!(app.notice.as_deref(), Some("Retrospective 001 is ready"));
     assert_eq!(repo.changed_files().unwrap(), Vec::<String>::new());
     let text = screen(&mut app);
     assert!(text.contains("001  "), "{text}");

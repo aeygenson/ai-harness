@@ -176,6 +176,7 @@ impl App {
         let mut branch_changed = false;
         if let Some(tasks) = &mut self.tasks {
             if let Some(message) = tasks.tick(&self.tr) {
+                self.notice = Some(message.text.clone());
                 self.message = Some(message);
             }
             branch_changed = std::mem::take(&mut tasks.branch_changed);
@@ -186,6 +187,7 @@ impl App {
         }
         if let Some(retro) = &mut self.retro {
             if let Some(message) = retro.tick(&self.tr) {
+                self.notice = Some(message.text.clone());
                 self.message = Some(message);
                 // A failed attempt is committed too; the agent may have used skills.
                 self.reload_skills(None);

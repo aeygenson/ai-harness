@@ -10,8 +10,10 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use anyhow::{bail, Result};
+use harness_core::text::safe_line;
 use harness_platform::editor;
 use harness_platform::input::{self, Input};
+use harness_platform::notify;
 use harness_platform::stop::StopSignals;
 use ratatui::crossterm::cursor::Hide;
 use ratatui::crossterm::event::{
@@ -32,6 +34,10 @@ const RELOAD_EVERY: Duration = Duration::from_secs(3);
 /// How long one turn of the loop waits for a key before it ticks (the
 /// spinner, a finished agent): short enough that the screen looks alive.
 const WAIT_FOR_INPUT: Duration = Duration::from_millis(250);
+
+/// The longest text of a system notification: the first words are enough to
+/// see which task stopped and why; the whole message is at the bottom.
+const NOTICE_CHARS: usize = 200;
 
 /// Stops with a clear error when the terminal has no size (0x0).
 ///
@@ -109,6 +115,9 @@ pub(crate) fn event_loop(
             }
         }
         app.tick();
+        if let Some(text) = app.notice.take() {
+            notify_work_ended(&text);
+        }
         app.open_task_file();
         if let Some(job) = app.edit.take() {
             let result = edit_outside(terminal, &job.path, &app.tr);
@@ -141,6 +150,15 @@ pub(crate) fn event_loop(
         }
     }
     Ok(())
+}
+
+/// Rings the bell and shows a system notification: agent work ended, and the
+/// user may be looking at another window. No notification program
+/// (Windows, Linux without `notify-send`) is fine: the bell still rings.
+fn notify_work_ended(text: &str) {
+    notify::bell();
+    // The text may hold what an agent wrote: no control characters.
+    let _ = notify::desktop("Harness", &safe_line(text, NOTICE_CHARS));
 }
 
 /// Hands one key, click or paste to the app.

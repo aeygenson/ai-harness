@@ -90,7 +90,11 @@ fn a_new_task_runs_the_architect_then_the_answer_goes_to_the_developer() {
     send(&mut app);
     assert!(app.tasks.as_ref().unwrap().is_running());
     assert!(screen(&mut app).contains(" Working… "));
+    assert_eq!(app.notice, None);
     wait(&mut app);
+    // The run has stopped for the user: the bell and the system notification
+    // tell them, with the message shown at the bottom.
+    assert!(app.notice.as_ref().unwrap().contains("the design is ready"));
 
     let store_dir = root.join(".harness/runs/task-001");
     assert_eq!(
