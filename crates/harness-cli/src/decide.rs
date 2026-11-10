@@ -10,7 +10,7 @@ use harness_core::task::run_lock::RunLock;
 use harness_core::task::store::TaskStore;
 use harness_core::task::{Stage, WaitReason};
 
-use crate::tasks::enter_branch;
+use crate::tasks::enter_task;
 use crate::{open_repo, open_task};
 
 /// The user's decision as `harness approve` and `harness reject` take it.
@@ -41,8 +41,8 @@ pub(crate) fn decide(project: &Path, task_id: &str, decision: Decision<'_>) -> R
     let repo = open_repo(project)?;
     let mut lock = RunLock::hold(&repo)?;
     lock.set_task(task_id)?;
-    // The user's decision is a commit too: it goes on the task's branch.
-    enter_branch(&repo, task_id)?;
+    // The user's decision is a commit too: it goes on the task's branch, in its folder.
+    let repo = enter_task(&repo, task_id)?;
     let (store, mut state) = open_task(&repo, task_id)?;
     // Rejecting starts a new round, and recorded unfinished work belongs to
     // this one: it could not be continued any more.

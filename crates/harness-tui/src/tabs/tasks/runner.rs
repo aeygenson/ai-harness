@@ -265,20 +265,10 @@ fn work(job: Job, events: &Sender<Event>, stop: oneshot::Receiver<()>) -> Result
     if let Some(task) = task_of(&request) {
         lock.set_task(task).map_err(|e| e.to_string())?;
     }
-    // An existing task's branch first: its settings are the ones to use, and
-    // the user's decision and the roles' work are committed there. A merge stays
-    // where the user is: it changes the folder only once everything is checked,
-    // and then it moves to the main branch.
-    if let Request::Decide { task, .. } | Request::Continue(task) | Request::Publish(task) =
-        &request
-    {
-        if branch::enter(&repo, task).map_err(|e| e.to_string())? {
-            let _ = events.send(Event::SwitchedBranch);
-        }
-    }
-    let harness_dir = root.join(HARNESS_DIR);
-    let config = load_config(&harness_dir, choice)?;
     let merging = matches!(request, Request::Merge(_));
+    let harness_dir = root.join(HARNESS_DIR);
+    // The settings are the project folder's: the ones the user sees and changes here.
+    let config = load_config(&harness_dir, choice)?;
     // Everything the agents need is checked before anything is saved: a
     // missing login leaves the task as it was.
     let agents = if runs_roles(&request) {
@@ -289,13 +279,27 @@ fn work(job: Job, events: &Sender<Event>, stop: oneshot::Receiver<()>) -> Result
         None
     };
 
-    let (store, mut state) = open_task(&repo, &config, request)?;
+    // Made after the checks above, so a missing login makes no folder.
+    // An existing task's own folder (see `branch::enter`): the user's
+    // decision and the roles' work are committed there. A merge works from
+    // the project folder: it brings the merged work into it.
+    let task_repo = match task_of(&request) {
+        Some(task) if !merging => branch::enter(&repo, task).map_err(|e| e.to_string())?,
+        _ => repo.clone(),
+    };
+    let (store, mut state) = open_task(&repo, &task_repo, &config, request)?;
     let task = state.task_id.clone();
+    // A new task now has its folder too.
+    let task_repo = if merging {
+        task_repo
+    } else {
+        branch::enter(&repo, &task).map_err(|e| e.to_string())?
+    };
     lock.set_task(&task).map_err(|e| e.to_string())?;
     let _ = events.send(Event::Started(task.clone()));
     let Some((team, skills)) = agents else {
         let merge = merge_waiting(merging, stop);
-        let (outcome, moved) = without_roles(merge, &repo, &config, &store, &mut state);
+        let (outcome, moved) = without_roles(merge, &task_repo, &config, &store, &mut state);
         if moved {
             let _ = events.send(Event::SwitchedBranch);
         }
@@ -310,12 +314,12 @@ fn work(job: Job, events: &Sender<Event>, stop: oneshot::Receiver<()>) -> Result
         stop: &stop_request,
     };
     let stop = run_until_stopped(
-        orchestrator::run_project(&repo, &store, &mut state, &team, project),
+        orchestrator::run_project(&task_repo, &store, &mut state, &team, project),
         stop,
     )?
     .map_err(|e| e.to_string())?;
     let published = if stop == StopReason::Done {
-        send_to_github(&repo, &config, &store, &mut state)
+        send_to_github(&task_repo, &config, &store, &mut state)
     } else {
         None
     };
@@ -338,14 +342,16 @@ fn task_of(request: &Request) -> Option<&str> {
     }
 }
 
-/// The task the request is about: a new one made, or the saved one opened
-/// (with the user's decision recorded, or a stopped task set to go on).
+/// The task the request is about: a new one made in `repo` (the project
+/// folder), or the saved one opened in `task_repo`, its own folder (with the
+/// user's decision recorded, or a stopped task set to go on).
 fn open_task(
     repo: &Repo,
+    task_repo: &Repo,
     config: &Config,
     request: Request,
 ) -> Result<(TaskStore, TaskState), String> {
-    let runs = repo.runs_dir();
+    let runs = task_repo.runs_dir();
     let opened = match request {
         Request::New(description) => {
             let id = branch::next_task_id(repo).map_err(|e| e.to_string())?;
@@ -375,7 +381,7 @@ fn open_task(
                     .map_err(|e| e.to_string())?;
             }
             orchestrator::record_human_decision(
-                repo,
+                task_repo,
                 &store,
                 &mut state,
                 HumanDecision {
@@ -391,10 +397,18 @@ fn open_task(
         Request::Continue(task) => {
             let (store, mut state) = TaskStore::open(&runs, &task).map_err(|e| e.to_string())?;
             // A task the user stopped goes on with the role they stopped.
-            orchestrator::continue_stopped(repo, &store, &mut state).map_err(|e| e.to_string())?;
+            orchestrator::continue_stopped(task_repo, &store, &mut state)
+                .map_err(|e| e.to_string())?;
             (store, state)
         }
-        Request::Publish(task) | Request::Merge(task) => {
+        Request::Publish(task) => TaskStore::open(&runs, &task).map_err(|e| e.to_string())?,
+        // Merged from the project folder, read where the task lives.
+        Request::Merge(task) => {
+            let place = branch::task_places(repo)
+                .map_err(|e| e.to_string())?
+                .into_iter()
+                .find(|place| place.id == task);
+            let runs = place.map_or(runs, |place| place.runs_dir());
             TaskStore::open(&runs, &task).map_err(|e| e.to_string())?
         }
     };

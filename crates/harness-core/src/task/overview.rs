@@ -7,8 +7,9 @@
 //! project and of `harness run` in a terminal.
 
 use crate::git::Repo;
+use crate::task::branch::{self, BranchError};
 use crate::task::run_lock::{self, RunLockError, Working};
-use crate::task::store::{self, StoreError, TaskStore};
+use crate::task::store::{StoreError, TaskStore};
 use crate::task::Stage;
 
 /// A project's state at a glance.
@@ -28,6 +29,9 @@ pub enum OverviewError {
     /// A task's files could not be read.
     #[error(transparent)]
     Store(#[from] StoreError),
+    /// The tasks' own folders could not be listed.
+    #[error(transparent)]
+    Branch(#[from] BranchError),
     /// The run lock could not be checked.
     #[error(transparent)]
     RunLock(#[from] RunLockError),
@@ -44,10 +48,10 @@ pub enum OverviewError {
 pub fn overview(repo: &Repo) -> Result<Overview, OverviewError> {
     let working = run_lock::working(repo)?;
     let running = working.as_ref().map(|w| w.task.as_str());
-    let runs = repo.runs_dir();
     let mut waiting = Vec::new();
-    for id in store::task_ids(&runs)? {
-        let Ok((_store, state)) = TaskStore::open(&runs, &id) else {
+    for place in branch::task_places(repo)? {
+        let id = place.id.clone();
+        let Ok((_store, state)) = TaskStore::open(&place.runs_dir(), &id) else {
             continue;
         };
         let waits = match state.stage {

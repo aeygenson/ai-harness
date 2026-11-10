@@ -11,7 +11,7 @@ use std::time::Instant;
 
 use harness_core::config::Config;
 use harness_core::git::Repo;
-use harness_core::task::branch::task_branch;
+use harness_core::task::branch::{task_branch, BRANCH_PREFIX};
 use harness_core::task::{Stage, TaskState};
 use harness_core::text;
 
@@ -32,6 +32,9 @@ pub struct Merged {
     /// The task's branch here has commits made after the merge (a retro,
     /// settings); they stay on that branch.
     pub left_behind: bool,
+    /// Why the task's own folder was not removed after the merge (usually
+    /// uncommitted changes in it); `None` when it was, or there is none.
+    pub task_folder_kept: Option<String>,
 }
 
 /// What happened to the project folder after the merge.
@@ -39,6 +42,9 @@ pub struct Merged {
 pub enum Folder {
     /// `base` is checked out and has the merged work.
     Updated,
+    /// `base` here has the merged work, but the folder stays on the user's
+    /// own branch (`None`: no branch, a detached HEAD) and was not touched.
+    BaseMoved(Option<String>),
     /// Nothing was changed: these files have uncommitted changes, and
     /// switching branches could lose them.
     Uncommitted(Vec<String>),
@@ -107,11 +113,22 @@ pub fn merge_with(
         ));
     }
     let left_behind = left_behind(repo, &branch, number, &seen.head_ref_oid)?;
+    let folder = update_base(repo, github, merged);
+    // Once the project folder has the merged work, the task is seen from
+    // there, and its own folder is not needed. Its branch stays.
+    let task_folder_kept = if folder == Folder::Updated {
+        harness_core::task::branch::finish(repo, task)
+            .err()
+            .map(|error| error.to_string())
+    } else {
+        None
+    };
     Ok(Merged {
         number,
         base: github.base.clone(),
-        folder: update_base(repo, github, merged),
+        folder,
         left_behind,
+        task_folder_kept,
     })
 }
 
@@ -208,10 +225,22 @@ fn merge_and_confirm(github: &GitHub, number: u64, head: &str) -> Result<View, S
 fn update_base(repo: &Repo, github: &GitHub, merged: &str) -> Folder {
     let message = |e: &dyn std::fmt::Display| e.to_string();
     let base = &github.base;
-    match repo.changed_files() {
-        Ok(files) if files.is_empty() => {}
-        Ok(files) => return Folder::Uncommitted(files),
+    let current = match repo.current_branch() {
+        Ok(current) => current,
         Err(e) => return Folder::Failed(message(&e)),
+    };
+    // A folder on the user's own branch is left there: only `base` is moved.
+    // On `base` or on a task's branch (a task from before tasks had folders
+    // of their own), the folder is brought to `base` as before.
+    let own_branch = current
+        .as_deref()
+        .is_none_or(|name| name != base && !name.starts_with(BRANCH_PREFIX));
+    if !own_branch {
+        match repo.changed_files() {
+            Ok(files) if files.is_empty() => {}
+            Ok(files) => return Folder::Uncommitted(files),
+            Err(e) => return Folder::Failed(message(&e)),
+        }
     }
     let fetched = match repo.fetch_branch(&github.push_url, base) {
         Ok(commit) => commit,
@@ -235,8 +264,13 @@ fn update_base(repo: &Repo, github: &GitHub, merged: &str) -> Folder {
             ));
         }
     }
-    let on_base = matches!(repo.current_branch(), Ok(Some(name)) if name == *base);
-    if on_base {
+    if own_branch {
+        return match repo.move_branch(base, &fetched, local.as_deref()) {
+            Ok(()) => Folder::BaseMoved(current),
+            Err(e) => Folder::Failed(message(&e)),
+        };
+    }
+    if current.as_deref() == Some(base.as_str()) {
         return match repo.fast_forward_to(&fetched) {
             Ok(()) => Folder::Updated,
             Err(e) => Folder::Failed(message(&e)),
@@ -382,6 +416,75 @@ mod tests {
         s.repo.current_branch().unwrap().as_deref() == Some("harness/task-001")
     }
 
+    /// The project folder back on the base branch and the task in its own
+    /// folder, as a task created with `[github]` is. Returns that folder.
+    fn task_in_own_folder(s: &Setup) -> PathBuf {
+        s.repo.switch_branch(&s.base).unwrap();
+        let task = harness_core::task::branch::enter(&s.repo, "task-001").unwrap();
+        assert_ne!(task.root(), s.repo.root());
+        task.root().to_path_buf()
+    }
+
+    #[test]
+    fn after_the_merge_the_task_folder_is_removed_and_its_branch_stays() {
+        let mut s = setup();
+        let folder = task_in_own_folder(&s);
+        let open = open_view("HEAD", "MERGEABLE", GREEN);
+        fake_gh(&mut s, &open, Some(&merged_view("HEAD")));
+
+        let merged = merge_with(&s.repo, &s.state, &s.github, &mut Waiting::none()).unwrap();
+
+        assert_eq!(merged.folder, Folder::Updated);
+        assert_eq!(merged.task_folder_kept, None);
+        assert!(!folder.exists());
+        assert!(s.repo.has_branch("harness/task-001").unwrap());
+        assert!(s.repo.root().join("parser.txt").is_file());
+    }
+
+    #[test]
+    fn a_task_folder_with_uncommitted_work_is_not_merged_and_stays() {
+        let mut s = setup();
+        let folder = task_in_own_folder(&s);
+        fs::write(folder.join("parser.txt"), "not saved yet\n").unwrap();
+        let args = fake_gh(&mut s, &open_view("HEAD", "MERGEABLE", GREEN), None);
+        let error = merge_with(&s.repo, &s.state, &s.github, &mut Waiting::none()).unwrap_err();
+        assert!(error.contains("parser.txt"), "{error}");
+        assert!(!merged_calls(&args));
+
+        // Merged on GitHub anyway: the folder with the unsaved work stays.
+        fake_gh(&mut s, &merged_view("HEAD"), None);
+        let merged = merge_with(&s.repo, &s.state, &s.github, &mut Waiting::none()).unwrap();
+
+        assert_eq!(merged.folder, Folder::Updated);
+        assert!(merged.task_folder_kept.is_some(), "{merged:?}");
+        assert_eq!(
+            fs::read_to_string(folder.join("parser.txt")).unwrap(),
+            "not saved yet\n"
+        );
+    }
+
+    #[test]
+    fn a_project_folder_on_the_user_s_own_branch_stays_there() {
+        let mut s = setup();
+        let folder = task_in_own_folder(&s);
+        s.repo.create_branch("lisa/ideas").unwrap();
+        // Lisa's own unfinished work is no reason to refuse the merge.
+        fs::write(s.repo.root().join("notes.txt"), "mine\n").unwrap();
+        let open = open_view("HEAD", "MERGEABLE", GREEN);
+        fake_gh(&mut s, &open, Some(&merged_view("HEAD")));
+
+        let merged = merge_with(&s.repo, &s.state, &s.github, &mut Waiting::none()).unwrap();
+
+        assert_eq!(merged.folder, Folder::BaseMoved(Some("lisa/ideas".into())));
+        assert_eq!(
+            s.repo.current_branch().unwrap().as_deref(),
+            Some("lisa/ideas")
+        );
+        assert!(s.repo.root().join("notes.txt").is_file());
+        assert_eq!(s.repo.branch_head(&s.base).unwrap(), Some(s.head.clone()));
+        assert!(folder.exists());
+    }
+
     #[test]
     fn a_green_pull_request_is_merged_and_the_folder_updated() {
         let mut s = setup();
@@ -397,6 +500,7 @@ mod tests {
                 base: s.base.clone(),
                 folder: Folder::Updated,
                 left_behind: false,
+                task_folder_kept: None,
             }
         );
         let saved = fs::read_to_string(args).unwrap();

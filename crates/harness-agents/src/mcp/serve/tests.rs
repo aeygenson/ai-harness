@@ -12,6 +12,8 @@ use super::*;
 /// A project with `task-001`: the architect finished and the design waits for the user.
 fn project() -> tempfile::TempDir {
     let root = tempfile::tempdir().unwrap();
+    // A project is a git repository: the tools find tasks through git too.
+    harness_core::git::Repo::init(root.path()).unwrap();
     let harness_dir = root.path().join(HARNESS_DIR);
     let runs = harness_dir.join("runs");
     fs::create_dir_all(&runs).unwrap();

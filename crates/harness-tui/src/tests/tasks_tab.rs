@@ -129,12 +129,7 @@ fn a_marked_step_gets_its_code_back_before_the_message_goes_to_a_role() {
     wait(&mut app);
 
     assert!(!root.join("parser.rs").exists());
-    let log = std::process::Command::new("git")
-        .current_dir(&root)
-        .args(["log", "--format=%s"])
-        .output()
-        .unwrap();
-    let log = String::from_utf8(log.stdout).unwrap();
+    let log = git_log(&root).join("\n");
     assert!(
         log.contains("task-001 round 1: code restored to round-01/01-architect by the user"),
         "{log}"
@@ -900,10 +895,25 @@ fn the_task_and_each_step_show_what_the_agents_spent() {
     assert!(!human.contains("Spent:"), "{human}");
 }
 
+/// The commit messages of the git repository in `root`, newest first.
+fn git_log(root: &std::path::Path) -> Vec<String> {
+    let out = std::process::Command::new("git")
+        .current_dir(root)
+        .args(["log", "--format=%s"])
+        .output()
+        .unwrap();
+    String::from_utf8(out.stdout)
+        .unwrap()
+        .lines()
+        .map(String::from)
+        .collect()
+}
+
 #[test]
-fn a_decision_on_an_old_copy_of_a_task_on_another_branch_is_refused() {
+fn a_task_on_github_works_in_its_own_folder_and_a_stale_decision_is_refused() {
     use harness_core::git::Repo;
-    use harness_core::task::orchestrator::{self, HumanDecision, SameText};
+    use harness_core::task::branch;
+    use harness_core::task::orchestrator::{self, HumanDecision};
     use harness_core::task::{Stage, WaitReason};
     let env = Env::new();
     let (root, mut app) = empty_project(&env);
@@ -916,28 +926,32 @@ fn a_decision_on_an_old_copy_of_a_task_on_another_branch_is_refused() {
     )
     .unwrap();
     repo.commit_all("on GitHub").unwrap();
+    let base = repo.current_branch().unwrap();
+    let base_commit = repo.head().unwrap();
     click(&mut app, "Write here");
     type_text(&mut app, "First task");
     send(&mut app);
     wait(&mut app);
+
+    // The task lives in its own folder, where the architect's step is
+    // committed; the project folder stays where it was.
+    assert_eq!(repo.current_branch().unwrap(), base);
+    assert_eq!(repo.head().unwrap(), base_commit);
+    assert!(!repo.runs_dir().join("task-001").exists());
+    let task = branch::enter(&repo, "task-001").unwrap();
+    assert_ne!(task.root(), repo.root());
+    assert_eq!(task.changed_files().unwrap(), Vec::<String>::new());
+    let log = git_log(task.root());
+    assert!(log.iter().any(|m| m.contains("architect")), "{log:?}");
+    click(&mut app, "task-001");
     assert_eq!(
-        repo.current_branch().unwrap().as_deref(),
-        Some("harness/task-001")
+        stage(&app),
+        Stage::WaitingForHuman(WaitReason::ApproveDesign)
     );
-    // task-002 starts from task-001's branch, with a copy of task-001 that
-    // waits for the design; then task-001 moves on in its own branch.
-    orchestrator::create_project_task(
-        &repo,
-        &config(&root),
-        "task-002",
-        "Second",
-        SameText::Refuse,
-    )
-    .unwrap();
-    repo.switch_branch("harness/task-001").unwrap();
-    let (store, mut state) = TaskStore::open(&repo.runs_dir(), "task-001").unwrap();
+    // Meanwhile another window answers in the task's folder.
+    let (store, mut state) = TaskStore::open(&task.runs_dir(), "task-001").unwrap();
     orchestrator::record_human_decision(
-        &repo,
+        &task,
         &store,
         &mut state,
         HumanDecision {
@@ -948,13 +962,6 @@ fn a_decision_on_an_old_copy_of_a_task_on_another_branch_is_refused() {
         },
     )
     .unwrap();
-    repo.switch_branch("harness/task-002").unwrap();
-    key(&mut app, KeyCode::F(5));
-    click(&mut app, "task-001");
-    assert_eq!(
-        stage(&app),
-        Stage::WaitingForHuman(WaitReason::ApproveDesign)
-    );
 
     key(&mut app, KeyCode::Enter);
     type_text(&mut app, "approve again");
@@ -964,13 +971,27 @@ fn a_decision_on_an_old_copy_of_a_task_on_another_branch_is_refused() {
     let (message, problem) = shown(&app);
     assert!(problem, "{message}");
     assert!(message.contains("has moved on"), "{message}");
-    assert_eq!(
-        repo.current_branch().unwrap().as_deref(),
-        Some("harness/task-001")
-    );
-    // Nothing was decided twice: the last step is still the user's first answer.
+    // Nothing was decided twice: the last step is still the first answer.
     let steps = store.steps().unwrap();
     assert_eq!(steps.last().unwrap().handoff.summary, "go");
+    assert_eq!(repo.current_branch().unwrap(), base);
+    assert_eq!(repo.head().unwrap(), base_commit);
+
+    // The user's own decision, on what is there now, lands in the task's folder.
+    let (store, mut state) = TaskStore::open(&task.runs_dir(), "task-001").unwrap();
+    state.stage = Stage::WaitingForHuman(WaitReason::RoleAskedForHelp(Role::Developer));
+    let json = serde_json::to_string(&state).unwrap();
+    fs::write(store.dir().join("state.json"), json).unwrap();
+    task.commit_all("the developer asks").unwrap();
+    key(&mut app, KeyCode::F(5));
+    click(&mut app, "task-001");
+    key(&mut app, KeyCode::Enter);
+    type_text(&mut app, "carry on");
+    send(&mut app);
+    wait(&mut app);
+    let log = git_log(task.root());
+    assert!(log.iter().any(|m| m.contains("carry on")), "{log:?}");
+    assert_eq!(repo.head().unwrap(), base_commit);
 }
 
 #[test]

@@ -68,7 +68,7 @@ struct Opened {
 /// `decide`: the user's decision on a task waiting for them, except finishing it.
 pub(super) fn decide(root: &Path, ask: Decide<'_>) -> Result<String, String> {
     check_notes(ask.notes)?;
-    with_branch_note(root, ask.task, |repo, lock| {
+    in_task_folder(root, ask.task, |repo, lock| {
         let opened = open_waiting(repo, lock, ask.task, ask.seen)?;
         record(opened, ask)
     })
@@ -152,7 +152,7 @@ pub(super) fn finish_task(
         return Err("finishing needs the user's own words, as they wrote them".into());
     }
     check_notes(words)?;
-    with_branch_note(root, task, |repo, lock| {
+    in_task_folder(root, task, |repo, lock| {
         let Opened {
             repo,
             store,
@@ -179,9 +179,9 @@ pub(super) fn finish_task(
     })
 }
 
-/// Holds the run lock and goes to the task's branch, then runs `work`; the
-/// answer, good or not, says when the project folder moved to that branch.
-fn with_branch_note(
+/// Holds the run lock and finds the task's folder (its own folder in a
+/// project on GitHub, see `branch::enter`), then runs `work` there.
+fn in_task_folder(
     root: &Path,
     task: &str,
     work: impl FnOnce(Repo, RunLock) -> Result<String, String>,
@@ -189,19 +189,9 @@ fn with_branch_note(
     let repo = Repo::open(root).map_err(|e| e.to_string())?;
     let mut lock = RunLock::hold(&repo).map_err(|e| e.to_string())?;
     lock.set_task(task).map_err(|e| e.to_string())?;
-    // The decision is a commit too: it goes on the task's branch.
-    let switched = branch::enter(&repo, task).map_err(|e| e.to_string())?;
-    let note = |text: String| {
-        if switched {
-            format!(
-                "{text}\n(The project folder is now on the task's branch {}.)",
-                branch::task_branch(task)
-            )
-        } else {
-            text
-        }
-    };
-    work(repo, lock).map(note).map_err(note)
+    // The decision is a commit too: it goes on the task's branch, in its folder.
+    let task_repo = branch::enter(&repo, task).map_err(|e| e.to_string())?;
+    work(task_repo, lock)
 }
 
 /// Opens the task if it waits for the user where the agent saw it.

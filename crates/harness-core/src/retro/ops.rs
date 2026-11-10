@@ -13,7 +13,7 @@ use crate::git::{GitError, Repo, HARNESS_DIR};
 use crate::retro::proposals::ProposalsFile;
 use crate::retro::suggest::{self, Applied, ApplyError, PROPOSALS_JSON, RETRO_MD};
 use crate::retro::{RetroError, Scope, Stats, TaskHistory, RETROS_DIR};
-use crate::task::branch;
+use crate::task::branch::{self, BranchError};
 use crate::task::orchestrator::{self, RunError, SameText};
 use crate::task::store::StoreError;
 
@@ -28,7 +28,7 @@ pub enum OpsError {
     NoTasks,
     /// The task id given does not exist or cannot be read.
     #[error("cannot open task {0}: {1}")]
-    NoTask(String, StoreError),
+    NoTask(String, BranchError),
     /// The text given is not a number such as `004`.
     #[error("{0:?} is not a retrospective number, such as 004")]
     BadNumber(String),
@@ -44,6 +44,9 @@ pub enum OpsError {
     /// The task history could not be read.
     #[error(transparent)]
     Store(#[from] StoreError),
+    /// The tasks' folders could not be listed.
+    #[error(transparent)]
+    Branch(#[from] BranchError),
     /// The statistics could not be saved.
     #[error(transparent)]
     Retro(#[from] RetroError),
@@ -146,13 +149,12 @@ pub fn save_stats(
     task_id: Option<&str>,
     config: Option<&Config>,
 ) -> Result<(PathBuf, Stats), OpsError> {
-    let runs = repo.runs_dir();
     let (scope, tasks) = match task_id {
         Some(id) => (
             Scope::Task(id.to_string()),
-            vec![TaskHistory::load(&runs, id).map_err(|e| OpsError::NoTask(id.to_string(), e))?],
+            vec![TaskHistory::load_one(repo, id).map_err(|e| OpsError::NoTask(id.to_string(), e))?],
         ),
-        None => (Scope::All, TaskHistory::load_all(&runs)?),
+        None => (Scope::All, TaskHistory::load_all(repo)?),
     };
     if tasks.is_empty() {
         return Err(OpsError::NoTasks);

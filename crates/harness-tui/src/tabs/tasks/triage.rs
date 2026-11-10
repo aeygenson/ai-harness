@@ -3,6 +3,8 @@
 //! `harness_agents::triage`, the same as `harness triage <task>`), and
 //! «↶ Restore code here (b)» (see `restore.rs`).
 
+use std::path::PathBuf;
+
 use ratatui::layout::Rect;
 use ratatui::Frame;
 
@@ -11,13 +13,15 @@ use crate::ui::i18n::I18n;
 use crate::ui::{button_width, buttons, ButtonId, Hits};
 
 impl TasksTab {
-    /// The task «Triage» looks into: the selected one, while this window runs
-    /// no roles (the agent would read files the roles are still writing).
-    pub fn triage_target(&self) -> Option<String> {
+    /// The task «Triage» looks into, with the folder it lives in: the
+    /// selected one, while this window runs no roles (the agent would read
+    /// files the roles are still writing).
+    pub fn triage_target(&self) -> Option<(String, PathBuf)> {
         if self.is_running() {
             return None;
         }
-        self.current().map(|task| task.id.clone())
+        self.current()
+            .map(|task| (task.id.clone(), task.root.clone()))
     }
 
     /// Draws the buttons that apply now at the right of the top border of

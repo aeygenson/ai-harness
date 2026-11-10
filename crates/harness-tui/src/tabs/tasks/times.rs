@@ -78,10 +78,20 @@ impl TasksTab {
         if known {
             return;
         }
-        let added = Repo::open(&self.root)
-            .map(|repo| repo.added_times(&format!("{HARNESS_DIR}/runs")))
-            .unwrap_or_default();
-        self.times = task_times(&self.root, &self.all, &added);
+        // Each working folder has its own history: the project folder, and
+        // the own folder of each task on its branch.
+        let mut roots: Vec<&PathBuf> = self.all.iter().map(|task| &task.root).collect();
+        roots.sort();
+        roots.dedup();
+        let mut times = HashMap::new();
+        for root in roots {
+            let added = Repo::open(root)
+                .map(|repo| repo.added_times(&format!("{HARNESS_DIR}/runs")))
+                .unwrap_or_default();
+            let tasks: Vec<&TaskView> = self.all.iter().filter(|t| &t.root == root).collect();
+            times.extend(task_times(root, &tasks, &added));
+        }
+        self.times = times;
     }
 
     /// The times of the task `id`, if they were read.
@@ -94,7 +104,7 @@ impl TasksTab {
 /// them (see `Repo::added_times`), paths relative to `root`.
 fn task_times(
     root: &Path,
-    tasks: &[TaskView],
+    tasks: &[&TaskView],
     added: &[(String, u64)],
 ) -> HashMap<String, TaskTimes> {
     // `added` lists the newest commits first; the oldest time of a file

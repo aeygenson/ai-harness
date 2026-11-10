@@ -283,9 +283,10 @@ pub fn background_log(repo: &Repo, task_id: &str) -> Result<PathBuf, RunLockErro
     Ok(lock_dir(repo)?.join(format!("run-{task_id}.log")))
 }
 
-/// `.git/harness` of this working folder.
+/// `.git/harness` in git's folder shared by all working folders of the
+/// repository: one lock for the project folder and the tasks' own folders.
 fn lock_dir(repo: &Repo) -> Result<PathBuf, RunLockError> {
-    Ok(repo.git_path(LOCK_DIR)?)
+    Ok(repo.git_common_dir()?.join(LOCK_DIR))
 }
 
 /// The stop file of `task` in the lock folder.
@@ -439,6 +440,26 @@ mod tests {
 
         assert!(dir.path().join(".git/harness/run.lock").exists());
         assert_eq!(repo.changed_files().unwrap(), Vec::<String>::new());
+    }
+
+    #[test]
+    fn a_task_s_own_folder_shares_the_project_s_lock() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("app");
+        std::fs::create_dir(&root).unwrap();
+        let repo = Repo::init(&root).unwrap();
+        std::fs::write(root.join("README.md"), "hello\n").unwrap();
+        repo.commit_all("first").unwrap();
+        let folder = dir.path().join("app.tasks/task-001");
+        repo.add_worktree_with_branch(&folder, "harness/task-001")
+            .unwrap();
+        let task = Repo::open(&folder).unwrap();
+        let _run = running(&repo, "task-001");
+
+        let refused = RunLock::hold(&task).unwrap_err();
+
+        assert!(matches!(refused, RunLockError::Busy { .. }), "{refused}");
+        ask_to_stop(&task, "task-001", StopWhen::AfterStep).unwrap();
     }
 
     #[test]

@@ -76,14 +76,14 @@ impl TasksTab {
     /// and log. Before the commit is there, what its handoff lists.
     pub fn artifacts(&self, step: &Step) -> Vec<Artifact> {
         let runs = format!("{HARNESS_DIR}/runs/");
-        let dir = self.root.join(&step.dir);
+        // The selected task's folder: its commits and files are there.
+        let root = self.task_root();
+        let dir = root.join(&step.dir);
         let known = self.commits.borrow().get(&dir).cloned();
         let commit = known.or_else(|| {
             let handoff = dir.join("handoff.json");
-            let relative = handoff.strip_prefix(&self.root).ok()?.to_str()?.to_string();
-            let files = Repo::open(&self.root)
-                .ok()?
-                .files_of_commit_adding(&relative)?;
+            let relative = handoff.strip_prefix(&root).ok()?.to_str()?.to_string();
+            let files = Repo::open(&root).ok()?.files_of_commit_adding(&relative)?;
             self.commits.borrow_mut().insert(dir.clone(), files.clone());
             Some(files)
         });
@@ -117,7 +117,7 @@ impl TasksTab {
         };
         let mut files: Vec<Artifact> = Vec::new();
         for (mark, shown) in changed {
-            let path = self.root.join(&shown);
+            let path = root.join(&shown);
             if !files.iter().any(|f| f.path == path) {
                 files.push(Artifact { mark, shown, path });
             }
@@ -206,10 +206,13 @@ pub(super) fn sized_list(files: &[(String, u64)]) -> String {
         .join(", ")
 }
 
-pub(super) fn load_task(runs: &Path, id: &str) -> Result<TaskView> {
-    let (store, state) = TaskStore::open(runs, id)?;
+/// The task `id` saved in the working folder `root`.
+pub(super) fn load_task(root: &Path, id: &str) -> Result<TaskView> {
+    let runs = root.join(HARNESS_DIR).join("runs");
+    let (store, state) = TaskStore::open(&runs, id)?;
     Ok(TaskView {
         id: id.to_string(),
+        root: root.to_path_buf(),
         state,
         description: store.description().unwrap_or_default(),
         steps: store.steps()?,
