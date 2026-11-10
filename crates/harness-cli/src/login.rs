@@ -205,9 +205,13 @@ fn login_gemini(dir: &Path, program: &Path) -> Result<()> {
     harness_platform::private::restrict_dir(&home)?;
     println!("Starting `gemini`. Choose «Sign in with Google», then type /quit to come back here.");
     let mut command = std::process::Command::new(harness_platform::program::resolve(program));
+    // In its own folder: started in the user's home, Gemini would offer to
+    // trust it and then read the user's own `~/.gemini/settings.json` as the
+    // folder's settings (for example a saved choice of an API key).
     command
         .env_clear()
-        .envs(harness_platform::env::inherited_values());
+        .envs(harness_platform::env::inherited_values())
+        .current_dir(&home);
     harness_platform::home::set_for(&mut command, &home);
     let status = command
         .status()
@@ -324,6 +328,21 @@ mod tests {
             "save-text ${HOME}/.gemini/oauth_creds.json {}\n",
         );
         login_gemini(creds.path(), &signs_in).unwrap();
+
+        assert!(credentials::has_login(creds.path(), AgentKind::Gemini));
+    }
+
+    #[test]
+    fn gemini_signs_in_inside_its_own_folder_not_the_users_home() {
+        let creds = tempfile::tempdir().unwrap();
+        // A path without a folder lands in the folder Gemini was started in.
+        let here = harness_fake::install(
+            &creds.path().join("bin"),
+            "gemini-here",
+            "save-text .gemini/oauth_creds.json {}\n",
+        );
+
+        login_gemini(creds.path(), &here).unwrap();
 
         assert!(credentials::has_login(creds.path(), AgentKind::Gemini));
     }
