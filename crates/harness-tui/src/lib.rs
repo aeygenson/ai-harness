@@ -153,6 +153,8 @@ enum Purpose {
     GenerateRetro,
     /// Apply these proposals of the retrospective in this folder.
     ApplyProposals(PathBuf, Vec<u32>),
+    /// Let the security role run the command typed in the form.
+    AllowCommand,
     /// Run this maker's command to install or update the agent named.
     RunAgentCommand {
         name: &'static str,

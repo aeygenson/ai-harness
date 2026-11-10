@@ -5,9 +5,11 @@
 //! keeps everything else as it was. After every change the result is checked
 //! with the normal `Config::parse`.
 
+mod commands;
 mod github;
 mod mcp;
 
+pub use commands::{add_extra_command, remove_extra_command};
 pub use github::set_github;
 pub use mcp::{remove_mcp, set_mcp};
 
@@ -162,7 +164,9 @@ pub fn add_role_skill(
     finish(&doc)
 }
 
-/// Sets everything of `[roles.<role>]`: agent, model and the four lists.
+/// Sets everything of `[roles.<role>]` the Roles tab shows: agent, model and
+/// the four lists. `extra_commands` is left as it is in the file: the tab does
+/// not show it, so a window opened before `harness allow-command` cannot undo it.
 /// The role's table is created if missing; values that did not change keep
 /// their lines and comments. An empty list or no model removes the key.
 pub fn set_role(text: &str, role: Role, settings: &RoleConfig) -> Result<String, EditError> {

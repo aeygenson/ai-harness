@@ -110,6 +110,11 @@ async fn main() -> Result<()> {
             Some(RetroCommand::Apply { number, ids }) => retro_apply(project, &number, &ids),
             None => until_stopped(retro(project, args.task_id.as_deref(), args.suggest)).await,
         },
+        Command::Allow {
+            role,
+            command,
+            remove,
+        } => retro::allow_command(project, role, &command.join(" "), !remove),
         Command::Models { refresh } => models(refresh),
         Command::Agents => {
             agents();

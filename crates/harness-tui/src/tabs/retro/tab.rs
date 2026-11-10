@@ -8,7 +8,7 @@
 //! │> [x] 1 Teach ...  ││ # Retrospective: all                                │
 //! │  ✓   2 Check ...  ││ ...                                                 │
 //! └───────────────────┘└─────────────────────────────────────────────────────┘
-//!  [ Generate ] [ Open in editor ] [ Choose ] [ Apply chosen ]
+//!  [ Generate ] [ Open in editor ] [ Choose ] [ Apply chosen ] [ Allow a command ]
 //! ```
 //!
 //! «Generate» does what `harness retro --all --suggest` does, in the
@@ -16,6 +16,12 @@
 //! the whole history (every handoff, note and agent log) and writes its
 //! lessons and its proposals for the skills. The text opens in the editor for
 //! editing. Proposals the user chooses are applied after a confirmation.
+//!
+//! «Allow a command» does what `harness allow-command security` does: the
+//! user types a check the security role may also run (see «Refused actions»
+//! in the statistics). It is never filled in from the refusals, because the
+//! agent chose what it tried; the agent's proposals cannot change
+//! permissions either.
 
 use std::collections::{BTreeSet, VecDeque};
 use std::path::{Path, PathBuf};
@@ -47,6 +53,8 @@ pub enum RetroButton {
     Toggle,
     /// Apply the chosen proposals.
     Apply,
+    /// Let the security role run one more check, typed by the user.
+    Allow,
 }
 
 /// What the tab asks the App to do.
@@ -58,6 +66,8 @@ pub enum Action {
     Open(String, PathBuf),
     /// Ask before applying these proposals of the retrospective in `dir`.
     Apply(PathBuf, Vec<u32>),
+    /// Ask which command the security role may also run.
+    Allow,
     /// Something cannot be done now; the key of the message why.
     Say(&'static str),
 }
@@ -255,6 +265,7 @@ impl RetroTab {
             KeyCode::Char('g') => return self.press(RetroButton::Generate),
             KeyCode::Char('e') => return self.press(RetroButton::Open),
             KeyCode::Char('a') => return self.press(RetroButton::Apply),
+            KeyCode::Char('c') => return self.press(RetroButton::Allow),
             _ => {}
         }
         Action::None
@@ -282,6 +293,7 @@ impl RetroTab {
                 }
                 None => Action::None,
             },
+            RetroButton::Allow => Action::Allow,
         }
     }
 }

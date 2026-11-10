@@ -5,7 +5,7 @@ use harness_core::mcp::McpServer;
 use harness_core::task::handoff::Role;
 use harness_core::task::permissions::Commands;
 
-use crate::adapters::antigravity::{DENIED_FOR_ALL, DENIED_FOR_READERS};
+use harness_core::task::commands::{DENIED_FOR_ALL, DENIED_FOR_READERS};
 
 /// Folders inside the project no role may write with Cursor's own file tool.
 /// The git check after the role catches the rest of the forbidden files.

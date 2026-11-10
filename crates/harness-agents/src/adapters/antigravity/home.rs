@@ -5,6 +5,7 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
+use harness_core::task::commands::{DENIED_FOR_ALL, DENIED_FOR_READERS};
 use harness_core::task::handoff::Role;
 use harness_core::task::permissions::Commands;
 
@@ -36,38 +37,6 @@ pub(super) fn toolchain_env(real_home: &Path) -> Vec<(&'static str, PathBuf)> {
         .filter(|(_, path)| path.is_dir())
         .collect()
 }
-
-/// Commands no role may run: the harness makes the commits, and only it
-/// sends work to GitHub (`gh` uses the user's GitHub login).
-pub(crate) const DENIED_FOR_ALL: &[&str] = &["git commit", "git push", "gh"];
-
-/// Commands a role without [`Commands::Any`] (see [`Role::spec`]) may not
-/// run: they change files, the git state, install or publish packages, or
-/// reach the network (so here such a role loses `curl` even when its spec
-/// allows the network). Reading, running tests and audit tools stay allowed.
-/// The list cannot be complete; the git check after the role still catches
-/// any changed file.
-pub(crate) const DENIED_FOR_READERS: &[&str] = &[
-    "rm",
-    "mv",
-    "cp",
-    "git add",
-    "git checkout",
-    "git reset",
-    "git restore",
-    "git stash",
-    "cargo build",
-    "cargo install",
-    "cargo run",
-    "cargo publish",
-    "npm install",
-    "npm publish",
-    "pip install",
-    "go install",
-    "dotnet build",
-    "curl",
-    "wget",
-];
 
 /// The role's `settings.json`. `deny` beats everything else.
 pub(super) fn settings(role: Role) -> String {

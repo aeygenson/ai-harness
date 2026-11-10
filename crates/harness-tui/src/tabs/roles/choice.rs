@@ -77,6 +77,7 @@ impl RolesTab {
                 always_skills: Vec::new(),
                 mcp: Vec::new(),
                 plugins: Vec::new(),
+                extra_commands: Vec::new(),
             });
             if settings.agent == agent {
                 return Action::None;

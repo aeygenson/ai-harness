@@ -79,7 +79,7 @@ impl ClaudeCode {
     fn command_with_mcp(&self, job: &RoleJob, mcp_config: &std::ffi::OsStr) -> Command {
         let config_dir = job.project_dir.join(CONFIG_DIR);
         let plugins = self.settings.plugins(job.role);
-        let rules = RoleRules::for_job(job, self.settings.servers(job.role), plugins);
+        let rules = RoleRules::for_job(job, &self.settings);
 
         let mut command = process::base_command(&self.program, &job.project_dir);
         command
@@ -338,15 +338,27 @@ mod tests {
                 ),
             ),
         ];
+        let for_all = "Bash(git commit:*),Bash(git push:*),Bash(gh:*)";
+        // A role without every command is also denied what readers may not run.
+        let readers = "Bash(rm:*),Bash(mv:*),Bash(cp:*),Bash(git add:*),Bash(git checkout:*),\
+             Bash(git reset:*),Bash(git restore:*),Bash(git stash:*),Bash(git clean:*),\
+             Bash(git rm:*),Bash(git mv:*),Bash(git apply:*),Bash(git switch:*),\
+             Bash(git merge:*),Bash(git rebase:*),Bash(git branch:*),Bash(git tag:*),\
+             Bash(git update-ref:*),Bash(git worktree:*),Bash(git pull:*),Bash(git fetch:*),\
+             Bash(git bisect:*),Bash(git config:*),Bash(cargo build:*),Bash(cargo install:*),\
+             Bash(cargo run:*),Bash(cargo publish:*),Bash(npm install:*),Bash(npm publish:*),\
+             Bash(pip install:*),Bash(go install:*),Bash(dotnet build:*),Bash(curl:*),\
+             Bash(wget:*)";
+        let files = "Edit(./.git/**),Edit(./.claude/**)";
         for (role, tools, allowed) in expected {
             let command = agent.command(&job(role));
             assert_eq!(arg_after(&command, "--tools"), tools, "{role}");
             assert_eq!(arg_after(&command, "--allowedTools"), allowed, "{role}");
-            assert_eq!(
-                arg_after(&command, "--disallowedTools"),
-                "Bash(git commit:*),Bash(git push:*),Bash(gh:*),Edit(./.git/**),Edit(./.claude/**)",
-                "{role}"
-            );
+            let denied = match role {
+                Role::Developer | Role::Tester => format!("{for_all},{files}"),
+                _ => format!("{for_all},{readers},{files}"),
+            };
+            assert_eq!(arg_after(&command, "--disallowedTools"), denied, "{role}");
         }
     }
 
@@ -458,17 +470,9 @@ mod tests {
             RoleSettings::default().with_mcp_servers(Role::Developer, vec![server]),
         );
 
-        let rules = RoleRules::for_job(
-            &job(Role::Developer),
-            agent.settings.servers(Role::Developer),
-            &[],
-        );
+        let rules = RoleRules::for_job(&job(Role::Developer), &agent.settings);
         assert!(rules.allowed.contains(&"mcp__context7".to_string()));
-        let tester = RoleRules::for_job(
-            &job(Role::Tester),
-            agent.settings.servers(Role::Tester),
-            &[],
-        );
+        let tester = RoleRules::for_job(&job(Role::Tester), &agent.settings);
         assert!(!tester.allowed.iter().any(|rule| rule.starts_with("mcp__")));
 
         let file = agent.write_mcp_config(Role::Developer).unwrap();

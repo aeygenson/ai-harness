@@ -3,7 +3,8 @@
 //! The folder holds the rest of running a task: `branch` (a task's own git
 //! branch in a project on GitHub), `handoff` (what a role hands over),
 //! `scenario` (the kind of project and the task's workflow), `routes`,
-//! `prompt`, `permissions`, `agent` (the adapter interface), `orchestrator`
+//! `prompt`, `permissions`, `commands` (which shell commands the roles may
+//! run), `agent` (the adapter interface), `orchestrator`
 //! (the run loop), `store` (saving tasks to disk), `facts` and `weakened`
 //! (what earlier steps really changed, read from git), `pull_request`
 //! (the pull request a finished task becomes on GitHub), `tripwire` (what
@@ -16,6 +17,7 @@
 pub mod agent;
 pub mod agent_stubs;
 pub mod branch;
+pub mod commands;
 pub mod facts;
 pub mod handoff;
 pub mod manifest;

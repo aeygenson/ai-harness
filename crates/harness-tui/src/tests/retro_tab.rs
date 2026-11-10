@@ -208,3 +208,60 @@ fn a_retrospective_is_generated_edited_and_its_proposals_applied() {
     click(&mut app, "001  ");
     assert!(screen(&mut app).contains("Lesson: write tests first."));
 }
+
+#[test]
+fn a_refused_check_is_shown_and_the_user_types_what_to_allow() {
+    let env = Env::new();
+    let (root, mut app) = empty_project(&env);
+    let repo = Repo::open(&root).unwrap();
+    // The security role (Claude Code) was refused `trivy fs .` in a failed
+    // attempt of task-001.
+    let (store, _) =
+        orchestrator::create_task(&repo, "task-001", "Build a parser", Workflow::Task, 5).unwrap();
+    let log = r#"{"type":"result","permission_denials":[{"tool_name":"Bash","tool_input":{"command":"trivy fs ."}}]}"#;
+    store.save_failure_log(1, Role::Security, log).unwrap();
+    repo.commit_all("task-001 failed").unwrap();
+    harness_core::retro::ops::save_stats(&repo, None, Some(&config(&root))).unwrap();
+
+    key(&mut app, KeyCode::Char('6'));
+    app.retro.as_mut().unwrap().reload();
+    let retro = app.retro.as_ref().unwrap().current().unwrap();
+    let stats = retro.stats.as_deref().unwrap();
+    assert!(
+        stats.contains("| security | trivy fs . | 1 | task-001 |"),
+        "{stats}"
+    );
+
+    // The form starts empty: nothing is filled in from what the agent tried.
+    click(&mut app, " Allow a command ");
+    let form = &app.form.as_ref().unwrap().1;
+    assert_eq!(form.value(0), "");
+    // A program that runs any code is refused; the form stays open.
+    type_text(&mut app, "bash");
+    key(&mut app, KeyCode::Enter);
+    assert!(app.form.is_some());
+    let error = app
+        .form
+        .as_ref()
+        .unwrap()
+        .1
+        .error
+        .clone()
+        .unwrap_or_default();
+    assert!(error.contains("bash can run any code"), "{error}");
+    for _ in 0..4 {
+        key(&mut app, KeyCode::Backspace);
+    }
+    type_text(&mut app, "trivy fs");
+    key(&mut app, KeyCode::Enter);
+    let (message, problem) = shown(&app);
+    assert!(
+        !problem && message == "The security role may now run «trivy fs»: saved and committed",
+        "{message}"
+    );
+    assert_eq!(
+        config(&root).roles[&Role::Security].extra_commands,
+        ["trivy fs"]
+    );
+    assert_eq!(repo.changed_files().unwrap(), Vec::<String>::new());
+}

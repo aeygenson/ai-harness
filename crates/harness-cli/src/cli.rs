@@ -118,6 +118,22 @@ pub(crate) enum Command {
     /// Count what happened in a task (or in all tasks) and save it in
     /// .harness/retros/<NNN>/; with --suggest also ask for skill proposals.
     Retro(RetroArgs),
+    /// Let the role that runs checks (security) also run COMMAND, for example
+    /// `harness allow-command security trivy fs` (see «Refused actions» in
+    /// `harness retro`). Saved in harness.toml as `extra_commands` and
+    /// committed. Only Claude Code allows commands one by one.
+    #[command(name = "allow-command")]
+    Allow {
+        /// The role: `security`.
+        #[arg(value_parser = parse_role)]
+        role: Role,
+        /// The command: a program and up to two more words, such as `trivy fs`.
+        #[arg(required = true)]
+        command: Vec<String>,
+        /// Take the command away again.
+        #[arg(long)]
+        remove: bool,
+    },
     /// A full-screen window with tabs: tasks, role settings, projects.
     /// Without `--pin` it is the main window (one per user, all projects);
     /// with `--pin` it stays on the project folder (one per project).

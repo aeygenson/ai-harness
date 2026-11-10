@@ -1,5 +1,6 @@
 //! `harness retro ...`: statistics of finished tasks, the retro agent's
-//! proposals, and applying the ones the user picks.
+//! proposals, and applying the ones the user picks; and `harness
+//! allow-command`, which allows a refused check the statistics show.
 
 use std::fmt::Write as _;
 use std::io::{self, Write};
@@ -7,11 +8,12 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use harness_agents::build::retro_agent;
-use harness_core::config::Config;
+use harness_core::config::{save, Config};
 use harness_core::git::{Repo, HARNESS_DIR};
 use harness_core::retro;
 use harness_core::retro::proposals::FileChange;
 use harness_core::retro::suggest::{self, Applied};
+use harness_core::task::handoff::Role;
 
 use crate::open_repo;
 
@@ -147,12 +149,26 @@ pub(crate) fn retro_apply(project: &Path, number: &str, ids: &[u32]) -> Result<(
     Ok(())
 }
 
+/// Adds `command` to the role's `extra_commands` in harness.toml (or takes
+/// it away when `allow` is false) and commits the file.
+pub(crate) fn allow_command(project: &Path, role: Role, command: &str, allow: bool) -> Result<()> {
+    let repo = open_repo(project)?;
+    let changed = save::set_extra_command(&repo, role, command, allow)
+        .context("harness.toml was not changed")?;
+    let role = role.as_str();
+    match (changed, allow) {
+        (false, true) => println!("The {role} role may already run «{command}»."),
+        (false, false) => println!("«{command}» was not in the {role} role's extra commands."),
+        (true, true) => println!("The {role} role may now run «{command}» (Claude Code)."),
+        (true, false) => println!("The {role} role may no longer run «{command}»."),
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::fs;
-
-    use harness_core::task::handoff::Role;
 
     use crate::init;
     use crate::tasks::new_task;

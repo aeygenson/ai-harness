@@ -35,7 +35,7 @@ use harness_core::task::handoff::Role;
 
 use crate::process::{self, failed};
 use crate::role_settings::RoleSettings;
-pub(crate) use home::{copy_dir, DENIED_FOR_ALL, DENIED_FOR_READERS};
+pub(crate) use home::copy_dir;
 use home::{settings, toolchain_env};
 pub(crate) use output::last_line;
 use output::{agy_error, RunResult};
@@ -299,6 +299,21 @@ mod tests {
                 "git reset",
                 "git restore",
                 "git stash",
+                "git clean",
+                "git rm",
+                "git mv",
+                "git apply",
+                "git switch",
+                "git merge",
+                "git rebase",
+                "git branch",
+                "git tag",
+                "git update-ref",
+                "git worktree",
+                "git pull",
+                "git fetch",
+                "git bisect",
+                "git config",
                 "cargo build",
                 "cargo install",
                 "cargo run",
