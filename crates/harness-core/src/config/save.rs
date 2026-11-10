@@ -166,7 +166,10 @@ mod tests {
         set_extra_command(&repo, Role::Security, "bash", true).unwrap_err();
         assert!(set_extra_command(&repo, Role::Security, "trivy fs", false).unwrap());
         let config = Config::load(&harness).unwrap();
-        assert!(config.roles[&Role::Security].extra_commands.is_empty());
+        assert_eq!(
+            config.roles[&Role::Security].extra_commands,
+            Vec::<String>::new()
+        );
     }
 
     #[test]
