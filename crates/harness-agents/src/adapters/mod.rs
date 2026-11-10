@@ -3,9 +3,11 @@
 //! Every adapter implements `harness_core::task::agent::AgentRunner`. The mock follows a
 //! script and lets tests run the whole loop without a real agent.
 
+pub mod acp;
 pub mod antigravity;
 pub mod claude;
 pub mod codex;
 pub mod cursor;
 pub mod dsh;
+pub mod gemini;
 pub mod mock;

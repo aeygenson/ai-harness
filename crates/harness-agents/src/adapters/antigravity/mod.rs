@@ -35,8 +35,9 @@ use harness_core::task::handoff::Role;
 
 use crate::process::{self, failed};
 use crate::role_settings::RoleSettings;
+use home::settings;
+pub(crate) use home::toolchain_env;
 pub(crate) use home::{copy_dir, DENIED_FOR_ALL, DENIED_FOR_READERS};
-use home::{settings, toolchain_env};
 pub(crate) use output::last_line;
 use output::{agy_error, RunResult};
 

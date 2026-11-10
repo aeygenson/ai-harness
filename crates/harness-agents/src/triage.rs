@@ -65,7 +65,11 @@ fn find_program(agent: AgentKind, find: Finder) -> Option<PathBuf> {
         AgentKind::Cursor => crate::adapters::cursor::PROGRAMS
             .iter()
             .find_map(|name| find(name)),
-        AgentKind::Antigravity | AgentKind::Dsh | AgentKind::DshNvidia => None,
+        AgentKind::Antigravity
+        | AgentKind::Gemini
+        | AgentKind::Dsh
+        | AgentKind::DshNvidia
+        | AgentKind::Acp => None,
     }
 }
 

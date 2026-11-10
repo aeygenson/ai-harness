@@ -165,7 +165,9 @@ mod tests {
     fn every_agent_the_harness_runs_is_in_the_catalog_once() {
         for agent in AgentKind::ALL {
             let count = CATALOG.iter().filter(|e| e.id == agent.as_str()).count();
-            assert_eq!(count, 1, "{agent}");
+            // An `acp` agent is whatever program the user names in `[acp]`.
+            let wanted = usize::from(agent != AgentKind::Acp);
+            assert_eq!(count, wanted, "{agent}");
         }
         let ids: HashSet<_> = CATALOG.iter().map(|e| e.id).collect();
         assert_eq!(ids.len(), CATALOG.len());

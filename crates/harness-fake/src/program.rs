@@ -64,6 +64,12 @@ impl Fake {
                 let mut line = String::new();
                 let _ = io::stdin().read_line(&mut line);
             }
+            "save-line" => {
+                // One line, kept: what the caller answered to the last line printed.
+                let mut line = String::new();
+                let _ = io::stdin().read_line(&mut line);
+                save(&text, &line);
+            }
             "save-stdin" => {
                 self.read_stdin();
                 save(&text, &self.stdin);

@@ -9,6 +9,8 @@
 //! - Codex: `codex debug models`;
 //! - Antigravity: `agy models`;
 //! - Cursor: `agent models`, with Cursor's own login and an empty config folder;
+//! - Gemini CLI: `gemini --list-models` in a temporary `HOME` with the saved login;
+//! - an `acp` agent: not asked; the harness cannot choose its model;
 //! - `DeepSeek` Harness: `GET /models` of `DeepSeek`'s API with the saved key,
 //!   with dsh's effort levels; with NVIDIA, `GET /v1/models` of NVIDIA's API.
 //!   NVIDIA lists every model it serves, also ones not made for chat.
@@ -30,7 +32,8 @@ use crate::adapters::dsh::Provider;
 use crate::install::credentials;
 use crate::process::base_command;
 pub use parse::{
-    parse_agy, parse_api_models, parse_claude, parse_codex, parse_cursor, with_dsh_efforts,
+    parse_agy, parse_api_models, parse_claude, parse_codex, parse_cursor, parse_gemini,
+    with_dsh_efforts,
 };
 
 /// How long one agent may take to answer.
@@ -53,6 +56,8 @@ pub struct Programs {
     pub agy: PathBuf,
     /// The Cursor CLI program.
     pub cursor: PathBuf,
+    /// The Gemini CLI program.
+    pub gemini: PathBuf,
 }
 
 impl Default for Programs {
@@ -63,6 +68,7 @@ impl Default for Programs {
             curl: "curl".into(),
             agy: "agy".into(),
             cursor: crate::adapters::cursor::program(),
+            gemini: "gemini".into(),
         }
     }
 }
@@ -75,7 +81,8 @@ pub fn ask_all(
 ) -> Vec<(AgentKind, Result<ModelList, String>)> {
     let handles: Vec<_> = AgentKind::ALL
         .into_iter()
-        .filter(|&agent| credentials::has_login(credentials_dir, agent))
+        // An `acp` agent's model cannot be chosen, so it is not asked.
+        .filter(|&agent| agent != AgentKind::Acp && credentials::has_login(credentials_dir, agent))
         .map(|agent| {
             let (dir, programs) = (credentials_dir.to_path_buf(), programs.clone());
             (agent, thread::spawn(move || ask(agent, &dir, &programs)))
@@ -168,6 +175,17 @@ pub fn ask(
                 .env("NO_OPEN_BROWSER", "1")
                 .arg("models");
             parse_cursor(&run(command, "", &[])?)
+        }
+        AgentKind::Gemini => {
+            let home = crate::adapters::gemini::prepare_home(&credentials_dir.join("gemini"))
+                .map_err(|e| e.to_string())?;
+            let mut command = base_command(&programs.gemini, tmp);
+            harness_platform::home::set_for(&mut command, home.path());
+            command.arg("--list-models");
+            parse_gemini(&run(command, "", &[])?)
+        }
+        AgentKind::Acp => {
+            return Err("the harness cannot choose the model of an acp agent".into());
         }
     };
     if models.is_empty() {
@@ -484,5 +502,20 @@ print {"models":[{"slug":"gpt-x","visibility":"list","supported_reasoning_levels
             expected.push(AgentKind::DshNvidia);
         }
         assert_eq!(asked, expected);
+    }
+
+    #[test]
+    fn gemini_lists_its_models_with_auto_first() {
+        let output = "Available Gemini Models:\n\nauto (Auto)\n  Description:   Let Gemini \
+                      CLI decide (x, y)\n  Context limit: 1 / 2\n\ngemini-2.5-pro \
+                      (gemini-2.5-pro)\n  Context limit: 1 / 2\n";
+
+        let models = parse_gemini(output);
+
+        let ids: Vec<&str> = models.iter().map(|m| m.id.as_str()).collect();
+        assert_eq!(ids, ["auto", "gemini-2.5-pro"]);
+        assert!(models[0].default);
+        assert_eq!(models[0].name.as_deref(), Some("Auto"));
+        assert_eq!(models[1].name, None);
     }
 }

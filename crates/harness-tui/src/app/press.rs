@@ -284,6 +284,18 @@ impl App {
                     .field(tr.t("roles.model_field"), &model),
                 ));
             }
+            Action::EditAcp(command) => {
+                let tr = &self.tr;
+                self.form = Some((
+                    Purpose::AcpCommand,
+                    Form::new(
+                        tr.t("roles.acp_title"),
+                        tr.t("roles.acp_text"),
+                        tr.t("roles.acp_ok"),
+                    )
+                    .field(tr.t("roles.acp_field"), &command),
+                ));
+            }
         }
     }
 }

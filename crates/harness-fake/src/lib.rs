@@ -16,6 +16,7 @@
 //! |---|---|
 //! | `read-stdin` | Reads all of standard input. |
 //! | `read-line` | Reads one line of standard input and forgets it. |
+//! | `save-line FILE` | Reads one line of standard input and saves it. |
 //! | `save-stdin FILE` | Reads all of standard input and saves it. |
 //! | `save-env FILE` | Saves the environment, sorted `NAME=VALUE` lines. |
 //! | `save-args FILE` / `append-args FILE` | Saves the arguments, one per line. |

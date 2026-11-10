@@ -52,6 +52,13 @@ pub fn has_login(dir: &Path, agent: AgentKind) -> bool {
         AgentKind::DshNvidia => load_api_key(dir, Provider::Nvidia).is_ok(),
         AgentKind::Antigravity => dir.join("antigravity/.gemini/antigravity-cli").is_dir(),
         AgentKind::Cursor => dir.join("cursor").join(CURSOR_SIGNED_IN).is_file(),
+        AgentKind::Gemini => dir
+            .join("gemini")
+            .join(crate::adapters::gemini::SETTINGS_DIR)
+            .join(crate::adapters::gemini::LOGIN_FILE)
+            .is_file(),
+        // The agent keeps its own login; the harness cannot see it.
+        AgentKind::Acp => true,
     }
 }
 

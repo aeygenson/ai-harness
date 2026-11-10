@@ -119,6 +119,8 @@ enum Purpose {
     ConnectGitHub(PathBuf),
     /// The model of the role selected on the Roles tab.
     Model,
+    /// The command of the `acp` agent (`[acp]`), from the Roles tab.
+    AcpCommand,
     /// A new skill: its name and description.
     NewSkill,
     /// Delete the project's copy of a built-in skill.
