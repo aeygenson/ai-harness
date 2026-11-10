@@ -89,6 +89,25 @@ impl AgentKind {
         }
     }
 
+    /// Is the agent offered on the screens (Agents tab, role choice, `harness agents`)?
+    ///
+    /// Gemini CLI is hidden: in November 2026 Google stopped serving it on a
+    /// personal Google login ("This client is no longer supported ... migrate to
+    /// Antigravity"), so Antigravity is offered instead. Its adapter stays, and a
+    /// role that already names `gemini` in `harness.toml` still starts it.
+    pub fn is_offered(self) -> bool {
+        match self {
+            AgentKind::Gemini => false,
+            AgentKind::Claude
+            | AgentKind::Codex
+            | AgentKind::Antigravity
+            | AgentKind::Dsh
+            | AgentKind::DshNvidia
+            | AgentKind::Cursor
+            | AgentKind::Acp => true,
+        }
+    }
+
     /// Can the agent load plugins? Only Claude Code and Codex have them.
     pub fn has_plugins(self) -> bool {
         match self {
@@ -199,5 +218,15 @@ mod tests {
             .filter(|a| a.has_plugins())
             .collect();
         assert_eq!(with, [AgentKind::Claude, AgentKind::Codex]);
+    }
+
+    #[test]
+    fn gemini_is_not_offered_but_still_read_from_harness_toml() {
+        let hidden: Vec<AgentKind> = AgentKind::ALL
+            .into_iter()
+            .filter(|a| !a.is_offered())
+            .collect();
+        assert_eq!(hidden, [AgentKind::Gemini]);
+        assert_eq!("gemini".parse::<AgentKind>(), Ok(AgentKind::Gemini));
     }
 }

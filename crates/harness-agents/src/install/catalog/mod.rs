@@ -25,14 +25,30 @@ pub use status::{Action, Status};
 /// How long `--version` may take.
 const VERSION_LIMIT: Duration = Duration::from_secs(10);
 
-/// Checks every agent of the catalog on this computer, all at once.
+/// Checks every offered agent of the catalog on this computer, all at once.
 pub fn check_all(credentials_dir: Option<&Path>) -> Vec<Status> {
     check_with(
-        CATALOG,
+        &offered(CATALOG),
         &harness_platform::program::find,
         &version_of,
         credentials_dir,
     )
+}
+
+/// The entries of `entries` the screens show: all but the agents that are not
+/// offered (see [`AgentKind::is_offered`]). Entries that are not agents a
+/// role can use, such as editors, are always kept.
+fn offered(entries: &[Entry]) -> Vec<Entry> {
+    entries
+        .iter()
+        .filter(|entry| {
+            entry
+                .id
+                .parse::<AgentKind>()
+                .map_or(true, AgentKind::is_offered)
+        })
+        .copied()
+        .collect()
 }
 
 /// The versions of the agents in `agents`, for the steps' manifests; an
@@ -153,6 +169,16 @@ pub fn older(version: &str, min: &str) -> bool {
 mod tests {
     use super::entries::for_npm;
     use super::*;
+
+    #[test]
+    fn the_screens_leave_out_gemini_and_keep_everything_else() {
+        let shown = offered(CATALOG);
+        assert!(shown.iter().all(|e| e.id != "gemini"));
+        assert!(CATALOG.iter().any(|e| e.id == "gemini"));
+        assert_eq!(shown.len(), CATALOG.len() - 1);
+        assert!(shown.iter().any(|e| e.id == "antigravity"));
+        assert!(shown.iter().any(|e| e.id == "zed"));
+    }
 
     #[test]
     fn no_agents_need_no_versions() {

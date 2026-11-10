@@ -10,14 +10,13 @@ use crate::ui::i18n::I18n;
 impl RolesTab {
     /// The rows of the details, in order.
     pub fn rows(&self) -> Vec<Row> {
-        // Only offered agents ready to work, and the one chosen now even if
-        // it is not ready or no longer offered (a `harness.toml` naming `gemini`).
+        // Only offered agents ready to work, and the one chosen now even if it
+        // is not (so a role set to a hidden agent still shows what it uses).
         let chosen = self.choice().0;
         let chosen_hidden = chosen.filter(|agent| !AgentKind::OFFERED.contains(agent));
         let mut rows: Vec<Row> = AgentKind::OFFERED
             .into_iter()
-            .filter(|&a| self.is_ready(a) || chosen == Some(a))
-            .chain(chosen_hidden)
+            .filter(|&a| (a.is_offered() && self.is_ready(a)) || chosen == Some(a))
             .map(Row::Agent)
             .collect();
         if chosen == Some(AgentKind::Acp) {
