@@ -208,9 +208,11 @@ fn login_gemini(dir: &Path, program: &Path) -> Result<()> {
     // In its own folder: started in the user's home, Gemini would offer to
     // trust it and then read the user's own `~/.gemini/settings.json` as the
     // folder's settings (for example a saved choice of an API key).
+    // The desktop variables let it open the browser for «Sign in with Google».
     command
         .env_clear()
         .envs(harness_platform::env::inherited_values())
+        .envs(harness_platform::env::desktop_values())
         .current_dir(&home);
     harness_platform::home::set_for(&mut command, &home);
     let status = command
