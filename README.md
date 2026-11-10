@@ -111,7 +111,7 @@ next. The harness then **trusts, but verifies**:
 | **Full-screen terminal UI** | `harness tui` (Ratatui) with tabs for Tasks, Roles, Skills, MCP, Plugins, Retro, Agents and Projects. Works with mouse and keyboard, in English and Russian, with five colour themes. One main window per computer, plus `harness tui --pin` windows pinned to one project each. |
 | **Skills** | Each role gets built-in instructions that work with any language or framework. Projects keep their own copies and add their own skills, shared by all agents. |
 | **MCP servers and plugins** | Give a role extra tools: MCP servers (local or on the web, with OAuth sign-in) and agent plugins from plugin catalogs. |
-| **Retrospective** | `harness retro` counts what happened across tasks (rounds, rejections, repeated issues, unused skills) without AI, then can ask an agent to propose skill changes that you approve one by one. |
+| **Retrospective** | `harness retro` counts what happened across tasks (rounds, rejections, repeated issues, unused skills) without AI, then can ask an agent to propose skill changes that you approve one by one. It also lists the actions each role was refused; you can let the security role run one more check yourself. |
 | **Drive it from your own AI** | `harness mcp-serve` is an MCP server: connect Claude Code, Codex, Gemini or any agent that speaks MCP, ask what your tasks are doing and why, and let it create, start and stop tasks. Approvals stay yours. |
 | **Agent manager** | Install, update, remove and sign in to agents from the Agents tab. `harness doctor` checks that Git, Node.js and at least one agent are ready. |
 | **Triage** | The Tasks tab's «Triage (t)» button or `harness triage <task>` starts your own Claude Code, Codex or Cursor with a ready playbook: it reads the task's logs and handoffs, names the cause and the next command, and drafts a GitHub issue for a harness bug. It changes nothing until you agree. |
@@ -181,6 +181,7 @@ harness approve task-001             # Developer, Tester and Security take over,
 harness stop task-001                # stop a run in the TUI or another terminal (--now: at once)
 harness status task-001              # where the task is and its history
 harness retro task-001               # what went well and what to improve
+harness allow-command security trivy fs  # let Security run one more check
 ```
 
 Building from source needs Rust: `cargo build --release -p harness-cli`, or run the

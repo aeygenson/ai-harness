@@ -2,6 +2,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use super::refusals;
 use super::usage::Usage;
 use super::{
     stage_text, RepeatedIssue, Return, RoleStats, Scope, SeverityCounts, SkillSetting, SkillUse,
@@ -109,8 +110,17 @@ impl Stats {
             repeated_issues: repeated,
             skills: config.map(|c| skill_uses(c, &used)).unwrap_or_default(),
             usage,
+            refusals: refusals::count(&refused_by_task(tasks)),
         }
     }
+}
+
+/// Each task's id with the actions its roles were refused.
+fn refused_by_task(tasks: &[TaskHistory]) -> Vec<(String, Vec<(Role, String)>)> {
+    tasks
+        .iter()
+        .map(|task| (task.state.task_id.clone(), task.refusals.clone()))
+        .collect()
 }
 
 /// One line per (role, skill): every configured skill and every used one.

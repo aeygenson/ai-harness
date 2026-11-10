@@ -124,7 +124,7 @@ impl RetroTab {
         }
     }
 
-    /// «Generate», «Open», «Choose» and «Apply».
+    /// «Generate», «Open», «Choose», «Apply» and «Allow a command».
     fn draw_buttons(&self, frame: &mut Frame, bottom: Rect, hits: &mut Hits, tr: &I18n) {
         let generating = self.generating.is_some();
         let has_text = self.current().is_some_and(|r| r.retro.is_some());
@@ -154,6 +154,11 @@ impl RetroTab {
                     &apply,
                     ButtonId::Retro(RetroButton::Apply),
                     !self.chosen.is_empty(),
+                ),
+                (
+                    tr.t("retro.allow"),
+                    ButtonId::Retro(RetroButton::Allow),
+                    self.config.is_some(),
                 ),
             ],
         );

@@ -1,12 +1,14 @@
-//! The Retro tab's work: generating a retrospective and applying the proposals
-//! the user accepted.
+//! The Retro tab's work: generating a retrospective, applying the proposals
+//! the user accepted and allowing the refused checks.
 
 use std::fmt::Write as _;
 use std::path::Path;
 
 use harness_core::config::projects::name_of;
+use harness_core::config::save;
 use harness_core::git::{Repo, HARNESS_DIR};
 use harness_core::retro::proposals::FileChange;
+use harness_core::task::handoff::Role;
 
 use crate::tabs::tasks::TasksTab;
 use crate::ui::message::Message;
@@ -100,7 +102,57 @@ impl App {
                     Form::new(tr.t("retro.apply_title"), &text, tr.t("retro.apply_ok")),
                 ));
             }
+            A::Allow => self.ask_allow_command(),
         }
+    }
+
+    /// «Allow a command»: a form with an empty field, unless roles are working.
+    fn ask_allow_command(&mut self) {
+        if self.tasks.as_ref().is_some_and(TasksTab::is_running) {
+            self.message = Some(Message::error(self.tr.t("retro.allow_running")));
+            return;
+        }
+        if self.roles_unsaved() {
+            return;
+        }
+        let tr = &self.tr;
+        self.form = Some((
+            Purpose::AllowCommand,
+            Form::new(
+                tr.t("retro.allow_title"),
+                tr.t("retro.allow_text"),
+                tr.t("retro.allow_ok"),
+            )
+            .field(tr.t("retro.allow_field"), ""),
+        ));
+    }
+
+    /// OK in «Allow a command»: the command the user typed goes into the
+    /// security role's `extra_commands`, checked and committed. It is never
+    /// filled in from the refusals: the agent chose what it tried.
+    pub(crate) fn allow_command(&mut self, command: &str) -> Result<(), String> {
+        let command = command.trim();
+        if command.is_empty() {
+            return Err(self.tr.t("retro.allow_empty").to_string());
+        }
+        let root = self
+            .project
+            .clone()
+            .ok_or_else(|| self.tr.t("retro.allow_no_project").to_string())?;
+        let repo = Repo::open(&root).map_err(|e| e.to_string())?;
+        let changed = save::set_extra_command(&repo, Role::Security, command, true)
+            .map_err(|e| e.to_string())?;
+        let key = if changed {
+            "retro.allowed"
+        } else {
+            "retro.already_allowed"
+        };
+        self.message = Some(Message::info(self.tr.f(key, &[("command", &command)])));
+        // The Roles tab keeps the settings it read; let it read them again.
+        if let Some(roles) = self.roles.as_mut().filter(|r| !r.changed()) {
+            roles.reload();
+        }
+        Ok(())
     }
 
     /// OK in «Make a retrospective»: the agent starts in the background.

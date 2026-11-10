@@ -355,6 +355,29 @@ impl TaskStore {
             .collect())
     }
 
+    /// The roles and texts of the failed attempts' logs, in the same order
+    /// as [`TaskStore::failures`]. A log that cannot be read is skipped.
+    pub fn failure_logs(&self) -> Result<Vec<(Role, String)>, StoreError> {
+        let dir = self.dir.join(FAILURES_DIR);
+        if !dir.exists() {
+            return Ok(Vec::new());
+        }
+        let mut paths = Vec::new();
+        for entry in fs::read_dir(&dir).map_err(|e| io_error(&dir, e))? {
+            paths.push(entry.map_err(|e| io_error(&dir, e))?.path());
+        }
+        paths.sort();
+        Ok(paths
+            .iter()
+            .filter_map(|path| {
+                let (_, role) = parse_failure(&path.file_name()?.to_string_lossy())?;
+                // An agent may print bytes that are not UTF-8; keep the rest.
+                let bytes = fs::read(path).ok()?;
+                Some((role, String::from_utf8_lossy(&bytes).into_owned()))
+            })
+            .collect())
+    }
+
     /// Creates the next numbered step folder, e.g. `round-02/03-tester`.
     fn new_step_dir(&self, round: u32, role: Role) -> Result<PathBuf, StoreError> {
         let round_dir = self.dir.join(format!("round-{round:02}"));

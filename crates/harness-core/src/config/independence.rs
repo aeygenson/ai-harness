@@ -41,6 +41,7 @@ mod tests {
             always_skills: vec![],
             mcp: vec![],
             plugins: vec![],
+            extra_commands: vec![],
         }
     }
 

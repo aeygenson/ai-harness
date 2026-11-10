@@ -11,12 +11,11 @@
 
 use std::path::{Path, PathBuf};
 
+use harness_core::task::commands::{DENIED_FOR_ALL, DENIED_FOR_READERS};
 use harness_core::task::handoff::Role;
 use harness_core::task::permissions::{self, Commands, WriteRule};
 use harness_core::text;
 use serde_json::{json, Value};
-
-use crate::adapters::antigravity::{DENIED_FOR_ALL, DENIED_FOR_READERS};
 
 /// How much of a refused tool's title or command goes into the log.
 const NOTE_CHARS: usize = 300;

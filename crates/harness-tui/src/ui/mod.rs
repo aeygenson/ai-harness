@@ -220,7 +220,7 @@ fn is_primary(id: ButtonId) -> bool {
             | ButtonId::Save
             | ButtonId::UseProject
             | ButtonId::Folder(FolderButton::Choose | FolderButton::CreateFolder)
-            | ButtonId::Retro(RetroButton::Generate | RetroButton::Apply)
+            | ButtonId::Retro(RetroButton::Generate | RetroButton::Apply | RetroButton::Allow)
             | ButtonId::Plugin(PluginButton::OpenCatalog)
             | ButtonId::PluginCatalog(PluginCatalogButton::Add)
             | ButtonId::Mcp(McpButton::OpenCatalog)

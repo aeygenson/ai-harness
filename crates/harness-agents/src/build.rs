@@ -54,6 +54,7 @@ pub fn build_team(config: &Config, project_dir: &Path) -> Result<Team, BuildErro
                 model: settings.model.as_deref(),
                 effort: settings.effort.as_deref(),
                 role,
+                extra_commands: &settings.extra_commands,
             },
             servers.for_role(role),
             plugins.for_role(role),
@@ -79,6 +80,7 @@ pub fn retro_agent(config: &Config) -> Result<AnyAgent, BuildError> {
             model: settings.model.as_deref(),
             effort: settings.effort.as_deref(),
             role: suggest::RULES_OF,
+            extra_commands: &[],
         },
         Vec::new(),
         Vec::new(),
@@ -98,6 +100,9 @@ pub struct AgentChoice<'a> {
     pub effort: Option<&'a str>,
     /// The role whose rules the agent gets.
     pub role: Role,
+    /// The user's extra check commands for this role (`extra_commands`);
+    /// empty for the `[retro]` agent, which only reads.
+    pub extra_commands: &'a [String],
 }
 
 /// Builds the agent `choice` names, with the role's model, effort, MCP
@@ -148,7 +153,8 @@ pub fn build_agent(
 }
 
 /// The settings every agent gets: the role's model and effort from `choice`,
-/// its MCP servers (through the harness's bridge) and plugins, and the time
+/// its MCP servers (through the harness's bridge), plugins and extra
+/// commands (from `choice`), and the time
 /// limit from `harness.toml`.
 fn role_settings(
     config: &Config,
@@ -162,6 +168,9 @@ fn role_settings(
         .with_timeout(Duration::from_secs(config.agent_timeout_minutes * 60))
         .with_mcp_servers(role, crate::launcher::with_bridge(servers, harness))
         .with_plugins(role, plugins);
+    if !choice.extra_commands.is_empty() {
+        settings = settings.with_extra_commands(role, choice.extra_commands.to_vec());
+    }
     if let Some(model) = choice.model {
         settings = settings.with_model(role, model);
     }
@@ -277,7 +286,31 @@ mod tests {
             model: None,
             effort: Some(effort),
             role: Role::Tester,
+            extra_commands: &[],
         }
+    }
+
+    #[test]
+    fn a_roles_extra_commands_reach_its_settings_but_not_the_retro_agent() {
+        let config = Config::parse(harness_core::config::DEFAULT_CONFIG).unwrap();
+        let extra = ["trivy fs".to_string()];
+        let security = AgentChoice {
+            role: Role::Security,
+            extra_commands: &extra,
+            ..choice(AgentKind::Claude, "high")
+        };
+        let settings = role_settings(&config, &security, Path::new("h"), vec![], vec![]);
+        assert_eq!(settings.extra_commands(Role::Security), extra);
+
+        let retro = AgentChoice {
+            role: suggest::RULES_OF,
+            ..choice(AgentKind::Claude, "high")
+        };
+        let settings = role_settings(&config, &retro, Path::new("h"), vec![], vec![]);
+        assert_eq!(
+            settings.extra_commands(Role::Security),
+            Vec::<String>::new()
+        );
     }
 
     #[test]

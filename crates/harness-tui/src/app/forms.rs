@@ -80,6 +80,7 @@ impl App {
                 Ok(())
             }
             Purpose::ApplyProposals(dir, ids) => self.apply_proposals(dir, ids),
+            Purpose::AllowCommand => self.allow_command(form.value(0)),
             Purpose::RunAgentCommand {
                 name,
                 action,

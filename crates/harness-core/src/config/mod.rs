@@ -11,6 +11,10 @@
 //! effort = "high"       # optional: how hard the model thinks (see `crate::models`)
 //! skills = ["write-docs"]  # optional: see `crate::skills`
 //!
+//! [roles.security]
+//! agent = "claude"
+//! extra_commands = ["trivy fs"]  # optional: more checks, see `crate::task::commands`
+//!
 //! [github]              # optional: the project is on GitHub, see `github`
 //! repo = "owner/name"
 //! ```
@@ -36,7 +40,9 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
+use crate::task::commands;
 use crate::task::handoff::Role;
+use crate::task::permissions::Commands;
 use crate::task::scenario::Scenario;
 use crate::task::DEFAULT_MAX_ROUNDS;
 
@@ -102,6 +108,15 @@ agent_timeout_minutes = 30
 #
 # `harness retro <task> --suggest` asks the [retro] agent to read the history
 # and propose skill changes; nothing changes until `harness retro apply`.
+#
+# The security role runs only checks (git diff, cargo audit, npm audit, ...).
+# `harness retro` lists the commands it was refused; to allow one more, write
+#   [roles.security]
+#   extra_commands = ["trivy fs"]
+# or run `harness allow-command security trivy fs`. The role may then run every
+# command that starts with these words. Shells, interpreters, package managers,
+# build tools, git and commands that change files are refused, but that list
+# cannot be complete: allow only scanners you know.
 #
 # A project on GitHub: every new task then works on its own branch,
 # harness/<task>, made from the branch checked out when the task is created.
@@ -210,6 +225,11 @@ pub struct RoleConfig {
     /// Names of the `[plugins.<name>]` this role gets.
     #[serde(default)]
     pub plugins: Vec<String>,
+    /// More commands a checking role (Security) may run, such as "trivy fs",
+    /// on top of the built-in checks. Only Claude Code allows commands one by
+    /// one, so only its rules change; other agents refuse just the denied ones.
+    #[serde(default, deserialize_with = "extra_commands")]
+    pub extra_commands: Vec<String>,
 }
 
 /// One plugin: a folder inside the project, for one kind of agent.
@@ -320,6 +340,16 @@ fn effort<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<String>, D::E
     }
 }
 
+/// Reads `extra_commands`, refusing a command that would allow too much
+/// (see [`commands::check_extra_command`]).
+fn extra_commands<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Vec<String>, D::Error> {
+    let list = Vec::<String>::deserialize(d)?;
+    for command in &list {
+        commands::check_extra_command(command).map_err(serde::de::Error::custom)?;
+    }
+    Ok(list)
+}
+
 fn default_max_rounds() -> u32 {
     DEFAULT_MAX_ROUNDS
 }
@@ -343,6 +373,17 @@ impl Config {
                 "[roles.{role}] is not a role of the {} scenario; its roles are {}",
                 config.scenario,
                 names.join(", ")
+            )));
+        }
+        // Extra commands only make sense for a role limited to checks: a role
+        // without commands must stay without them, and one with any command
+        // needs none.
+        if let Some((role, _)) = config.roles.iter().find(|(role, settings)| {
+            !settings.extra_commands.is_empty() && role.spec().commands != Commands::Checks
+        }) {
+            return Err(serde::de::Error::custom(format!(
+                "[roles.{role}] cannot have extra_commands: only a role that runs checks \
+                 (security) can"
             )));
         }
         Ok(config)
@@ -406,6 +447,22 @@ mod tests {
         }
         assert_eq!(config.retro.unwrap().agent, AgentKind::Claude);
         assert_eq!(Config::parse("").unwrap().retro, None);
+    }
+
+    #[test]
+    fn extra_commands_are_checked_and_only_for_a_checking_role() {
+        let security = "[roles.security]\nagent = \"claude\"\n";
+        let config =
+            Config::parse(&format!("{security}extra_commands = [\"trivy fs\"]\n")).unwrap();
+        assert_eq!(config.roles[&Role::Security].extra_commands, ["trivy fs"]);
+        Config::parse(&format!("{security}extra_commands = [\"git\"]\n")).unwrap_err();
+        let error =
+            Config::parse("[roles.tester]\nagent = \"claude\"\nextra_commands = [\"trivy\"]\n")
+                .unwrap_err();
+        assert!(
+            error.to_string().contains("only a role that runs checks"),
+            "{error}"
+        );
     }
 
     #[test]

@@ -1,5 +1,5 @@
 //! What each role gets from `harness.toml`, the same for every agent: model,
-//! reasoning effort, MCP servers, plugins and the time limit.
+//! reasoning effort, MCP servers, plugins, extra commands and the time limit.
 //!
 //! Every adapter keeps one [`RoleSettings`] and reads it while building its
 //! command, so these settings are stored and looked up in one place.
@@ -26,6 +26,7 @@ pub struct RoleSettings {
     efforts: HashMap<Role, String>,
     mcp: HashMap<Role, Vec<McpServer>>,
     plugins: HashMap<Role, Vec<Plugin>>,
+    extra_commands: HashMap<Role, Vec<String>>,
     timeout: Duration,
 }
 
@@ -36,6 +37,7 @@ impl Default for RoleSettings {
             efforts: HashMap::new(),
             mcp: HashMap::new(),
             plugins: HashMap::new(),
+            extra_commands: HashMap::new(),
             timeout: DEFAULT_TIMEOUT,
         }
     }
@@ -73,6 +75,14 @@ impl RoleSettings {
         self
     }
 
+    /// The user's extra check commands of a role (`extra_commands` in
+    /// harness.toml). Only Claude Code allows commands one by one, so only
+    /// its adapter reads them.
+    pub fn with_extra_commands(mut self, role: Role, commands: Vec<String>) -> Self {
+        self.extra_commands.insert(role, commands);
+        self
+    }
+
     /// The model of `role`, or `None` for the agent's default.
     pub fn model(&self, role: Role) -> Option<&str> {
         self.models.get(&role).map(String::as_str)
@@ -91,6 +101,11 @@ impl RoleSettings {
     /// The plugins of `role` (empty when it has none).
     pub fn plugins(&self, role: Role) -> &[Plugin] {
         self.plugins.get(&role).map_or(&[], Vec::as_slice)
+    }
+
+    /// The extra check commands of `role` (empty when it has none).
+    pub fn extra_commands(&self, role: Role) -> &[String] {
+        self.extra_commands.get(&role).map_or(&[], Vec::as_slice)
     }
 
     /// How long one role may run.

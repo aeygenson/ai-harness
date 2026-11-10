@@ -17,6 +17,7 @@ impl Stats {
         self.issues_markdown(&mut md);
         self.skills_markdown(&mut md);
         self.usage_markdown(&mut md);
+        self.refusals_markdown(&mut md);
         md
     }
 
@@ -181,6 +182,39 @@ impl Stats {
              steps of other agents are not counted.\n",
         );
     }
+
+    /// The «Refused actions» table: what the roles wanted to do but were not
+    /// allowed. Nothing is suggested from it: the agent chose what it tried.
+    fn refusals_markdown(&self, md: &mut String) {
+        md.push_str("\n## Refused actions\n\n");
+        if self.refusals.is_empty() {
+            md.push_str("No role was refused an action.\n");
+            return;
+        }
+        md.push_str("| Role | Action | Times | Tasks |\n");
+        md.push_str("|---|---|---|---|\n");
+        for r in &self.refusals {
+            let _ = writeln!(
+                md,
+                "| {} | {} | {} | {} |",
+                r.role.as_str(),
+                table_cell(&r.action),
+                r.count,
+                r.tasks.join(", ")
+            );
+        }
+        md.push_str(
+            "\nOnly Claude Code, Antigravity and ACP agents report refused actions. \
+             The agent chose what it tried, so read each one before you allow \
+             anything. A check the security role needs can be allowed with \
+             `harness allow-command security <command>` (Claude Code only).\n",
+        );
+    }
+}
+
+/// `text` safe inside a Markdown table cell: a `|` would start a new column.
+fn table_cell(text: &str) -> String {
+    text.replace('|', "\\|")
 }
 
 /// `$0.25`, or `—` when the agent did not report a cost.

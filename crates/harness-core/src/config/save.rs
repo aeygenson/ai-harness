@@ -5,12 +5,15 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use crate::config::edit::{self, EditError};
 use crate::config::{Config, CONFIG_FILE};
 use crate::git::{GitError, Repo, HARNESS_DIR};
 use crate::mcp::{McpError, McpServers};
 use crate::plugins::{PluginError, Plugins};
 use crate::secret::Secret;
 use crate::skills::{SkillError, Skills};
+use crate::task::handoff::Role;
+use crate::task::run_lock::{self, RunLockError};
 
 /// Why changed settings were not saved; the old file then stays as it was.
 #[derive(Debug, thiserror::Error)]
@@ -39,6 +42,15 @@ pub enum SettingsError {
     /// Committing the changed file failed.
     #[error(transparent)]
     Git(#[from] GitError),
+    /// The change could not be made to the text of harness.toml.
+    #[error(transparent)]
+    Edit(#[from] EditError),
+    /// A role is working in this project, so its permissions stay as they are.
+    #[error("{0} is running; change the permissions when it stops")]
+    TaskRunning(String),
+    /// Whether a role is working could not be found out.
+    #[error(transparent)]
+    RunLock(#[from] RunLockError),
 }
 
 /// Checks `text` as the settings of the project in `project_dir`. Secrets of
@@ -70,12 +82,41 @@ pub fn save(repo: &Repo, text: &str) -> Result<bool, SettingsError> {
     Ok(repo.commit_paths(&[&path], "harness: settings")?)
 }
 
+/// Allows `command` to `role` (adds it to `extra_commands`), or with
+/// `allow` false takes it away, then checks, writes and commits harness.toml.
+/// Returns false if nothing changed. Used by `harness allow-command` and
+/// the TUI's Retro tab.
+pub fn set_extra_command(
+    repo: &Repo,
+    role: Role,
+    command: &str,
+    allow: bool,
+) -> Result<bool, SettingsError> {
+    // A role that is working keeps the rights it started with; the commit
+    // would also land in the middle of its work.
+    if let Some(working) = run_lock::working(repo)? {
+        return Err(SettingsError::TaskRunning(working.task));
+    }
+    let text = read_config(repo)?;
+    let changed = if allow {
+        edit::add_extra_command(&text, role, command)?
+    } else {
+        edit::remove_extra_command(&text, role, command)?
+    };
+    save(repo, &changed)
+}
+
+/// The text of the project's `harness.toml`.
+fn read_config(repo: &Repo) -> Result<String, SettingsError> {
+    let path = repo.root().join(HARNESS_DIR).join(CONFIG_FILE);
+    fs::read_to_string(&path).map_err(|source| SettingsError::Io { path, source })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::config::projects;
     use crate::config::{AgentKind, DEFAULT_CONFIG};
-    use crate::task::handoff::Role;
 
     #[test]
     fn only_settings_that_pass_the_checks_are_saved() {
@@ -107,5 +148,44 @@ mod tests {
         let config = Config::load(&dir.path().join(HARNESS_DIR)).unwrap();
         assert_eq!(config.roles[&Role::Tester].agent, AgentKind::Codex);
         assert!(repo.changed_files().unwrap().is_empty(), "committed");
+    }
+
+    #[test]
+    fn an_extra_command_is_allowed_committed_and_taken_back() {
+        let dir = tempfile::tempdir().unwrap();
+        projects::init(dir.path()).unwrap();
+        let repo = Repo::open(dir.path()).unwrap();
+        let harness = dir.path().join(HARNESS_DIR);
+
+        assert!(set_extra_command(&repo, Role::Security, "trivy fs", true).unwrap());
+        let config = Config::load(&harness).unwrap();
+        assert_eq!(config.roles[&Role::Security].extra_commands, ["trivy fs"]);
+        assert!(repo.changed_files().unwrap().is_empty(), "committed");
+
+        // A command that would allow too much is refused; the file stays.
+        set_extra_command(&repo, Role::Security, "bash", true).unwrap_err();
+        assert!(set_extra_command(&repo, Role::Security, "trivy fs", false).unwrap());
+        let config = Config::load(&harness).unwrap();
+        assert_eq!(
+            config.roles[&Role::Security].extra_commands,
+            Vec::<String>::new()
+        );
+    }
+
+    #[test]
+    fn no_command_is_allowed_while_a_task_runs() {
+        let dir = tempfile::tempdir().unwrap();
+        projects::init(dir.path()).unwrap();
+        let repo = Repo::open(dir.path()).unwrap();
+        let mut lock = run_lock::RunLock::hold(&repo).unwrap();
+        lock.set_task("task-007").unwrap();
+
+        let error = set_extra_command(&repo, Role::Security, "trivy fs", true).unwrap_err();
+        assert!(matches!(error, SettingsError::TaskRunning(ref task) if task == "task-007"));
+        let config = Config::load(&dir.path().join(HARNESS_DIR)).unwrap();
+        assert_eq!(
+            config.roles[&Role::Security].extra_commands,
+            Vec::<String>::new()
+        );
     }
 }
