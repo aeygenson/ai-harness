@@ -44,7 +44,7 @@ impl Status {
     /// one, nothing for a [`host_only`](Status::host_only) one. With the command for
     /// this computer, if the maker gives one.
     pub fn action(&self) -> Option<(Action, Option<String>)> {
-        if self.host_only() {
+        if self.host_only() || self.entry.is_any_acp() {
             None
         } else if self.installed() {
             let command = match (self.entry.npm_package(), self.npm_place()) {

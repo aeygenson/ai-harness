@@ -635,6 +635,15 @@ about_grok = "xAI's coding agent. Without a window it needs an xAI API key (paid
 about_kiro = "Amazon's agent, mostly with Claude models. Running without a window needs Kiro Pro or higher."
 about_vibe = "Mistral's agent with Devstral models, included in Vibe Pro. Check that it runs without a window."
 about_opencode = "An open-source agent for many models: open models in OpenCode Go, or your own keys."
+about_acp = """
+Not one program: any agent that speaks ACP (Agent Client Protocol), for example OpenCode (`opencode acp`).
+
+How to connect it:
+1. Install the agent and sign in with its own command (the harness keeps no login for it).
+2. Roles tab: pick a role, choose the agent «acp».
+3. Type the command that starts it in ACP mode, for example `opencode acp`, and Save.
+
+The agent picks its own model. One command for every role with acp."""
 host_only = "{host} is installed, but the harness cannot run this agent yet."
 run_install = "Install"
 run_update = "Update"

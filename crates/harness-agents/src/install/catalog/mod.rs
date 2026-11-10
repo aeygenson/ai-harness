@@ -89,7 +89,9 @@ pub fn check_with(
                         Some(Err(error)) => (None, Some(error)),
                         None => (None, None),
                     };
-                    let login = entry.id.parse::<AgentKind>().ok().map(|agent| {
+                    // «Any ACP agent» has no login of its own to look for.
+                    let agent = entry.id.parse::<AgentKind>().ok();
+                    let login = agent.filter(|_| !entry.is_any_acp()).map(|agent| {
                         credentials_dir.is_some_and(|dir| credentials::has_login(dir, agent))
                     });
                     Status {
@@ -188,19 +190,36 @@ mod tests {
     use std::fs;
 
     #[test]
+    fn any_acp_agent_has_no_program_and_no_login_to_look_for() {
+        let creds = tempfile::tempdir().unwrap();
+        let acp: Vec<Entry> = CATALOG.iter().filter(|e| e.is_any_acp()).copied().collect();
+        let statuses = check_with(
+            &acp,
+            &|_| Some(PathBuf::from("/bin/x")),
+            &|_| Ok("1.0".into()),
+            Some(creds.path()),
+        );
+        assert_eq!(statuses.len(), 1);
+        assert_eq!(statuses[0].login, None);
+        assert_eq!(statuses[0].path, None);
+        assert_eq!(statuses[0].action(), None);
+    }
+
+    #[test]
     fn every_agent_the_harness_runs_is_in_the_catalog_once() {
         for agent in AgentKind::ALL {
             let count = CATALOG.iter().filter(|e| e.id == agent.as_str()).count();
-            // An `acp` agent is whatever program the user names in `[acp]`.
-            let wanted = usize::from(agent != AgentKind::Acp);
-            assert_eq!(count, wanted, "{agent}");
+            assert_eq!(count, 1, "{agent}");
         }
         let ids: HashSet<_> = CATALOG.iter().map(|e| e.id).collect();
         assert_eq!(ids.len(), CATALOG.len());
         // The ones the harness runs come first.
         let first_other = CATALOG.iter().position(|e| !e.runs()).unwrap();
         assert!(CATALOG[first_other..].iter().all(|e| !e.runs()));
-        assert!(CATALOG.iter().all(|e| !e.programs.is_empty()));
+        // Only «Any ACP agent» has no program of its own.
+        assert!(CATALOG
+            .iter()
+            .all(|e| e.programs.is_empty() == e.is_any_acp()));
     }
 
     #[test]

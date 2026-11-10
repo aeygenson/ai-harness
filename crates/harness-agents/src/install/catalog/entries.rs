@@ -75,6 +75,12 @@ pub struct Entry {
 }
 
 impl Entry {
+    /// It stands for any agent that speaks ACP: there is no program to find,
+    /// install or sign in to; the Roles tab takes its command.
+    pub fn is_any_acp(&self) -> bool {
+        self.id == AgentKind::Acp.as_str()
+    }
+
     /// The harness can run it: it is one of the agents of `harness.toml`.
     pub fn runs(&self) -> bool {
         self.id.parse::<AgentKind>().is_ok()
@@ -212,6 +218,20 @@ pub const CATALOG: &[Entry] = &[
         update: CURSOR_INSTALL,
         remove: Commands::NONE,
         site: "https://cursor.com/docs/cli/overview",
+    },
+    // Not one program: any agent that speaks ACP, named on the Roles tab.
+    Entry {
+        id: "acp",
+        name: "Any ACP agent",
+        vendor: "Agent Client Protocol",
+        programs: &[],
+        inside: None,
+        plan: "the agent's own",
+        min_version: None,
+        install: Commands::NONE,
+        update: Commands::NONE,
+        remove: Commands::NONE,
+        site: "https://agentclientprotocol.com/overview/agents",
     },
     Entry {
         id: "claude+glm",

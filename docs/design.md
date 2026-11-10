@@ -749,6 +749,11 @@ individuals … migrate to Antigravity» (`IneligibleTierError`, `UNSUPPORTED_CL
 роль, у которой в `harness.toml` уже записан `gemini`, по-прежнему его запускает и видна на
 вкладке «Роли», `harness login gemini` тоже работает.
 
+На вкладке «Агенты» есть строка «Any ACP agent» (знак `·`): своей программы у неё нет,
+поэтому ни «Установить», ни «Войти» для неё не предлагаются, а справа написано, как его
+подключить (те же шаги, что ниже). `harness agents` печатает то же, `harness doctor` её не
+проверяет.
+
 **Как подключить агента ACP** (подробно для людей и для Claude Code или Codex через
 `harness mcp-serve`):
 

@@ -227,14 +227,17 @@ impl App {
         if failed {
             self.message = Some(Message::error(self.tr.t("agents.check_stopped")));
         } else if self.tab == Tab::Agents && self.agents.job.is_none() {
-            let installed = self.agents.statuses.iter().filter(|s| s.installed());
-            let text = self.tr.f(
-                "agents.checked",
-                &[
-                    ("count", &installed.count()),
-                    ("all", &self.agents.statuses.len()),
-                ],
-            );
+            // «Any ACP agent» is no program, so it is not counted.
+            let programs = self
+                .agents
+                .statuses
+                .iter()
+                .filter(|s| !s.entry.is_any_acp());
+            let all = programs.clone().count();
+            let installed = programs.filter(|s| s.installed()).count();
+            let text = self
+                .tr
+                .f("agents.checked", &[("count", &installed), ("all", &all)]);
             self.message = Some(Message::info(text));
         }
     }
