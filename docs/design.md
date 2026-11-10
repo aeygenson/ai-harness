@@ -334,7 +334,7 @@ MCP-серверы для каждой роли — раздел 5.5 (этап 6
 | `dsh` | DeepSeek Harness, собственный агент DeepSeek | тот же ключ API DeepSeek | раздел 5.4a |
 | `dsh+nvidia` | тот же DeepSeek Harness с моделями NVIDIA (build.nvidia.com) | бесплатный ключ API NVIDIA | раздел 5.4a |
 | `cursor` | Cursor CLI (`agent`, раньше `cursor-agent`) | подписка Cursor (у Лизы — рабочее место) | раздел 5.4b |
-| `gemini` | Gemini CLI (`gemini --acp`) | вход Google (бесплатно) / Google AI Pro | раздел 5.4c |
+| `gemini` | Gemini CLI (`gemini --acp`), скрыт с экранов | вход Google (бесплатно) / Google AI Pro | раздел 5.4c |
 | `acp` | любой агент с протоколом ACP, команда в `[acp]` | как у самого агента | раздел 5.4c |
 | `mock` | заранее записанный «агент» | бесплатно | для тестов всего цикла без интернета |
 
@@ -738,6 +738,14 @@ OpenCode, Goose и другие. Харнесс — клиент протоко�
 | Gemini | `gemini --acp --approval-mode default [--model m]`; временный `HOME` с копией входа Google и нашим `settings.json` (без MCP, расширений и истории Лизы), удаляется после роли. Модели: `gemini --list-models` (по умолчанию `auto`) |
 | `acp` | команда из `[acp]` в `harness.toml` (задаётся на вкладке «Роли», когда выбран агент `acp`); свой вход, свои настройки и модель агента, выбрать модель харнесс не может |
 | Ограничения | проверка команд — не разбор оболочки: хитрую строку (`git -c x=y push` через переменную, другой язык) она пропустит, а `git push` уходит с машины; агент может не спрашивать разрешения (тогда остаются только проверки `git status` и растяжка из раздела 6); `acp` видит личные настройки агента Лизы; команда в `[acp]` делится по пробелам, без кавычек; обновлённый токен Google из временного `HOME` обратно не сохраняется, при долгой работе может понадобиться войти снова; Gemini читает и `.gemini/settings.json` самого проекта (там можно разрешить инструменты без вопроса), как Cursor читает `.cursor/`; если харнесс упадёт, копия входа может остаться во временной папке |
+
+**Gemini скрыт (10.11.2026).** Живая проверка: Google отвечает на вход Google Лизы
+«This client is no longer supported for Gemini Code Assist for individuals … migrate to
+Antigravity» (`IneligibleTierError`, `UNSUPPORTED_CLIENT`, уровень `free-tier`). Поэтому
+`AgentKind::is_offered` прячет `gemini` с вкладки «Агенты», из выбора агента на вкладке
+«Роли», из `harness agents` и `harness doctor`; вместо него — Antigravity. Код адаптера
+остаётся: роль, у которой в `harness.toml` уже записан `gemini`, по-прежнему его запускает
+и видна на вкладке «Роли», `harness login gemini` тоже работает.
 
 Copilot CLI пока остаётся в каталоге «не реализовано».
 
