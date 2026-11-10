@@ -63,9 +63,9 @@ agent_timeout_minutes = 30
 # "antigravity" (Antigravity CLI), "dsh" (DeepSeek Harness, DeepSeek's own
 # agent; the Agents tab («Sign in») saves the API key) or "dsh+nvidia" (the
 # same agent with NVIDIA's free models from build.nvidia.com, with an NVIDIA key)
-# or "cursor" (Cursor CLI; sign in on the Agents tab) or "gemini" (Gemini CLI,
-# signed in with Google on the Agents tab) or "acp" (any agent that speaks the
-# Agent Client Protocol, with its own login and model; its command is set once:
+# or "cursor" (Cursor CLI; sign in on the Agents tab) or "acp" (any agent that
+# speaks the Agent Client Protocol, such as OpenCode, signed in with its own
+# command; it uses its own model; its command is set once, also on the Roles tab:
 #   [acp]
 #   command = "opencode"
 #   args = ["acp"]

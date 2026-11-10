@@ -53,7 +53,13 @@ branches and commits in the project folder: do not change files there yourself m
 Decisions on a waiting task (decide: approve a design, answer a role, send work back; \
 finish_task: accept the result) are the person's: make them only when they told you what \
 to decide, and pass their own words to finish_task. Pass seen_steps and seen_stage from task_status, so a \
-decision never lands on a task that has moved on.";
+decision never lands on a task that has moved on. Agents a role can use (read_settings shows \
+which role has which): claude, codex, antigravity (Google's models), dsh, dsh+nvidia, cursor, \
+and acp: any agent that speaks the Agent Client Protocol, such as OpenCode, started with the \
+command in [acp] of harness.toml (for example command = \"opencode\", args = [\"acp\"]); it \
+uses its own login and model. Gemini CLI is hidden: Google no longer serves it with a \
+personal login, so suggest antigravity instead. This server does not change settings: the \
+person picks agents on the Roles tab of `harness tui` or in harness.toml.";
 
 /// The MCP server for one project.
 #[derive(Debug, Clone)]

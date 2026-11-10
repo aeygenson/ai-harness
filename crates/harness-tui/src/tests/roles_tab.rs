@@ -83,6 +83,33 @@ fn roles_get_agents_models_and_skills_and_are_saved() {
 }
 
 #[test]
+fn gemini_is_not_offered_but_a_role_already_on_it_shows_it() {
+    let env = Env::new();
+    let root = env.path("test");
+    project(&root);
+    let mut app = env.app(&root);
+    click(&mut app, "2 Roles");
+    click(&mut app, "architect  claude");
+    let text = screen_of_size(&mut app, 120, 40);
+    assert!(text.contains("( ) antigravity"), "{text}");
+    assert!(!text.contains("gemini"), "{text}");
+
+    // A harness.toml written before Gemini was hidden keeps working.
+    let path = root.join(".harness/harness.toml");
+    let toml = fs::read_to_string(&path).unwrap().replacen(
+        "[roles.architect]\nagent = \"claude\"",
+        "[roles.architect]\nagent = \"gemini\"",
+        1,
+    );
+    fs::write(&path, toml).unwrap();
+    let mut app = env.app(&root);
+    click(&mut app, "2 Roles");
+    click(&mut app, "architect  gemini");
+    let text = screen_of_size(&mut app, 120, 40);
+    assert!(text.contains("(•) gemini"), "{text}");
+}
+
+#[test]
 fn an_acp_agent_gets_its_command_on_the_roles_tab() {
     let env = Env::new();
     let root = env.path("test");

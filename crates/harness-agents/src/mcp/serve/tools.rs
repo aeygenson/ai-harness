@@ -86,7 +86,7 @@ pub(super) fn definitions() -> Value {
         ),
         tool(
             "read_settings",
-            "The project's harness.toml: roles, agents, models, skills and MCP servers. It holds no secret values.",
+            "The project's harness.toml: roles, agents, models, skills, MCP servers and [acp] (the command of an `acp` agent). It holds no secret values.",
             &json!({}),
             &[],
         ),
