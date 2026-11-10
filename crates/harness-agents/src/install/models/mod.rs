@@ -79,8 +79,9 @@ pub fn ask_all(
     credentials_dir: &Path,
     programs: &Programs,
 ) -> Vec<(AgentKind, Result<ModelList, String>)> {
-    let handles: Vec<_> = AgentKind::OFFERED
+    let handles: Vec<_> = AgentKind::ALL
         .into_iter()
+        .filter(|agent| agent.is_offered())
         // An `acp` agent's model cannot be chosen, so it is not asked.
         .filter(|&agent| agent != AgentKind::Acp && credentials::has_login(credentials_dir, agent))
         .map(|agent| {

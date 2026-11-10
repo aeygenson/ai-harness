@@ -13,8 +13,7 @@ impl RolesTab {
         // Only offered agents ready to work, and the one chosen now even if it
         // is not (so a role set to a hidden agent still shows what it uses).
         let chosen = self.choice().0;
-        let chosen_hidden = chosen.filter(|agent| !AgentKind::OFFERED.contains(agent));
-        let mut rows: Vec<Row> = AgentKind::OFFERED
+        let mut rows: Vec<Row> = AgentKind::ALL
             .into_iter()
             .filter(|&a| (a.is_offered() && self.is_ready(a)) || chosen == Some(a))
             .map(Row::Agent)

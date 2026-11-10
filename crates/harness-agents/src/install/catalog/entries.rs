@@ -89,6 +89,7 @@ impl Entry {
 
 pub(super) const NPM_CODEX: &str = "npm install -g @openai/codex@latest";
 pub(super) const NPM_DSH: &str = "npm install -g @deepseek-ai/dsh@latest";
+pub(super) const NPM_GEMINI: &str = "npm install -g @google/gemini-cli@latest";
 pub(super) const CLAUDE_INSTALL: Commands = Commands {
     unix: Some("curl -fsSL https://claude.ai/install.sh | bash"),
     windows: Some("irm https://claude.ai/install.ps1 | iex"),
@@ -158,6 +159,19 @@ pub const CATALOG: &[Entry] = &[
         update: AGY_INSTALL,
         remove: Commands::NONE,
         site: "https://antigravity.google/docs/cli/install",
+    },
+    Entry {
+        id: "gemini",
+        name: "Gemini CLI",
+        vendor: "Google",
+        programs: &["gemini"],
+        inside: None,
+        plan: "Google login (free tier) / Google AI Pro / Ultra",
+        min_version: Some("0.67.0"),
+        install: Commands::both(NPM_GEMINI),
+        update: Commands::both(NPM_GEMINI),
+        remove: Commands::NONE,
+        site: "https://github.com/google-gemini/gemini-cli",
     },
     Entry {
         id: "dsh",

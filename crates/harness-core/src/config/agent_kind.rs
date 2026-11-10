@@ -46,20 +46,6 @@ impl AgentKind {
         AgentKind::Acp,
     ];
 
-    /// The agents the screens offer: [`AgentKind::ALL`] without Gemini CLI.
-    /// Google no longer serves Gemini CLI with a personal Google login
-    /// (checked live 2026-11-10: `UNSUPPORTED_CLIENT`) and points to
-    /// Antigravity instead. A `harness.toml` that names `gemini` still runs it.
-    pub const OFFERED: [AgentKind; 7] = [
-        AgentKind::Claude,
-        AgentKind::Codex,
-        AgentKind::Antigravity,
-        AgentKind::Dsh,
-        AgentKind::DshNvidia,
-        AgentKind::Cursor,
-        AgentKind::Acp,
-    ];
-
     /// The name as written in `harness.toml`, e.g. `"codex"`.
     pub const fn as_str(self) -> &'static str {
         match self {

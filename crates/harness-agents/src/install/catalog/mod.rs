@@ -189,7 +189,7 @@ mod tests {
 
     #[test]
     fn every_agent_the_harness_runs_is_in_the_catalog_once() {
-        for agent in AgentKind::OFFERED {
+        for agent in AgentKind::ALL {
             let count = CATALOG.iter().filter(|e| e.id == agent.as_str()).count();
             // An `acp` agent is whatever program the user names in `[acp]`.
             let wanted = usize::from(agent != AgentKind::Acp);

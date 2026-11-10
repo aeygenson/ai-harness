@@ -137,32 +137,6 @@ fn an_acp_agent_gets_its_command_on_the_roles_tab() {
 }
 
 #[test]
-fn gemini_is_offered_no_more_but_still_shown_where_it_is_chosen() {
-    let env = Env::new();
-    let root = env.path("test");
-    project(&root);
-    let mut app = env.app(&root);
-    click(&mut app, "2 Roles");
-    let text = screen_of_size(&mut app, 120, 40);
-    assert!(!text.contains("gemini"), "{text}");
-    assert!(text.contains("( ) acp"), "{text}");
-
-    // A harness.toml written before still names it: the role shows it.
-    let path = root.join(".harness/harness.toml");
-    let file = fs::read_to_string(&path).unwrap();
-    let file = file.replacen(
-        "[roles.developer]\nagent = \"claude\"",
-        "[roles.developer]\nagent = \"gemini\"",
-        1,
-    );
-    fs::write(&path, file).unwrap();
-    let mut app = env.app(&root);
-    click(&mut app, "2 Roles");
-    click(&mut app, "developer  gemini");
-    assert!(screen_of_size(&mut app, 120, 40).contains("(•) gemini"));
-}
-
-#[test]
 fn settings_that_fail_the_checks_are_not_saved() {
     let env = Env::new();
     let root = env.path("test");
