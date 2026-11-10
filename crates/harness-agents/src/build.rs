@@ -16,7 +16,7 @@ use crate::adapters::dsh::Provider;
 use crate::install::catalog;
 use crate::install::credentials::{self, Secret};
 use crate::role_settings::RoleSettings;
-use crate::{Antigravity, AnyAgent, ClaudeCode, Codex, Cursor, Dsh, Team};
+use crate::{Acp, Antigravity, AnyAgent, ClaudeCode, Codex, Cursor, Dsh, Gemini, Team};
 
 /// Why an agent cannot be built, in words for the user: a missing login or a
 /// broken setting.
@@ -138,6 +138,17 @@ pub fn build_agent(
             cursor_login(&dir)?;
             Ok(AnyAgent::Cursor(Cursor::new(settings)))
         }
+        AgentKind::Gemini => Ok(AnyAgent::Gemini(Gemini::new(gemini_login(&dir)?, settings))),
+        AgentKind::Acp => {
+            let Some(acp) = &config.acp else {
+                return Err(problem(format!(
+                    "{} uses agent \"acp\", but harness.toml has no [acp] section; add\n\
+                     [acp]\ncommand = \"opencode\"\nargs = [\"acp\"]",
+                    choice.who
+                )));
+            };
+            Ok(AnyAgent::Acp(Acp::new(acp, settings)))
+        }
     }
 }
 
@@ -195,6 +206,17 @@ fn antigravity_login(dir: &Path) -> Result<PathBuf, BuildError> {
     } else {
         Err(problem(
             "no Antigravity login saved; sign in on the Agents tab first",
+        ))
+    }
+}
+
+/// The `HOME` Gemini CLI was signed in with.
+fn gemini_login(dir: &Path) -> Result<PathBuf, BuildError> {
+    if credentials::has_login(dir, AgentKind::Gemini) {
+        Ok(dir.join("gemini"))
+    } else {
+        Err(problem(
+            "no Gemini login saved; sign in on the Agents tab first",
         ))
     }
 }

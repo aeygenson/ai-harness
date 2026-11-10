@@ -12,7 +12,7 @@
   <b>A conductor for a team of AI coding agents.</b><br>
   It leads a task through Architect, Developer, Tester and Security roles,<br>
   with the Architect checking the result against its own design,<br>
-  each played by a real console agent: Claude Code, Codex CLI, Antigravity CLI, DeepSeek Harness or Cursor CLI<br>
+  each played by a real console agent: Claude Code, Codex CLI, Antigravity CLI, DeepSeek Harness, Cursor CLI, Gemini CLI or any ACP agent<br>
   (with DeepSeek's models or NVIDIA's free ones).
 </p>
 
@@ -107,7 +107,7 @@ next. The harness then **trusts, but verifies**:
 
 | | |
 |---|---|
-| **Five agents, one interface** | Claude Code, OpenAI Codex CLI, Google Antigravity CLI, DeepSeek Harness (with DeepSeek's API or NVIDIA's free models) and Cursor CLI, behind one Rust trait (plus a mock agent for tests). Choose an agent, model and effort level per role, per project. |
+| **Seven agents, one interface** | Claude Code, OpenAI Codex CLI, Google Antigravity CLI, DeepSeek Harness (with DeepSeek's API or NVIDIA's free models), Cursor CLI, Gemini CLI and any agent that speaks ACP (Agent Client Protocol, for example OpenCode), behind one Rust trait (plus a mock agent for tests). Choose an agent, model and effort level per role, per project. |
 | **Full-screen terminal UI** | `harness tui` (Ratatui) with tabs for Tasks, Roles, Skills, MCP, Plugins, Retro, Agents and Projects. Works with mouse and keyboard, in English and Russian, with five colour themes. One main window per computer, plus `harness tui --pin` windows pinned to one project each. |
 | **Skills** | Each role gets built-in instructions that work with any language or framework. Projects keep their own copies and add their own skills, shared by all agents. |
 | **MCP servers and plugins** | Give a role extra tools: MCP servers (local or on the web, with OAuth sign-in) and agent plugins from plugin catalogs. |
@@ -247,6 +247,6 @@ and checks keep it honest, and a person stays in charge of the decisions that ma
 
 ## Status
 
-Version 0.10.0. The core flow, five agents (Cursor CLI is new and not yet tried live), the TUI, MCP, plugins, retrospectives and the
+Version 0.10.0. The core flow, seven agents (Cursor CLI, Gemini CLI and the ACP agent are new and not yet tried live), the TUI, MCP, plugins, retrospectives and the
 installers all work and are used on Linux. macOS and Windows pass CI; live testing on
 those systems is in progress.

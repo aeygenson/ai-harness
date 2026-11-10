@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 
 use harness_core::config;
 use harness_core::config::{
-    AgentKind, Config, McpConfig, PluginConfig, RetroConfig, RoleConfig, CONFIG_FILE,
+    AcpConfig, AgentKind, Config, McpConfig, PluginConfig, RetroConfig, RoleConfig, CONFIG_FILE,
 };
 use harness_core::git::{Repo, HARNESS_DIR};
 use harness_core::models::{self, ModelList};
@@ -31,6 +31,8 @@ pub enum Row {
     OtherModel,
     /// The effort level: a click moves to the next one.
     Effort,
+    /// The command that starts the `acp` agent (`[acp]`), typed in a form.
+    AcpCommand,
     Skill(String),
     Mcp(String),
     Plugin(String),
@@ -42,6 +44,8 @@ pub enum Action {
     None,
     /// Ask for the model in a form; the current one is given.
     EditModel(String),
+    /// Ask for the `acp` agent's command in a form; the current one is given.
+    EditAcp(String),
     /// Show this message.
     Say(String),
 }
@@ -72,6 +76,8 @@ pub struct RolesTab {
     /// The settings with the changes not saved yet.
     pub(super) roles: BTreeMap<Role, RoleConfig>,
     pub(super) retro: Option<RetroConfig>,
+    /// `[acp]` with the changes not saved yet.
+    pub(super) acp: Option<AcpConfig>,
     pub(super) skills: Vec<SkillFile>,
     /// The agents installed with a saved login, from the Agents tab's check;
     /// `None` until it has answered, then all agents are offered.
@@ -95,6 +101,7 @@ impl RolesTab {
             saved: Config::parse("").unwrap_or_else(|_| unreachable!("an empty config is valid")),
             roles: BTreeMap::new(),
             retro: None,
+            acp: None,
             skills: Vec::new(),
             ready: None,
             selected: 0,
@@ -121,6 +128,7 @@ impl RolesTab {
             Ok((text, config)) => {
                 self.roles = config.roles.clone();
                 self.retro = config.retro.clone();
+                self.acp = config.acp.clone();
                 self.text = text;
                 self.saved = config;
             }
@@ -136,11 +144,15 @@ impl RolesTab {
         self.row = self.row.min(self.rows().len().saturating_sub(1));
     }
 
-    /// The agent can work: installed with a login, or not checked yet.
+    /// The agent can work: installed with a login, or not checked yet. The
+    /// `acp` agent is the user's own program, which the Agents tab does not
+    /// check, so it is always offered.
     pub(super) fn is_ready(&self, agent: AgentKind) -> bool {
-        self.ready
-            .as_ref()
-            .is_none_or(|ready| ready.contains(&agent))
+        agent == AgentKind::Acp
+            || self
+                .ready
+                .as_ref()
+                .is_none_or(|ready| ready.contains(&agent))
     }
 
     /// Reads the saved model lists again (after «Refresh models»).
@@ -162,7 +174,9 @@ impl RolesTab {
 
     /// Are there changes not saved yet?
     pub fn changed(&self) -> bool {
-        self.roles != self.saved.roles || self.retro != self.saved.retro
+        self.roles != self.saved.roles
+            || self.retro != self.saved.retro
+            || self.acp != self.saved.acp
     }
 
     /// The AI roles of the project's scenario, in the order of the flow.
@@ -258,6 +272,27 @@ impl RolesTab {
     pub fn undo(&mut self) {
         self.roles = self.saved.roles.clone();
         self.retro = self.saved.retro.clone();
+        self.acp = self.saved.acp.clone();
+    }
+
+    /// The `acp` agent's command as one line: the program and its arguments.
+    pub(super) fn acp_line(&self) -> Option<String> {
+        self.acp.as_ref().map(|acp| {
+            let mut words = vec![acp.command.clone()];
+            words.extend(acp.args.iter().cloned());
+            words.join(" ")
+        })
+    }
+
+    /// Sets the `acp` agent's command from one typed line: the first word is
+    /// the program, the others its arguments (no quotes: a word with a space
+    /// is not possible here). An empty line removes `[acp]`.
+    pub fn set_acp_command(&mut self, line: &str) {
+        let mut words = line.split_whitespace().map(str::to_string);
+        self.acp = words.next().map(|command| AcpConfig {
+            command,
+            args: words.collect(),
+        });
     }
 
     /// Checks, writes and commits the changes. The error is shown as it is.
@@ -267,6 +302,9 @@ impl RolesTab {
             if self.saved.roles.get(role) != Some(settings) {
                 text = config::edit::set_role(&text, *role, settings).map_err(|e| e.to_string())?;
             }
+        }
+        if self.acp != self.saved.acp {
+            text = config::edit::set_acp(&text, self.acp.as_ref()).map_err(|e| e.to_string())?;
         }
         if self.retro != self.saved.retro {
             if let Some(retro) = &self.retro {

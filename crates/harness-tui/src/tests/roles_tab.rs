@@ -17,7 +17,8 @@ fn roles_get_agents_models_and_skills_and_are_saved() {
     fs::write(skills.join("broken.md"), "no header").unwrap();
     let mut app = env.app(&root);
     click(&mut app, "2 Roles");
-    let text = screen(&mut app);
+    // Tall enough for the whole details panel under the list of agents.
+    let text = screen_of_size(&mut app, 120, 40);
     for part in [
         "architect  claude",
         "retro      claude",
@@ -79,6 +80,33 @@ fn roles_get_agents_models_and_skills_and_are_saved() {
     // The Tasks tab shows the new agent.
     key(&mut app, KeyCode::Char('1'));
     assert!(screen(&mut app).contains("developer  codex (gpt-5.5)"));
+}
+
+#[test]
+fn an_acp_agent_gets_its_command_on_the_roles_tab() {
+    let env = Env::new();
+    let root = env.path("test");
+    project(&root);
+    let mut app = env.app(&root);
+    click(&mut app, "2 Roles");
+    click(&mut app, "developer  claude");
+    click(&mut app, "( ) acp ");
+    let text = screen(&mut app);
+    // No model or effort to choose: the agent uses its own.
+    assert!(!text.contains("agent's default"), "{text}");
+    assert!(text.contains("not set: click or Enter"), "{text}");
+
+    click(&mut app, "not set: click or Enter");
+    fill(&mut app, "opencode  acp");
+    key(&mut app, KeyCode::Enter);
+    assert!(screen(&mut app).contains("opencode acp"));
+    click(&mut app, " Save ");
+
+    let saved = config(&root);
+    assert_eq!(saved.roles[&Role::Developer].agent, AgentKind::Acp);
+    let acp = saved.acp.unwrap();
+    assert_eq!(acp.command, "opencode");
+    assert_eq!(acp.args, ["acp"]);
 }
 
 #[test]

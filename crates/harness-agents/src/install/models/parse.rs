@@ -233,6 +233,31 @@ pub fn parse_cursor(output: &str) -> Vec<Model> {
     models
 }
 
+/// Reads `gemini --list-models`: a heading, then one block per model whose
+/// first line is `<id> (<name>)` and whose other lines are indented details.
+/// `auto` (Gemini picks the model itself) is its default.
+pub fn parse_gemini(output: &str) -> Vec<Model> {
+    output
+        .lines()
+        .filter(|line| !line.starts_with([' ', '\t']))
+        .filter_map(|line| {
+            let (id, rest) = line.trim().split_once(" (")?;
+            let name = rest.strip_suffix(')')?;
+            let ok = !id.is_empty()
+                && id
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || "-._".contains(c));
+            ok.then(|| Model {
+                id: id.to_string(),
+                name: Some(name.to_string()).filter(|n| !n.is_empty() && n != id),
+                efforts: Vec::new(),
+                default_effort: None,
+                default: id == "auto",
+            })
+        })
+        .collect()
+}
+
 fn strings(value: &Value) -> Vec<String> {
     value
         .as_array()

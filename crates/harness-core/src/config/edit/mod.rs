@@ -5,10 +5,12 @@
 //! keeps everything else as it was. After every change the result is checked
 //! with the normal `Config::parse`.
 
+mod acp;
 mod commands;
 mod github;
 mod mcp;
 
+pub use acp::set_acp;
 pub use commands::{add_extra_command, remove_extra_command};
 pub use github::set_github;
 pub use mcp::{remove_mcp, set_mcp};

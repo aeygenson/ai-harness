@@ -26,17 +26,24 @@ pub enum AgentKind {
     DshNvidia,
     /// Cursor CLI (`agent`, earlier `cursor-agent`).
     Cursor,
+    /// Google's Gemini CLI, run through the Agent Client Protocol (`gemini --acp`).
+    Gemini,
+    /// Any agent that speaks the Agent Client Protocol, started with the
+    /// command in `[acp]` of `harness.toml`.
+    Acp,
 }
 
 impl AgentKind {
     /// Every agent, in the order the screens list them.
-    pub const ALL: [AgentKind; 6] = [
+    pub const ALL: [AgentKind; 8] = [
         AgentKind::Claude,
         AgentKind::Codex,
         AgentKind::Antigravity,
+        AgentKind::Gemini,
         AgentKind::Dsh,
         AgentKind::DshNvidia,
         AgentKind::Cursor,
+        AgentKind::Acp,
     ];
 
     /// The name as written in `harness.toml`, e.g. `"codex"`.
@@ -48,6 +55,8 @@ impl AgentKind {
             AgentKind::Dsh => "dsh",
             AgentKind::DshNvidia => "dsh+nvidia",
             AgentKind::Cursor => "cursor",
+            AgentKind::Gemini => "gemini",
+            AgentKind::Acp => "acp",
         }
     }
 
@@ -57,9 +66,12 @@ impl AgentKind {
         match self {
             AgentKind::Dsh => "deepseek",
             AgentKind::DshNvidia => "nvidia",
-            AgentKind::Claude | AgentKind::Codex | AgentKind::Antigravity | AgentKind::Cursor => {
-                self.as_str()
-            }
+            AgentKind::Claude
+            | AgentKind::Codex
+            | AgentKind::Antigravity
+            | AgentKind::Cursor
+            | AgentKind::Gemini
+            | AgentKind::Acp => self.as_str(),
         }
     }
 
@@ -67,9 +79,12 @@ impl AgentKind {
     pub fn has_plugins(self) -> bool {
         match self {
             AgentKind::Claude | AgentKind::Codex => true,
-            AgentKind::Antigravity | AgentKind::Dsh | AgentKind::DshNvidia | AgentKind::Cursor => {
-                false
-            }
+            AgentKind::Antigravity
+            | AgentKind::Dsh
+            | AgentKind::DshNvidia
+            | AgentKind::Cursor
+            | AgentKind::Gemini
+            | AgentKind::Acp => false,
         }
     }
 }
@@ -93,8 +108,8 @@ pub enum UnknownAgent {
     Removed,
     /// Any other text that is not an agent name.
     #[error(
-        "{0:?} is not an agent; use \"claude\", \"codex\", \"antigravity\", \"dsh\", \
-         \"dsh+nvidia\" or \"cursor\""
+        "{0:?} is not an agent; use \"claude\", \"codex\", \"antigravity\", \"gemini\", \
+         \"dsh\", \"dsh+nvidia\", \"cursor\" or \"acp\""
     )]
     Other(String),
 }
@@ -111,6 +126,8 @@ impl FromStr for AgentKind {
             "dsh" => Ok(AgentKind::Dsh),
             "dsh+nvidia" => Ok(AgentKind::DshNvidia),
             "cursor" => Ok(AgentKind::Cursor),
+            "gemini" => Ok(AgentKind::Gemini),
+            "acp" => Ok(AgentKind::Acp),
             "codex+deepseek" => Err(UnknownAgent::Removed),
             _ => Err(UnknownAgent::Other(text.to_string())),
         }
@@ -147,7 +164,7 @@ mod tests {
 
     #[test]
     fn a_wrong_name_says_what_to_use() {
-        let error = "gemini".parse::<AgentKind>().unwrap_err();
+        let error = "gemini-cli".parse::<AgentKind>().unwrap_err();
         assert!(error.to_string().contains("\"dsh\""));
         let removed = "codex+deepseek".parse::<AgentKind>().unwrap_err();
         assert_eq!(removed, UnknownAgent::Removed);

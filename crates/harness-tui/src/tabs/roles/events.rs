@@ -17,13 +17,18 @@ impl RolesTab {
             .filter(|&a| self.is_ready(a) || chosen == Some(a))
             .map(Row::Agent)
             .collect();
-        rows.push(Row::Model(None));
-        if let Some(list) = self.model_list() {
-            rows.extend(list.models.iter().map(|m| Row::Model(Some(m.id.clone()))));
-        }
-        rows.push(Row::OtherModel);
-        if !self.effort_levels().is_empty() || self.choice().2.is_some() {
-            rows.push(Row::Effort);
+        if chosen == Some(AgentKind::Acp) {
+            // The harness cannot choose an `acp` agent's model; it needs its command.
+            rows.push(Row::AcpCommand);
+        } else {
+            rows.push(Row::Model(None));
+            if let Some(list) = self.model_list() {
+                rows.extend(list.models.iter().map(|m| Row::Model(Some(m.id.clone()))));
+            }
+            rows.push(Row::OtherModel);
+            if !self.effort_levels().is_empty() || self.choice().2.is_some() {
+                rows.push(Row::Effort);
+            }
         }
         let Some(role) = self.who() else {
             return rows;
@@ -145,6 +150,7 @@ impl RolesTab {
                     .filter(|m| self.model_list().is_none_or(|l| l.find(m).is_none()));
                 Action::EditModel(typed.unwrap_or_default().to_string())
             }
+            Row::AcpCommand => Action::EditAcp(self.acp_line().unwrap_or_default()),
             Row::Effort => {
                 // The agent's default -> each level -> the agent's default.
                 let mut levels: Vec<Option<String>> = vec![None];

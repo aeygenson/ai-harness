@@ -63,7 +63,13 @@ agent_timeout_minutes = 30
 # "antigravity" (Antigravity CLI), "dsh" (DeepSeek Harness, DeepSeek's own
 # agent; the Agents tab («Sign in») saves the API key) or "dsh+nvidia" (the
 # same agent with NVIDIA's free models from build.nvidia.com, with an NVIDIA key)
-# or "cursor" (Cursor CLI; sign in on the Agents tab).
+# or "cursor" (Cursor CLI; sign in on the Agents tab) or "gemini" (Gemini CLI,
+# signed in with Google on the Agents tab) or "acp" (any agent that speaks the
+# Agent Client Protocol, with its own login and model; its command is set once:
+#   [acp]
+#   command = "opencode"
+#   args = ["acp"]
+# ).
 # Add `model = "..."` to pick a model, for example "opus" for claude,
 # "deepseek-v4-pro" for dsh (default "deepseek-flash") or "z-ai/glm-5.3" for
 # dsh+nvidia (default "moonshotai/kimi-k2.6"), and (except with dsh+nvidia)
@@ -164,6 +170,21 @@ pub struct Config {
     /// branch the user has checked out.
     #[serde(default)]
     pub github: Option<GitHubConfig>,
+    /// The command of the agent that roles with `agent = "acp"` run.
+    #[serde(default)]
+    pub acp: Option<AcpConfig>,
+}
+
+/// `[acp]`: how to start an agent that speaks the Agent Client Protocol,
+/// for example `command = "opencode"` with `args = ["acp"]`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AcpConfig {
+    /// The program, by name (looked up in `PATH`) or as a full path.
+    pub command: String,
+    /// Its arguments that start it in ACP mode.
+    #[serde(default)]
+    pub args: Vec<String>,
 }
 
 /// `[retro]`: which agent reads the history and proposes skill changes.
@@ -509,7 +530,7 @@ mod tests {
 
     #[test]
     fn an_unknown_agent_is_refused_with_the_names_to_use() {
-        let error = Config::parse("[roles.tester]\nagent = \"gemini\"").unwrap_err();
+        let error = Config::parse("[roles.tester]\nagent = \"gemini-cli\"").unwrap_err();
         assert!(error.to_string().contains("\"antigravity\""), "{error}");
         let error = Config::parse("[roles.tester]\nagent = \"codex+deepseek\"").unwrap_err();
         assert!(error.to_string().contains("use \"dsh\""), "{error}");

@@ -14,7 +14,7 @@ use super::NOT_COPIED;
 /// Toolchains installed in the user's home folder that find themselves
 /// through `$HOME` unless their variable is set: `(variable, folder in home)`.
 /// With the temporary `HOME` of a role they would look in the wrong place.
-pub(super) const TOOLCHAIN_HOMES: &[(&str, &str)] = &[
+pub(crate) const TOOLCHAIN_HOMES: &[(&str, &str)] = &[
     // Rust
     ("CARGO_HOME", ".cargo"),
     ("RUSTUP_HOME", ".rustup"),
@@ -28,7 +28,7 @@ pub(super) const TOOLCHAIN_HOMES: &[(&str, &str)] = &[
 
 /// The [`TOOLCHAIN_HOMES`] variables pointing at the real home folder, for
 /// those the user has not set themselves and whose folder exists.
-pub(super) fn toolchain_env(real_home: &Path) -> Vec<(&'static str, PathBuf)> {
+pub(crate) fn toolchain_env(real_home: &Path) -> Vec<(&'static str, PathBuf)> {
     TOOLCHAIN_HOMES
         .iter()
         .copied()
