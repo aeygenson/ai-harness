@@ -46,6 +46,24 @@ const WINDOWS: &[&str] = &[
     "PROCESSOR_ARCHITECTURE",
 ];
 
+/// How a program reaches the user's desktop on Linux: the screen and the
+/// session bus, which it needs to open the browser for a Google sign-in.
+/// None of them is a secret; agents still do not get them.
+const DESKTOP: &[&str] = &[
+    "DISPLAY",
+    "WAYLAND_DISPLAY",
+    "DBUS_SESSION_BUS_ADDRESS",
+    "XDG_RUNTIME_DIR",
+];
+
+/// The desktop variables that are set here, for a sign-in that opens the
+/// browser (only Linux uses them; elsewhere they are usually not set).
+pub fn desktop_values() -> impl Iterator<Item = (&'static str, std::ffi::OsString)> {
+    DESKTOP
+        .iter()
+        .filter_map(|name| std::env::var_os(name).map(|value| (*name, value)))
+}
+
 /// The variables an agent inherits on this system.
 pub fn inherited() -> impl Iterator<Item = &'static str> {
     let own = if cfg!(windows) { WINDOWS } else { UNIX };
@@ -85,6 +103,13 @@ fn same_name(a: &str, b: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn agents_do_not_get_the_desktop() {
+        for name in DESKTOP {
+            assert!(!is_inherited(name), "{name}");
+        }
+    }
 
     #[test]
     fn no_secret_is_inherited() {
