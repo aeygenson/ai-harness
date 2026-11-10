@@ -41,7 +41,7 @@ pub(crate) enum Command {
     /// terminal.
     #[command(hide = true)]
     Login {
-        /// `claude`, `codex`, `deepseek`, `nvidia` or `antigravity`.
+        /// `claude`, `codex`, `deepseek`, `nvidia`, `antigravity`, `cursor` or `gemini`.
         agent: String,
     },
     /// Secrets for MCP servers, such as API keys (outside the project, never in git).

@@ -7,6 +7,7 @@ use ratatui::Frame;
 
 use harness_core::config::{independence, trifecta, AgentKind};
 use harness_core::task::handoff::Role;
+use harness_core::text;
 
 use super::tab::{Focus, RolesTab, Row};
 use crate::ui::i18n::I18n;
@@ -14,6 +15,10 @@ use crate::ui::theme;
 use crate::ui::{
     buttons, draw_list, panel, selected, unsaved_note, ButtonId, Hits, ListId, ListView, Target,
 };
+
+/// How much of the ACP command is shown: it comes from `harness.toml`, which
+/// anyone could have edited, so a very long line is cut rather than trusted.
+const ACP_SHOWN: usize = 120;
 
 impl RolesTab {
     pub fn draw(&self, frame: &mut Frame, area: Rect, hits: &mut Hits, tr: &I18n) {
@@ -183,11 +188,7 @@ impl RolesTab {
         lines.extend(self.same_reviewer_warning(who, tr));
         lines.extend(self.outside_servers_warning(who, tr));
 
-        lines.push(heading(if who.is_some() {
-            "roles.agent"
-        } else {
-            "roles.retro_agent"
-        }));
+        lines.push(heading(who.map_or("roles.retro_agent", |_| "roles.agent")));
         // Each group gets its heading before its first row.
         let (mut skills_seen, mut mcp_seen, mut plugins_seen) = (false, false, false);
         for (index, row) in self.rows().into_iter().enumerate() {
@@ -216,6 +217,10 @@ impl RolesTab {
                 Row::Effort => {
                     lines.push((None, Line::default()));
                     self.effort_line(effort, tr)
+                }
+                Row::AcpCommand => {
+                    lines.extend(self.acp_lines(index, tr));
+                    continue;
                 }
                 Row::Skill(name) => {
                     if !skills_seen {
@@ -252,24 +257,37 @@ impl RolesTab {
             };
             lines.push((Some(index), line));
         }
-        if who.is_some() {
-            for (present, key) in [
+        let notes = if who.is_some() {
+            vec![
                 (skills_seen, "roles.no_skills"),
                 (mcp_seen, "roles.no_mcp"),
                 (plugins_seen, "roles.no_plugins"),
-            ] {
-                if !present {
-                    lines.push((None, Line::default()));
-                    lines.push((None, Line::styled(tr.t(key).to_string(), dim)));
-                }
-            }
+            ]
         } else {
-            lines.push((None, Line::default()));
-            lines.push((
-                None,
-                Line::styled(tr.t("roles.retro_hint").to_string(), dim),
-            ));
+            vec![(false, "roles.retro_hint")]
+        };
+        for (present, key) in notes {
+            if !present {
+                lines.push((None, Line::default()));
+                lines.push((None, Line::styled(tr.t(key).to_string(), dim)));
+            }
         }
         lines
+    }
+
+    /// The command of the ACP agent: a heading, the clickable command and a hint.
+    fn acp_lines(&self, index: usize, tr: &I18n) -> [(Option<usize>, Line<'static>); 4] {
+        let shown = self.acp_line().map_or_else(
+            || tr.t("roles.acp_none").to_string(),
+            |command| text::safe_line(&command, ACP_SHOWN),
+        );
+        let heading = tr.t("roles.acp_command").to_string();
+        let hint = tr.t("roles.acp_hint").to_string();
+        [
+            (None, Line::default()),
+            (None, Line::styled(heading, theme::bold())),
+            (Some(index), Line::from(format!("  {shown}"))),
+            (None, Line::styled(hint, theme::dim())),
+        ]
     }
 }

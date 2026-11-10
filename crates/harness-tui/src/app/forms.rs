@@ -27,10 +27,8 @@ impl App {
             Purpose::InitFolder(path) => projects::init(path)
                 .map(|_| self.open(path))
                 .map_err(|e| e.to_string()),
-            Purpose::Model => {
-                if let Some(roles) = &mut self.roles {
-                    roles.set_model(form.value(0));
-                }
+            Purpose::Model | Purpose::AcpCommand => {
+                self.set_role_text(&purpose, form.value(0));
                 Ok(())
             }
             Purpose::NewSkill => self.create_skill(&form),
@@ -109,6 +107,18 @@ impl App {
             let mut form = form;
             form.error = Some(error);
             self.form = Some((purpose, form));
+        }
+    }
+
+    /// A line typed on the Roles tab: the model or the ACP agent's command.
+    fn set_role_text(&mut self, purpose: &Purpose, value: &str) {
+        let Some(roles) = &mut self.roles else {
+            return;
+        };
+        if matches!(purpose, Purpose::AcpCommand) {
+            roles.set_acp_command(value);
+        } else {
+            roles.set_model(value);
         }
     }
 

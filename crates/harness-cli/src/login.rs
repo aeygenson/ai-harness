@@ -21,9 +21,10 @@ pub(crate) fn login(agent: &str) -> Result<()> {
         "nvidia" => login_api_key(&dir, &NVIDIA),
         "antigravity" => login_antigravity(&dir),
         "cursor" => login_cursor(&dir, &harness_agents::adapters::cursor::program()),
+        "gemini" => login_gemini(&dir, Path::new("gemini")),
         other => bail!(
             "unknown agent {other:?}; use `claude`, `codex`, `deepseek`, `nvidia`, \
-             `antigravity` or `cursor`"
+             `antigravity`, `cursor` or `gemini`"
         ),
     }
 }
@@ -171,9 +172,12 @@ fn login_antigravity(dir: &Path) -> Result<()> {
     harness_platform::private::restrict_dir(&home)?;
     println!("Starting `agy`. Sign in with Google, then type /quit to come back here.");
     let mut command = std::process::Command::new(harness_platform::program::resolve("agy"));
+    // In its own folder, so no project's `.gemini/settings.json` or MCP
+    // servers are started while signing in.
     command
         .env_clear()
-        .envs(harness_platform::env::inherited_values());
+        .envs(harness_platform::env::inherited_values())
+        .current_dir(&home);
     harness_platform::home::set_for(&mut command, &home);
     let status = command
         .status()
@@ -187,6 +191,40 @@ fn login_antigravity(dir: &Path) -> Result<()> {
             home.display()
         );
     }
+    println!("Saved in {} (only you can read it).", home.display());
+    Ok(())
+}
+
+/// Runs `gemini` with its own `HOME` in `credentials/gemini`, where the
+/// user signs in with Google; roles later get a copy of that login (see
+/// `harness_agents::adapters::gemini`), never the user's own Gemini setup.
+fn login_gemini(dir: &Path, program: &Path) -> Result<()> {
+    use harness_agents::adapters::gemini::{LOGIN_FILE, SETTINGS_DIR};
+    let home = dir.join("gemini");
+    fs::create_dir_all(&home)?;
+    harness_platform::private::restrict_dir(&home)?;
+    println!("Starting `gemini`. Choose «Sign in with Google», then type /quit to come back here.");
+    let mut command = std::process::Command::new(harness_platform::program::resolve(program));
+    command
+        .env_clear()
+        .envs(harness_platform::env::inherited_values());
+    harness_platform::home::set_for(&mut command, &home);
+    let status = command
+        .status()
+        .context("cannot start `gemini`; is Gemini CLI installed?")?;
+    let login = home.join(SETTINGS_DIR).join(LOGIN_FILE);
+    // Quitting with Ctrl+C after signing in ends `gemini` with an error code,
+    // yet the login is saved: the file decides.
+    if !status.success() && !login.is_file() {
+        bail!("`gemini` failed ({status})");
+    }
+    if !login.is_file() {
+        bail!(
+            "`gemini` finished but did not save a Google login in {}",
+            home.display()
+        );
+    }
+    harness_platform::private::restrict_file(&login)?;
     println!("Saved in {} (only you can read it).", home.display());
     Ok(())
 }
@@ -270,5 +308,23 @@ mod tests {
             masked("sk-0123456789abcdef0123456789abcdef", "sk-"),
             "sk-…cdef (35 characters)"
         );
+    }
+
+    #[test]
+    fn gemini_counts_as_signed_in_only_when_it_saved_a_google_login() {
+        let creds = tempfile::tempdir().unwrap();
+        let bin = creds.path().join("bin");
+        let quits = harness_fake::install(&bin, "gemini-quits", "exit 0\n");
+        assert!(login_gemini(creds.path(), &quits).is_err());
+        assert!(!credentials::has_login(creds.path(), AgentKind::Gemini));
+
+        let signs_in = harness_fake::install(
+            &bin,
+            "gemini-signs-in",
+            "save-text ${HOME}/.gemini/oauth_creds.json {}\n",
+        );
+        login_gemini(creds.path(), &signs_in).unwrap();
+
+        assert!(credentials::has_login(creds.path(), AgentKind::Gemini));
     }
 }

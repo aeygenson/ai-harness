@@ -14,10 +14,12 @@ use harness_core::task::stop_request::StopRequest;
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWriteExt, BufReader};
 
 mod live_log;
+mod talk;
 mod time_limit;
 
 use live_log::send_live;
 pub use live_log::{note_live, set_live_log};
+pub use talk::{run_talking, AgentLines, AgentStdin};
 use time_limit::time_limit_passed;
 
 /// `program`, started in the project folder with an empty environment plus
@@ -84,38 +86,13 @@ const STOP_CHECK_PAUSE: Duration = Duration::from_millis(200);
 /// background, even in another process group. Windows finds only what is
 /// still linked to the agent.
 pub async fn run(
-    mut command: Command,
+    command: Command,
     prompt: &str,
     timeout: Duration,
     secrets: &[&str],
     stop: &StopRequest,
 ) -> Result<Finished, String> {
-    let program = command.get_program().to_string_lossy().into_owned();
-    // Pressed before the agent started (between two attempts): no need to start it.
-    if stop.now() {
-        return Err(format!("{STOPPED_BY_USER} before the agent started"));
-    }
-    harness_platform::process::own_group(&mut command);
-    // Some agents (Codex) move their commands to process groups of their
-    // own; the mark still finds them (see `harness_platform::run_mark`).
-    let mark = harness_platform::run_mark::new_mark();
-    harness_platform::run_mark::mark(&mut command, &mark);
-    let mut command = tokio::process::Command::from(command);
-    command
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        // A safety net: the agent itself is killed even if the tree kill fails.
-        .kill_on_drop(true);
-    let mut child = command
-        .spawn()
-        .map_err(|e| format!("cannot start {program}: {e}"))?;
-    // From here on, leaving this function in any way stops the whole tree.
-    let tree = child.id().map(|pid| ProcessTree {
-        pid,
-        mark,
-        stopped: AtomicBool::new(false),
-    });
+    let (mut child, tree) = start(command, stop)?;
     let stdin = child.stdin.take();
     let stdout = child.stdout.take();
     let stderr = child.stderr.take();
@@ -163,6 +140,43 @@ pub async fn run(
         }),
         Err(e) => Err(format!("error while waiting for the agent: {e}")),
     }
+}
+
+/// Starts `command` in its own process group, with the run mark and all
+/// three streams piped (see [`run`]). Fails at once, without starting it,
+/// when the user already pressed «Stop now». The returned tree stops the
+/// agent and everything it started when it is dropped.
+fn start(
+    mut command: Command,
+    stop: &StopRequest,
+) -> Result<(tokio::process::Child, Option<ProcessTree>), String> {
+    let program = command.get_program().to_string_lossy().into_owned();
+    // Pressed before the agent started (between two attempts): no need to start it.
+    if stop.now() {
+        return Err(format!("{STOPPED_BY_USER} before the agent started"));
+    }
+    harness_platform::process::own_group(&mut command);
+    // Some agents (Codex) move their commands to process groups of their
+    // own; the mark still finds them (see `harness_platform::run_mark`).
+    let mark = harness_platform::run_mark::new_mark();
+    harness_platform::run_mark::mark(&mut command, &mark);
+    let mut command = tokio::process::Command::from(command);
+    command
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        // A safety net: the agent itself is killed even if the tree kill fails.
+        .kill_on_drop(true);
+    let child = command
+        .spawn()
+        .map_err(|e| format!("cannot start {program}: {e}"))?;
+    // From here on, dropping the tree stops the whole tree.
+    let tree = child.id().map(|pid| ProcessTree {
+        pid,
+        mark,
+        stopped: AtomicBool::new(false),
+    });
+    Ok((child, tree))
 }
 
 /// Ends once the user has pressed «Stop now». The request is a plain shared
