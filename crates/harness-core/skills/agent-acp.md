@@ -1,5 +1,5 @@
 ---
-description: Working notes for agents run through the Agent Client Protocol (Gemini CLI and others).
+description: Working notes for agents run through the Agent Client Protocol (OpenCode and others).
 ---
 # Working through the harness
 
