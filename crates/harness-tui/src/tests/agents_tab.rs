@@ -488,6 +488,39 @@ fn an_agent_without_an_adapter_says_loudly_it_is_not_implemented() {
     assert!(!screen_of_width(&mut app, 160).contains("ПОКА НЕ РЕАЛИЗОВАНО"));
 }
 
+#[test]
+fn any_acp_agent_says_how_to_connect_it_and_offers_nothing_to_run() {
+    let env = Env::new();
+    let mut app = agents_app(&env);
+    let acp = app
+        .agents
+        .statuses
+        .iter()
+        .position(|s| s.entry.is_any_acp())
+        .unwrap();
+    app.agents.select(acp);
+    let text = screen_of_width(&mut app, 160);
+    for part in [
+        "· Any ACP agent",
+        "Roles tab: pick a role, choose the agent «acp»",
+        "`opencode acp`",
+        "agentclientprotocol.com",
+    ] {
+        assert!(text.contains(part), "missing {part:?} in:\n{text}");
+    }
+    // It is no program: nothing to install, remove or sign in to.
+    for part in ["Not installed", "No login", "NOT IMPLEMENTED"] {
+        assert!(!text.contains(part), "{part:?} in:\n{text}");
+    }
+    assert!(app.agents.next_step(false).is_none());
+    assert!(app.agents.next_step(true).is_none());
+    assert!(app.agents.sign_in_target().is_none());
+
+    key(&mut app, KeyCode::Char('L'));
+    let text = screen_of_width(&mut app, 160);
+    assert!(text.contains("Вкладка «Роли»"), "{text}");
+}
+
 /// Says that release 9.9.9 is out.
 #[expect(
     clippy::unnecessary_wraps,

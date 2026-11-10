@@ -117,7 +117,11 @@ fn report(tools: &[ToolStatus], agents: &[Status]) -> (String, usize) {
     }
 
     text.push_str("\nAgents:\n");
-    for status in agents.iter().filter(|s| s.entry.runs()) {
+    // «Any ACP agent» has no program to check: its command is on the Roles tab.
+    for status in agents
+        .iter()
+        .filter(|s| s.entry.runs() && !s.entry.is_any_acp())
+    {
         text.push_str(&agent_line(status));
     }
     if agents.iter().any(Status::ready) {

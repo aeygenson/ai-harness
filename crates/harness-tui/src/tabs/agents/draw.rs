@@ -17,7 +17,10 @@ use crate::ui::{buttons, draw_list, panel, ButtonId, Hits, ListId, ListView};
 impl AgentsTab {
     /// The mark before an agent: installed, too old, not installed, not known yet.
     fn mark(&self, status: &Status) -> (&'static str, ratatui::style::Style) {
-        if !self.known {
+        if status.entry.is_any_acp() {
+            // Nothing to install or check: the command is set on the Roles tab.
+            ("·", theme::accent())
+        } else if !self.known {
             ("…", theme::dim())
         } else if status.old() {
             ("!", theme::warn())
@@ -114,6 +117,9 @@ impl AgentsTab {
         };
         let (title, text) = match (self.current_tool(), self.current()) {
             (Some(tool), _) => (tr.t("agents.about_tool"), tool_details(tool, tr)),
+            (None, Some(status)) if status.entry.is_any_acp() => {
+                (tr.t("agents.about"), any_acp_details(status, tr))
+            }
             (None, Some(status)) => (tr.t("agents.about"), self.details(status, tr)),
             (None, None) => (tr.t("agents.about"), vec![]),
         };
@@ -231,6 +237,18 @@ impl AgentsTab {
         lines.push(Line::from(tr.f("agents.site", &[("site", &entry.site)])));
         lines
     }
+}
+
+/// «Any ACP agent» is no program: only how to connect one, and where to find them.
+fn any_acp_details(status: &Status, tr: &I18n) -> Vec<Line<'static>> {
+    let entry = &status.entry;
+    let title = format!("{} · {}", entry.name, entry.vendor);
+    let mut lines = vec![Line::styled(title, theme::accent()), Line::default()];
+    let about = tr.t("agents.about_acp");
+    lines.extend(about.lines().map(|l| Line::from(l.to_string())));
+    lines.push(Line::default());
+    lines.push(Line::from(tr.f("agents.site", &[("site", &entry.site)])));
+    lines
 }
 
 /// The output of the install or update: the last lines that fit, and how it ended.

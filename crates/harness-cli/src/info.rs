@@ -63,12 +63,25 @@ pub(crate) fn models(refresh: bool) -> Result<()> {
     Ok(())
 }
 
+/// «Any ACP agent»: no program of its own, so only how to set it up.
+fn print_any_acp(entry: &harness_agents::install::catalog::Entry) {
+    println!("· {:<20} {}", entry.name, entry.vendor);
+    println!("    any agent that speaks ACP, for example `opencode acp`");
+    println!("    1. install it and sign in with its own command");
+    println!("    2. harness tui, Roles tab: pick a role, agent `acp`, type its command, Save");
+    println!("    agents: {}", entry.site);
+}
+
 /// The catalog of agents with what was found on this computer.
 pub(crate) fn agents() {
     use harness_agents::install::catalog;
     let dir = credentials::default_dir();
     for status in catalog::check_all(dir.as_deref()) {
         let entry = &status.entry;
+        if entry.is_any_acp() {
+            print_any_acp(entry);
+            continue;
+        }
         let mark = if status.old() {
             "!"
         } else if status.installed() {
