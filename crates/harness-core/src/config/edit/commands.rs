@@ -11,11 +11,7 @@ use crate::task::handoff::Role;
 pub fn add_extra_command(text: &str, role: Role, command: &str) -> Result<String, EditError> {
     let mut doc: DocumentMut = text.parse()?;
     let list = role_list(&mut doc, role)?;
-    let command = single_spaced(command);
-    if !list
-        .iter()
-        .any(|item| item.as_str() == Some(command.as_str()))
-    {
+    if !list.iter().any(|item| item.as_str() == Some(command)) {
         list.push(command);
     }
     finish(&doc)
@@ -26,19 +22,13 @@ pub fn add_extra_command(text: &str, role: Role, command: &str) -> Result<String
 pub fn remove_extra_command(text: &str, role: Role, command: &str) -> Result<String, EditError> {
     let mut doc: DocumentMut = text.parse()?;
     let list = role_list(&mut doc, role)?;
-    let command = single_spaced(command);
-    list.retain(|item| item.as_str() != Some(command.as_str()));
+    list.retain(|item| item.as_str() != Some(command));
     if list.is_empty() {
         if let Some(role_table) = doc["roles"][role.as_str()].as_table_mut() {
             role_table.remove("extra_commands");
         }
     }
     finish(&doc)
-}
-
-/// `command` with one space between its words, as the file keeps it.
-fn single_spaced(command: &str) -> String {
-    command.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 /// The role's `extra_commands` list, created empty if missing.
@@ -64,13 +54,18 @@ mod tests {
 
     #[test]
     fn a_command_is_added_once_and_removed_with_its_key() {
-        let text = add_extra_command(TOML, Role::Security, "trivy  fs").unwrap();
+        let text = add_extra_command(TOML, Role::Security, "trivy fs").unwrap();
+        // Written as typed, then checked: odd spacing is refused, not tidied.
+        assert!(matches!(
+            add_extra_command(TOML, Role::Security, "trivy\nrm"),
+            Err(EditError::Invalid(_))
+        ));
         let text = add_extra_command(&text, Role::Security, "trivy fs").unwrap();
         assert!(text.contains("agent = \"claude\" # careful"), "{text}");
         let config = Config::parse(&text).unwrap();
         assert_eq!(config.roles[&Role::Security].extra_commands, ["trivy fs"]);
 
-        let text = remove_extra_command(&text, Role::Security, " trivy   fs").unwrap();
+        let text = remove_extra_command(&text, Role::Security, "trivy fs").unwrap();
         assert!(!text.contains("extra_commands"), "{text}");
     }
 

@@ -29,7 +29,9 @@ const NEVER_EXTRA: &[&str] = &[
     "pwsh",
     "py",
     "ipython",
-    "node",
+    "jupyter",
+    "jython",
+    "jruby",
     "nodejs",
     "deno",
     "bun",
@@ -52,12 +54,21 @@ const NEVER_EXTRA: &[&str] = &[
     "mawk",
     "nawk",
     "sed",
+    "gsed",
+    "expect",
+    "wish",
+    "ash",
+    "toybox",
+    "sqlite3",
+    "psql",
     // Programs and shell built-ins that start other programs.
     "env",
+    "genv",
     "sudo",
     "doas",
     "su",
     "xargs",
+    "gxargs",
     "find",
     "eval",
     "exec",
@@ -66,6 +77,7 @@ const NEVER_EXTRA: &[&str] = &[
     "builtin",
     "script",
     "timeout",
+    "gtimeout",
     "nice",
     "nohup",
     "time",
@@ -77,6 +89,19 @@ const NEVER_EXTRA: &[&str] = &[
     "chroot",
     "unshare",
     "strace",
+    "ltrace",
+    "valgrind",
+    "pkexec",
+    "runuser",
+    "nsenter",
+    "bwrap",
+    "firejail",
+    "fakeroot",
+    "ionice",
+    "taskset",
+    "at",
+    "crontab",
+    "launchctl",
     "gdb",
     "man",
     "tmux",
@@ -90,6 +115,12 @@ const NEVER_EXTRA: &[&str] = &[
     "msiexec",
     "forfiles",
     "schtasks",
+    "start",
+    "wmic",
+    "certutil",
+    "bitsadmin",
+    "regsvr32",
+    "reg",
     "docker",
     "podman",
     "ssh",
@@ -101,13 +132,17 @@ const NEVER_EXTRA: &[&str] = &[
     "emacs",
     "less",
     "more",
+    "ed",
+    "nano",
     // Package managers, compilers and build tools.
     "npm",
     "npx",
     "pnpm",
+    "pnpx",
     "yarn",
-    "pip",
-    "pip3",
+    "yarnpkg",
+    "bunx",
+    "corepack",
     "pipx",
     "uv",
     "uvx",
@@ -123,13 +158,13 @@ const NEVER_EXTRA: &[&str] = &[
     "cargo",
     "rustc",
     "rustup",
-    "go",
     "dotnet",
     "msbuild",
     "gcc",
     "clang",
     "javac",
     "make",
+    "gmake",
     "cmake",
     "ninja",
     "meson",
@@ -160,14 +195,17 @@ const NEVER_EXTRA: &[&str] = &[
     "scoop",
     // Commands that change files.
     "tee",
+    "gtee",
     "touch",
     "chmod",
     "chown",
     "ln",
     "dd",
     "tar",
+    "gtar",
     "rsync",
     "install",
+    "ginstall",
     "truncate",
     "patch",
     "mkdir",
@@ -190,19 +228,53 @@ const NEVER_EXTRA: &[&str] = &[
     "gcloud",
     "glab",
     "kubectl",
+    "gsutil",
+    "bq",
+    "terraform",
+    "helm",
+    "heroku",
+    "snyk",
+    "hub",
+    "op",
+    "vault",
+    "security",
     // The repository: see above.
     "git",
 ];
 
-/// Interpreters that are also installed under a name with their version,
-/// such as `python3.12`, `perl5.34` or `lua5.4`: a program that starts with
-/// one of these is refused too.
-const VERSIONED: &[&str] = &["python", "perl", "ruby", "php", "lua", "tclsh", "node"];
+/// Interpreters and tools that are also installed under a name with their
+/// version, such as `python3.12`, `pip3.12` or `perl5.34`: the name alone or
+/// followed only by digits and dots is refused (`phpstan` is not).
+const VERSIONED: &[&str] = &[
+    "python", "pypy", "pip", "perl", "ruby", "php", "lua", "tclsh", "node", "go",
+];
 
 /// Is `program` (lower case, without a Windows ending) one an extra command
 /// may never start with? `git-lfs` and other `git-` helpers count as git.
 pub(super) fn is_never_extra(program: &str) -> bool {
     NEVER_EXTRA.contains(&program)
         || program.starts_with("git-")
-        || VERSIONED.iter().any(|name| program.starts_with(name))
+        || VERSIONED.iter().any(|name| is_versioned(program, name))
+}
+
+/// Is `program` exactly `name`, or `name` followed by a version such as `3.12`?
+fn is_versioned(program: &str, name: &str) -> bool {
+    program
+        .strip_prefix(name)
+        .is_some_and(|version| version.chars().all(|c| c.is_ascii_digit() || c == '.'))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn versioned_names_are_refused_but_longer_names_are_not() {
+        for program in ["python", "python3.12", "pip3", "pip3.12", "go1.22", "node"] {
+            assert!(is_never_extra(program), "{program}");
+        }
+        for program in ["phpstan", "perlcritic", "gosec", "pip-audit"] {
+            assert!(!is_never_extra(program), "{program}");
+        }
+    }
 }

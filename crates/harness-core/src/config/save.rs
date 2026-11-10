@@ -13,6 +13,7 @@ use crate::plugins::{PluginError, Plugins};
 use crate::secret::Secret;
 use crate::skills::{SkillError, Skills};
 use crate::task::handoff::Role;
+use crate::task::run_lock::{self, RunLockError};
 
 /// Why changed settings were not saved; the old file then stays as it was.
 #[derive(Debug, thiserror::Error)]
@@ -44,6 +45,12 @@ pub enum SettingsError {
     /// The change could not be made to the text of harness.toml.
     #[error(transparent)]
     Edit(#[from] EditError),
+    /// A role is working in this project, so its permissions stay as they are.
+    #[error("{0} is running; change the permissions when it stops")]
+    TaskRunning(String),
+    /// Whether a role is working could not be found out.
+    #[error(transparent)]
+    RunLock(#[from] RunLockError),
 }
 
 /// Checks `text` as the settings of the project in `project_dir`. Secrets of
@@ -85,6 +92,11 @@ pub fn set_extra_command(
     command: &str,
     allow: bool,
 ) -> Result<bool, SettingsError> {
+    // A role that is working keeps the rights it started with; the commit
+    // would also land in the middle of its work.
+    if let Some(working) = run_lock::working(repo)? {
+        return Err(SettingsError::TaskRunning(working.task));
+    }
     let text = read_config(repo)?;
     let changed = if allow {
         edit::add_extra_command(&text, role, command)?
@@ -155,5 +167,22 @@ mod tests {
         assert!(set_extra_command(&repo, Role::Security, "trivy fs", false).unwrap());
         let config = Config::load(&harness).unwrap();
         assert!(config.roles[&Role::Security].extra_commands.is_empty());
+    }
+
+    #[test]
+    fn no_command_is_allowed_while_a_task_runs() {
+        let dir = tempfile::tempdir().unwrap();
+        projects::init(dir.path()).unwrap();
+        let repo = Repo::open(dir.path()).unwrap();
+        let mut lock = run_lock::RunLock::hold(&repo).unwrap();
+        lock.set_task("task-007").unwrap();
+
+        let error = set_extra_command(&repo, Role::Security, "trivy fs", true).unwrap_err();
+        assert!(matches!(error, SettingsError::TaskRunning(ref task) if task == "task-007"));
+        let config = Config::load(&dir.path().join(HARNESS_DIR)).unwrap();
+        assert_eq!(
+            config.roles[&Role::Security].extra_commands,
+            Vec::<String>::new()
+        );
     }
 }

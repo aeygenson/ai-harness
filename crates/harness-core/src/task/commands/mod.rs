@@ -82,8 +82,11 @@ pub const CHECK_COMMANDS: &[&str] = &[
 /// such as `osv-scanner scan source`.
 const MAX_WORDS: usize = 3;
 
-/// Endings of programs on Windows: `git.exe` runs the same program as `git`.
-const WINDOWS_ENDINGS: &[&str] = &[".exe", ".cmd", ".bat", ".com", ".ps1"];
+/// Endings of programs on Windows (its usual `PATHEXT`, plus `.ps1`): `git.exe`
+/// runs the same program as `git`.
+const WINDOWS_ENDINGS: &[&str] = &[
+    ".exe", ".com", ".bat", ".cmd", ".ps1", ".vbs", ".vbe", ".js", ".jse", ".wsf", ".wsh", ".msc",
+];
 
 /// Checks one of the user's `extra_commands` and says what is wrong with it.
 ///
@@ -145,11 +148,20 @@ fn plain_word(word: &str) -> bool {
 /// The program as the system finds it: lower case (macOS and Windows do not
 /// tell `Git` from `git`) and without a Windows ending (`git.exe` is `git`).
 fn program_name(word: &str) -> String {
-    let lower = word.to_ascii_lowercase();
-    WINDOWS_ENDINGS
-        .iter()
-        .find_map(|ending| lower.strip_suffix(ending))
-        .map_or(lower.clone(), str::to_string)
+    let mut name = word.to_ascii_lowercase();
+    // Windows ignores trailing dots and finds `bash.exe.` or `bash.cmd.exe`
+    // too, so every ending is taken off until none is left.
+    loop {
+        let trimmed = name.trim_end_matches('.');
+        let stripped = WINDOWS_ENDINGS
+            .iter()
+            .find_map(|ending| trimmed.strip_suffix(ending))
+            .unwrap_or(trimmed);
+        if stripped == name {
+            return name;
+        }
+        name = stripped.to_string();
+    }
 }
 
 /// Does either command start with the other, word by word?
@@ -220,6 +232,8 @@ mod tests {
             "aws s3",
             "Bash",
             "bash.exe",
+            "bash.exe.",
+            "bash.cmd.exe",
             "PowerShell.EXE",
             "npm.cmd",
             "git-lfs install",

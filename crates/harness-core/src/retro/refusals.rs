@@ -15,7 +15,8 @@
 //! The logs come from the agents, so every action is cleaned with
 //! [`text::safe_line`] before it is kept. It is only shown: nothing here is
 //! ever allowed from it, because the agent chose what it tried. The user
-//! decides with `harness allow-command`.
+//! decides with `harness allow-command`. An agent can also print a line in
+//! one of these shapes itself, so a row is a hint, not a proof.
 
 use std::collections::BTreeMap;
 
