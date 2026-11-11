@@ -174,9 +174,6 @@ pub async fn run_watching<A: AgentRunner>(
         // Before looking at git status: a block an unwatched run of Claude
         // Code left in `info/exclude` would hide files from it.
         agent_stubs::clear_stub_block(repo)?;
-        // The tripwire must see Claude Code's sandbox folder appear during
-        // the role; one left by an unwatched run would hide that.
-        crate::task::tripwire::remove_leftover_sandbox_folder(repo)?;
         // Claude Code's empty stub files an earlier role left (for example
         // after a stop by the tripwire) are not the user's changes. Files of
         // recorded unfinished work stay: an empty one there is the role's.

@@ -1127,6 +1127,38 @@ mod tests {
     }
 
     #[test]
+    fn a_file_named_like_the_sandbox_folder_still_stops_the_task() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::create_dir_all(dir.path().join("info")).unwrap();
+        let watched = watched(dir.path());
+        let before = watched.snapshot();
+        let file = dir.path().join("info/.claude-sandbox-noreplace");
+        fs::write(&file, "").unwrap();
+
+        let changes = before.check_and_restore(&watched);
+
+        assert_eq!(changes.put_back, std::slice::from_ref(&file));
+        assert!(!file.exists());
+    }
+
+    #[test]
+    fn a_file_turned_into_an_empty_sandbox_folder_is_put_back() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::create_dir_all(dir.path().join("info")).unwrap();
+        let path = dir.path().join("info/.claude-sandbox-noreplace");
+        fs::write(&path, "mine").unwrap();
+        let watched = watched(dir.path());
+        let before = watched.snapshot();
+        fs::remove_file(&path).unwrap();
+        fs::create_dir(&path).unwrap();
+
+        let changes = before.check_and_restore(&watched);
+
+        assert_eq!(changes.put_back, std::slice::from_ref(&path));
+        assert_eq!(fs::read_to_string(&path).unwrap(), "mine");
+    }
+
+    #[test]
     fn a_sandbox_folder_name_in_hooks_still_stops_the_task() {
         let dir = tempfile::tempdir().unwrap();
         fs::create_dir_all(dir.path().join("hooks")).unwrap();

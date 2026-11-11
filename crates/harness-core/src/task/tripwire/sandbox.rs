@@ -12,7 +12,6 @@ use std::fs;
 use std::path::Path;
 
 use super::{Content, Snapshot, Watched};
-use crate::git::{GitError, Repo};
 
 /// The folder's name inside `info/`.
 const SANDBOX_FOLDER: &str = ".claude-sandbox-noreplace";
@@ -37,25 +36,23 @@ impl Watched {
 }
 
 /// Removes the sandbox folder an unwatched run left (the user's own Claude
-/// Code, the retrospective), so that the next role starts without it and
-/// the tripwire sees it appear when that role runs Claude Code.
+/// Code, the retrospective) in the git folder `common`, so that the tripwire
+/// sees it appear when the next role runs Claude Code.
 ///
-/// `remove_dir` only removes an empty folder; one with something inside
-/// stays, and so does a link in its place on Linux and macOS. Neither hides
-/// anything from git, so this is best effort.
-///
-/// # Errors
-/// Git could not say where its folder is.
-pub(crate) fn remove_leftover_sandbox_folder(repo: &Repo) -> Result<(), GitError> {
-    let folder = repo.git_common_dir()?.join("info").join(SANDBOX_FOLDER);
-    // Ignored on purpose: see "best effort" above.
-    let _ = fs::remove_dir(folder);
-    Ok(())
+/// Best effort: `remove_dir` only removes an empty folder, so one with
+/// something inside stays (and a link in its place, on Linux and macOS).
+/// Then a role in a task's own worktree has no sign that Claude Code ran,
+/// and its empty stub files are not removed: they show up in the role's
+/// commit, where the user can see them. Nothing else depends on it.
+pub(crate) fn remove_leftover_sandbox_folder(common: &Path) {
+    // Ignored on purpose: see "Best effort" above.
+    let _ = fs::remove_dir(common.join("info").join(SANDBOX_FOLDER));
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::git::Repo;
 
     #[test]
     fn an_empty_leftover_folder_is_removed() {
@@ -64,7 +61,7 @@ mod tests {
         let folder = dir.path().join(".git/info").join(SANDBOX_FOLDER);
         fs::create_dir_all(&folder).unwrap();
 
-        remove_leftover_sandbox_folder(&repo).unwrap();
+        remove_leftover_sandbox_folder(&repo.git_common_dir().unwrap());
 
         assert!(!folder.exists());
     }
@@ -77,7 +74,7 @@ mod tests {
         fs::create_dir_all(&folder).unwrap();
         fs::write(folder.join("a"), "a").unwrap();
 
-        remove_leftover_sandbox_folder(&repo).unwrap();
+        remove_leftover_sandbox_folder(&repo.git_common_dir().unwrap());
 
         assert!(folder.join("a").exists());
     }

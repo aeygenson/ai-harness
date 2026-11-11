@@ -13,9 +13,9 @@
 //! change was this block, it does not stop the task, and the harness removes
 //! the new empty stub files so they do not end up in the role's commit. In a
 //! task's own worktree there is no block (`.git` is a file there); the empty
-//! sandbox folder Claude Code makes in `info/` plays its part (see
-//! `tripwire::sandbox`). Any
-//! other change to `info/exclude` still stops the task. When the role is
+//! sandbox folder Claude Code makes in `info/` since 2.1.322 plays its part
+//! (see `tripwire::sandbox`), so older versions leave their stubs there.
+//! Any other change to `info/exclude` still stops the task. When the role is
 //! stopped for another reason (not a commit), the new empty stub files are
 //! removed too, without running git, so the next run does not stop on them.
 //! A block left by a run the harness did not watch (the user's own Claude Code,
@@ -149,7 +149,7 @@ fn strip_stub_blocks(text: &[u8]) -> Option<Vec<u8>> {
 /// # Errors
 /// Git failed, or reading or writing `info/exclude` or a stub file failed.
 pub fn clear_leftovers(repo: &Repo) -> Result<(), GitError> {
-    crate::task::tripwire::remove_leftover_sandbox_folder(repo)?;
+    crate::task::tripwire::remove_leftover_sandbox_folder(&repo.git_common_dir()?);
     if !clear_stub_block(repo)? {
         return Ok(());
     }
