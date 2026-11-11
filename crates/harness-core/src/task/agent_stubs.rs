@@ -6,12 +6,16 @@
 //! creates empty files where a package manager or git would look for
 //! settings (`package.json`, `.npmrc`, `.env`, ...), so the sandbox can make
 //! them read-only, and appends them to `.git/info/exclude` so `git status`
-//! does not show them. Checked against Claude Code 2.1.283 and 2.1.299.
+//! does not show them. Checked against Claude Code 2.1.283, 2.1.299 and
+//! 2.1.322.
 //!
 //! The tripwire puts `info/exclude` back after every role. When the only
 //! change was this block, it does not stop the task, and the harness removes
-//! the new empty stub files so they do not end up in the role's commit. Any
-//! other change to `info/exclude` still stops the task. When the role is
+//! the new empty stub files so they do not end up in the role's commit. In a
+//! task's own worktree there is no block (`.git` is a file there); the empty
+//! sandbox folder Claude Code makes in `info/` since 2.1.322 plays its part
+//! (see `tripwire::sandbox`), so older versions leave their stubs there.
+//! Any other change to `info/exclude` still stops the task. When the role is
 //! stopped for another reason (not a commit), the new empty stub files are
 //! removed too, without running git, so the next run does not stop on them.
 //! A block left by a run the harness did not watch (the user's own Claude Code,

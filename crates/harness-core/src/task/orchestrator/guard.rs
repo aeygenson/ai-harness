@@ -7,7 +7,7 @@ use super::{GitAfterRole, RunError, StopReason};
 use crate::git::{GitError, LocalConfig, Repo};
 use crate::task::agent_stubs::MissingStubs;
 use crate::task::handoff::Role;
-use crate::task::tripwire::{Changes, Snapshot, Watched};
+use crate::task::tripwire::{self, Changes, Snapshot, Watched};
 use crate::text;
 
 /// Git's message after a role is cut to this many characters: it is shown in
@@ -29,10 +29,16 @@ pub(super) struct Before {
 impl Before {
     /// Notes the last commit, the branches, `.git/config`, the files the
     /// tripwire watches and which of Claude Code's stub files are missing.
+    /// First removes an empty sandbox folder of Claude Code left in `info/`.
     pub(super) fn take(repo: &Repo, watched: &Watched) -> Result<Self, RunError> {
         let config_path = repo.local_config_path()?;
+        let git_dir = repo.git_common_dir()?;
+        // Just before the snapshot: the tripwire must see Claude Code's
+        // sandbox folder appear during the role, and one left by an
+        // unwatched run (the user's own Claude Code) would hide that.
+        tripwire::remove_leftover_sandbox_folder(&git_dir);
         Ok(Self {
-            git_dir: repo.git_common_dir()?,
+            git_dir,
             head: repo.head()?,
             branch: repo.current_branch()?,
             branch_heads: repo.branch_heads()?,
@@ -45,10 +51,10 @@ impl Before {
 
     /// Compares with now: git's settings, the tripwire, the commit and the
     /// branches. Puts back what can be put back and returns why the task
-    /// must stop, or `None` when all is as before. When Claude Code's stub
-    /// block was there, removes its new empty stub files (see
-    /// [`crate::task::agent_stubs`]), except after a commit or branch change
-    /// (then the next run removes them).
+    /// must stop, or `None` when all is as before. When Claude Code ran
+    /// (its stub block or sandbox folder appeared), removes its new empty
+    /// stub files (see [`crate::task::agent_stubs`]), except after a commit
+    /// or branch change (then the next run removes them).
     pub(super) fn check(
         &self,
         repo: &Repo,
@@ -102,12 +108,13 @@ impl Before {
         };
         // Claude Code's empty stub files would otherwise end up in the role's
         // commit, or stop the next run as uncommitted changes, once
-        // `info/exclude` no longer hides them. Only when its block was there:
-        // another agent's empty file is its own work. After a commit or a
-        // branch change (or when git could not tell) they stay: whether the
-        // new commit holds them only `git status` could tell, and a tracked
-        // file is never removed. The next run removes them if they are still
-        // empty and untracked (`agent_stubs::remove_leftover_stubs`).
+        // `info/exclude` no longer hides them. Only when its block or its
+        // sandbox folder appeared: another agent's empty file is its own work.
+        // After a commit or a branch change (or when git could not tell) they
+        // stay: whether the new commit holds them only `git status` could
+        // tell, and a tracked file is never removed. The next run removes
+        // them if they are still empty and untracked
+        // (`agent_stubs::remove_leftover_stubs`).
         if claude_stubs && commits_same {
             match stop {
                 // No git here: something was changed that should not have
@@ -236,6 +243,45 @@ mod tests {
             reported[0].canonicalize().unwrap(),
             settings.canonicalize().unwrap()
         );
+    }
+
+    #[test]
+    fn claude_codes_sandbox_in_a_task_folder_does_not_stop_the_role() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("app");
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("a.txt"), "a").unwrap();
+        let repo = Repo::init(&root).unwrap();
+        repo.commit_all("first").unwrap();
+        let folder = dir.path().join("app.tasks/task-001");
+        repo.add_worktree_with_branch(&folder, "harness/task-001")
+            .unwrap();
+        let task = Repo::open(&folder).unwrap();
+        let watched = Watched::for_repo(&task).unwrap();
+        let before = Before::take(&task, &watched).unwrap();
+        // What Claude Code's sandbox leaves in a task's own folder: the empty
+        // folder in the shared `info/`, and empty stubs that no exclude
+        // block hides, because there `.git` is a file.
+        let sandbox = task
+            .git_common_dir()
+            .unwrap()
+            .join("info/.claude-sandbox-noreplace");
+        fs::create_dir_all(&sandbox).unwrap();
+        fs::write(folder.join("bunfig.toml"), "").unwrap();
+        fs::write(folder.join("package.json"), "").unwrap();
+        // The role's own work: an empty file with another name, and a stub
+        // name with content.
+        fs::write(folder.join("notes.md"), "").unwrap();
+        fs::write(folder.join(".npmrc"), "registry=x\n").unwrap();
+
+        let stop = before.check(&task, &watched, Role::Architect).unwrap();
+
+        assert_eq!(stop, None);
+        assert!(!sandbox.exists());
+        assert!(!folder.join("bunfig.toml").exists());
+        assert!(!folder.join("package.json").exists());
+        assert!(folder.join("notes.md").exists());
+        assert!(folder.join(".npmrc").exists());
     }
 
     #[test]

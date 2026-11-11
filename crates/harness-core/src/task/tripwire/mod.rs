@@ -8,6 +8,7 @@
 //! operating system, which not every agent has.
 
 mod files;
+mod sandbox;
 mod settings;
 
 use std::collections::BTreeMap;
@@ -16,6 +17,7 @@ use std::path::{Path, PathBuf};
 use crate::git::{GitError, Repo};
 use crate::task::agent_stubs;
 use files::{add_tree, put_back, put_back_folder_modes, read, Content};
+pub(crate) use sandbox::remove_leftover_sandbox_folder;
 
 /// Files inside the home folder that are watched, with `/`. A file that
 /// does not exist is watched too: creating it is a change. Both the Unix
@@ -183,14 +185,17 @@ pub struct Changes {
     /// Changed files in the restored folders that could not be put back
     /// (removed when possible): the user must look at them by hand.
     pub not_put_back: Vec<PathBuf>,
-    /// `info/exclude` changed and held Claude Code's block of stub lines
-    /// (now put back): its new empty stub files must be removed. When the
-    /// block was the only change, it is not a reason to stop.
+    /// Claude Code ran: `info/exclude` changed and held its block of stub
+    /// lines (now put back), or its empty sandbox folder appeared in `info/`
+    /// (now removed). Its new empty stub files must be removed. Neither is a
+    /// reason to stop. In a task's own worktree `.git` is a file, so Claude
+    /// Code cannot write the block there and only the folder shows it ran.
     pub claude_stubs: bool,
 }
 
 impl Changes {
-    /// True when nothing watched changed, apart from Claude Code's stub lines.
+    /// True when nothing watched changed, apart from what Claude Code makes
+    /// (stub lines, sandbox folder).
     pub fn is_empty(&self) -> bool {
         self.put_back.is_empty() && self.reported.is_empty() && self.not_put_back.is_empty()
     }
@@ -236,6 +241,13 @@ impl Snapshot {
             {
                 continue;
             }
+            if watched.is_sandbox_folder(path, before.as_ref(), &now) {
+                if put_back(path, None).is_err() {
+                    changes.not_put_back.push(path.clone());
+                }
+                changes.claude_stubs = true;
+                continue;
+            }
             // Below something that could not be removed (maybe a link to
             // elsewhere), or below a link just made again, any change would
             // land outside the folder. Within each pass the paths are sorted,
@@ -266,7 +278,7 @@ impl Snapshot {
             }
             if *path == watched.exclude_file {
                 // Claude Code ran, also when it is not the only change.
-                changes.claude_stubs = matches!(&after, Some(Content::File { bytes, .. })
+                changes.claude_stubs |= matches!(&after, Some(Content::File { bytes, .. })
                     if agent_stubs::has_stub_block(bytes));
             }
             if !watched.is_stub_exclude(path, before.as_ref(), after.as_ref()) {
@@ -1061,6 +1073,104 @@ mod tests {
         let changes = before.check_and_restore(&watched);
 
         assert!(changes.is_empty() && changes.claude_stubs, "{changes:?}");
+    }
+
+    #[test]
+    fn claude_codes_empty_sandbox_folder_is_removed_quietly() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::create_dir_all(dir.path().join("info")).unwrap();
+        let watched = watched(dir.path());
+        let before = watched.snapshot();
+        let sandbox = dir.path().join("info/.claude-sandbox-noreplace");
+        fs::create_dir(&sandbox).unwrap();
+
+        let changes = before.check_and_restore(&watched);
+
+        assert!(changes.is_empty() && changes.claude_stubs, "{changes:?}");
+        assert!(!sandbox.exists());
+    }
+
+    #[test]
+    fn the_sandbox_folder_still_marks_claude_code_when_exclude_changed_otherwise() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::create_dir_all(dir.path().join("info")).unwrap();
+        let exclude = dir.path().join("info/exclude");
+        fs::write(&exclude, "# excludes\n").unwrap();
+        let watched = watched(dir.path());
+        let before = watched.snapshot();
+        fs::create_dir(dir.path().join("info/.claude-sandbox-noreplace")).unwrap();
+        fs::write(&exclude, "# excludes\n/src\n").unwrap();
+
+        let changes = before.check_and_restore(&watched);
+
+        assert_eq!(changes.put_back, std::slice::from_ref(&exclude));
+        assert!(changes.claude_stubs, "{changes:?}");
+    }
+
+    #[test]
+    fn a_sandbox_folder_with_something_inside_still_stops_the_task() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::create_dir_all(dir.path().join("info")).unwrap();
+        let watched = watched(dir.path());
+        let before = watched.snapshot();
+        let sandbox = dir.path().join("info/.claude-sandbox-noreplace");
+        fs::create_dir(&sandbox).unwrap();
+        fs::write(sandbox.join("attributes"), "* filter=evil").unwrap();
+
+        let changes = before.check_and_restore(&watched);
+
+        assert_eq!(
+            changes.put_back,
+            [sandbox.clone(), sandbox.join("attributes")]
+        );
+        assert!(!sandbox.exists());
+    }
+
+    #[test]
+    fn a_file_named_like_the_sandbox_folder_still_stops_the_task() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::create_dir_all(dir.path().join("info")).unwrap();
+        let watched = watched(dir.path());
+        let before = watched.snapshot();
+        let file = dir.path().join("info/.claude-sandbox-noreplace");
+        fs::write(&file, "").unwrap();
+
+        let changes = before.check_and_restore(&watched);
+
+        assert_eq!(changes.put_back, std::slice::from_ref(&file));
+        assert!(!file.exists());
+    }
+
+    #[test]
+    fn a_file_turned_into_an_empty_sandbox_folder_is_put_back() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::create_dir_all(dir.path().join("info")).unwrap();
+        let path = dir.path().join("info/.claude-sandbox-noreplace");
+        fs::write(&path, "mine").unwrap();
+        let watched = watched(dir.path());
+        let before = watched.snapshot();
+        fs::remove_file(&path).unwrap();
+        fs::create_dir(&path).unwrap();
+
+        let changes = before.check_and_restore(&watched);
+
+        assert_eq!(changes.put_back, std::slice::from_ref(&path));
+        assert_eq!(fs::read_to_string(&path).unwrap(), "mine");
+    }
+
+    #[test]
+    fn a_sandbox_folder_name_in_hooks_still_stops_the_task() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::create_dir_all(dir.path().join("hooks")).unwrap();
+        let watched = watched(dir.path());
+        let before = watched.snapshot();
+        let folder = dir.path().join("hooks/.claude-sandbox-noreplace");
+        fs::create_dir(&folder).unwrap();
+
+        let changes = before.check_and_restore(&watched);
+
+        assert_eq!(changes.put_back, [folder]);
+        assert!(!changes.claude_stubs);
     }
 
     #[test]

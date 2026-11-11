@@ -1210,6 +1210,22 @@ async fn leftover_empty_stubs_do_not_stop_a_run_but_other_files_do() {
 }
 
 #[tokio::test]
+async fn a_leftover_sandbox_folder_is_removed_before_the_role() {
+    let (dir, repo) = new_project();
+    let (store, mut state) = new_task(&repo);
+    // Left by Claude Code run outside the harness (the user's own, the retro).
+    let sandbox = dir.path().join(".git/info/.claude-sandbox-noreplace");
+    fs::create_dir_all(&sandbox).unwrap();
+    let agent = MockAgent::new().then(Role::Architect, approve(Role::Human));
+
+    orchestrator::run(&repo, &store, &mut state, &agent)
+        .await
+        .unwrap();
+
+    assert!(!sandbox.exists());
+}
+
+#[tokio::test]
 async fn claude_codes_stubs_are_removed_when_it_also_made_a_home_file() {
     let (dir, repo) = new_project();
     let (store, mut state) = new_task(&repo);
