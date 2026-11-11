@@ -1,6 +1,6 @@
 //! The empty folder Claude Code's sandbox makes in git's `info/`.
 //!
-//! With `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB` Claude Code 2.1.322 makes an empty
+//! With `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB` Claude Code 2.1.322 on Linux makes an empty
 //! folder `.claude-sandbox-noreplace` next to `info/exclude` when it starts,
 //! also when it runs no command, and leaves it there. In a task's own
 //! worktree `.git` is a file, so Claude Code cannot write its block of stub
@@ -36,8 +36,9 @@ impl Watched {
 }
 
 /// Removes the sandbox folder an unwatched run left (the user's own Claude
-/// Code, the retrospective) in the git folder `common`, so that the tripwire
-/// sees it appear when the next role runs Claude Code.
+/// Code, the retrospective) in the git folder `common`. Called just before
+/// a role's snapshot, so that the tripwire sees it appear when the role
+/// runs Claude Code.
 ///
 /// Best effort: `remove_dir` only removes an empty folder, so one with
 /// something inside stays (and a link in its place, on Linux and macOS).

@@ -267,7 +267,7 @@ mod tests {
             .unwrap()
             .join("info/.claude-sandbox-noreplace");
         fs::create_dir_all(&sandbox).unwrap();
-        fs::write(folder.join(".env"), "").unwrap();
+        fs::write(folder.join("bunfig.toml"), "").unwrap();
         fs::write(folder.join("package.json"), "").unwrap();
         // The role's own work: an empty file with another name, and a stub
         // name with content.
@@ -278,7 +278,7 @@ mod tests {
 
         assert_eq!(stop, None);
         assert!(!sandbox.exists());
-        assert!(!folder.join(".env").exists());
+        assert!(!folder.join("bunfig.toml").exists());
         assert!(!folder.join("package.json").exists());
         assert!(folder.join("notes.md").exists());
         assert!(folder.join(".npmrc").exists());

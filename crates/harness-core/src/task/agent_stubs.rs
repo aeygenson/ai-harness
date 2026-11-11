@@ -139,9 +139,8 @@ fn strip_stub_blocks(text: &[u8]) -> Option<Vec<u8>> {
     Some(new_text)
 }
 
-/// Removes what an earlier unwatched run of Claude Code left: its empty
-/// sandbox folder in `info/`, its block in `info/exclude`, then the stub
-/// files that are now visible to git and empty.
+/// Removes what an earlier unwatched run of Claude Code left: its block in
+/// `info/exclude`, then the stub files that are now visible to git and empty.
 /// A stub with content stays, so git status shows it and the user checks it.
 /// Without a block nothing is removed: then an empty stub-named file is the
 /// work of whatever made it (see [`remove_leftover_stubs`] for the run loop).
@@ -149,7 +148,6 @@ fn strip_stub_blocks(text: &[u8]) -> Option<Vec<u8>> {
 /// # Errors
 /// Git failed, or reading or writing `info/exclude` or a stub file failed.
 pub fn clear_leftovers(repo: &Repo) -> Result<(), GitError> {
-    crate::task::tripwire::remove_leftover_sandbox_folder(&repo.git_common_dir()?);
     if !clear_stub_block(repo)? {
         return Ok(());
     }
