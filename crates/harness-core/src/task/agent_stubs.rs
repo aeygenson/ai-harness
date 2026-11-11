@@ -7,15 +7,14 @@
 //! settings (`package.json`, `.npmrc`, `.env`, ...), so the sandbox can make
 //! them read-only, and appends them to `.git/info/exclude` so `git status`
 //! does not show them. Checked against Claude Code 2.1.283, 2.1.299 and
-//! 2.1.322. Since 2.1.322 its sandbox also makes an empty folder
-//! `.claude-sandbox-noreplace` in git's `info/` on every run; the tripwire
-//! takes that as a sign of Claude Code too. In a task's own worktree `.git`
-//! is a file, so the block cannot be written there and only the folder shows
-//! that the stubs are Claude Code's.
+//! 2.1.322.
 //!
 //! The tripwire puts `info/exclude` back after every role. When the only
 //! change was this block, it does not stop the task, and the harness removes
-//! the new empty stub files so they do not end up in the role's commit. Any
+//! the new empty stub files so they do not end up in the role's commit. In a
+//! task's own worktree there is no block (`.git` is a file there); the empty
+//! sandbox folder Claude Code makes in `info/` plays its part (see
+//! `tripwire::sandbox`). Any
 //! other change to `info/exclude` still stops the task. When the role is
 //! stopped for another reason (not a commit), the new empty stub files are
 //! removed too, without running git, so the next run does not stop on them.
@@ -140,8 +139,9 @@ fn strip_stub_blocks(text: &[u8]) -> Option<Vec<u8>> {
     Some(new_text)
 }
 
-/// Removes what an earlier unwatched run of Claude Code left: its block in
-/// `info/exclude`, then the stub files that are now visible to git and empty.
+/// Removes what an earlier unwatched run of Claude Code left: its empty
+/// sandbox folder in `info/`, its block in `info/exclude`, then the stub
+/// files that are now visible to git and empty.
 /// A stub with content stays, so git status shows it and the user checks it.
 /// Without a block nothing is removed: then an empty stub-named file is the
 /// work of whatever made it (see [`remove_leftover_stubs`] for the run loop).
@@ -149,6 +149,7 @@ fn strip_stub_blocks(text: &[u8]) -> Option<Vec<u8>> {
 /// # Errors
 /// Git failed, or reading or writing `info/exclude` or a stub file failed.
 pub fn clear_leftovers(repo: &Repo) -> Result<(), GitError> {
+    crate::task::tripwire::remove_leftover_sandbox_folder(repo)?;
     if !clear_stub_block(repo)? {
         return Ok(());
     }

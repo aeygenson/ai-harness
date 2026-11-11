@@ -8,6 +8,7 @@
 //! operating system, which not every agent has.
 
 mod files;
+mod sandbox;
 mod settings;
 
 use std::collections::BTreeMap;
@@ -16,6 +17,7 @@ use std::path::{Path, PathBuf};
 use crate::git::{GitError, Repo};
 use crate::task::agent_stubs;
 use files::{add_tree, put_back, put_back_folder_modes, read, Content};
+pub(crate) use sandbox::remove_leftover_sandbox_folder;
 
 /// Files inside the home folder that are watched, with `/`. A file that
 /// does not exist is watched too: creating it is a change. Both the Unix
@@ -53,10 +55,6 @@ const GIT_FOLDERS: &[&str] = &["hooks", "info"];
 /// and the repack rewrites this file, maybe while the next role runs. It
 /// holds no command, so a change to it is not a reason to stop.
 const GIT_OWN_FILES: &[&str] = &["info/refs"];
-
-/// The empty folder Claude Code's sandbox makes in git's `info/` on every
-/// run (seen with Claude Code 2.1.322), next to `info/exclude`.
-const CLAUDE_SANDBOX_FOLDER: &str = ".claude-sandbox-noreplace";
 
 /// What the tripwire watches: folders that are put back after a change, and
 /// single files that are only reported.
@@ -167,18 +165,6 @@ impl Watched {
             Some(_) => return false,
         };
         agent_stubs::only_stub_lines(before, after)
-    }
-
-    /// Is `path` Claude Code's new, empty sandbox folder in `info/`?
-    /// Anything inside it (`now` holds what is there) makes it a real change.
-    fn is_sandbox_folder(&self, path: &Path, before: Option<&Content>, now: &Snapshot) -> bool {
-        let Some(info) = self.exclude_file.parent() else {
-            return false;
-        };
-        path == info.join(CLAUDE_SANDBOX_FOLDER)
-            && before.is_none()
-            && matches!(now.files.get(path), Some(Some(Content::Folder(_))))
-            && !now.files.keys().any(|p| p != path && p.starts_with(path))
     }
 }
 
@@ -1102,6 +1088,23 @@ mod tests {
 
         assert!(changes.is_empty() && changes.claude_stubs, "{changes:?}");
         assert!(!sandbox.exists());
+    }
+
+    #[test]
+    fn the_sandbox_folder_still_marks_claude_code_when_exclude_changed_otherwise() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::create_dir_all(dir.path().join("info")).unwrap();
+        let exclude = dir.path().join("info/exclude");
+        fs::write(&exclude, "# excludes\n").unwrap();
+        let watched = watched(dir.path());
+        let before = watched.snapshot();
+        fs::create_dir(dir.path().join("info/.claude-sandbox-noreplace")).unwrap();
+        fs::write(&exclude, "# excludes\n/src\n").unwrap();
+
+        let changes = before.check_and_restore(&watched);
+
+        assert_eq!(changes.put_back, std::slice::from_ref(&exclude));
+        assert!(changes.claude_stubs, "{changes:?}");
     }
 
     #[test]

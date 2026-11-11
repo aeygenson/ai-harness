@@ -45,8 +45,8 @@ impl Before {
 
     /// Compares with now: git's settings, the tripwire, the commit and the
     /// branches. Puts back what can be put back and returns why the task
-    /// must stop, or `None` when all is as before. When Claude Code's stub
-    /// block was there, removes its new empty stub files (see
+    /// must stop, or `None` when all is as before. When Claude Code ran (its
+    /// stub block or sandbox folder appeared), removes its new empty stub files (see
     /// [`crate::task::agent_stubs`]), except after a commit or branch change
     /// (then the next run removes them).
     pub(super) fn check(
@@ -102,8 +102,8 @@ impl Before {
         };
         // Claude Code's empty stub files would otherwise end up in the role's
         // commit, or stop the next run as uncommitted changes, once
-        // `info/exclude` no longer hides them. Only when its block was there:
-        // another agent's empty file is its own work. After a commit or a
+        // `info/exclude` no longer hides them. Only when its block or its
+        // sandbox folder appeared: another agent's empty file is its own work. After a commit or a
         // branch change (or when git could not tell) they stay: whether the
         // new commit holds them only `git status` could tell, and a tracked
         // file is never removed. The next run removes them if they are still
