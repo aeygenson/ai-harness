@@ -239,6 +239,45 @@ mod tests {
     }
 
     #[test]
+    fn claude_codes_sandbox_in_a_task_folder_does_not_stop_the_role() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("app");
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("a.txt"), "a").unwrap();
+        let repo = Repo::init(&root).unwrap();
+        repo.commit_all("first").unwrap();
+        let folder = dir.path().join("app.tasks/task-001");
+        repo.add_worktree_with_branch(&folder, "harness/task-001")
+            .unwrap();
+        let task = Repo::open(&folder).unwrap();
+        let watched = Watched::for_repo(&task).unwrap();
+        let before = Before::take(&task, &watched).unwrap();
+        // What Claude Code's sandbox leaves in a task's own folder: the empty
+        // folder in the shared `info/`, and empty stubs that no exclude
+        // block hides, because there `.git` is a file.
+        let sandbox = task
+            .git_common_dir()
+            .unwrap()
+            .join("info/.claude-sandbox-noreplace");
+        fs::create_dir_all(&sandbox).unwrap();
+        fs::write(folder.join(".env"), "").unwrap();
+        fs::write(folder.join("package.json"), "").unwrap();
+        // The role's own work: an empty file with another name, and a stub
+        // name with content.
+        fs::write(folder.join("notes.md"), "").unwrap();
+        fs::write(folder.join(".npmrc"), "registry=x\n").unwrap();
+
+        let stop = before.check(&task, &watched, Role::Architect).unwrap();
+
+        assert_eq!(stop, None);
+        assert!(!sandbox.exists());
+        assert!(!folder.join(".env").exists());
+        assert!(!folder.join("package.json").exists());
+        assert!(folder.join("notes.md").exists());
+        assert!(folder.join(".npmrc").exists());
+    }
+
+    #[test]
     fn a_broken_project_inside_another_repository_is_not_a_commit() {
         let outer = tempfile::tempdir().unwrap();
         let outer_repo = Repo::init(outer.path()).unwrap();

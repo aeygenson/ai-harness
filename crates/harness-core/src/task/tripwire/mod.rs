@@ -54,6 +54,10 @@ const GIT_FOLDERS: &[&str] = &["hooks", "info"];
 /// holds no command, so a change to it is not a reason to stop.
 const GIT_OWN_FILES: &[&str] = &["info/refs"];
 
+/// The empty folder Claude Code's sandbox makes in git's `info/` on every
+/// run (seen with Claude Code 2.1.322), next to `info/exclude`.
+const CLAUDE_SANDBOX_FOLDER: &str = ".claude-sandbox-noreplace";
+
 /// What the tripwire watches: folders that are put back after a change, and
 /// single files that are only reported.
 #[derive(Debug, Clone, Default)]
@@ -164,6 +168,18 @@ impl Watched {
         };
         agent_stubs::only_stub_lines(before, after)
     }
+
+    /// Is `path` Claude Code's new, empty sandbox folder in `info/`?
+    /// Anything inside it (`now` holds what is there) makes it a real change.
+    fn is_sandbox_folder(&self, path: &Path, before: Option<&Content>, now: &Snapshot) -> bool {
+        let Some(info) = self.exclude_file.parent() else {
+            return false;
+        };
+        path == info.join(CLAUDE_SANDBOX_FOLDER)
+            && before.is_none()
+            && matches!(now.files.get(path), Some(Some(Content::Folder(_))))
+            && !now.files.keys().any(|p| p != path && p.starts_with(path))
+    }
 }
 
 /// The watched files at one moment.
@@ -183,14 +199,17 @@ pub struct Changes {
     /// Changed files in the restored folders that could not be put back
     /// (removed when possible): the user must look at them by hand.
     pub not_put_back: Vec<PathBuf>,
-    /// `info/exclude` changed and held Claude Code's block of stub lines
-    /// (now put back): its new empty stub files must be removed. When the
-    /// block was the only change, it is not a reason to stop.
+    /// Claude Code ran: `info/exclude` changed and held its block of stub
+    /// lines (now put back), or its empty sandbox folder appeared in `info/`
+    /// (now removed). Its new empty stub files must be removed. Neither is a
+    /// reason to stop. In a task's own worktree `.git` is a file, so Claude
+    /// Code cannot write the block there and only the folder shows it ran.
     pub claude_stubs: bool,
 }
 
 impl Changes {
-    /// True when nothing watched changed, apart from Claude Code's stub lines.
+    /// True when nothing watched changed, apart from what Claude Code makes
+    /// (stub lines, sandbox folder).
     pub fn is_empty(&self) -> bool {
         self.put_back.is_empty() && self.reported.is_empty() && self.not_put_back.is_empty()
     }
@@ -236,6 +255,13 @@ impl Snapshot {
             {
                 continue;
             }
+            if watched.is_sandbox_folder(path, before.as_ref(), &now) {
+                if put_back(path, None).is_err() {
+                    changes.not_put_back.push(path.clone());
+                }
+                changes.claude_stubs = true;
+                continue;
+            }
             // Below something that could not be removed (maybe a link to
             // elsewhere), or below a link just made again, any change would
             // land outside the folder. Within each pass the paths are sorted,
@@ -266,7 +292,7 @@ impl Snapshot {
             }
             if *path == watched.exclude_file {
                 // Claude Code ran, also when it is not the only change.
-                changes.claude_stubs = matches!(&after, Some(Content::File { bytes, .. })
+                changes.claude_stubs |= matches!(&after, Some(Content::File { bytes, .. })
                     if agent_stubs::has_stub_block(bytes));
             }
             if !watched.is_stub_exclude(path, before.as_ref(), after.as_ref()) {
@@ -1061,6 +1087,55 @@ mod tests {
         let changes = before.check_and_restore(&watched);
 
         assert!(changes.is_empty() && changes.claude_stubs, "{changes:?}");
+    }
+
+    #[test]
+    fn claude_codes_empty_sandbox_folder_is_removed_quietly() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::create_dir_all(dir.path().join("info")).unwrap();
+        let watched = watched(dir.path());
+        let before = watched.snapshot();
+        let sandbox = dir.path().join("info/.claude-sandbox-noreplace");
+        fs::create_dir(&sandbox).unwrap();
+
+        let changes = before.check_and_restore(&watched);
+
+        assert!(changes.is_empty() && changes.claude_stubs, "{changes:?}");
+        assert!(!sandbox.exists());
+    }
+
+    #[test]
+    fn a_sandbox_folder_with_something_inside_still_stops_the_task() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::create_dir_all(dir.path().join("info")).unwrap();
+        let watched = watched(dir.path());
+        let before = watched.snapshot();
+        let sandbox = dir.path().join("info/.claude-sandbox-noreplace");
+        fs::create_dir(&sandbox).unwrap();
+        fs::write(sandbox.join("attributes"), "* filter=evil").unwrap();
+
+        let changes = before.check_and_restore(&watched);
+
+        assert_eq!(
+            changes.put_back,
+            [sandbox.clone(), sandbox.join("attributes")]
+        );
+        assert!(!sandbox.exists());
+    }
+
+    #[test]
+    fn a_sandbox_folder_name_in_hooks_still_stops_the_task() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::create_dir_all(dir.path().join("hooks")).unwrap();
+        let watched = watched(dir.path());
+        let before = watched.snapshot();
+        let folder = dir.path().join("hooks/.claude-sandbox-noreplace");
+        fs::create_dir(&folder).unwrap();
+
+        let changes = before.check_and_restore(&watched);
+
+        assert_eq!(changes.put_back, [folder]);
+        assert!(!changes.claude_stubs);
     }
 
     #[test]
