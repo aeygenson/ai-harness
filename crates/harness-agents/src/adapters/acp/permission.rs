@@ -207,13 +207,12 @@ fn write_refusal(place: Place, tool: &Value) -> Option<String> {
     let paths: Vec<&str> = tool
         .get("locations")
         .and_then(Value::as_array)
-        .map(|locations| {
+        .map_or_default(|locations| {
             locations
                 .iter()
                 .filter_map(|location| location.get("path").and_then(Value::as_str))
                 .collect()
-        })
-        .unwrap_or_default();
+        });
     if paths.is_empty() {
         // Nothing named: only a role that may change any file gets it.
         return (place.role.spec().writes != WriteRule::Anything)

@@ -31,14 +31,13 @@ pub fn plugin_list(project: &Path, agent: Option<AgentKind>) -> Result<()> {
     let added: Vec<String> = Repo::open(project)
         .ok()
         .and_then(|repo| Config::load(&repo.root().join(HARNESS_DIR)).ok())
-        .map(|config| {
+        .map_or_default(|config| {
             config
                 .plugins
                 .values()
                 .filter_map(|p| p.source.clone())
                 .collect()
-        })
-        .unwrap_or_default();
+        });
     let mut out = String::new();
     for entry in entries
         .iter()
@@ -145,8 +144,7 @@ pub fn plugin_add(project: &Path, wanted: &str, options: &AddOptions) -> Result<
         entry.id(),
         commit
             .as_deref()
-            .map(|c| format!(" at {}", short(c)))
-            .unwrap_or_default(),
+            .map_or_default(|c| format!(" at {}", short(c))),
         relative(repo.root(), &target)
     );
     warn_about(name, contents, options.allow_hooks, options.allow_mcp);
@@ -183,8 +181,7 @@ pub fn plugin_update(project: &Path, name: &str) -> Result<()> {
         prepared
             .commit
             .as_deref()
-            .map(|c| format!(" to {}", short(c)))
-            .unwrap_or_default()
+            .map_or_default(|c| format!(" to {}", short(c)))
     );
     print_changes(&prepared.changes);
     warn_about(

@@ -2066,3 +2066,45 @@ fn the_wheel_over_a_pull_request_link_moves_through_the_tasks() {
     assert_eq!(tasks.task, 1);
     assert_eq!(tasks.scroll, 0);
 }
+
+#[test]
+fn the_user_asks_for_a_rethink_and_a_new_approach_goes_to_the_architect_by_default() {
+    use harness_core::task::routes::ArchitectJob;
+    use harness_core::task::{Stage, WaitReason};
+    // Arrange: a design waits for the user.
+    let env = Env::new();
+    let (root, mut app) = empty_project(&env);
+    app.tasks.as_mut().unwrap().paste("Build a parser");
+    send(&mut app);
+    wait(&mut app);
+    assert_eq!(
+        stage(&app),
+        Stage::WaitingForHuman(WaitReason::ApproveDesign)
+    );
+
+    // Act: «architect: rethink the approach» with a note.
+    click(&mut app, " To: developer ▾ ");
+    click(&mut app, "architect: rethink the approach");
+    click(&mut app, "Write here");
+    type_text(&mut app, "The checks keep failing in new ways");
+    send(&mut app);
+    wait(&mut app);
+
+    // Assert: the architect's rethink waits for the user, who accepts it by
+    // sending it to the architect.
+    assert_eq!(
+        stage(&app),
+        Stage::WaitingForHuman(WaitReason::ApproveNewApproach)
+    );
+    let (store, state) = TaskStore::open(&root.join(".harness/runs"), "task-001").unwrap();
+    assert_eq!(state.architect_job, ArchitectJob::Rethink);
+    let steps = store.steps().unwrap();
+    assert_eq!(steps[1].handoff.role, Role::Human);
+    assert_eq!(
+        steps[1].handoff.summary,
+        "The checks keep failing in new ways"
+    );
+    let text = screen(&mut app);
+    assert!(text.contains("waiting: approve a new approach"), "{text}");
+    assert!(text.contains(" To: architect ▾ "), "{text}");
+}

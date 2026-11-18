@@ -100,12 +100,10 @@ pub fn build(role: Role, agents: AgentFacts<'_>, skills: &RoleSkills, prompt: &s
             .collect(),
         mcp: agents
             .config
-            .map(|config| mcp_stamps(config, role))
-            .unwrap_or_default(),
+            .map_or_default(|config| mcp_stamps(config, role)),
         plugins: agents
             .config
-            .map(|config| plugin_stamps(config, role))
-            .unwrap_or_default(),
+            .map_or_default(|config| plugin_stamps(config, role)),
         prompt: fingerprint(prompt),
     }
 }
@@ -113,11 +111,7 @@ pub fn build(role: Role, agents: AgentFacts<'_>, skills: &RoleSkills, prompt: &s
 /// The role's MCP servers. Only the command, the arguments (which usually
 /// pin the server's version, such as `pkg@1.2.0`) and the address count.
 fn mcp_stamps(config: &Config, role: Role) -> Vec<Stamp> {
-    let names = config
-        .roles
-        .get(&role)
-        .map(|r| r.mcp.as_slice())
-        .unwrap_or_default();
+    let names = config.roles.get(&role).map_or_default(|r| r.mcp.as_slice());
     names
         .iter()
         .filter_map(|name| {
@@ -136,8 +130,7 @@ fn plugin_stamps(config: &Config, role: Role) -> Vec<PluginStamp> {
     let names = config
         .roles
         .get(&role)
-        .map(|r| r.plugins.as_slice())
-        .unwrap_or_default();
+        .map_or_default(|r| r.plugins.as_slice());
     names
         .iter()
         .filter_map(|name| {

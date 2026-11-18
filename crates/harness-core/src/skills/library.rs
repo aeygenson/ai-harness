@@ -15,8 +15,7 @@ pub fn library(harness_dir: &Path) -> Vec<LibrarySkill> {
         for path in entries.filter_map(Result::ok).map(|e| e.path()) {
             let name = path
                 .file_stem()
-                .map(|s| s.to_string_lossy().into_owned())
-                .unwrap_or_default();
+                .map_or_default(|s| s.to_string_lossy().into_owned());
             if path.extension().is_some_and(|e| e == "md")
                 && check_name(&name).is_ok()
                 && !names.contains(&name)

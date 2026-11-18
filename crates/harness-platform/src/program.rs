@@ -79,19 +79,17 @@ pub fn usual_places(home: Option<&Path>) -> Vec<PathBuf> {
         }
         return places;
     }
-    let mut places: Vec<PathBuf> = home
-        .map(|home| {
-            [
-                ".local/bin",
-                ".claude/local",
-                ".npm-global/bin",
-                ".cargo/bin",
-            ]
-            .iter()
-            .map(|dir| home.join(dir))
-            .collect()
-        })
-        .unwrap_or_default();
+    let mut places: Vec<PathBuf> = home.map_or_default(|home| {
+        [
+            ".local/bin",
+            ".claude/local",
+            ".npm-global/bin",
+            ".cargo/bin",
+        ]
+        .iter()
+        .map(|dir| home.join(dir))
+        .collect()
+    });
     places.extend(["/opt/homebrew/bin", "/usr/local/bin"].map(PathBuf::from));
     places
 }

@@ -1321,3 +1321,104 @@ async fn an_empty_stub_named_file_without_claude_codes_block_is_the_agents_work(
     assert!(dir.path().join(".env").exists());
     assert!(repo.is_tracked(std::path::Path::new(".env")));
 }
+
+#[tokio::test]
+async fn a_tester_who_rejects_three_times_in_a_row_brings_the_architects_rethink() {
+    // Arrange: an approved design; the tester then sends the work back three times.
+    let (_dir, repo) = new_project();
+    let (store, mut state) = new_task(&repo);
+    store
+        .save_stage(&mut state, Stage::Working(Role::Developer))
+        .unwrap();
+    repo.commit_all("the design is approved").unwrap();
+    let mut agent = MockAgent::new();
+    for _ in 0..3 {
+        agent = agent
+            .then(Role::Developer, approve(Role::Architect))
+            .then(Role::Architect, approve(Role::Tester))
+            .then(
+                Role::Tester,
+                MockStep::finish(Verdict::Rejected, NextStep::To(Role::Developer)),
+            );
+    }
+    let agent = agent.then(Role::Architect, approve(Role::Human));
+
+    // Act
+    let stop = orchestrator::run(&repo, &store, &mut state, &agent)
+        .await
+        .unwrap();
+
+    // Assert: the developer did not get a fourth try; the architect's rethink
+    // saw the whole history and waits for the user.
+    assert_eq!(
+        stop,
+        StopReason::WaitingForHuman(WaitReason::ApproveNewApproach)
+    );
+    let calls = agent.calls();
+    assert_eq!(calls.len(), 10);
+    assert_eq!(calls[9], Role::Architect);
+    let rethink = &agent.prompts()[9];
+    assert!(rethink.contains("This step is a rethink"), "{rethink}");
+    for round in 1..=3 {
+        assert!(
+            rethink.contains(&format!("- round {round}, tester:")),
+            "{rethink}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn the_user_asks_for_a_rethink_of_a_design_and_at_the_round_limit() {
+    // Arrange: a design waits for the user.
+    let (_dir, repo) = new_project();
+    let (store, mut state) = new_task(&repo);
+    let agent = MockAgent::new()
+        .then(Role::Architect, approve(Role::Human))
+        .then(Role::Architect, approve(Role::Human));
+    orchestrator::run(&repo, &store, &mut state, &agent)
+        .await
+        .unwrap();
+
+    // Act: the user asks for another approach to the design they did not approve.
+    orchestrator::ask_for_rethink(&repo, &store, &mut state, "  ").unwrap();
+    let stop = orchestrator::run(&repo, &store, &mut state, &agent)
+        .await
+        .unwrap();
+
+    // Assert: saved as a rejection with the default note, which the
+    // architect sees in the history; the new approach waits for the user.
+    let decision = &store.steps().unwrap()[1].handoff;
+    assert_eq!(decision.verdict, Verdict::Rejected);
+    assert!(decision.summary.starts_with("Rethink the approach"));
+    let rethink = &agent.prompts()[1];
+    assert!(
+        rethink.contains("- round 1, human: Rethink the approach"),
+        "{rethink}"
+    );
+    assert_eq!(
+        stop,
+        StopReason::WaitingForHuman(WaitReason::ApproveNewApproach)
+    );
+
+    // At the round limit a rethink first gets the task fresh rounds.
+    store
+        .save_stage(
+            &mut state,
+            Stage::WaitingForHuman(WaitReason::RoundLimitReached),
+        )
+        .unwrap();
+    repo.commit_all("at the limit").unwrap();
+    let limit = state.max_rounds;
+    orchestrator::ask_for_rethink(&repo, &store, &mut state, "Try another way").unwrap();
+    assert!(state.max_rounds > limit);
+    assert_eq!(state.stage, Stage::Working(Role::Architect));
+
+    // A task that does not wait for the user refuses it and keeps its job.
+    let job = state.architect_job;
+    let refused = orchestrator::ask_for_rethink(&repo, &store, &mut state, "again").unwrap_err();
+    assert!(
+        matches!(refused, orchestrator::RunError::NotWaiting),
+        "{refused}"
+    );
+    assert_eq!(state.architect_job, job);
+}

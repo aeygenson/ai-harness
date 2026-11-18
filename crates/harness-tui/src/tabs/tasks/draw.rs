@@ -87,8 +87,7 @@ impl TasksTab {
         let took = self
             .times_of(&task.id)
             .and_then(|times| times.task_took(task.state.stage == Stage::Done, SystemTime::now()))
-            .map(|took| tr.f("tasks.task_time", &[("time", &duration_label(took, tr))]))
-            .unwrap_or_default();
+            .map_or_default(|took| tr.f("tasks.task_time", &[("time", &duration_label(took, tr))]));
         let title = tr.f(
             "tasks.header",
             &[

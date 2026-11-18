@@ -108,8 +108,7 @@ fn step_text(handoff: &Handoff, secrets: &[&str]) -> String {
         let place = issue
             .location
             .as_deref()
-            .map(|place| format!(" {place}:"))
-            .unwrap_or_default();
+            .map_or_default(|place| format!(" {place}:"));
         let _ = write!(
             words,
             "\n- [{}]{place} {}",

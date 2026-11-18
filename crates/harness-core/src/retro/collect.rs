@@ -108,7 +108,7 @@ impl Stats {
             returns,
             issues,
             repeated_issues: repeated,
-            skills: config.map(|c| skill_uses(c, &used)).unwrap_or_default(),
+            skills: config.map_or_default(|c| skill_uses(c, &used)),
             usage,
             refusals: refusals::count(&refused_by_task(tasks)),
         }

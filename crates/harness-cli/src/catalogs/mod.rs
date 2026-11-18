@@ -68,8 +68,7 @@ pub fn marketplace_list() -> Result<()> {
         };
         let commit = catalog
             .commit
-            .map(|c| format!(" at {}", short(&c)))
-            .unwrap_or_default();
+            .map_or_default(|c| format!(" at {}", short(&c)));
         println!(
             "{}  {}{commit}  ({about})",
             catalog.name, catalog.config.source

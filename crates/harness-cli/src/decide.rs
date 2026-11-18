@@ -4,7 +4,7 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Result};
-use harness_core::task::handoff::{NextStep, Verdict};
+use harness_core::task::handoff::{NextStep, Role, Verdict};
 use harness_core::task::orchestrator::{self, HumanDecision};
 use harness_core::task::run_lock::RunLock;
 use harness_core::task::store::TaskStore;
@@ -59,6 +59,8 @@ pub(crate) fn decide(project: &Path, task_id: &str, decision: Decision<'_>) -> R
                 NextStep::To(state.workflow.after_approval())
             }
             Stage::WaitingForHuman(WaitReason::AcceptResult) => NextStep::Done,
+            // Accepting the new approach: the architect rewrites the design along it.
+            Stage::WaitingForHuman(WaitReason::ApproveNewApproach) => NextStep::To(Role::Architect),
             Stage::WaitingForHuman(
                 WaitReason::RoleAskedForHelp(role) | WaitReason::StoppedByUser(role),
             ) => NextStep::To(role),
@@ -89,6 +91,19 @@ pub(crate) fn decide(project: &Path, task_id: &str, decision: Decision<'_>) -> R
     } else {
         println!("Saved. Next: harness run {task_id}");
     }
+    Ok(())
+}
+
+/// `harness rethink`: the user asks the architect of a waiting task to stop
+/// patching and propose another approach (see `harness_core::task::rethink`).
+pub(crate) fn rethink(project: &Path, task_id: &str, notes: &str) -> Result<()> {
+    let repo = open_repo(project)?;
+    let mut lock = RunLock::hold(&repo)?;
+    lock.set_task(task_id)?;
+    let repo = enter_task(&repo, task_id)?;
+    let (store, mut state) = open_task(&repo, task_id)?;
+    orchestrator::ask_for_rethink(&repo, &store, &mut state, notes)?;
+    println!("Saved. The architect rethinks the approach next: harness run {task_id}");
     Ok(())
 }
 

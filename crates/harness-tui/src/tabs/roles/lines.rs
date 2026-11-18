@@ -49,17 +49,14 @@ impl RolesTab {
         let dim = theme::dim();
         let list = self.model_list();
         let mark = if model == Some(id) { "(•)" } else { "( )" };
-        let about = list
-            .and_then(|l| l.find(id))
-            .map(|m| {
-                let default = if m.default {
-                    format!("{} ", tr.t("roles.agents_default"))
-                } else {
-                    String::new()
-                };
-                format!("{default}{}", m.name.clone().unwrap_or_default())
-            })
-            .unwrap_or_default();
+        let about = list.and_then(|l| l.find(id)).map_or_default(|m| {
+            let default = if m.default {
+                format!("{} ", tr.t("roles.agents_default"))
+            } else {
+                String::new()
+            };
+            format!("{default}{}", m.name.clone().unwrap_or_default())
+        });
         Line::from(vec![
             Span::raw(format!("  {mark} {id:<24} ")),
             Span::styled(about, dim),

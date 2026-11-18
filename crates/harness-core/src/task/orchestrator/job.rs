@@ -6,6 +6,8 @@ use crate::task::facts;
 use crate::task::handoff::Role;
 use crate::task::manifest::{self, Manifest};
 use crate::task::prompt;
+use crate::task::rethink;
+use crate::task::routes::ArchitectJob;
 use crate::task::store::{StoreError, TaskStore};
 use crate::task::TaskState;
 
@@ -23,7 +25,11 @@ pub(super) fn prepare_job(
 ) -> Result<(RoleJob, Manifest), StoreError> {
     let output_dir = store.prepare_inbox()?;
     let steps = store.steps()?;
-    let facts = facts::text(repo, &steps);
+    let mut facts = facts::text(repo, &steps);
+    // A rethink needs the whole story of the loop, not only the last step.
+    if role == Role::Architect && state.architect_job == ArchitectJob::Rethink {
+        facts.push_str(&rethink::history_text(&steps));
+    }
     let skills = setup.skills.for_role(role);
     let context = prompt::Context {
         description: &store.description()?,

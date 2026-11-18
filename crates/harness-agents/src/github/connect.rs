@@ -44,9 +44,7 @@ pub struct Connection<'a> {
 /// repository as `owner/name`.
 pub fn connect(root: &Path, name: &str, private: bool) -> Result<String, String> {
     let gh = super::ready_gh("try again")?;
-    let secrets = credentials::default_dir()
-        .map(|dir| credentials::saved_secrets(&dir))
-        .unwrap_or_default();
+    let secrets = credentials::default_dir().map_or_default(|dir| credentials::saved_secrets(&dir));
     let secrets: Vec<&str> = secrets.iter().map(credentials::Secret::expose).collect();
     let connection = Connection {
         gh: &gh,

@@ -86,8 +86,7 @@ impl TasksTab {
         let mut times = HashMap::new();
         for root in roots {
             let added = Repo::open(root)
-                .map(|repo| repo.added_times(&format!("{HARNESS_DIR}/runs")))
-                .unwrap_or_default();
+                .map_or_default(|repo| repo.added_times(&format!("{HARNESS_DIR}/runs")));
             let tasks: Vec<&TaskView> = self.all.iter().filter(|t| &t.root == root).collect();
             times.extend(task_times(root, &tasks, &added));
         }

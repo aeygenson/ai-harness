@@ -93,8 +93,7 @@ impl McpTab {
         let wanted: Vec<String> = roles
             .servers()
             .get(name)
-            .map(|s| secret_names(s).collect())
-            .unwrap_or_default();
+            .map_or_default(|s| secret_names(s).collect());
         wanted
             .iter()
             .find(|n| !self.secrets.contains(n))

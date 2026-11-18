@@ -45,9 +45,7 @@ fn with_places<T>(work: impl FnOnce(&Places) -> T) -> T {
         OsString::new()
     };
     let apps = if cfg!(windows) {
-        env::var_os("LOCALAPPDATA")
-            .map(|local| PathBuf::from(local).join("Programs"))
-            .unwrap_or_default()
+        env::var_os("LOCALAPPDATA").map_or_default(|local| PathBuf::from(local).join("Programs"))
     } else {
         PathBuf::from(MAC_APPS)
     };

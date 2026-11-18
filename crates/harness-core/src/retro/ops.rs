@@ -225,8 +225,7 @@ pub fn apply(repo: &Repo, dir: &Path, ids: &[u32]) -> Result<Vec<u32>, OpsError>
     });
     let made = repo
         .last_change_date(&format!("{HARNESS_DIR}/{RETROS_DIR}/{number}"))
-        .map(|day| format!(" of {day}"))
-        .unwrap_or_default();
+        .map_or_default(|day| format!(" of {day}"));
     if !skills.is_empty() {
         let origin = format!("retro {number}{made}, approved by the user");
         let mut paths = suggest::apply(&harness_dir, &found.proposals, &skills, &origin)?;

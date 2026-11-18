@@ -26,6 +26,7 @@ impl TasksTab {
                 "tasks.choice_more_rounds",
                 &[("role", &role), ("rounds", &MORE_ROUNDS)],
             ),
+            Choice::Rethink => tr.t("tasks.choice_rethink").to_string(),
             Choice::Finish => tr.t("tasks.choice_finish").to_string(),
             Choice::Publish => tr.t("tasks.choice_publish").to_string(),
             Choice::Merge => tr.t("tasks.choice_merge").to_string(),

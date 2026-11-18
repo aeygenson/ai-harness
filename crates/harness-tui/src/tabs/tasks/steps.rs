@@ -36,7 +36,8 @@ impl TasksTab {
                 WaitReason::ApproveDesign
                 | WaitReason::AcceptResult
                 | WaitReason::RoleAskedForHelp(_)
-                | WaitReason::RoundLimitReached,
+                | WaitReason::RoundLimitReached
+                | WaitReason::ApproveNewApproach,
             ) => {}
             Stage::WaitingForHuman(WaitReason::StoppedByUser(_))
             | Stage::Working(_)
@@ -157,9 +158,7 @@ impl TasksTab {
         for found in task.steps.iter().filter_map(|step| self.step_usage(step)) {
             total.get_or_insert_with(Usage::default).add(found);
         }
-        total
-            .map(|usage| format!(" · {}", usage_label(&usage, tr)))
-            .unwrap_or_default()
+        total.map_or_default(|usage| format!(" · {}", usage_label(&usage, tr)))
     }
 }
 
@@ -170,7 +169,9 @@ pub(super) fn waits_on(task: &TaskView, role: Role) -> bool {
         Stage::WaitingForHuman(
             WaitReason::RoleAskedForHelp(asking) | WaitReason::StoppedByUser(asking),
         ) => asking == role,
-        Stage::WaitingForHuman(WaitReason::ApproveDesign) => role == Role::Architect,
+        Stage::WaitingForHuman(WaitReason::ApproveDesign | WaitReason::ApproveNewApproach) => {
+            role == Role::Architect
+        }
         // Only the user's acceptance is awaited, no role's.
         Stage::WaitingForHuman(WaitReason::AcceptResult) | Stage::Done => false,
         Stage::WaitingForHuman(WaitReason::RoundLimitReached) => task
@@ -257,8 +258,7 @@ pub(super) fn step_text(
             let location = issue
                 .location
                 .as_deref()
-                .map(|l| format!("{l}  "))
-                .unwrap_or_default();
+                .map_or_default(|l| format!("{l}  "));
             lines.push(Line::from(vec![
                 Span::styled(
                     format!("  {name:<9} "),

@@ -36,7 +36,7 @@ impl RolesTab {
         };
         let settings = self.roles.get(&role);
         let listed = |list: fn(&RoleConfig) -> &Vec<String>| -> Vec<String> {
-            settings.map(|s| list(s).clone()).unwrap_or_default()
+            settings.map_or_default(|s| list(s).clone())
         };
         let mut skills: Vec<String> = self.skills.iter().map(|s| s.name.clone()).collect();
         for name in listed(|s| &s.skills)

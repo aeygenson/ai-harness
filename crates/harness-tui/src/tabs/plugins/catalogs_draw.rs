@@ -71,10 +71,7 @@ impl CatalogsView {
         frame.render_widget(
             Paragraph::new(lines)
                 .block(panel(
-                    &self
-                        .current()
-                        .map(|c| format!(" {} ", c.name))
-                        .unwrap_or_default(),
+                    &self.current().map_or_default(|c| format!(" {} ", c.name)),
                     false,
                 ))
                 .wrap(Wrap { trim: false }),

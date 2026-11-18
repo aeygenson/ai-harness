@@ -49,11 +49,7 @@ pub(crate) fn models(refresh: bool) -> Result<()> {
                     .collect();
                 format!("  effort: {}", levels.join(" "))
             };
-            let name = model
-                .name
-                .as_deref()
-                .map(|n| format!("  {n}"))
-                .unwrap_or_default();
+            let name = model.name.as_deref().map_or_default(|n| format!("  {n}"));
             println!("  {}{default}{name}{efforts}", model.id);
         }
     }

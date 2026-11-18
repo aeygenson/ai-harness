@@ -61,9 +61,7 @@ pub fn publish(
         return Ok(None);
     };
     let github = GitHub::ready(settings, "run the task again")?;
-    let secrets = credentials::default_dir()
-        .map(|dir| credentials::saved_secrets(&dir))
-        .unwrap_or_default();
+    let secrets = credentials::default_dir().map_or_default(|dir| credentials::saved_secrets(&dir));
     let secrets: Vec<&str> = secrets.iter().map(credentials::Secret::expose).collect();
     publish_with(repo, store, state, &github, &secrets).map(Some)
 }
@@ -145,8 +143,7 @@ fn finish_saved_pull_request(
     let state_file = store.dir().join("state.json");
     let shown = state_file
         .strip_prefix(repo.root())
-        .map(harness_platform::path::slashed)
-        .unwrap_or_default();
+        .map_or_default(harness_platform::path::slashed);
     if state.pull_request.is_some() && files == [shown] {
         repo.commit_paths(&[state_file.as_path()], &commit_message(state))
             .map_err(|e| e.to_string())?;

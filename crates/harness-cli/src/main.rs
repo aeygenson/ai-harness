@@ -88,6 +88,7 @@ async fn main() -> Result<()> {
             };
             decide(project, &task_id, decision)
         }
+        Command::Rethink { task_id, notes } => decide::rethink(project, &task_id, &notes),
         Command::Reject {
             task_id,
             to,

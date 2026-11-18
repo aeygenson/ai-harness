@@ -29,8 +29,7 @@ pub(super) fn remote_offer(registry_name: &str, remote: &Value) -> Option<Offer>
         };
         let description = header["description"]
             .as_str()
-            .map(|t| safe_line(t, TEXT_LIMIT))
-            .unwrap_or_default();
+            .map_or_default(|t| safe_line(t, TEXT_LIMIT));
         let given = header["value"]
             .as_str()
             .or_else(|| header["default"].as_str())
@@ -101,8 +100,7 @@ pub(super) fn offer(registry_name: &str, package: &Value) -> Option<Offer> {
         };
         let description = variable["description"]
             .as_str()
-            .map(|t| safe_line(t, TEXT_LIMIT))
-            .unwrap_or_default();
+            .map_or_default(|t| safe_line(t, TEXT_LIMIT));
         let value = if variable["isSecret"] == true {
             secrets += 1;
             let secret = if secrets == 1 {

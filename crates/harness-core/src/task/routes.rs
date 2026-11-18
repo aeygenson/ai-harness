@@ -2,9 +2,11 @@
 //!
 //! A role only *suggests* `next_role` in its handoff. The orchestrator accepts the
 //! suggestion only if it is listed here (see `docs/handoff-format.md`).
-//! Each workflow has its own table. The architect has three jobs: writing the
-//! design, checking the developer's work against it, and the final check after
-//! security. Each job has its own routes.
+//! Each workflow has its own table. The architect has three main jobs: writing
+//! the design, checking the developer's work against it, and the final check
+//! after security; when a task loops, two more: proposing another approach and
+//! rewriting the design along it (see [`crate::task::rethink`]). Each job has
+//! its own routes.
 
 use serde::{Deserialize, Serialize};
 
@@ -25,6 +27,12 @@ pub enum ArchitectJob {
     /// The last step of a task: after security, checks the whole result
     /// against the design, including the security findings and fixes.
     FinalReview,
+    /// One role kept sending the work back: the architect studies the
+    /// history and proposes another approach to the user.
+    Rethink,
+    /// The user accepted the new approach: the architect rewrites the design
+    /// along it, and the user approves it like any design.
+    NewApproach,
 }
 
 impl ArchitectJob {
@@ -100,14 +108,17 @@ fn task_routes(role: Role, job: ArchitectJob, verdict: Verdict) -> &'static [Nex
         // A design always goes to the user for approval: the architect may not
         // skip them and hand its own design to the developer.
         (Role::Architect, Verdict::Approved) => match job {
-            ArchitectJob::Design => &[N::To(Role::Human)],
+            // A new approach, like a design, is the user's to accept.
+            ArchitectJob::Design | ArchitectJob::Rethink | ArchitectJob::NewApproach => {
+                &[N::To(Role::Human)]
+            }
             ArchitectJob::Review => &[N::To(Role::Tester)],
             // The user accepts the result when the task asked for a step only
             // they can do, such as a live check; otherwise the task is done.
             ArchitectJob::FinalReview => &[N::Done, N::To(Role::Human)],
         },
         (Role::Architect, Verdict::Rejected) => match job {
-            ArchitectJob::Design => &[],
+            ArchitectJob::Design | ArchitectJob::Rethink | ArchitectJob::NewApproach => &[],
             ArchitectJob::Review | ArchitectJob::FinalReview => &[N::To(Role::Developer)],
         },
 
@@ -223,6 +234,8 @@ mod tests {
             ArchitectJob::Design,
             ArchitectJob::Review,
             ArchitectJob::FinalReview,
+            ArchitectJob::Rethink,
+            ArchitectJob::NewApproach,
         ];
         for job in all {
             let state = task(job);

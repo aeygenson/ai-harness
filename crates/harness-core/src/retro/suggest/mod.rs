@@ -178,8 +178,7 @@ pub async fn suggest<A: AgentRunner>(
 
     let number = retro_dir
         .file_name()
-        .map(|n| n.to_string_lossy().into_owned())
-        .unwrap_or_default();
+        .map_or_default(|n| n.to_string_lossy().into_owned());
     let job = RoleJob {
         task_id: format!("retro-{number}"),
         round: 1,

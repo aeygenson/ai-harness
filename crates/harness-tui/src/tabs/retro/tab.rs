@@ -128,18 +128,13 @@ impl RetroTab {
     /// Reads the saved retrospectives again, keeping the selected one.
     pub fn reload(&mut self) {
         let keep = self.current().map(|r| r.number.clone());
-        self.list = Repo::open(&self.root)
-            .map(|repo| ops::list(&repo))
-            .unwrap_or_default();
+        self.list = Repo::open(&self.root).map_or_default(|repo| ops::list(&repo));
         self.config = Config::load(&self.root.join(HARNESS_DIR)).ok();
         match keep {
             Some(number) => self.select_number(&number),
             None => self.row = 0,
         }
-        let applied = self
-            .current()
-            .map(|r| r.applied.clone())
-            .unwrap_or_default();
+        let applied = self.current().map_or_default(|r| r.applied.clone());
         self.chosen.retain(|id| !applied.contains(id));
     }
 

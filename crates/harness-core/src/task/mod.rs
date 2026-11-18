@@ -11,8 +11,9 @@
 //! `git status` does not show), `agent_stubs` (the empty files Claude Code
 //! makes when it starts, which are not a reason to stop), `stop_request`
 //! (the user's «Stop after this step» and «Stop now»), `run_lock` (one
-//! harness at a time in a project folder, and `harness stop`) and `overview`
-//! (what is going on in a project, for the main window's list).
+//! harness at a time in a project folder, and `harness stop`), `overview`
+//! (what is going on in a project, for the main window's list) and `rethink`
+//! (noticing a task that loops, and the architect's new approach).
 
 pub mod agent;
 pub mod agent_stubs;
@@ -26,6 +27,7 @@ pub mod overview;
 pub mod permissions;
 pub mod prompt;
 pub mod pull_request;
+pub mod rethink;
 pub mod routes;
 pub mod run_lock;
 pub mod scenario;
@@ -40,6 +42,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::task::handoff::{Handoff, NextStep, Role, Verdict, SCHEMA_VERSION};
 use crate::task::pull_request::PullRequest;
+use crate::task::rethink::RejectionCount;
 use crate::task::routes::ArchitectJob;
 use crate::task::scenario::Workflow;
 
@@ -60,6 +63,10 @@ pub enum WaitReason {
     RoleAskedForHelp(Role),
     /// Work was sent back too many times.
     RoundLimitReached,
+    /// One role kept sending the work back, and the architect proposes
+    /// another approach (see [`rethink`]): the user accepts it (it goes to
+    /// the architect, who rewrites the design) or sends the work on as before.
+    ApproveNewApproach,
     /// The user stopped the run («Stop now» or «Stop after this step»). The
     /// role is the one that continues when they choose «Continue»: the
     /// stopped one, or the one that would have run next. In `state.json`:
@@ -104,6 +111,10 @@ pub struct TaskState {
     /// `state.json` until there is one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pull_request: Option<PullRequest>,
+    /// How many times in a row each AI role sent the work back, to notice a
+    /// loop (see [`rethink`]); left out of `state.json` while it is empty.
+    #[serde(default, skip_serializing_if = "RejectionCount::is_empty")]
+    pub rejected_in_a_row: RejectionCount,
 }
 
 /// Why a handoff was refused. The task state is left unchanged.
@@ -226,6 +237,7 @@ impl TaskState {
             stage: Stage::Working(workflow.start()),
             architect_job: ArchitectJob::Design,
             pull_request: None,
+            rejected_in_a_row: RejectionCount::default(),
         }
     }
 
@@ -291,7 +303,9 @@ impl TaskState {
             });
         }
 
-        self.architect_job = self.architect_job.after(handoff);
+        let job_before = self.architect_job;
+        self.architect_job = self.next_architect_job(handoff);
+        self.count_for_rethink(handoff);
         // Sending work back starts a new round.
         if handoff.verdict == Verdict::Rejected {
             self.round += 1;
@@ -299,28 +313,35 @@ impl TaskState {
 
         self.stage = match handoff.next_role {
             NextStep::Done => Stage::Done,
-            NextStep::To(Role::Human) => Stage::WaitingForHuman(self.wait_reason(handoff)),
+            NextStep::To(Role::Human) => {
+                Stage::WaitingForHuman(Self::wait_reason(handoff, job_before))
+            }
             // The user may always continue past the limit; AI roles may not.
             NextStep::To(_) if self.round > self.max_rounds && handoff.role != Role::Human => {
                 Stage::WaitingForHuman(WaitReason::RoundLimitReached)
             }
+            // A role that keeps sending the work back sends it to the architect's rethink.
+            NextStep::To(_) if self.starts_rethink(handoff) => self.begin_rethink(),
             NextStep::To(role) => Stage::Working(role),
         };
         Ok(())
     }
 
-    /// Why the task waits for the user after `handoff` sent the work to them.
-    /// Called after `architect_job` is updated; a handoff to the user keeps it.
-    fn wait_reason(&self, handoff: &Handoff) -> WaitReason {
-        match (handoff.verdict, self.architect_job) {
+    /// Why the task waits for the user after `handoff` sent the work to them;
+    /// `job` is the architect's job in the step that wrote it.
+    fn wait_reason(handoff: &Handoff, job: ArchitectJob) -> WaitReason {
+        match (handoff.verdict, job) {
             (Verdict::NeedsHuman, _) => WaitReason::RoleAskedForHelp(handoff.role),
             (Verdict::Approved, ArchitectJob::FinalReview) => WaitReason::AcceptResult,
+            (Verdict::Approved, ArchitectJob::Rethink) => WaitReason::ApproveNewApproach,
             // The routes let only a design reach the user with another verdict.
             (
                 Verdict::Approved | Verdict::Rejected,
-                ArchitectJob::Design | ArchitectJob::Review,
+                ArchitectJob::Design | ArchitectJob::Review | ArchitectJob::NewApproach,
             )
-            | (Verdict::Rejected, ArchitectJob::FinalReview) => WaitReason::ApproveDesign,
+            | (Verdict::Rejected, ArchitectJob::FinalReview | ArchitectJob::Rethink) => {
+                WaitReason::ApproveDesign
+            }
         }
     }
 

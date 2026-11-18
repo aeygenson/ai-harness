@@ -369,6 +369,9 @@ pub fn stage_text(stage: Stage) -> String {
         Stage::WaitingForHuman(WaitReason::RoundLimitReached) => {
             "waiting: round limit reached".into()
         }
+        Stage::WaitingForHuman(WaitReason::ApproveNewApproach) => {
+            "waiting: approve a new approach".into()
+        }
         Stage::WaitingForHuman(WaitReason::StoppedByUser(role)) => {
             format!("waiting: stopped by the user, {} next", role.as_str())
         }
@@ -426,6 +429,7 @@ mod tests {
                 stage,
                 architect_job: ArchitectJob::Design,
                 pull_request: None,
+                rejected_in_a_row: crate::task::rethink::RejectionCount::default(),
             },
             handoffs,
             failures: vec![],

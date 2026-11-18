@@ -129,11 +129,12 @@ pub enum RunError {
     /// The task could not be put on its own branch.
     #[error(transparent)]
     Branch(#[from] BranchError),
-    /// The user wanted to finish the task while a role's unfinished work is still
-    /// uncommitted in the folder; the task is not finished.
+    /// The user wanted to finish the task (or start a new round of it) while
+    /// a role's unfinished work is still uncommitted in the folder; nothing
+    /// is saved.
     #[error(
         "unfinished work of a stopped role is still in the folder ({}); continue that role, \
-         or commit or remove the files, before finishing the task",
+         or commit or remove the files, before finishing the task or sending the work back",
         files.join(", ")
     )]
     UnfinishedWork {
@@ -151,6 +152,13 @@ pub enum RunError {
         /// The changed files, relative to the project.
         files: Vec<String>,
     },
+    /// The user's decision was asked for a task that does not wait for them
+    /// (it is running or done).
+    #[error(
+        "the task does not wait for you: it is running or done; stop it first \
+         (harness stop) and try again"
+    )]
+    NotWaiting,
     /// The step to restore the code to has no commit in this branch.
     #[error("step {step} is not in this branch's history; the code cannot be restored to it")]
     NoStepCommit {
