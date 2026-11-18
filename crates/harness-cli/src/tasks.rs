@@ -204,6 +204,14 @@ fn explain(stop: &StopReason, task_id: &str, suggested: Option<&AnswerTo>) -> St
             "The round limit is reached. Decide who continues:\n  \
              harness approve {task_id} --to <role|done> --notes \"...\""
         ),
+        StopReason::WaitingForHuman(WaitReason::ApproveNewApproach) => format!(
+            "The work kept being sent back, so the architect proposes another approach in \
+             docs/design/{task_id}-rethink.md. Read it, then accept it (the architect \
+             rewrites the design for you to approve):\n  \
+             harness approve {task_id}\n\
+             or go on the old way:   harness approve {task_id} --to <role> --notes \"...\"\n\
+             or ask for another proposal:   harness rethink {task_id} --notes \"...\""
+        ),
         StopReason::WaitingForHuman(WaitReason::StoppedByUser(role)) => {
             stopped_by_user_text(*role, task_id)
         }

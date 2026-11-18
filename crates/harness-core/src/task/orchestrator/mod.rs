@@ -39,7 +39,7 @@ pub use changes::unfinished_left;
 pub use create::{
     create_project_task, create_task, create_task_anyway, same_task, words, SameText,
 };
-pub use human::{record_human_decision, HumanDecision};
+pub use human::{ask_for_rethink, record_human_decision, HumanDecision};
 pub use manual::continue_stopped;
 pub use size::oversized_changes;
 pub use stop::{GitAfterRole, RunError, StopReason};

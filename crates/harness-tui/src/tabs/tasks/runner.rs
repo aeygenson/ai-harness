@@ -60,6 +60,14 @@ pub enum Request {
         /// First bring back the code of this step (its folder); `None` keeps it.
         restore_to: Option<PathBuf>,
     },
+    /// The user asks the architect to rethink the approach of a waiting task
+    /// (see `harness_core::task::rethink`); then the roles run.
+    Rethink {
+        task: String,
+        /// Where the task stood when the user asked, as in `Decide`.
+        seen: Stage,
+        notes: String,
+    },
     /// A role stopped part-way (a limit, a failure): run the task again.
     Continue(String),
     /// Send the done task to GitHub again (the last try failed).
@@ -336,6 +344,7 @@ fn task_of(request: &Request) -> Option<&str> {
     match request {
         Request::New(_) => None,
         Request::Decide { task, .. }
+        | Request::Rethink { task, .. }
         | Request::Continue(task)
         | Request::Publish(task)
         | Request::Merge(task) => Some(task),
@@ -392,6 +401,18 @@ fn open_task(
                 },
             )
             .map_err(|e| e.to_string())?;
+            (store, state)
+        }
+        Request::Rethink { task, seen, notes } => {
+            let (store, mut state) = TaskStore::open(&runs, &task).map_err(|e| e.to_string())?;
+            if state.stage != seen {
+                return Err(format!(
+                    "{task} has moved on in its branch {}; look at it again and decide",
+                    branch::task_branch(&task)
+                ));
+            }
+            orchestrator::ask_for_rethink(task_repo, &store, &mut state, &notes)
+                .map_err(|e| e.to_string())?;
             (store, state)
         }
         Request::Continue(task) => {

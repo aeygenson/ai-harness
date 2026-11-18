@@ -55,17 +55,8 @@ impl TasksTab {
             },
             (_, None) => return Err(tr.t("tasks.no_task").to_string()),
             (Choice::Role(role), Some((task, stage))) => {
-                // Sending the design back to the architect rejects it, and so
-                // does sending a result the user did not accept to any role.
-                // So does throwing later code away by restoring a step.
-                let rejected = restore_to.is_some()
-                    || match stage {
-                        Stage::WaitingForHuman(WaitReason::ApproveDesign) => {
-                            role == Role::Architect
-                        }
-                        Stage::WaitingForHuman(WaitReason::AcceptResult) => true,
-                        _ => false,
-                    };
+                // Throwing later code away by restoring a step rejects the work too.
+                let rejected = restore_to.is_some() || rejects(stage, role);
                 Request::Decide {
                     task,
                     seen: stage,
@@ -97,6 +88,11 @@ impl TasksTab {
                 notes,
                 extra_rounds: 0,
                 restore_to: None,
+            },
+            (Choice::Rethink, Some((task, stage))) => Request::Rethink {
+                task,
+                seen: stage,
+                notes,
             },
             (Choice::Continue(_), Some((task, _))) => Request::Continue(task),
             (Choice::Publish, Some((task, _))) => Request::Publish(task),
@@ -188,6 +184,40 @@ impl TasksTab {
     }
 }
 
+/// The message when the task waits for the user, for `reason`.
+fn waiting_text(reason: WaitReason, task: &str, tr: &I18n) -> Message {
+    // `tr.f` takes `&dyn Display`; a `&str` is unsized behind it, a `&&str` is not.
+    let task = &task;
+    let role = |role: Role| role.as_str();
+    match reason {
+        WaitReason::ApproveDesign => Message::info(tr.f("tasks.stop_design", &[("task", task)])),
+        WaitReason::AcceptResult => Message::info(tr.f("tasks.stop_accept", &[("task", task)])),
+        WaitReason::RoleAskedForHelp(r) => {
+            Message::info(tr.f("tasks.stop_help", &[("task", task), ("role", &role(r))]))
+        }
+        WaitReason::RoundLimitReached => {
+            Message::error(tr.f("tasks.stop_rounds", &[("task", task)]))
+        }
+        WaitReason::ApproveNewApproach => {
+            Message::info(tr.f("tasks.stop_rethink", &[("task", task)]))
+        }
+        WaitReason::StoppedByUser(r) => {
+            Message::info(tr.f("tasks.stop_by_user", &[("task", task), ("role", &role(r))]))
+        }
+    }
+}
+
+/// Does sending the work to `role` at `stage` reject it? Sending the design
+/// back to the architect does, and so does sending a result the user did not
+/// accept to any role.
+fn rejects(stage: Stage, role: Role) -> bool {
+    match stage {
+        Stage::WaitingForHuman(WaitReason::ApproveDesign) => role == Role::Architect,
+        Stage::WaitingForHuman(WaitReason::AcceptResult) => true,
+        _ => false,
+    }
+}
+
 /// The message after the work: what happened and what the user does next.
 fn outcome_text(outcome: &Outcome, tr: &I18n) -> Message {
     let task = &outcome.task;
@@ -200,21 +230,7 @@ fn outcome_text(outcome: &Outcome, tr: &I18n) -> Message {
     };
     match stop {
         StopReason::Done => Message::info(tr.f("tasks.stop_done", &[("task", task)])),
-        StopReason::WaitingForHuman(WaitReason::ApproveDesign) => {
-            Message::info(tr.f("tasks.stop_design", &[("task", task)]))
-        }
-        StopReason::WaitingForHuman(WaitReason::AcceptResult) => {
-            Message::info(tr.f("tasks.stop_accept", &[("task", task)]))
-        }
-        StopReason::WaitingForHuman(WaitReason::RoleAskedForHelp(r)) => {
-            Message::info(tr.f("tasks.stop_help", &[("task", task), ("role", &role(r))]))
-        }
-        StopReason::WaitingForHuman(WaitReason::RoundLimitReached) => {
-            Message::error(tr.f("tasks.stop_rounds", &[("task", task)]))
-        }
-        StopReason::WaitingForHuman(WaitReason::StoppedByUser(r)) => {
-            Message::info(tr.f("tasks.stop_by_user", &[("task", task), ("role", &role(r))]))
-        }
+        StopReason::WaitingForHuman(reason) => waiting_text(*reason, task, tr),
         StopReason::UsageLimitReached(r) => {
             Message::error(tr.f("tasks.stop_usage", &[("task", task), ("role", &role(r))]))
         }

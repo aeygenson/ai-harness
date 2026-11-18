@@ -1,5 +1,6 @@
 //! The server's tools for the user's decisions on a waiting task: `decide`
-//! (approve a design, answer a role, send work back, more rounds) and
+//! (approve a design, answer a role, send work back, more rounds, accept a
+//! new approach), `rethink` (ask the architect for another approach) and
 //! `finish_task` (accept the result).
 //!
 //! They save the decision like `harness approve` / `harness reject` and the
@@ -15,6 +16,7 @@ use harness_core::retro::stage_text;
 use harness_core::task::branch;
 use harness_core::task::handoff::{NextStep, Role, Verdict, MAX_TEXT_CHARS};
 use harness_core::task::orchestrator::{self, HumanDecision};
+use harness_core::task::rethink::DEFAULT_RETHINK_NOTE;
 use harness_core::task::run_lock::RunLock;
 use harness_core::task::store::TaskStore;
 use harness_core::task::{Stage, TaskState, WaitReason, DEFAULT_MAX_ROUNDS};
@@ -92,8 +94,10 @@ fn record(opened: Opened, ask: Decide<'_>) -> Result<String, String> {
     let rejected = match reason {
         WaitReason::ApproveDesign => role == Role::Architect,
         WaitReason::AcceptResult => true,
+        // To the architect accepts a new approach; to another role goes on as before.
         WaitReason::RoleAskedForHelp(_)
         | WaitReason::RoundLimitReached
+        | WaitReason::ApproveNewApproach
         | WaitReason::StoppedByUser(_) => false,
     };
     // As `harness reject`: a new round could not continue that work any more.
@@ -136,6 +140,36 @@ fn record(opened: Opened, ask: Decide<'_>) -> Result<String, String> {
         "Saved: {} {what} the {role}. Start the roles with start_run.",
         ask.task
     ))
+}
+
+/// `rethink`: the user asks the architect to rethink the approach of a task
+/// that waits for them, as `harness rethink` (see `harness_core::task::rethink`).
+pub(super) fn rethink(
+    root: &Path,
+    task: &str,
+    seen: Seen<'_>,
+    notes: &str,
+) -> Result<String, String> {
+    check_notes(notes)?;
+    in_task_folder(root, task, |repo, lock| {
+        let Opened {
+            repo,
+            store,
+            mut state,
+            _lock,
+            ..
+        } = open_waiting(repo, lock, task, seen)?;
+        let words = match notes.trim() {
+            "" => DEFAULT_RETHINK_NOTE,
+            words => words,
+        };
+        let notes = format!("{words}\n\n{VIA_MCP}");
+        orchestrator::ask_for_rethink(&repo, &store, &mut state, &notes)
+            .map_err(|e| e.to_string())?;
+        Ok(format!(
+            "Saved: the architect of {task} rethinks the approach. Start the roles with start_run."
+        ))
+    })
 }
 
 /// `finish_task`: accepts the result and finishes the task (whenever it
@@ -232,6 +266,8 @@ fn usual_role(reason: WaitReason, store: &TaskStore, state: &TaskState) -> Resul
     };
     match reason {
         WaitReason::ApproveDesign => Ok(state.workflow.after_approval()),
+        // Accepting the new approach: the architect rewrites the design along it.
+        WaitReason::ApproveNewApproach => Ok(Role::Architect),
         WaitReason::StoppedByUser(role) => Ok(role),
         WaitReason::RoleAskedForHelp(asked) => {
             let history = store.history().map_err(|e| e.to_string())?;
@@ -298,6 +334,7 @@ mod tests {
 
     use harness_core::git::HARNESS_DIR;
     use harness_core::task::handoff::{AnswerTo, Handoff, SCHEMA_VERSION};
+    use harness_core::task::routes::ArchitectJob;
 
     use super::*;
 
@@ -372,6 +409,24 @@ mod tests {
         assert_eq!(decision.handoff.summary, "Looks good");
         assert!(decision.notes.contains(VIA_MCP), "{}", decision.notes);
         assert_eq!(repo.changed_files().unwrap(), Vec::<String>::new());
+    }
+
+    #[test]
+    fn rethink_gives_the_architect_the_rethink_job_and_a_new_approach_is_accepted_by_default() {
+        // Arrange
+        let (dir, repo) = design_waiting();
+
+        // Act: the user asks for another approach.
+        let answer = rethink(dir.path(), "task-001", seen(1, DESIGN), "It keeps looping").unwrap();
+
+        // Assert
+        assert!(answer.contains("rethinks"), "{answer}");
+        let (store, state_now) = state(&repo);
+        assert_eq!(state_now.stage, Stage::Working(Role::Architect));
+        assert_eq!(state_now.architect_job, ArchitectJob::Rethink);
+        assert_eq!(repo.changed_files().unwrap(), Vec::<String>::new());
+        let usual = usual_role(WaitReason::ApproveNewApproach, &store, &state_now).unwrap();
+        assert_eq!(usual, Role::Architect);
     }
 
     #[test]

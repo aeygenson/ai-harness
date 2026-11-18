@@ -95,6 +95,15 @@ pub(crate) enum Command {
         #[arg(long)]
         restore: Option<String>,
     },
+    /// Ask the architect to stop patching and propose a different approach, for
+    /// a waiting task that keeps going round in circles. The harness does this
+    /// by itself when one role sends the work back 3 times in a row.
+    Rethink {
+        task_id: String,
+        /// What the architect should know, for example what keeps going wrong.
+        #[arg(long, default_value = "")]
+        notes: String,
+    },
     /// Ask the harness that runs a task in this project (in the TUI or another
     /// terminal) to stop after the running role, or at once with --now.
     Stop {

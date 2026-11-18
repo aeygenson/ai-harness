@@ -36,7 +36,8 @@ impl TasksTab {
                 WaitReason::ApproveDesign
                 | WaitReason::AcceptResult
                 | WaitReason::RoleAskedForHelp(_)
-                | WaitReason::RoundLimitReached,
+                | WaitReason::RoundLimitReached
+                | WaitReason::ApproveNewApproach,
             ) => {}
             Stage::WaitingForHuman(WaitReason::StoppedByUser(_))
             | Stage::Working(_)
@@ -170,7 +171,9 @@ pub(super) fn waits_on(task: &TaskView, role: Role) -> bool {
         Stage::WaitingForHuman(
             WaitReason::RoleAskedForHelp(asking) | WaitReason::StoppedByUser(asking),
         ) => asking == role,
-        Stage::WaitingForHuman(WaitReason::ApproveDesign) => role == Role::Architect,
+        Stage::WaitingForHuman(WaitReason::ApproveDesign | WaitReason::ApproveNewApproach) => {
+            role == Role::Architect
+        }
         // Only the user's acceptance is awaited, no role's.
         Stage::WaitingForHuman(WaitReason::AcceptResult) | Stage::Done => false,
         Stage::WaitingForHuman(WaitReason::RoundLimitReached) => task

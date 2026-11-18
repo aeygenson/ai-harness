@@ -100,7 +100,7 @@ fn initialize_and_list_answer_but_notifications_get_nothing() {
     let instructions = answers[0]["result"]["instructions"].as_str().unwrap();
     assert!(instructions.contains("[acp]"), "{instructions}");
     assert_eq!(answers[1]["id"], 2);
-    assert_eq!(answers[1]["result"]["tools"].as_array().unwrap().len(), 12);
+    assert_eq!(answers[1]["result"]["tools"].as_array().unwrap().len(), 13);
 }
 
 #[test]

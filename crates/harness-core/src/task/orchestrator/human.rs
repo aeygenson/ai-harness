@@ -5,8 +5,10 @@ use std::path::{Path, PathBuf};
 use super::{commit_message, RunError};
 use crate::git::Repo;
 use crate::task::handoff::{Handoff, NextStep, Role, Verdict};
+use crate::task::rethink::DEFAULT_RETHINK_NOTE;
+use crate::task::routes::ArchitectJob;
 use crate::task::store::{StoreError, TaskStore};
-use crate::task::TaskState;
+use crate::task::{Stage, TaskState, WaitReason, DEFAULT_MAX_ROUNDS};
 
 /// What the user decided on a waiting task.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -20,6 +22,70 @@ pub struct HumanDecision<'a> {
     /// First make the code as it was after this step (its folder in
     /// `runs/`), with its own commit; `None` leaves the code as it is.
     pub restore_to: Option<&'a Path>,
+}
+
+/// The user asks the architect to rethink the approach of a task that waits
+/// for them (see [`crate::task::rethink`]), with `notes` for the architect.
+///
+/// Saved like any decision of the user. Where the user has not accepted
+/// the work (a design, a result, a new approach) it is a rejection, as
+/// sending that work to a role is in the TUI; at the round limit the task
+/// first gets the rounds a new task gets, so the answer can go on.
+///
+/// # Errors
+/// As [`record_human_decision`]: a task that does not wait for the user
+/// refuses it and nothing changes. A rejection is refused
+/// ([`RunError::UnfinishedWork`]) while a stopped role's unfinished work is
+/// still in the folder: a new round could not continue it.
+pub fn ask_for_rethink(
+    repo: &Repo,
+    store: &TaskStore,
+    state: &mut TaskState,
+    notes: &str,
+) -> Result<PathBuf, RunError> {
+    let Stage::WaitingForHuman(reason) = state.stage else {
+        return Err(RunError::NotWaiting);
+    };
+    let verdict = match reason {
+        WaitReason::ApproveDesign | WaitReason::AcceptResult | WaitReason::ApproveNewApproach => {
+            Verdict::Rejected
+        }
+        WaitReason::RoleAskedForHelp(_)
+        | WaitReason::RoundLimitReached
+        | WaitReason::StoppedByUser(_) => Verdict::Approved,
+    };
+    if verdict == Verdict::Rejected {
+        let files = super::changes::unfinished_left(repo, store)?;
+        if !files.is_empty() {
+            return Err(RunError::UnfinishedWork { files });
+        }
+    }
+    if reason == WaitReason::RoundLimitReached {
+        // Saved first, so the decision's commit carries it (as «more rounds»).
+        store.add_rounds(state, DEFAULT_MAX_ROUNDS)?;
+    }
+    let notes = if notes.trim().is_empty() {
+        DEFAULT_RETHINK_NOTE
+    } else {
+        notes
+    };
+    // The user's decision to the architect keeps a rethink job (see
+    // `TaskState::next_architect_job`). If the decision is refused before
+    // it is saved, the stage is unchanged and the old job comes back.
+    let old_job = state.architect_job;
+    let waiting = state.stage;
+    state.architect_job = ArchitectJob::Rethink;
+    let decision = HumanDecision {
+        verdict,
+        next: NextStep::To(Role::Architect),
+        notes,
+        restore_to: None,
+    };
+    let result = record_human_decision(repo, store, state, decision);
+    if result.is_err() && state.stage == waiting {
+        state.architect_job = old_job;
+    }
+    result
 }
 
 /// The user's decision (approve the design, send work back, answer a question),

@@ -24,6 +24,9 @@ pub fn stage_label(stage: Stage, tr: &I18n) -> String {
             tr.f("stage.asked_for_help", &[("role", &role.as_str())])
         }
         Stage::WaitingForHuman(WaitReason::RoundLimitReached) => tr.t("stage.round_limit").into(),
+        Stage::WaitingForHuman(WaitReason::ApproveNewApproach) => {
+            tr.t("stage.approve_new_approach").into()
+        }
         Stage::WaitingForHuman(WaitReason::StoppedByUser(role)) => {
             tr.f("stage.stopped", &[("role", &role.as_str())])
         }
@@ -48,6 +51,8 @@ pub fn task_stage_label(state: &TaskState, tr: &I18n) -> String {
         ArchitectJob::Design => return label,
         ArchitectJob::Review => tr.t("stage.job_review"),
         ArchitectJob::FinalReview => tr.t("stage.job_final_review"),
+        ArchitectJob::Rethink => tr.t("stage.job_rethink"),
+        ArchitectJob::NewApproach => tr.t("stage.job_new_approach"),
     };
     if architect_next {
         format!("{label} · {job}")

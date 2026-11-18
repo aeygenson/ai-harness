@@ -168,6 +168,17 @@ fn action_definitions(task: &Value) -> Vec<Value> {
             &["task", "seen_steps", "seen_stage", "notes"],
         ),
         action(
+            "rethink",
+            "Asks the architect to stop patching and propose a different approach, for a task waiting for the user that keeps going round in circles. The harness also does this by itself when one role sends the work back 3 times in a row; the task then waits as \"approve a new approach\": accept it with decide to=architect (the architect rewrites the design, the user approves it as usual), go on the old way with decide to=<another role>, or call rethink again for another proposal. Saved like `harness rethink`; then call start_run.",
+            &json!({
+                "task": task,
+                "seen_steps": seen_steps,
+                "seen_stage": seen_stage,
+                "notes": { "type": "string", "description": "What the architect should know, for example what the user thinks keeps going wrong; may be empty." },
+            }),
+            &["task", "seen_steps", "seen_stage", "notes"],
+        ),
+        action(
             "finish_task",
             "Accepts the result and finishes the task whenever it waits for the user (usually after the architect's final review handed it over). Only with the user's own words of acceptance, as they wrote them; they are saved in the history.",
             &json!({
@@ -236,6 +247,12 @@ pub(super) fn call(
                 notes: text_argument(arguments, "notes")?,
             };
             return decisions::decide(folders.root, ask).map_err(CallError::Failed);
+        }
+        "rethink" => {
+            let task = text_argument(arguments, "task")?;
+            let seen = seen_argument(arguments)?;
+            let notes = optional_text_argument(arguments, "notes")?.unwrap_or_default();
+            return decisions::rethink(folders.root, task, seen, notes).map_err(CallError::Failed);
         }
         "finish_task" => {
             let task = text_argument(arguments, "task")?;
@@ -315,9 +332,10 @@ mod tests {
                 "start_run",
                 "stop_run",
                 "decide",
+                "rethink",
                 "finish_task"
             ]
         );
-        assert_eq!(tools.as_array().unwrap().len(), 12);
+        assert_eq!(tools.as_array().unwrap().len(), 13);
     }
 }

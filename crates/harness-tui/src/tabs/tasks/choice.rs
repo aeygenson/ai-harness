@@ -41,6 +41,8 @@ impl TasksTab {
             };
             items.push((choice, waiting));
         }
+        // A task that keeps going round in circles: ask for another approach.
+        items.push((Choice::Rethink, waiting));
         items.push((Choice::Finish, waiting));
         if self.needs_publishing() {
             items.push((Choice::Publish, true));
@@ -105,6 +107,8 @@ impl TasksTab {
             Stage::WaitingForHuman(WaitReason::RoundLimitReached) => {
                 Choice::MoreRounds(self.after_round_limit())
             }
+            // Sending it to the architect accepts the new approach.
+            Stage::WaitingForHuman(WaitReason::ApproveNewApproach) => Choice::Role(Role::Architect),
             // A note to the role the user stopped; «Continue» is in the list too.
             Stage::WaitingForHuman(WaitReason::StoppedByUser(role)) => Choice::Role(role),
         }
@@ -209,7 +213,7 @@ impl TasksTab {
     /// «Model» and «Level» set; none when the task is only finished.
     pub fn target(&self) -> Option<Role> {
         match self.choice {
-            Choice::NewTask => Some(Role::Architect),
+            Choice::NewTask | Choice::Rethink => Some(Role::Architect),
             Choice::Role(role) | Choice::Continue(role) | Choice::MoreRounds(role) => Some(role),
             Choice::Finish | Choice::Publish | Choice::Merge => None,
         }
@@ -338,6 +342,8 @@ pub enum Choice {
     /// The task hit its round limit: give it `MORE_ROUNDS` more and send
     /// the work on to this role.
     MoreRounds(Role),
+    /// Ask the architect to rethink the approach; the text is the user's note to it.
+    Rethink,
     /// Approve and finish the task.
     Finish,
     /// Send the done task to GitHub: push its branch and open its pull request.

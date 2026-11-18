@@ -101,11 +101,12 @@ pub fn build(role: Role, state: &TaskState, context: Context<'_>, output_dir: &P
     prompt
 }
 
-/// Told to the architect when its turn is a review, not a new design (see
+/// Told to the architect when its turn is not a plain design (see
 /// [`ArchitectJob`]); empty for a design.
 fn review_text(job: ArchitectJob, task_id: &str) -> String {
     let (what, acceptance) = match job {
         ArchitectJob::Design => return String::new(),
+        ArchitectJob::Rethink | ArchitectJob::NewApproach => return rethink_text(job, task_id),
         ArchitectJob::Review => ("a review: check the developer's finished work against", ""),
         ArchitectJob::FinalReview => (
             "the final review: security has finished; check the whole result, with \
@@ -113,7 +114,9 @@ fn review_text(job: ArchitectJob, task_id: &str) -> String {
             " If the work is approved but task.md or the design asks for a step only the \
              user can do (an acceptance, a live check, a demo) and the user has not accepted \
              this result yet, \
-             send it to \"human\" instead of \"done\" and say in notes.md what to check.",
+             send it to \"human\" instead of \"done\" and say in notes.md what to check. \
+             More work for the developer is always \"rejected\" with issues, never \
+             \"approved\".",
         ),
     };
     format!(
@@ -122,6 +125,37 @@ fn review_text(job: ArchitectJob, task_id: &str) -> String {
          of your skill: verdict \"approved\" if the work does what the design says; \
          \"rejected\" with each gap in issues if it does not; \"needs_human\" if the design \
          itself turned out to be wrong.{acceptance}\n\n"
+    )
+}
+
+/// Told to the architect when the task loops (see [`crate::task::rethink`]):
+/// propose another approach, or rewrite the design along the accepted one.
+fn rethink_text(job: ArchitectJob, task_id: &str) -> String {
+    let proposal = format!("docs/design/{task_id}-rethink.md");
+    if job == ArchitectJob::NewApproach {
+        return format!(
+            "This step is a new design: the user accepted the new approach you proposed in \
+             {proposal}. Rewrite docs/design/{task_id}.md along it (the whole design, as in \
+             the first part of your skill), then verdict \"approved\" and next \"human\": \
+             the user approves it like any design.\n\n"
+        );
+    }
+    let count = crate::task::rethink::REJECTIONS_BEFORE_RETHINK;
+    format!(
+        "This step is a rethink: one role sent the work back {count} times in a row, or \
+         the user asked for it, because the task is going round in circles. Do not patch \
+         the latest problem, and change neither the code nor the current design. Read \
+         the history of rejections below and the notes of the steps it names. Find what \
+         the rejections have in common (the same part of the work, the same kind of \
+         check, a result that changes from run to run such as a language model's output) \
+         and why fixing them one by one does not converge. Propose one or two different \
+         approaches that remove the cause instead of catching its effects (for example: \
+         code decides the structure and the model only writes text; a checked result is \
+         saved and reused for the same input; a different test), each with what changes, \
+         its cost and its risks, and recommend one. Write it to {proposal} with the \
+         headings Loop, Cause, Options and Recommendation (the \"Rethink\" part of your \
+         skill says more, if your skill has it). Then verdict \"approved\" and next \
+         \"human\": the user decides whether to take it.\n\n"
     )
 }
 
@@ -464,6 +498,54 @@ mod tests {
         );
         let tester = prompt_for(Role::Tester);
         assert!(tester.contains("verdict \"rejected\": \"developer\" or \"architect\""));
+    }
+
+    #[test]
+    fn a_rethinking_architect_proposes_another_approach_and_then_rewrites_the_design() {
+        let mut state = TaskState::new("task-007", Workflow::Task, DEFAULT_MAX_ROUNDS);
+        let inbox = Path::new("/p/.harness/runs/task-007/inbox");
+        let skills = RoleSkills::default();
+
+        state.architect_job = ArchitectJob::Rethink;
+        let rethink = build(Role::Architect, &state, context(None, &skills), inbox);
+        state.architect_job = ArchitectJob::NewApproach;
+        let new_design = build(Role::Architect, &state, context(None, &skills), inbox);
+
+        assert!(rethink.contains("This step is a rethink"), "{rethink}");
+        assert!(
+            rethink.contains("docs/design/task-007-rethink.md"),
+            "{rethink}"
+        );
+        assert!(
+            rethink.contains("Do not patch the latest problem"),
+            "{rethink}"
+        );
+        assert!(
+            new_design.contains("Rewrite docs/design/task-007.md"),
+            "{new_design}"
+        );
+        for prompt in [&rethink, &new_design] {
+            assert!(
+                prompt.contains("verdict \"approved\": \"human\""),
+                "{prompt}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_final_review_sends_more_work_back_as_rejected() {
+        let mut state = TaskState::new("task-007", Workflow::Task, DEFAULT_MAX_ROUNDS);
+        state.architect_job = ArchitectJob::FinalReview;
+        let prompt = build(
+            Role::Architect,
+            &state,
+            context(None, &RoleSkills::default()),
+            Path::new("/p/.harness/runs/task-007/inbox"),
+        );
+        assert!(
+            prompt.contains("More work for the developer is always \"rejected\""),
+            "{prompt}"
+        );
     }
 
     #[test]
