@@ -73,7 +73,8 @@ pub(crate) enum Command {
     /// TUI continues with the role that was stopped (or was next). A done
     /// task of a project on GitHub is pushed and becomes a pull request.
     Run { task_id: String },
-    /// Accept the work and send it on.
+    /// Accept the work and send it on. At the round limit, sending it to a
+    /// role first gives the task 5 more rounds.
     Approve {
         task_id: String,
         /// Who works next: a role or `done`. Usually chosen automatically.

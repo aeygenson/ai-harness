@@ -18,7 +18,7 @@ use harness_core::task::orchestrator::{self, GitAfterRole, Project, SameText, St
 use harness_core::task::run_lock::{self, RunLock};
 use harness_core::task::stop_request::{StopRequest, StopWhen};
 use harness_core::task::store::TaskStore;
-use harness_core::task::{Stage, TaskState, WaitReason};
+use harness_core::task::{Stage, TaskState, WaitReason, DEFAULT_MAX_ROUNDS};
 use harness_platform::stop::StopSignals;
 
 use crate::decide::step_name;
@@ -201,7 +201,8 @@ fn explain(stop: &StopReason, task_id: &str, suggested: Option<&AnswerTo>) -> St
             help_request_text(*role, task_id, suggested)
         }
         StopReason::WaitingForHuman(WaitReason::RoundLimitReached) => format!(
-            "The round limit is reached. Decide who continues:\n  \
+            "The round limit is reached. Decide who continues; that gives the task \
+             {DEFAULT_MAX_ROUNDS} more rounds:\n  \
              harness approve {task_id} --to <role|done> --notes \"...\""
         ),
         StopReason::WaitingForHuman(WaitReason::ApproveNewApproach) => format!(
@@ -481,6 +482,32 @@ mod tests {
         let json = serde_json::to_string(&state).unwrap();
         fs::write(store.dir().join("state.json"), json).unwrap();
         repo.commit_all("stage").unwrap();
+    }
+
+    #[test]
+    fn approve_at_the_round_limit_gives_five_more_rounds() {
+        // Arrange: a task in round 6 of 5, waiting at the limit.
+        let dir = tempfile::tempdir().unwrap();
+        let project = dir.path();
+        projects::init(project).unwrap();
+        let repo = open_repo(project).unwrap();
+        new_task(project, "task-001", "Add a parser", false).unwrap();
+        let (store, mut state) = open_task(&repo, "task-001").unwrap();
+        state.round = 6;
+        state.stage = Stage::WaitingForHuman(WaitReason::RoundLimitReached);
+        let json = serde_json::to_string(&state).unwrap();
+        fs::write(store.dir().join("state.json"), json).unwrap();
+        repo.commit_all("at the limit").unwrap();
+
+        // Act
+        let to = Some(NextStep::To(Role::Developer));
+        decide(project, "task-001", approve(to, "Go on")).unwrap();
+
+        // Assert: five rounds from the ones used, saved with the decision's commit.
+        let (_, state) = open_task(&repo, "task-001").unwrap();
+        assert_eq!(state.max_rounds, 10);
+        assert_eq!(state.stage, Stage::Working(Role::Developer));
+        assert_eq!(repo.changed_files().unwrap(), Vec::<String>::new());
     }
 
     #[test]
