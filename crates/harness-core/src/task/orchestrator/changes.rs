@@ -150,8 +150,7 @@ pub(super) fn resumable(at: RoleAt) -> Result<Option<Vec<String>>, GitError> {
 /// or the work could no longer be resumed.
 pub(super) fn recorded_files(store: &TaskStore) -> Vec<String> {
     read_record(&unfinished_path(store))
-        .map(|record| record.files.into_iter().map(|(path, _)| path).collect())
-        .unwrap_or_default()
+        .map_or_default(|record| record.files.into_iter().map(|(path, _)| path).collect())
 }
 
 /// The recorded unfinished work that is still uncommitted in the folder;

@@ -194,8 +194,7 @@ fn entry(
     let description = fields
         .get("description")
         .and_then(|d| d.as_str())
-        .map(text::safe)
-        .unwrap_or_default();
+        .map_or_default(text::safe);
     let source = source(fields.get("source"));
     Some(Entry {
         name,

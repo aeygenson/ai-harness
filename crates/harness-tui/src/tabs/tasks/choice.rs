@@ -272,7 +272,7 @@ impl TasksTab {
             Some(id) => list.find(id),
             None => list.models.iter().find(|m| m.default),
         };
-        let levels = found.map(|m| m.efforts.clone()).unwrap_or_default();
+        let levels = found.map_or_default(|m| m.efforts.clone());
         if levels.is_empty() {
             return Vec::new();
         }

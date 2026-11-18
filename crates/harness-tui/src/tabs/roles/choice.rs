@@ -22,7 +22,7 @@ impl RolesTab {
             Some(id) => list.find(id),
             None => list.models.iter().find(|m| m.default),
         };
-        model.map(|m| m.efforts.clone()).unwrap_or_default()
+        model.map_or_default(|m| m.efforts.clone())
     }
 
     /// Sets the model and effort of the selected role or of `[retro]`.

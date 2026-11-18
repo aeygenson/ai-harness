@@ -276,8 +276,7 @@ mod tests {
                         headers
                             .iter()
                             .find(|(n, _)| n == name)
-                            .map(|(_, v)| v.clone())
-                            .unwrap_or_default()
+                            .map_or_default(|(_, v)| v.clone())
                     };
                     let length: usize = get("content-length").parse().unwrap_or(0);
                     let mut body = vec![0; length];

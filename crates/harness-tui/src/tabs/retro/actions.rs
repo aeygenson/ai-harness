@@ -81,8 +81,7 @@ impl App {
                     }
                     let roles: Vec<&str> = config
                         .as_ref()
-                        .map(|c| proposal.missing_roles(c))
-                        .unwrap_or_default()
+                        .map_or_default(|c| proposal.missing_roles(c))
                         .iter()
                         .map(|given| given.role.as_str())
                         .collect();

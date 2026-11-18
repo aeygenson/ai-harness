@@ -158,9 +158,7 @@ impl TasksTab {
         for found in task.steps.iter().filter_map(|step| self.step_usage(step)) {
             total.get_or_insert_with(Usage::default).add(found);
         }
-        total
-            .map(|usage| format!(" · {}", usage_label(&usage, tr)))
-            .unwrap_or_default()
+        total.map_or_default(|usage| format!(" · {}", usage_label(&usage, tr)))
     }
 }
 
@@ -260,8 +258,7 @@ pub(super) fn step_text(
             let location = issue
                 .location
                 .as_deref()
-                .map(|l| format!("{l}  "))
-                .unwrap_or_default();
+                .map_or_default(|l| format!("{l}  "));
             lines.push(Line::from(vec![
                 Span::styled(
                     format!("  {name:<9} "),

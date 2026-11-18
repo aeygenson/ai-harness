@@ -81,8 +81,7 @@ pub fn list_tools_within(
             .lines()
             .map(str::trim)
             .rfind(|l| !l.is_empty())
-            .map(|l| format!(" ({})", safe_line(l, SAID_LIMIT)))
-            .unwrap_or_default();
+            .map_or_default(|l| format!(" ({})", safe_line(l, SAID_LIMIT)));
         hide(format!("{}: {why}{said}", server.name))
     })
 }
@@ -196,22 +195,19 @@ impl Session {
 
 /// The tools of one `tools/list` answer.
 pub fn parse_tools(result: &Value) -> Vec<Tool> {
-    result["tools"]
-        .as_array()
-        .map(|tools| {
-            tools
-                .iter()
-                .filter_map(|tool| {
-                    let name = safe_line(tool["name"].as_str()?, SAID_LIMIT);
-                    let description = tool["description"]
-                        .as_str()
-                        .and_then(|d| d.lines().map(str::trim).find(|l| !l.is_empty()))
-                        .map(|t| safe_line(t, SAID_LIMIT));
-                    Some(Tool { name, description })
-                })
-                .collect()
-        })
-        .unwrap_or_default()
+    result["tools"].as_array().map_or_default(|tools| {
+        tools
+            .iter()
+            .filter_map(|tool| {
+                let name = safe_line(tool["name"].as_str()?, SAID_LIMIT);
+                let description = tool["description"]
+                    .as_str()
+                    .and_then(|d| d.lines().map(str::trim).find(|l| !l.is_empty()))
+                    .map(|t| safe_line(t, SAID_LIMIT));
+                Some(Tool { name, description })
+            })
+            .collect()
+    })
 }
 
 #[cfg(test)]

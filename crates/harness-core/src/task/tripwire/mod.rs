@@ -79,8 +79,7 @@ impl Watched {
         let common = repo.git_common_dir()?;
         let restored_folders = GIT_FOLDERS.iter().map(|name| common.join(name)).collect();
         let mut reported_files: Vec<PathBuf> = harness_platform::home::home_dir()
-            .map(|home| HOME_FILES.iter().map(|file| home.join(file)).collect())
-            .unwrap_or_default();
+            .map_or_default(|home| HOME_FILES.iter().map(|file| home.join(file)).collect());
         if let Ok(program) = std::env::current_exe() {
             reported_files.push(program);
         }

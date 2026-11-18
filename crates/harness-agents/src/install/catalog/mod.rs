@@ -148,8 +148,7 @@ pub fn parse_version(text: &str) -> Option<String> {
             })
             .map(|rest| rest.trim_end_matches('.').to_string())
             .filter(|rest| rest.starts_with(|c: char| c.is_ascii_alphabetic()))
-            .map(|rest| format!("-{rest}"))
-            .unwrap_or_default();
+            .map_or_default(|rest| format!("-{rest}"));
         (number.contains('.') && number.starts_with(|c: char| c.is_ascii_digit()))
             .then(|| format!("{number}{pre}"))
     })

@@ -192,7 +192,7 @@ fn outcome(mut log: String, result: Result<process::Finished, String>) -> AgentO
 
     let result = RunResult::find(&finished.stdout);
     let status = result.as_ref().map(|r| r.status.clone());
-    let denied = result.map(|r| r.denied).unwrap_or_default();
+    let denied = result.map_or_default(|r| r.denied);
     let success = finished.status.success() && status.as_deref() == Some("SUCCESS");
     let message = if success && denied.is_empty() {
         String::new()

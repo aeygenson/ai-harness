@@ -19,7 +19,7 @@ impl RunResult {
                 let status = result["status"].as_str()?.to_string();
                 let denied = result["denied_actions"]
                     .as_array()
-                    .map(|actions| {
+                    .map_or_default(|actions| {
                         actions
                             .iter()
                             .map(|a| {
@@ -30,8 +30,7 @@ impl RunResult {
                                     .to_string()
                             })
                             .collect()
-                    })
-                    .unwrap_or_default();
+                    });
                 Some(RunResult { status, denied })
             })
             .next_back()
