@@ -8,7 +8,7 @@ use harness_core::task::handoff::{NextStep, Role, Verdict};
 use harness_core::task::orchestrator::{self, HumanDecision};
 use harness_core::task::run_lock::RunLock;
 use harness_core::task::store::TaskStore;
-use harness_core::task::{Stage, WaitReason};
+use harness_core::task::{Stage, WaitReason, DEFAULT_MAX_ROUNDS};
 
 use crate::tasks::enter_task;
 use crate::{open_repo, open_task};
@@ -72,6 +72,14 @@ pub(crate) fn decide(project: &Path, task_id: &str, decision: Decision<'_>) -> R
     let restore_to = restore
         .map(|step| step_dir(&store, task_id, step))
         .transpose()?;
+    // At the round limit a role sent on without more rounds would stop again
+    // after its first step, so the task gets as many rounds as a new task, like
+    // «more rounds» in the TUI and `decide` over MCP. Saved first, so the
+    // decision's commit carries it.
+    let at_limit = state.stage == Stage::WaitingForHuman(WaitReason::RoundLimitReached);
+    if at_limit && next != NextStep::Done {
+        store.add_rounds(&mut state, DEFAULT_MAX_ROUNDS)?;
+    }
     orchestrator::record_human_decision(
         &repo,
         &store,
@@ -85,6 +93,12 @@ pub(crate) fn decide(project: &Path, task_id: &str, decision: Decision<'_>) -> R
     )?;
     if let Some(step) = restore {
         println!("The code outside .harness/ is as after {step}; the history is kept.");
+    }
+    if at_limit && next != NextStep::Done {
+        println!(
+            "{task_id} gets {DEFAULT_MAX_ROUNDS} more rounds: now round {} of {}.",
+            state.round, state.max_rounds
+        );
     }
     if state.stage == Stage::Done {
         println!("Saved. {task_id} is done.");
