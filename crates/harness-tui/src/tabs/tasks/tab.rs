@@ -256,6 +256,7 @@ impl TasksTab {
         self.problem = problems.into_iter().next();
         self.refresh_elsewhere();
         self.refresh_times();
+        self.sort_newest_first();
         self.apply_filter(selected);
     }
 

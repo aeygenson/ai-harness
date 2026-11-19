@@ -9,6 +9,10 @@ fn the_mouse_moves_through_tasks_and_steps() {
     let root = env.path("test");
     project(&root);
     let mut app = env.app(&root);
+    // The newest task is on top: task-002 above task-001.
+    assert_eq!(app.tasks.as_ref().unwrap().task, 0);
+    click(&mut app, "task-001  ");
+    assert_eq!(app.tasks.as_ref().unwrap().task, 1);
     click(&mut app, "r1 human");
     assert_eq!(app.tasks.as_ref().unwrap().step, 1);
     assert!(screen(&mut app).contains("round 1 · human"));
@@ -25,7 +29,7 @@ fn the_mouse_moves_through_tasks_and_steps() {
 
     click(&mut app, "task-002");
     let tasks = app.tasks.as_ref().unwrap();
-    assert_eq!((tasks.task, tasks.step), (1, 0));
+    assert_eq!((tasks.task, tasks.step), (0, 0));
     assert!(screen(&mut app).contains("Second task"));
 
     key(&mut app, KeyCode::Char('q'));
@@ -39,6 +43,7 @@ fn triage_gives_the_terminal_to_the_users_own_agent_for_the_selected_task() {
     project(&root);
     let mut app = env.app(&root);
     app.triage_finder = |name| (name == "codex").then(|| PathBuf::from("/fake/codex"));
+    click(&mut app, "task-001  ");
     assert!(screen(&mut app).contains(" Triage (t) "));
 
     click(&mut app, " Triage (t) ");
@@ -740,6 +745,7 @@ fn files_of_a_step_open_in_zed_with_a_click() {
     let mut app = env.app(&root);
     // Zed is not started in the tests: a command that does nothing.
     app.viewer = |_| Some(std::process::Command::new("true"));
+    click(&mut app, "task-001  ");
     let text = screen(&mut app);
     for part in [
         "Files (click: open in the editor):",
@@ -775,6 +781,7 @@ fn files_of_a_step_open_in_zed_with_a_click() {
         .unwrap();
     let mut app = env.app(&root);
     app.viewer = |_| None;
+    click(&mut app, "task-001  ");
     let text = screen(&mut app);
     assert!(text.contains("+ docs/forgotten.md"), "{text}");
     assert!(text.contains("+ docs/parser.md"), "{text}");
@@ -798,6 +805,7 @@ fn a_click_on_a_title_shows_the_window_over_the_whole_tab() {
     let root = env.path("test");
     project(&root);
     let mut app = env.app(&root);
+    click(&mut app, "task-001  ");
     let text = screen(&mut app);
     assert!(text.contains("╭ ⤢ round 1 · tester "), "{text}");
     assert!(text.contains("╭ Roles "), "{text}");
@@ -878,6 +886,7 @@ fn the_task_and_each_step_show_what_the_agents_spent() {
     fs::write(round.join("03-developer/agent.log"), codex).unwrap();
     let mut app = env.app(&root);
 
+    click(&mut app, "task-001  ");
     click(&mut app, "r1 architect");
     let architect = screen(&mut app);
     click(&mut app, "r1 developer");
@@ -1023,6 +1032,7 @@ fn a_done_task_on_github_shows_its_pull_request_or_offers_to_send_it() {
         std::fs::write(store.dir().join("state.json"), json).unwrap();
     }
     let mut app = env.app(&root);
+    click(&mut app, "task-001  ");
 
     // The pull request is on the task's row; a click opens it.
     click(&mut app, "PR #7");
@@ -1037,7 +1047,7 @@ fn a_done_task_on_github_shows_its_pull_request_or_offers_to_send_it() {
     assert!(app.message.is_some());
 
     // A task with a pull request can have it merged; no role runs for that.
-    key(&mut app, KeyCode::Up);
+    key(&mut app, KeyCode::Down);
     click(&mut app, " To: architect · new task ▾ ");
     click(&mut app, "Merge pull request");
     let text = screen(&mut app);
@@ -1053,7 +1063,7 @@ fn a_done_task_on_github_shows_its_pull_request_or_offers_to_send_it() {
         text.contains("│▶ task-002  ✓ done                │"),
         "{text}"
     );
-    assert_eq!(app.tasks.as_ref().unwrap().pull_request_url(1), None);
+    assert_eq!(app.tasks.as_ref().unwrap().pull_request_url(0), None);
     click(&mut app, " To: Send to GitHub ▾ ");
     assert!(!screen(&mut app).contains("Merge pull request"));
 }
@@ -2024,24 +2034,25 @@ fn project_with_many_tasks(env: &Env) -> App {
 fn choosing_a_task_on_screen_does_not_scroll_the_last_task_away() {
     let env = Env::new();
     let mut app = project_with_many_tasks(&env);
-    // The wheel over the list goes down to the last task.
-    let at = find(&screen(&mut app), "task-001  ");
+    // The newest task is on top; the wheel over the list goes down to the
+    // oldest one at the bottom.
+    let at = find(&screen(&mut app), "task-030  ");
     for _ in 0..30 {
         wheel(&mut app, at, true);
         screen(&mut app);
     }
     assert_eq!(app.tasks.as_ref().unwrap().task, 29);
     let text = screen(&mut app);
-    assert!(text.contains("task-021  "), "{text}");
+    assert!(text.contains("task-010  "), "{text}");
 
     // A click on a task near the top of the list chooses it; the list stays
     // where it is, so the last task is still there to click.
-    click(&mut app, "task-021  ");
+    click(&mut app, "task-010  ");
     assert_eq!(app.tasks.as_ref().unwrap().task, 20);
     let text = screen(&mut app);
-    assert!(text.contains("│▶ task-021  ● working"), "{text}");
-    assert!(text.contains("task-030  "), "{text}");
-    click(&mut app, "task-030  ");
+    assert!(text.contains("│▶ task-010  ● working"), "{text}");
+    assert!(text.contains("task-001  "), "{text}");
+    click(&mut app, "task-001  ");
     assert_eq!(app.tasks.as_ref().unwrap().task, 29);
 }
 

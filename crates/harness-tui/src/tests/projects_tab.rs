@@ -10,6 +10,14 @@ fn starts_with_a_project_folder_and_shows_its_tasks() {
     let mut app = env.app(&root);
     assert_eq!(app.tab, Tab::Tasks);
     assert_eq!(app.project.as_deref(), Some(root.as_path()));
+    // The newest task is on top and chosen, the oldest below it.
+    let text = screen(&mut app);
+    assert!(text.contains("│▶ task-002  ● working"), "{text}");
+    assert!(
+        find(&text, "task-002  ").1 < find(&text, "task-001  ").1,
+        "{text}"
+    );
+    click(&mut app, "task-001  ");
     let text = screen(&mut app);
     for part in [
         " ◆ test   1 Tasks │ 2 Roles",

@@ -97,6 +97,25 @@ impl TasksTab {
     pub(super) fn times_of(&self, id: &str) -> Option<&TaskTimes> {
         self.times.get(id)
     }
+
+    /// Puts the newest task on top and the oldest at the bottom (see [`newest_first`]).
+    pub(super) fn sort_newest_first(&mut self) {
+        newest_first(&mut self.all, &self.times);
+    }
+}
+
+/// Sorts `tasks` by the time each was created, newest first; tasks created in
+/// the same second go by id, the higher first. A task whose creation is not
+/// committed yet (just made) goes on top.
+pub(super) fn newest_first(tasks: &mut [TaskView], times: &HashMap<String, TaskTimes>) {
+    // `Option` sorts `None` before `Some`, so the key starts with `is_none()`:
+    // in the reversed order below that puts an unknown time on top.
+    let key = |task: &TaskView| {
+        let created = times.get(&task.id).and_then(|t| t.created);
+        (created.is_none(), created, task.id.clone())
+    };
+    // `Reverse` turns the order round: the larger key (the newer task) comes first.
+    tasks.sort_by_cached_key(|task| std::cmp::Reverse(key(task)));
 }
 
 /// The times of `tasks` from `added`: files with the time their commit added
@@ -152,6 +171,9 @@ pub(super) fn duration_label(took: Duration, tr: &I18n) -> String {
 
 #[cfg(test)]
 mod tests {
+    use harness_core::task::scenario::Workflow;
+    use harness_core::task::TaskState;
+
     use super::*;
 
     fn at(seconds: u64) -> SystemTime {
@@ -225,5 +247,51 @@ mod tests {
         assert!(done.complete(1));
         // A new step makes the times incomplete again.
         assert!(!done.complete(2));
+    }
+
+    fn task(id: &str) -> TaskView {
+        TaskView {
+            id: id.into(),
+            root: PathBuf::from("/project"),
+            state: TaskState::new(id, Workflow::Task, 5),
+            description: String::new(),
+            steps: Vec::new(),
+            failures: 0,
+        }
+    }
+
+    fn created(seconds: u64) -> TaskTimes {
+        TaskTimes {
+            created: Some(at(seconds)),
+            steps: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn the_newest_task_is_on_top_and_the_oldest_at_the_bottom() {
+        // A name sorted by letters would put «bugfix» first and «task-010» before «task-009».
+        let mut tasks = vec![
+            task("bugfix"),
+            task("task-009"),
+            task("task-010"),
+            task("task-011"),
+            task("task-012"),
+        ];
+        let times = HashMap::from([
+            ("bugfix".to_string(), created(100)),
+            ("task-009".to_string(), created(200)),
+            ("task-010".to_string(), created(300)),
+            // Made in the same second as task-010: the higher id is newer.
+            ("task-011".to_string(), created(300)),
+            // task-012 is not committed yet: it was just made.
+        ]);
+
+        newest_first(&mut tasks, &times);
+
+        let ids: Vec<&str> = tasks.iter().map(|t| t.id.as_str()).collect();
+        assert_eq!(
+            ids,
+            ["task-012", "task-011", "task-010", "task-009", "bugfix"]
+        );
     }
 }

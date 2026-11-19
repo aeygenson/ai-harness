@@ -8,6 +8,7 @@ fn the_language_switches_and_is_remembered() {
     let root = env.path("test");
     project(&root);
     let mut app = env.app(&root);
+    click(&mut app, "task-001  ");
     assert!(screen(&mut app).contains("1 Tasks"));
 
     click(&mut app, " EN ");
