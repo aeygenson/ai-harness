@@ -10,7 +10,8 @@
 //!   Code removes the token from every command it runs (see [`HIDE_TOKEN`]);
 //! - the role's tools and file rules are given as flags (the rules also in
 //!   the role's `settings.json`), and anything not allowed is refused without
-//!   asking (`--permission-mode dontAsk`).
+//!   asking (`--permission-mode dontAsk`); the shell goes back to the project
+//!   folder after every command, so the `./` rules always mean the project.
 
 mod rules;
 
@@ -41,6 +42,13 @@ const HIDE_TOKEN: &str = "CLAUDE_CODE_SUBPROCESS_ENV_SCRUB";
 /// The line the role's log gets when the token cannot be hidden.
 const NO_SANDBOX_NOTE: &str = "note: bubblewrap (bwrap) is not installed, so the commands the \
 agent runs can see its Claude login; install the package «bubblewrap» to hide it\n";
+
+/// Claude Code reads a rule like `Edit(./x/**)` from the folder its shell is
+/// in, and a `cd` in one command stays for the next. After the retrospective
+/// ran `cd .harness`, the rule for its inbox no longer matched and it could
+/// not write `retro.md`. With this variable Claude Code goes back to the
+/// project folder after every command, so the `./` rules keep their meaning.
+const STAY_IN_PROJECT: &str = "CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR";
 
 /// `--mcp-config` for a role without MCP servers.
 const NO_MCP_SERVERS: &str = r#"{"mcpServers":{}}"#;
@@ -87,6 +95,7 @@ impl ClaudeCode {
             .env("CLAUDE_CONFIG_DIR", &config_dir)
             .env("CLAUDE_CODE_OAUTH_TOKEN", self.token.expose())
             .env("DISABLE_AUTOUPDATER", "1")
+            .env(STAY_IN_PROJECT, "1")
             // The prompt comes on standard input.
             .arg("-p")
             .args(["--output-format", "stream-json", "--verbose"])
@@ -162,12 +171,11 @@ impl ClaudeCode {
     /// The role's `settings.json`: hooks run only if a plugin of the role is
     /// allowed to have them, and the same allow and deny rules as the flags.
     ///
-    /// The rules are given twice on purpose. With `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB`
-    /// Claude Code switches `--permission-mode` to `default` (it warns
-    /// "Declare allowedTools explicitly"), and 2.1.330 then refused the
-    /// retrospective's writes into its own inbox although `--allowedTools`
-    /// allowed them. `--setting-sources user` reads this file; it allows
-    /// nothing the flags do not, and `--tools` still limits the tools.
+    /// The rules are given twice on purpose: with `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB`
+    /// Claude Code switches `--permission-mode` to `default` and warns
+    /// "Declare allowedTools explicitly", so the settings file holds them
+    /// too. It allows nothing the flags do not, and `--tools` still limits
+    /// the tools.
     fn settings(&self, job: &RoleJob) -> String {
         let hooks = self
             .settings
@@ -597,11 +605,14 @@ mod tests {
             Some(config_dir.to_string_lossy().as_ref())
         );
         assert_eq!(envs["CLAUDE_CODE_OAUTH_TOKEN"].as_deref(), Some("my-token"));
+        // The `./` permission rules hold only while the shell stays in the project.
+        assert_eq!(envs[STAY_IN_PROJECT].as_deref(), Some("1"));
         for name in envs.keys() {
             let ours = [
                 "CLAUDE_CONFIG_DIR",
                 "CLAUDE_CODE_OAUTH_TOKEN",
                 "DISABLE_AUTOUPDATER",
+                STAY_IN_PROJECT,
                 HIDE_TOKEN,
             ];
             assert!(
