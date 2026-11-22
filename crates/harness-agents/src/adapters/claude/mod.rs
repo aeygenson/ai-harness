@@ -8,8 +8,9 @@
 //!   folder is emptied before and after every role (see `agent_home`);
 //! - login only through the token saved by the Agents tab («Sign in»); Claude
 //!   Code removes the token from every command it runs (see [`HIDE_TOKEN`]);
-//! - the role's tools and file rules are given as flags, and anything not
-//!   allowed is refused without asking (`--permission-mode dontAsk`).
+//! - the role's tools and file rules are given as flags (the rules also in
+//!   the role's `settings.json`), and anything not allowed is refused without
+//!   asking (`--permission-mode dontAsk`).
 
 mod rules;
 
@@ -155,13 +156,34 @@ impl ClaudeCode {
     /// file, so nothing an earlier role left there reaches this one.
     fn prepare_config_dir(&self, job: &RoleJob) -> std::io::Result<()> {
         let dir = agent_home::fresh(&job.project_dir, CONFIG_DIR)?;
-        fs::write(dir.join("settings.json"), self.settings(job.role))
+        fs::write(dir.join("settings.json"), self.settings(job))
     }
 
-    /// Hooks run only if a plugin of the role is allowed to have them.
-    fn settings(&self, role: Role) -> String {
-        let hooks = self.settings.plugins(role).iter().any(|p| p.allow_hooks);
-        format!("{}\n", serde_json::json!({ "disableAllHooks": !hooks }))
+    /// The role's `settings.json`: hooks run only if a plugin of the role is
+    /// allowed to have them, and the same allow and deny rules as the flags.
+    ///
+    /// The rules are given twice on purpose. With `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB`
+    /// Claude Code switches `--permission-mode` to `default` (it warns
+    /// "Declare allowedTools explicitly"), and 2.1.330 then refused the
+    /// retrospective's writes into its own inbox although `--allowedTools`
+    /// allowed them. `--setting-sources user` reads this file; it allows
+    /// nothing the flags do not, and `--tools` still limits the tools.
+    fn settings(&self, job: &RoleJob) -> String {
+        let hooks = self
+            .settings
+            .plugins(job.role)
+            .iter()
+            .any(|p| p.allow_hooks);
+        let rules = RoleRules::for_job(job, &self.settings);
+        let json = serde_json::json!({
+            "disableAllHooks": !hooks,
+            "permissions": {
+                "defaultMode": "dontAsk",
+                "allow": rules.allowed,
+                "deny": rules.denied,
+            },
+        });
+        format!("{json}\n")
     }
 }
 
@@ -440,19 +462,75 @@ mod tests {
             .split(',')
             .any(|t| t == "Skill"));
         assert!(arg_after(&security, "--allowedTools").contains("mcp__plugin_review_*"));
-        assert_eq!(
-            agent.settings(Role::Security),
-            "{\"disableAllHooks\":true}\n"
-        );
-        assert_eq!(
-            agent.settings(Role::Developer),
-            "{\"disableAllHooks\":false}\n"
-        );
+        assert_eq!(hooks_off(&agent, Role::Security), Some(true));
+        assert_eq!(hooks_off(&agent, Role::Developer), Some(false));
 
         let tester = args(&agent.command(&job(Role::Tester)));
         assert!(!tester.contains(&"--plugin-dir".to_string()));
         assert!(tester.contains(&"--disable-slash-commands".to_string()));
-        assert_eq!(agent.settings(Role::Tester), "{\"disableAllHooks\":true}\n");
+        assert_eq!(hooks_off(&agent, Role::Tester), Some(true));
+    }
+
+    /// `disableAllHooks` from the role's settings file.
+    fn hooks_off(agent: &ClaudeCode, role: Role) -> Option<bool> {
+        let json: serde_json::Value = serde_json::from_str(&agent.settings(&job(role))).unwrap();
+        json["disableAllHooks"].as_bool()
+    }
+
+    #[test]
+    fn the_settings_file_repeats_the_allow_and_deny_rules_of_the_flags() {
+        let agent = ClaudeCode::new(Secret::new("t"), RoleSettings::default());
+        for role in [
+            Role::Architect,
+            Role::Developer,
+            Role::Tester,
+            Role::Security,
+        ] {
+            let job = job(role);
+            let command = agent.command(&job);
+            let json: serde_json::Value = serde_json::from_str(&agent.settings(&job)).unwrap();
+            let list = |key: &str| -> String {
+                json["permissions"][key]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|rule| rule.as_str().unwrap())
+                    .collect::<Vec<_>>()
+                    .join(",")
+            };
+
+            assert_eq!(
+                list("allow"),
+                arg_after(&command, "--allowedTools"),
+                "{role:?}"
+            );
+            assert_eq!(
+                list("deny"),
+                arg_after(&command, "--disallowedTools"),
+                "{role:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_retrospective_may_write_its_inbox_by_the_settings_file_alone() {
+        // The retrospective runs with the security role's rules and writes
+        // into `.harness/retros/<NNN>/inbox`, not into a task's inbox.
+        let agent = ClaudeCode::new(Secret::new("t"), RoleSettings::default());
+        let mut retro = job(Role::Security);
+        retro.task_id = "retro-001".into();
+        retro.output_dir = PathBuf::from("/work/app/.harness/retros/001/inbox");
+
+        let json: serde_json::Value = serde_json::from_str(&agent.settings(&retro)).unwrap();
+
+        let permissions = &json["permissions"];
+        assert_eq!(permissions["defaultMode"], "dontAsk");
+        let allowed = permissions["allow"].as_array().unwrap();
+        assert!(allowed.contains(&"Edit(./.harness/retros/001/inbox/**)".into()));
+        // Writing anywhere else is still not allowed.
+        assert!(!allowed
+            .iter()
+            .any(|rule| rule.as_str().unwrap().starts_with("Edit(./**")));
     }
 
     #[test]
